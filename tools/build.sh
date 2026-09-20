@@ -93,11 +93,28 @@ dist="$root/dist"
 native="$root/tooling/native"
 tool="$build/host/ps5-native-tool"
 mkdir -p "$build/host" "$build/obj" "$dist"
-"$cxx" -std=c++20 -O2 -Wall -Wextra -Werror \
-    -I "$zlib_root/usr/include" \
-    "$native/native_app_builder.cpp" "$native/self_container.cpp" \
-    "$native/elf_object.cpp" "$native/sce_module_writer.cpp" \
-    "$zlib_archive" -o "$tool"
+# The host tool the whole build runs through is worth about five seconds of the
+# run, so it is rebuilt only when one of its own inputs is newer, the same
+# `find -newer` test the driver-archive guard below uses.
+stale=
+if [[ ! -x $tool ]]; then
+    stale=$tool
+else
+    for input in "$zlib_archive" "$native/native_app_builder.cpp" \
+        "$native/self_container.cpp" "$native/elf_object.cpp" \
+        "$native/sce_module_writer.cpp" "$native"/*.hpp "$native"/*.h; do
+        [[ -e $input && $input -nt $tool ]] || continue
+        stale=$input
+        break
+    done
+fi
+if [[ -n $stale ]]; then
+    "$cxx" -std=c++20 -O2 -Wall -Wextra -Werror \
+        -I "$zlib_root/usr/include" \
+        "$native/native_app_builder.cpp" "$native/self_container.cpp" \
+        "$native/elf_object.cpp" "$native/sce_module_writer.cpp" \
+        "$zlib_archive" -o "$tool"
+fi
 
 mapfile -d '' -t source_paths < <(
     find "$root/src" -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' \) \
@@ -218,12 +235,24 @@ if (( vulkan_driver )); then
         --end-group)
 fi
 
-objects=()
+# The sources are independent compilation units, so they compile concurrently.
+# Validation stays ahead of the fan-out: a rejected source, definition or
+# include directory is reported before any compiler starts. Diagnoses are
+# captured per source so concurrent compilers cannot interleave their errors,
+# and the first failure in submission order is the one reported.
+compile_dir="$build/obj/logs"
+mkdir -p "$compile_dir"
+trap 'rm -rf -- "$compile_dir"' EXIT
+# An interrupt reaches both the shell and the compiler subshells, which share
+# its process group; killing the group makes sure none is left compiling.
+trap 'kill 0' INT TERM
+compile_sources=()
+compile_objects=()
+compile_logs=()
 for source in "${sources[@]}"; do
     [[ $source =~ ^src/[A-Za-z0-9_./-]+\.(c|cc|cpp)$ && -f $root/$source ]] || {
         echo "invalid source: $source" >&2; exit 2;
     }
-    object="$build/obj/${source//\//_}.o"
     if [[ $source == *.c ]]; then standard=-std=c11; else standard=-std=c++20; fi
     args=("$standard" -O2 -Wall -Wextra -ffunction-sections -fdata-sections)
     [[ $source == *.c ]] || args+=(-fno-exceptions -fno-rtti)
@@ -240,10 +269,28 @@ for source in "${sources[@]}"; do
         args+=("-I$root/$include")
     done
     args+=("${pacbrew_cflags[@]}" "${compiler_include[@]}" "${driver_include[@]}")
+    compile_sources+=("$source")
+    compile_objects+=("$build/obj/${source//\//_}.o")
+    log="$compile_dir/${source//\//_}.txt"
+    compile_logs+=("$log")
     PS5_PAYLOAD_SDK="$sdk_root" sh "$root/tooling/prospero-clang18" \
-        "${args[@]}" -c "$root/$source" -o "$object"
-    objects+=("$object")
+        "${args[@]}" -c "$root/$source" -o "${compile_objects[-1]}" > "$log" 2>&1 &
 done
+compile_failed=0
+for compile_job in $(jobs -p); do
+    wait "$compile_job" || compile_failed=1
+done
+if (( compile_failed )); then
+    for index in "${!compile_logs[@]}"; do
+        [[ -s ${compile_logs[index]} ]] || continue
+        echo "compilation failed: ${compile_sources[index]}" >&2
+        cat -- "${compile_logs[index]}" >&2
+        exit 1
+    done
+    echo "a source failed to compile" >&2
+    exit 1
+fi
+objects=("${compile_objects[@]}")
 if (( vulkan_driver )); then
     object="$build/obj/driver_tests_ps5vk_triangle.c.o"
     PS5_PAYLOAD_SDK="$sdk_root" sh "$root/tooling/prospero-clang18" \
