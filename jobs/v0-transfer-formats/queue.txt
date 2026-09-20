@@ -1,0 +1,24 @@
+# PS5 Vulkan test runner job queue (PPSA99988): V0-formats' transfer rows.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-transfer-formats/queue.txt
+#
+# docs/V0_FORMATS_AUDIT.md: 25 formats were missing TRANSFER_SRC alone -- the
+# integer families (8/16/32-bit signed and unsigned, one to four channels), the
+# packed 16-bit forms (R5G6B5, B4G4R4A4, A1R5G5B5), the packed 32-bit float
+# forms (B10G11R11, E5B9G9R9) and A2B10G10R10 in both number types. The driver
+# reports the bit for each of them now, and v0-transfer-formats proves the path
+# it names: a 64x16 image of the format, created with transfer and sampled usage
+# and no attachment usage (the row layout), filled from a staging buffer through
+# vkCmdCopyBufferToImage and read back through vkCmdCopyImageToBuffer, every byte
+# required equal, with a source row of 64 texels so the 256-byte row padding is
+# part of the proof, and the image's memory requirement required to be those
+# padded rows. A row is closed only when its format round-trips and reports the
+# bit; the two rows whose only missing feature this was leave the audit's table.
+#
+# Risk: low. Twenty-five small images, each a staging buffer, two submissions and
+# a byte comparison, no draws and no attachments; m2-solid last shows the console
+# still renders, and "exit" leaves the console when the batch is done
+# (docs/DEPLOYMENT.md).
+hold 60
+v0-transfer-formats
+m2-solid
+exit

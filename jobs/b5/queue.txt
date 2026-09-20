@@ -1,0 +1,18 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase B5 prerequisites.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/b5/queue.txt
+#
+# Milestone 5 Phase B5 (docs/M5_PHASE_B.md). Two console questions decide how
+# the Vulkan driver submits and waits:
+# - b5-empty: does a stream without draws complete? Two headless submissions:
+#   the colour-buffer barrier and the completion marker, then the marker alone.
+# - b4-timing: does sceAgcSuspendPoint wait for the GPU? 1, 16 and 128 draws.
+# b4-headless between them shows that the GPU still draws after the empty
+# streams. Capture records every frame for the PC models; b4-timing's 128 draws
+# exceed the capture's helper-call record, which marks that capture
+# incomplete. Nothing appears on screen until m2-solid.
+capture
+hold 60
+b5-empty
+b4-headless
+b4-timing
+m2-solid

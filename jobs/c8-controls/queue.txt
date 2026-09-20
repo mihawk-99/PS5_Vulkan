@@ -1,0 +1,57 @@
+# PS5 Vulkan test runner job queue (PPSA99988): everything the committed tree
+# proves, including C8's resolve.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/c8-controls/queue.txt
+#
+# This is the session's first battery, and it runs on the deployed build:
+#
+#   tools/build-driver.sh
+#   APP_DEFINITIONS="AGC_LINKED_CANARY=1 AGC_TEST_RUNNER=1 AGC_OUTPUT_4K=1 AGC_LIVE_SUBMIT_ARMED=1 AGC_SHADER_COMPILER=1 AGC_VULKAN_DRIVER=1" \
+#       PARAM_PATH=sce_sys/param-runner.json make deploy
+#   python3 tools/ps5_console.py battery PPSA99988 jobs/c8-controls/queue.txt \
+#       --output Klog_Logs/c8-controls.log
+#
+# jobs/c8-resolve/queue.txt is the second battery: C8's four-sample frame and its
+# resolve behind their own control, which is the pair to run when either changes.
+# This queue's cases are, in order:
+#
+#  - the two C7 mip probes whose goldens are in the tree, which confirm the
+#    deployed build is the proven one before anything new runs;
+#  - c7-mip-pages-six, the second chain length for the level-packing rule;
+#  - c2-instancing and c3-quad, the controls for the geometry the C8 frames use;
+#  - the cases the last rounds added, whose PC proofs are tools/check-runner-cases.sh
+#    and driver/tests/: the four-sample frame (c8-msaa, pid 169 passed before),
+#    events (b5-events), the CPU-side transfers (c2-transfers), the image clear
+#    and readback (c7-clear), the indirect draws (c2-indirect) and secondary
+#    command buffers (b8-secondary);
+#  - m2-solid last, the plain frame, so the log ends with a frame every earlier
+#    run has.
+capture
+hold 60
+c7-mip-pages
+c7-mip-tiled
+c7-mip-pages-six
+c2-instancing
+c3-quad
+c8-msaa
+# The four-sample frame and its resolve (Phase C8): four frames -- one-sample
+# control, four-sample control, the resolved frame and the one-sample reference --
+# and the last two are compared word for word.
+c8-resolve
+# Events (Phase B5): the driver's flag follows the command order. It draws
+# nothing.
+b5-events
+# The CPU-side transfers (Phase C2): vkCmdFillBuffer and vkCmdUpdateBuffer write
+# the mapped buffer, and the case reads every write back. It draws nothing.
+c2-transfers
+# The colour clear and the readback (Phase C7): a linear level, a tiled
+# attachment, level 1 of two, a region readback and a padded one, compared byte
+# for byte. No draw here either.
+c7-clear
+# The indirect draws (Phase C2): the M2 triangle through vkCmdDrawIndirect, whose
+# parameters the driver reads from the bound buffer when the draw is recorded.
+c2-indirect
+# Secondary command buffers (Phase B8): the same triangle recorded into a
+# secondary the primary executes with vkCmdExecuteCommands.
+b8-secondary
+m2-solid
+exit

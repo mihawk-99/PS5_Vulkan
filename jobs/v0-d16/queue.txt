@@ -1,0 +1,16 @@
+# PS5 Vulkan test runner job queue (PPSA99988): round 15, the D16 depth attachment.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-d16/queue.txt
+#
+# D16_UNORM's DEPTH_STENCIL_ATTACHMENT: the M4 canary's own frame (the same
+# geometry, shaders and clear of 1.0) with a D16 depth attachment, whose
+# DB_Z_INFO word is Z_16 (0x80000181 where D32F's measured word carries 3), and
+# the depth read back through the two-byte element's own map (AddrLib's
+# 256x128-texel Z_X row, thirteen terms). c5-depth runs after it so the D32
+# criterion's frame is proved in the same battery, then the audit mirror and
+# m2-solid.
+hold 60
+c5-depth-16
+c5-depth
+v0-formats
+m2-solid
+exit

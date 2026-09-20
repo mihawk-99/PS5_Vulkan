@@ -1,0 +1,14 @@
+# PS5 Vulkan test runner job queue (PPSA99988): round 12, the packed 16-bit targets.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-packed/queue.txt
+#
+# R5G6B5_UNORM_PACK16 and A1R5G5B5_UNORM_PACK16 (CB data formats 5_6_5 and
+# 1_5_5_5 with the UNORM number type and Mesa's FP16_ABGR export) render and
+# blend, and R16_UINT (COLOR_16 with UINT16_ABGR) renders: the round-11 narrow
+# machinery reads each two-byte texel through the two-byte map, which
+# tools/check-mip-layout.sh compares with the AddrLib oracle.
+hold 60
+v0-targets-uint
+v0-targets
+v0-formats
+m2-solid
+exit

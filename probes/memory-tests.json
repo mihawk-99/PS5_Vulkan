@@ -1,0 +1,6 @@
+{
+  "tests": [
+    { "bytes": 65536, "alignment": 16384 },
+    { "bytes": 131072, "alignment": 16384 }
+  ]
+}

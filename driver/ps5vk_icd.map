@@ -1,0 +1,17 @@
+/*
+ * PS5 Vulkan driver - exports of the PC loader driver (libvulkan_ps5vk.so).
+ * Copyright (C) 2026 Mihawk-99
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * The Vulkan loader interface lets a driver export only its loader entry
+ * points; every other symbol, the runtime's and Mesa util's included, stays
+ * local. tools/build-driver.sh links with -Bsymbolic as well.
+ */
+{
+  global:
+    vk_icdGetInstanceProcAddr;
+    vk_icdGetPhysicalDeviceProcAddr;
+    vk_icdNegotiateLoaderICDInterfaceVersion;
+  local:
+    *;
+};

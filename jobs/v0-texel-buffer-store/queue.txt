@@ -1,0 +1,16 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the storage texel buffers.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-texel-buffer-store/queue.txt
+#
+# Blocker round 6: the 19 rows whose VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT no
+# entry carried, stored through an imageBuffer at set 0, binding 0 and read back
+# out of the buffer's own memory. One frame a format, four texels a frame, one per
+# quarter of the target; the three probes are the float, unsigned and signed
+# classes, the signed one last because its shader is the one that has faulted ACO
+# before. v0-formats (the audit mirror) and m2-solid are the regression.
+hold 60
+v0-formats-texel-buffer-store
+v0-formats-texel-buffer-store-uint
+v0-formats-texel-buffer-store-sint
+v0-formats
+m2-solid
+exit

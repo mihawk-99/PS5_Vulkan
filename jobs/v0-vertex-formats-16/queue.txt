@@ -1,0 +1,13 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the sixteen-bit vertex formats.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-vertex-formats-16/queue.txt
+#
+# Blocker round 2: the sixteen-bit component layouts (R16_*, R16G16_* and
+# R16G16B16A16_* in the UNORM, SNORM, FLOAT, UINT and SINT classes), which
+# tooling/psbc/patch-vertex-formats.py adds to the compiler's enum and the
+# driver maps. One frame a format; v0-formats (the audit mirror) and m2-solid
+# follow as the regression.
+hold 60
+v0-vertex-formats-16
+v0-formats
+m2-solid
+exit

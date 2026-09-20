@@ -1,0 +1,23 @@
+# PS5 Vulkan test runner job queue (PPSA99988): V0-robust.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-robust/queue.txt
+#
+# V0-robust (docs/M5_REFERENCE.md): the one feature Vulkan 1.0 requires and the
+# driver still reports off, robustBufferAccess -- an out-of-bounds buffer access
+# stays safe.
+#
+# The probe draws C2's indexed square twice. Frame 0 asks for the six indices
+# the index buffer holds; frame 1 asks for twelve, twice the bound, so the
+# second draw reaches past the buffer. robustBufferAccess makes that safe -- no
+# fault, and no index fetched from outside the bound -- and the driver clamps
+# the count to what the binding covers, so the second frame must be the same
+# square, with nothing drawn from whatever follows the buffer. The square
+# checker reads back both frames exactly.
+#
+# Risk: low. Two fullscreen frames of one uniform colour, no geometry, no depth;
+# m2-solid after them shows the console still renders, and "exit" leaves the
+# console when the batch is done (docs/DEPLOYMENT.md).
+capture
+hold 60
+v0-robust
+m2-solid
+exit

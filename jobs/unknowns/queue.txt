@@ -1,0 +1,50 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Battery 1, the remaining
+# hardware unknowns, measured in one console session.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/unknowns/queue.txt
+#
+# The rung's definition is in docs/M5_REFERENCE.md ("1.0 (driver-reachable)" and
+# the step "V0-unknowns"); this is that step's first battery. A battery claims
+# nothing: it answers questions, one case each, and the answers are written up in
+# docs/FINDINGS.md with their boundaries. The driver work they unblock follows in
+# its own commits, each with the usual console run, golden and PC comparison.
+#
+# The six cases are specified in docs/M5_REFERENCE.md (V0-unknowns):
+#
+#   unknowns-array-field      where a 2D array's layer count and base layer live
+#                             in the sampled-image descriptor (D1's arrays)
+#   unknowns-cube-field       the same for a cube: the kind word and layer count
+#                             that make six faces one resource (D1's cubemaps)
+#   unknowns-depth4x-map      a four-sample depth target's storage layout, the
+#                             way C8 measured the colour one (C8's depth 4x)
+#   unknowns-packed-fetch     the GFX10_FORMAT_* word and DST_SEL for the packed
+#                             formats the audit still misses (their SAMPLED_IMAGE
+#                             rows)
+#   unknowns-packed-blit-dst  what the resampler must write into those formats as
+#                             a blit destination (their BLIT_DST rows)
+#   unknowns-depth-words      DB_Z_INFO's words for D16_UNORM and the stencil
+#                             formats, and the stencil registers
+#
+# They stay comments until their cases are in the runner's table:
+# tests/test_tools.py (test_every_queue_case_is_a_runner_case) requires every
+# name a queue carries to be a case the runner has, because a queue with one
+# unknown name is rejected whole and would cost a console session. Write the
+# cases, move their lines below out of this comment block, and run the battery --
+# one deploy and one console run for all six questions.
+#
+# Risk: every case above is one draw and one readback into the offscreen target
+# the C-frames already use; a wrong candidate reads the wrong colour and the log
+# names which. m2-solid last shows the console still renders.
+#
+# "exit" leaves the console when the batch is done, so the control payload
+# (payload/ps5vkctl) can load the next deploy without a hand on the console
+# (docs/DEPLOYMENT.md).
+capture
+hold 60
+# unknowns-array-field
+# unknowns-cube-field
+# unknowns-depth4x-map
+# unknowns-packed-fetch
+# unknowns-packed-blit-dst
+# unknowns-depth-words
+m2-solid
+exit

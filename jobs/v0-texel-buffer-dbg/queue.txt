@@ -1,0 +1,10 @@
+# Diagnostic battery for blocker round 5: the float texel-buffer case with the
+# driver's command-stream and table-chunk capture on, followed by one runner
+# frame (m2-solid). The driver case's capture is what golden/v0-texel-buffer
+# holds; the runner frame is the sibling its replay takes the console process's
+# register defaults from, which a test that drives the driver never logs itself.
+hold 60
+capture
+v0-formats-texel-buffer
+m2-solid
+exit

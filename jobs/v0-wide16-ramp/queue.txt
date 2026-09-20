@@ -1,0 +1,13 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the sixteen-byte ramp.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-wide16-ramp/queue.txt
+#
+# One frame into R32G32B32A32_SFLOAT with a colour that encodes each texel's own
+# position (R = x/4096, G = y/4096), then the allocation is walked without any
+# map: the words that decode name the texel that wrote them, which is the
+# measurement the sixteen-byte map's band needs (round 19). The row needs the
+# driver's COLOR_ATTACHMENT bit for its format in the same commit as this run.
+hold 60
+v0-wide16-ramp
+v0-formats
+m2-solid
+exit

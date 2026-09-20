@@ -1,0 +1,15 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the two-byte depth pair.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-depth-pair/queue.txt
+#
+# D16_UNORM's and D32_SFLOAT's SAMPLED_IMAGE and BLIT_SRC -- the last reachable
+# rows of rung 1.0. Two frames each: the pair sampled as a texture (a 0.5 depth
+# in a 256x4 image, read back as 0x80 in red) and the pair as a scaled blit's
+# source, whose decode the frame then samples. The rows need the driver's table
+# to carry the two bits in the same commit as this run: vkCreateImage refuses a
+# usage a format's entry does not claim (docs/HARDWARE_FINDINGS.md, 2026-09-20).
+hold 60
+v0-formats-sampled-depth
+c7-blit-depth
+v0-formats
+m2-solid
+exit

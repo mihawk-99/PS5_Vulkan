@@ -1,0 +1,17 @@
+# PS5 Vulkan test runner job queue (PPSA99988): round 14, the depth path's regression.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-depth2/queue.txt
+#
+# Round 14's groundwork touched the depth path: ps5vk_depth_registers now builds
+# DB_Z_INFO's FORMAT field from the image's format (Z_16 = 1, Z_32_FLOAT = 3, so
+# a D16 target's word is 0x80000181 where the measured D32 one is 0x80000183),
+# ps5vk_tiled_depth_offset takes the element size and a two-byte element reads
+# through AddrLib's own 2-byte Z_X row (thirteen terms, which
+# tools/check-mip-layout.sh compares with the oracle), and ps5vk_tile_extent
+# keeps a two-byte depth element's own 256x128 tile. The D32 frames of c5-depth
+# are what proves none of that broke the measured path.
+hold 60
+c5-depth
+c5-depth-clear
+v0-formats
+m2-solid
+exit

@@ -1,0 +1,17 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the storage image atomics.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-storage-image-atomic/queue.txt
+#
+# Blocker round 9: the last two parked features, R32_UINT's and R32_SINT's
+# VK_FORMAT_FEATURE_STORAGE_IMAGE_ATOMIC_BIT. One frame a format: the case zeroes
+# the image's own memory, the frame's every fragment adds its quarter's texel
+# (one to row 0, two to row 1) through imageAtomicAdd, and the case reads the
+# counts back -- the quarter's 960x2160 pixels each, so a lost update shows as a
+# short texel. The signed case is last because its shaders are the ones that have
+# faulted ACO before. v0-formats (the audit mirror) and m2-solid are the
+# regression.
+hold 60
+v0-formats-storage-image-atomic
+v0-formats-storage-image-atomic-sint
+v0-formats
+m2-solid
+exit

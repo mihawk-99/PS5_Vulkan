@@ -1,0 +1,17 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the sixteen-byte rows, mid-case.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-wide16/queue.txt
+#
+# Round 9 measured both sixteen-byte rows at 99.63 per cent through these two
+# cases with the rows **last** in their tables (frames 6 and 14/15,
+# Klog_Logs/v0-wide2-run1.log). Round 16's three runs died at these rows'
+# vkCreateImage, which asserted because their entries carry no COLOR_ATTACHMENT
+# bit: round 17's diagnosis (docs/HARDWARE_FINDINGS.md). This battery needs that
+# bit claimed for R32G32B32A32_UINT and _SFLOAT in the same commit, and then
+# reads check_wide_frame's mismatch box against round 9's 99.63 per cent and
+# first mismatch at (64, 2128).
+hold 60
+v0-targets-uint
+v0-targets
+v0-formats
+m2-solid
+exit

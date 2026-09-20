@@ -1,0 +1,13 @@
+# PS5 Vulkan test runner job queue (PPSA99988): round 10, the 32_32 targets.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-wide3/queue.txt
+#
+# The eight-byte two-channel targets, on the map rounds 8 and 9 proved: a 32_32
+# UINT target through the integer case and a 32_32 FLOAT one through the colour
+# case, both with Mesa's 32_AR export. v0-formats reads the reported bits back
+# against the audit and m2-solid last.
+hold 60
+v0-targets-uint
+v0-targets
+v0-formats
+m2-solid
+exit

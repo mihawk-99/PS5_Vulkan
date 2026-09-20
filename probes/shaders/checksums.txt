@@ -1,0 +1,3 @@
+vertex 7122dedaa7edc69c
+pixel d059b7137ede81cd
+resources 8351377525c96059

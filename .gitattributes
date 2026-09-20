@@ -1,0 +1,52 @@
+# ps5-native-app-boilerplate - Git content and line-ending policy.
+# Copyright (C) 2026 BlackBearReloaded
+# Copyright (C) 2026 Mihawk-99
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+* text=auto
+*.sh text eol=lf
+*.c text eol=lf
+*.cc text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+*.ld text eol=lf
+Makefile text eol=lf
+# Makefile fragments and linker version scripts, read by the native build.
+Makefile.* text eol=lf
+*.mk text eol=lf
+*.mak text eol=lf
+*.map text eol=lf
+.clang-format text eol=lf
+.clang-tidy text eol=lf
+tooling/prospero-clang18 text eol=lf
+*.py text eol=lf
+# Runner job queues are read on the console; keep them LF like the receipts.
+jobs/**/*.txt text eol=lf
+# Golden command-stream captures are compared byte for byte.
+golden/**/*.json text eol=lf
+# Shader receipts are copied verbatim into the app image and checked with
+# sha256sum --check, which rejects CRLF file names.
+probes/shaders/*.txt text eol=lf
+probes/shaders/SHA256SUMS text eol=lf
+probes/m2/*.txt text eol=lf
+probes/m2/SHA256SUMS text eol=lf
+probes/m3/*.txt text eol=lf
+probes/m3/SHA256SUMS text eol=lf
+probes/m3-vertex/*.txt text eol=lf
+probes/m3-vertex/SHA256SUMS text eol=lf
+probes/m3-texture/*.txt text eol=lf
+probes/m3-texture/SHA256SUMS text eol=lf
+probes/m4-depth/*.txt text eol=lf
+probes/m4-depth/SHA256SUMS text eol=lf
+probes/m4-blend/*.txt text eol=lf
+probes/m4-blend/SHA256SUMS text eol=lf
+*.vert text eol=lf
+*.frag text eol=lf
+*.png binary
+*.dds binary
+*.at9 binary
+*.prx binary
+*.bin binary
+# SPIR-V the runner compiles on the console (probes/<set>/*.spv).
+*.spv binary

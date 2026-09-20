@@ -1,0 +1,79 @@
+{
+  "problem": "Standalone fragment compilation aliases distinct varying inputs to base zero.",
+  "fix": "Run ac_nir_assign_fs_input_locations before radv_nir_shader_info_pass, as radv_fill_shader_info does.",
+  "host_before": "fragment inputs: result=0 count=0 semantics=0,0 expected=15,16 linkage=unresolved",
+  "host_after": [
+    "fragment inputs: result=0 count=2 semantics=15,16 expected=15,16 linkage=resolved",
+    "fragment inputs: result=0 count=2 semantics=18,22 expected=18,22 linkage=resolved"
+  ],
+  "commands": [
+    "bash tools/build-psbc-ps5.sh",
+    "bash tools/build-driver.sh",
+    "bash tools/check-fragment-inputs.sh",
+    "bash tools/check-driver.sh",
+    "make test",
+    "make lint",
+    "make",
+    "cd ../PS5_RetroArch && bash tools/verify.sh",
+    "cd ../PS5_RetroArch && bash tools/run-title.sh --no-build --watch 30"
+  ],
+  "retroarch_build_identity": "dc4d5d48081967fb97de05b14a0b5b27258ca35836e0f08297abb7361dab8265",
+  "compiler_archive_sha256": "a7605370c28895a3b5a13d0718ebfea2abf1b9cf842633de07533775745b21b8",
+  "console": {
+    "watch_seconds": 30,
+    "script_closed_title": true,
+    "refusals": 0,
+    "results": [
+      "gpu result: vkEndCommandBuffer calls=1 failures=0 result=0",
+      "gpu result: vkQueueSubmit calls=1 failures=0 result=0",
+      "gpu result: vkEndCommandBuffer calls=2 failures=0 result=0",
+      "gpu result: vkQueueSubmit calls=2 failures=0 result=0",
+      "gpu result: vkEndCommandBuffer calls=3 failures=0 result=0",
+      "gpu result: vkQueueSubmit calls=3 failures=0 result=0",
+      "gpu result: vkEndCommandBuffer calls=4 failures=0 result=0",
+      "gpu result: vkQueueSubmit calls=4 failures=0 result=0",
+      "gpu result: vkQueuePresentKHR calls=1 failures=0 result=0",
+      "gpu result: swapchain image calls=1 failures=0 result=0",
+      "gpu result: vkQueuePresentKHR calls=2 failures=0 result=0",
+      "gpu result: swapchain image calls=2 failures=0 result=0",
+      "gpu result: vkQueuePresentKHR calls=3 failures=0 result=0",
+      "gpu result: swapchain image calls=3 failures=0 result=0",
+      "gpu result: vkQueuePresentKHR calls=4 failures=0 result=0",
+      "gpu result: swapchain image calls=4 failures=0 result=0"
+    ],
+    "owner": "Colours correct; no flicker or triangles",
+    "pixel_analysis": {
+      "opaque_white_texels": 909,
+      "correct_white_centres": 909,
+      "changed_target_pixels": 0,
+      "files": {
+        "gpu-menu-8.bin": {
+          "bytes": 307200,
+          "sha256": "611be7969671f1510cacc5f676bb8dbca40b3be66716234894023087e9af7a6e"
+        },
+        "gpu-target-8.bin": {
+          "bytes": 33554432,
+          "sha256": "30d6eefb63354325f1334b0e37d380ab7699290f9f5a01ac096c09047bea2bce"
+        },
+        "gpu-menu-9.bin": {
+          "bytes": 307200,
+          "sha256": "611be7969671f1510cacc5f676bb8dbca40b3be66716234894023087e9af7a6e"
+        },
+        "gpu-target-9.bin": {
+          "bytes": 33554432,
+          "sha256": "30d6eefb63354325f1334b0e37d380ab7699290f9f5a01ac096c09047bea2bce"
+        }
+      }
+    }
+  },
+  "raw_capture": "../PS5_RetroArch/klog/gpu-fixed-inputs-latest-trace.txt",
+  "limits": "PC tests check compiler metadata and command streams; console captures and owner establish pixels. No Vulkan version or format coverage claim changes.",
+  "gates": {
+    "fragment_input_regression": "PASS",
+    "driver_loader_direct_ps5_link_negatives": "PASS",
+    "make_test": "PASS",
+    "make_lint": "PASS",
+    "make": "PASS",
+    "retroarch_five_gates": "PASS"
+  }
+}

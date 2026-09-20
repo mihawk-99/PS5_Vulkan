@@ -1,0 +1,17 @@
+PS5 Vulkan c3-quad shader packages, built by tools/build-probe-shaders.sh c3-quad.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 197c7fedfe8a25d29b03f8a0835bd166592938276036a9f199fbc6781faa4cdf
+vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32_float:0:0:8:4 --descriptor-binding 0:0:uniform_buffer:1:0:16; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2; writer --allow-unresolved
+vertex attributes: location 0 r32g32_float offset 0, stride 8, binding 0
+vertex binding metadata: {"array_size": 1, "binding": 0, "offset": 0, "set": 0, "stride": 16, "type": 1}
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+508326d7cb55ddc23dc0ab8097d8d8f0849dcc96fb52157edc05bea6f00a6940  shaders/c3/quad.vert
+28c512364202a5d7c733e562c90f8fe9b1c221a7a4dbf0fdc07801ffec000058  shaders/c3/quad.frag
+a77747d9219ed86252f76ec15d53a41f7596e73c270fdbad49905b7bb6df0248  build/shaders/c3-quad/vertex.spv
+8d362932003ac0e42645da514b4787f1434ff19737f488e8a355f16cf62ee0b2  build/shaders/c3-quad/pixel.spv
+ba1869d849a1f78a8128c6bb994ab7d238ddd7b17050d9338afe43e1bccdd9cc  build/shaders/c3-quad/vertex.ngg.bin
+74676d7460e5418fc854015162e3b04fdba62e28fe1c4c33d8e7f8a860264a20  build/shaders/c3-quad/vertex.hw.json
+01b34690f095041a98ee461b1f0a0a0dbaa7d02ab75ef358fa6d504cbe39f7e8  build/shaders/c3-quad/pixel.raw.bin
+bdc70236e22b4f92d2317213073cd16b4f2ca6ab6cbe37740099b0074e282efa  build/shaders/c3-quad/pixel.hw.json

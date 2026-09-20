@@ -1,0 +1,30 @@
+# PS5 Vulkan test runner job queue (PPSA99988): V0-query through the driver.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-query-driver/queue.txt
+#
+# Phase V0-query, the driver half (docs/M5_REFERENCE.md). The AGC-level probe
+# (jobs/v0-query) measured the counter the GPU has: ZPASS_DONE, one count per
+# sixteen samples, 0 / 518,400 / 259,200 counts for regions covering none, all
+# and half of a 4K target. This queue asks the same three questions of the
+# driver's own API: vkCreateQueryPool, vkCmdBeginQuery/vkCmdEndQuery around a
+# draw whose pipeline scissor covers one of those regions, and
+# vkGetQueryPoolResults.
+#
+# What it checks is the driver, not the packet: the results must be 0, 8,294,400
+# and 4,147,200 SAMPLES -- 3840x2160 and half of it, one sample per pixel. A
+# driver that handed back the counter's counts would answer 0, 518,400 and
+# 259,200, which fails. Every region is a whole number of sixteen-sample counts,
+# so the counter's unit does not blur these numbers; the device reports
+# occlusionQueryPrecise false because a region of a few pixels alone would be.
+#
+# Risk: low. Three headless frames of the M2 triangle the console draws in every
+# battery, each inside one query, plus the driver's own query packets. m2-solid
+# after them shows the console still renders, and "exit" leaves the console when
+# the batch is done, so the next deploy's eboot is what the next launch loads
+# (docs/DEPLOYMENT.md, the control payload).
+capture
+hold 60
+v0-query-masked
+v0-query-full
+v0-query-half
+m2-solid
+exit

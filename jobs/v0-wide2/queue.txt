@@ -1,0 +1,15 @@
+# PS5 Vulkan test runner job queue (PPSA99988): round 9, the wide float target.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-wide2/queue.txt
+#
+# R16G16B16A16_SFLOAT's attachment and its blend: an eight-byte texel with the
+# half-float words the shader's exact quarters store (0x3400, 0x3800, 0x3a00,
+# 0x3c00) plus the blended frame's 2.0 alpha. The sixteen-byte rows are *not*
+# claimed: their target matches 99.63% of its texels only, which run 1 of this
+# round measured (first mismatch at (64, 2128)) and which the next round's
+# pitch investigation starts from.
+hold 60
+v0-targets-uint
+v0-targets
+v0-formats
+m2-solid
+exit

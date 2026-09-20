@@ -1,0 +1,15 @@
+PS5 Vulkan v0-cube shader packages, built by tools/build-probe-shaders.sh v0-cube.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 197c7fedfe8a25d29b03f8a0835bd166592938276036a9f199fbc6781faa4cdf
+vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32_float:0:0:20:4 --vertex-attribute 1:r32g32b32_float:0:8:20:4; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2 --descriptor-binding 0:0:combined_image_sampler:1:0:48; writer --allow-unresolved
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+d424a0d1337bf7ea044c354f69e63f8784c95af8ec31d692b609da14bb087334  shaders/v0/cube.vert
+7e040a65e012ad913c703e080cb5982ab3a889f6445daae87dc6fb29d72a9353  shaders/v0/cube.frag
+2c3b73a2ec016c4715b04c030d61714273f8053c36dd9039f472308e3935a608  build/shaders/v0-cube/vertex.spv
+f35dee41e43300da6dbc253b0b223044065e7be63d79079844c4cd65ae1d3075  build/shaders/v0-cube/pixel.spv
+df76871c28f97b7812acbcd1f1157eb2c30c41cd6046da8d1b7d8dd8fd0fe4fe  build/shaders/v0-cube/vertex.ngg.bin
+4526c61cd26f3f61884a14b70aae1b250114ef32c81e33f1bb1a63f5b7a87609  build/shaders/v0-cube/vertex.hw.json
+e223ebc52997531b81e0bc27dcc2b4d11b24e11b8cccc3b303ef7e333a41139c  build/shaders/v0-cube/pixel.raw.bin
+07377f56c6ac782eb279d391cbb572e7bc66e45320aadccaecbe2b75d8a95b35  build/shaders/v0-cube/pixel.hw.json

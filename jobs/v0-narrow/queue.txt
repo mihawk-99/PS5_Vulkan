@@ -1,0 +1,15 @@
+# PS5 Vulkan test runner job queue (PPSA99988): round 11, the narrow targets.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-narrow/queue.txt
+#
+# The one- and two-byte colour targets: R8_UNORM and R8G8_UNORM (COLOR_8 and
+# COLOR_8_8), R16_SFLOAT (COLOR_16 with the FLOAT number type), all three with
+# Mesa's FP16_ABGR export, and the unsigned integer pair R8_UINT/R8G8_UINT with
+# UINT16_ABGR. The 1-byte map is AddrLib's own row (13 terms, which the driver
+# had used the four-byte row for) and the 2-byte one the row the driver already
+# carried; tools/check-mip-layout.sh compares both with the oracle.
+hold 60
+v0-targets-uint
+v0-targets
+v0-formats
+m2-solid
+exit

@@ -1,0 +1,18 @@
+# PS5 Vulkan test runner job queue (PPSA99988): V0-formats' console probe.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-formats/queue.txt
+#
+# Phase V0-formats (docs/M5_REFERENCE.md, docs/V0_FORMATS_AUDIT.md). A Vulkan
+# 1.0 device must support a set of formats with a set of features whether or not
+# anything is enabled, and the audit records which of them this driver reports
+# and which it deliberately does not. This run observes the same answer on the
+# console: the probe creates an instance, asks the device for each format's
+# features and checks them against the audit's own numbers -- the seven the
+# probes proved carry their bits, and the eight formats the audit records as
+# gaps must report nothing, so a bit that appears with no probe behind it fails.
+#
+# No submission, no GPU work, no risk: the probe queries and returns. m2-solid
+# after it shows the console still renders.
+capture
+hold 60
+v0-formats
+m2-solid

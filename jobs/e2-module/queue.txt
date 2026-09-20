@@ -1,0 +1,15 @@
+# PS5 Vulkan test runner job queue (PPSA99988): E2 (docs/M5_REFERENCE.md).
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/e2-module/queue.txt
+#
+# The loaderless delivery's first step: does the shared object the driver builds
+# (libvulkan.so.1, beside eboot.bin) load through the console's own rtld and
+# answer vkGetInstanceProcAddr? The case dlopens every name a frontend tries,
+# dlsyms the one symbol RetroArch resolves, and calls it for vkCreateInstance --
+# the reading separates "the module is unloadable" from "the frontend asks for
+# something the module will not give". m2-solid after it shows the console still
+# renders, and "exit" leaves the console when the batch is done.
+capture
+hold 60
+e2-module-load
+m2-solid
+exit

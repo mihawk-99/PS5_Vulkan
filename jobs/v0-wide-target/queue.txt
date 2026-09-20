@@ -1,0 +1,13 @@
+# PS5 Vulkan test runner job queue (PPSA99988): round 8, the eight-byte colour target.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-wide-target/queue.txt
+#
+# R16G16B16A16_UINT's last reachable feature is its colour attachment: an
+# eight-byte texel needs a tiled colour map, which the driver has now
+# (ps5vk_tiled_8b_terms, AddrLib's own row) and this battery proves by drawing
+# the unsigned integer target and reading its two words a texel back. v0-formats
+# then reads the reported bits against the audit, and m2-solid last.
+hold 60
+v0-targets-uint
+v0-formats
+m2-solid
+exit

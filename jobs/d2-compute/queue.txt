@@ -1,0 +1,23 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the D2 compute dispatch.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/d2-compute/queue.txt
+#
+# Phase D2 (docs/M5_REFERENCE.md): the V0-compute probe proved the dispatch
+# packets on the console at the raw-packet level (jobs/c0-dispatch); this case
+# proves them behind the Vulkan API -- an ordinary compute program that creates
+# a pipeline, binds one storage buffer and dispatches, then reads the word the
+# shader wrote. Deploy the current tree first:
+#
+#   tools/build-driver.sh
+#   APP_DEFINITIONS="AGC_LINKED_CANARY=1 AGC_TEST_RUNNER=1 AGC_OUTPUT_4K=1 AGC_LIVE_SUBMIT_ARMED=1 AGC_SHADER_COMPILER=1 AGC_VULKAN_DRIVER=1" \
+#       PARAM_PATH=sce_sys/param-runner.json make deploy
+#   python3 tools/ps5_console.py battery PPSA99988 jobs/d2-compute/queue.txt \
+#       --output Klog_Logs/d2-compute.log
+#
+# Risk: moderate. The dispatch packets themselves ran on this console (V0-compute,
+# c0-dispatch PASS), but they now carry a pipeline's own ISA and a descriptor the
+# driver builds, so a wrong address or descriptor would fault the GPU the way B8's
+# indirect buffer did. m2-solid last shows the console still renders afterwards.
+capture
+hold 60
+d2-compute
+m2-solid

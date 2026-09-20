@@ -1,0 +1,12 @@
+# PS5 Vulkan test runner job queue (PPSA99988): M2-M4 regression.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/regression/queue.txt
+#
+# One entry per line, run in order: a test name, or "all" for every test.
+# "hold <vblanks>" sets how long each checked frame stays on screen, for the
+# whole queue (default 300). "capture" logs every frame's helper calls, stream
+# and workspace image for golden files. Blank lines and lines starting with #
+# are ignored.
+#
+# Tests: m2-solid m3-uniform m3-vertex m3-texture m4-depth m4-blend m4-rtt
+hold 120
+all

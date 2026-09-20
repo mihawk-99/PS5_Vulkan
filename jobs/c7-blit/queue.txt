@@ -1,0 +1,15 @@
+# PS5 Vulkan test runner job queue (PPSA99988): C7's per-format blit frames.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/c7-blit/queue.txt
+#
+# Rung round 4: the blit formatter case now loops 44 formats -- the 22 sampled
+# families it proved before plus the integer families, the byte order VideoOut
+# scans out, and the ten-bit unsigned form -- because docs/V0_FORMATS_AUDIT.md
+# lists their BLIT_SRC as reachable work and the driver's resampler decodes them
+# now. Each row blits a solid texture of its own format, scaled nearest, into a
+# tiled R8G8B8A8_UNORM destination the frame samples, and the readback has to be
+# the colour that format's decode names. m2-solid last shows the console still
+# renders.
+hold 60
+c7-blit-formats
+m2-solid
+exit

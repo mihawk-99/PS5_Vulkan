@@ -1,0 +1,23 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase C1 presentation through the driver.
+# Upload: copy this file under the name queue.txt, then
+#   python3 tools/ps5_console.py push-jobs --replace PPSA99988 <dir>/queue.txt
+#
+# Milestone 5 Phases C1 and C1b (docs/M5_PHASE_C.md): the corner triangle drawn
+# through the Vulkan driver into its swapchain (VK_KHR_display,
+# VK_KHR_swapchain) and presented four times, alternating VideoOut's
+# framebuffers. Each frame's attachment is cleared first -- Mesa's vk_meta draws
+# the clear with a pipeline of its own, the second pipeline in one stream -- and
+# the frame is read back from its swapchain image before vkQueuePresentKHR
+# flips it: the half inside the diagonal is the triangle's colour, the other
+# half is the clear's. b7-triangle first shows the driver's draw path, and
+# m2-solid last that the console still renders through the runner after it.
+#
+# Risk: moderate. The draw path is the one run pid 134 (c1-present) proved; the
+# clear is new and is what this run is for. If a submission or flip does not
+# complete, the runner keeps the program's objects and stops the queue.
+capture
+hold 60
+c1-flip
+b7-triangle
+c1-triangle
+m2-solid

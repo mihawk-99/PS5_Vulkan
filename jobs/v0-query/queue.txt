@@ -1,0 +1,29 @@
+# PS5 Vulkan test runner job queue (PPSA99988): V0-query's occlusion probe.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-query/queue.txt
+#
+# Phase V0-query (docs/M5_REFERENCE.md). The only GPU-to-CPU signal the project
+# has recorded is a RELEASE_MEM completion marker, which is a write rather than
+# a counter. Vulkan 1.0 requires occlusion queries, and ps5-opengl's hardware-run
+# runtime emits their sample as ZPASS_DONE: an EVENT_WRITE (opcode 0x46, event
+# 0x115) of the GPU's z-pass counter to an address. This probe writes three of
+# those by hand -- no AGC helper emits one, and the words are recorded as a
+# raw_packets span -- around a draw covering the whole target, one covering half
+# of it and one covering nothing. The differences must be 518,400, 259,200 and 0
+# counts exactly, one count per sixteen samples: the first run (Klog_Logs/
+# v0-query-run1.log) counted 518,400 for the full target and 0 for the masked one,
+# which is where the unit comes from, and the half target measures it.
+#
+# Risk: low. Three headless frames with the triangle the M2 test already draws,
+# plus four words per frame; the counters land in the stage workspace, which the
+# runner reads back. If the packet is wrong the differences are simply not the
+# expected numbers, which the log names. m2-solid last shows the console still
+# renders.
+#
+# "exit" leaves the console when the batch is done, so the control payload
+# (payload/ps5vkctl) can load the next deploy without a hand on the console
+# (docs/DEPLOYMENT.md).
+capture
+hold 60
+v0-query
+m2-solid
+exit

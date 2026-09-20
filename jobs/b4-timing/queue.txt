@@ -1,0 +1,12 @@
+# PS5 Vulkan test runner job queue (PPSA99988): completion timing.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/b4-timing/queue.txt
+#
+# Milestone 5 Phase B4 follow-up (docs/M5_PHASE_B.md): does sceAgcSuspendPoint
+# wait for the GPU? b4-timing draws three headless frames with 1, 16 and 128
+# repeated full-target triangles; each logs the completion marker straight
+# after submission, the suspend point's duration and the marker's arrival.
+# Nothing appears on screen until m2-solid, the regression check. No capture:
+# 128 draws exceed the capture's helper-call record.
+hold 60
+b4-timing
+m2-solid

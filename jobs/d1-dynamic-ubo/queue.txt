@@ -1,0 +1,20 @@
+# PS5 Vulkan test runner job queue (PPSA99988): D1's dynamic uniform buffer.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/d1-dynamic-ubo/queue.txt
+#
+# Phase D1 (docs/M5_REFERENCE.md): the drawing API's breadth. This queue is the
+# dynamic uniform buffer: one 32-byte buffer holding two 16-byte colours, one
+# descriptor whose range is the shader's 16 bytes, and a dynamic offset the
+# application binds between the frames. Each frame must read back the half its
+# offset chose, which is what the driver's reported
+# maxDescriptorSetUniformBuffersDynamic = 8 promises and what
+# VK_ERROR_UNKNOWN used to refuse ("dynamic descriptor offsets need the dynamic
+# uniform buffers of D1").
+#
+# Risk: low. Two fullscreen frames of one uniform colour, no geometry, no depth;
+# m2-solid after them shows the console still renders, and "exit" leaves the
+# console when the batch is done (docs/DEPLOYMENT.md).
+capture
+hold 60
+d1-dynamic-ubo
+m2-solid
+exit

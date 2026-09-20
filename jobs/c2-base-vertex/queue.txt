@@ -1,0 +1,32 @@
+# PS5 Vulkan test runner job queue (PPSA99988): C2's base vertex.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/c2-base-vertex/queue.txt
+#
+# Phase C2 (docs/M5_REFERENCE.md): vertex, staging and index buffers, base
+# vertex and instancing. The driver refused a base vertex because no recorded
+# stream set one; it writes the vertex stage's base-vertex user data, which is
+# RADV's NGG ABI, so what was missing is the proof (driver/ps5vk_draw.c,
+# ps5vk_cmd_draw).
+#
+# The probe puts two quads in one vertex buffer -- the second is the first with
+# another red -- and draws the same indices twice, with vkCmdDrawIndexed's
+# vertexOffset 0 and then at the second quad. Each frame must read back the quad
+# its base vertex names, exactly as the c2-indexed frame reads back the first,
+# gradients included. Instancing is still refused: the AGC library's
+# sceAgcDcbSetNumInstances is the count, and nothing has probed it yet.
+#
+# Risk: low. Two frames of the M2 battery's own indexed square, one buffer
+# larger; m2-solid after them shows the console still renders, and "exit"
+# leaves the console when the batch is done (docs/DEPLOYMENT.md).
+# NOTE: c2-instancing is out of the runner's table while the console's
+# instance count is unsolved, so a queue that names it is rejected; the line is
+# kept, commented, as the record of what the probe measures.
+# c2-instancing runs FIRST: its image is freshly allocated, so a frame that does
+# not clear reads zeros outside its geometry -- and the vk_meta clear is exactly
+# what corrupts the draw after it (docs/M5_PHASE_C.md).
+capture
+hold 60
+c2-base-vertex
+# c2-instancing is out of the runner's table while the instance count has no
+# effect on the frame it draws (docs/M5_PHASE_C.md, run17).
+m2-solid
+exit

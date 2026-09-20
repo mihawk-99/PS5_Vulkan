@@ -1,0 +1,41 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Battery 1's depth question.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/unknowns-depth4x/queue.txt
+#
+# Phase C8 and V0-unknowns (docs/M5_REFERENCE.md). Where a four-sample *colour*
+# target keeps its samples is measured: four 0x4000-byte planes a 64x64-texel
+# tile, turned by the block's place (docs/M5_PHASE_C.md, pid 119). The depth
+# side is the open question: ps5vk_tiled_depth_offset is the one-sample map, and
+# nothing has read a four-sample depth target back.
+#
+# This case claims nothing. It renders the m4-depth canary's two rectangles into
+# a four-sample depth attachment with the test off and the write on -- so every
+# covered sample holds its rectangle's depth bits -- and reports what the storage
+# says: per plane (0x4000 bytes apart, the colour tile's candidate), how many
+# words are the clear's, the near rectangle's and the far one's, where the first
+# of each sits, and how many words in the plane are none of the three. The answer
+# is the map, read from those numbers; the driver work that follows (a four-sample
+# depth map in ps5vk_image.c, the DB registers it needs, and the depth/stencil
+# resolve form) is its own step with its own evidence.
+#
+# -rects is the measurement that answers it: solid rectangles at known places,
+# never one texel wide (a one-texel quad does not rasterize at four samples --
+# unknowns-depth4x-single said so three times), a strip per low bit of x and of
+# y and whole 64x64 tiles. Each probe's word count, first and last place and its
+# first six offsets are in the log; the host compares them with the one-sample
+# map (tools/depth4x-map-check.py).
+#
+# Risk: low. One 4K four-sample depth target, two rectangles, no resolve and no
+# four-sample colour. m2-solid last shows the console still renders.
+#
+# "exit" leaves the console when the batch is done, so the control payload
+# (payload/ps5vkctl) can load the next deploy without a hand on the console
+# (docs/DEPLOYMENT.md).
+# No capture: this battery's evidence is its log, and capturing a frame whose
+# depth target is 128 MiB costs the console more than the measurement does.
+hold 60
+unknowns-depth4x-map
+unknowns-depth4x-less
+unknowns-depth4x-ramp
+unknowns-depth4x-rects
+m2-solid
+exit

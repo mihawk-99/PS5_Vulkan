@@ -1,0 +1,16 @@
+# PS5 Vulkan test runner job queue (PPSA99988): round 13, the depth rows' attempt.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-depth/queue.txt
+#
+# The depth formats' *sampled* and *blit source* features are not reachable by a
+# probe this driver can run: a shader whose descriptors include a depth image
+# aborts inside ACO (radv_nir_lower_descriptors -> aco::lower_branches), which
+# three batteries of this round measured -- the whole sampled table
+# (Klog_Logs/v0-depth-run1.log, pid 119), the per-format blit case's sixteenth
+# frame (run2, pid 120) and a two-row depth case of its own (run3, pid 121).
+# The claims are out of the driver's table and the audit quotes the fault. This
+# queue is the clean battery the reverted tree ran: the audit mirror and the
+# console's own render, with no depth descriptor in reach.
+hold 60
+v0-formats
+m2-solid
+exit

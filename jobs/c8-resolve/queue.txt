@@ -1,0 +1,38 @@
+# PS5 Vulkan test runner job queue (PPSA99988): C8's four-sample frame and its
+# resolve, behind a control that uses the same frame.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/c8-resolve/queue.txt
+#
+# Both cases are part of the committed tree, so this battery runs against the
+# deployed build as it is (rebuild and deploy after any driver/ change):
+#
+#   tools/build-driver.sh
+#   APP_DEFINITIONS="AGC_LINKED_CANARY=1 AGC_TEST_RUNNER=1 AGC_OUTPUT_4K=1 AGC_LIVE_SUBMIT_ARMED=1 AGC_SHADER_COMPILER=1 AGC_VULKAN_DRIVER=1" \
+#       PARAM_PATH=sce_sys/param-runner.json make deploy
+#   python3 tools/ps5_console.py battery PPSA99988 jobs/c8-resolve/queue.txt \
+#       --output Klog_Logs/c8-resolve.log
+#
+# c8-msaa runs first as the control: it is the same four-sample frame with no
+# resolve, so if it passes and c8-resolve fails, the fault is in the resolve path
+# rather than in the frames both share. c8-resolve then draws the canary quad over
+# the whole viewport four times -- one-sample control, four-sample control, the
+# resolved frame and the one-sample reference -- and compares the last two word
+# for word; it also measures the four-sample image's storage (agc_resolve_map),
+# which is what the resolve's map was fitted from. It passed on pid 119, and
+# docs/M5_PHASE_C.md has that run's log.
+#
+capture
+hold 60
+# The runner-driven frame of this same run: a driver capture logs no AGC helper
+# calls, so the driver's host replay takes the process's register defaults from a
+# golden of a frame the runner drove, and tools/golden.py's sibling_defaults only
+# accepts one from the same run (tools/golden.py, register_defaults). Extract it
+# into both driver golden directories:
+#
+#   python3 tools/golden.py extract Klog_Logs/c8-resolve.log golden/c8-msaa \
+#       --test m2-solid
+#   python3 tools/golden.py extract Klog_Logs/c8-resolve.log golden/c8-resolve \
+#       --test m2-solid
+m2-solid
+c8-msaa
+c8-resolve
+exit

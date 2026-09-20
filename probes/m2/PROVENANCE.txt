@@ -1,0 +1,15 @@
+PS5 Vulkan m2 shader packages, built by tools/build-probe-shaders.sh m2.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 197c7fedfe8a25d29b03f8a0835bd166592938276036a9f199fbc6781faa4cdf
+vertex: -g -s vertex --ngg; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw; writer --allow-unresolved
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+3fb53b25664f05eb8068f8e6e418915889b1f8c56bc88c6de600d26f2eb9131f  shaders/m2/fullscreen.vert
+192e8e27157aa02ffefc40f7c40e645945beab5dfccf4a41333f501ffa6f9367  shaders/m2/solid.frag
+ebc5c12b4c55b322bc1a61165e108bd3feb7b09d72f4d9a22b6f9d2a9c3143c9  build/shaders/m2/vertex.spv
+bdacfc0da7f982d072d1dc2a2ad11778cc7544020f87c60b335d54e7166f5975  build/shaders/m2/pixel.spv
+229cfec58ba3b610e6e46f57865637408ccc075b5815e31e543240452b39e3f9  build/shaders/m2/vertex.ngg.bin
+b9fe5ef67824fc8db13d17aebe175c5cf86b2312ab6292b5d284717919519a88  build/shaders/m2/vertex.hw.json
+4c3f8c95c7fc9b1d6e52088f6dc966e159f6818337ad25a34aa3d1abd2334c0d  build/shaders/m2/pixel.raw.bin
+a6499785bdf2adc5fdc8cbef8eede665f6c2ed6e65b15a0ca1ec3d29d15168e5  build/shaders/m2/pixel.hw.json

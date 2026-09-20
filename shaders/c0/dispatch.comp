@@ -1,0 +1,31 @@
+// PS5 Vulkan compatibility probe - the V0-compute dispatch probe shader.
+// Copyright (C) 2026 Mihawk-99
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// One workgroup writes one known word into one storage buffer at set 0,
+// binding 0. The probe dispatches it once and reads the buffer back, so a pass
+// proves the whole compute path: the compiler's ISA, the dispatch packet, the
+// descriptor table, the CS partial flush and the readback. The local size is
+// deliberately 1x1x1 so the packet's grid and workgroup numbers are both one
+// and any mix-up is visible in the readback rather than hidden by the
+// arithmetic.
+//
+// tools/build-probe-shaders.sh compiles this with glslang to Vulkan 1.2 SPIR-V
+// and stores it under probes/c0/, the same way the graphics probe sets are
+// stored. The runner compiles that SPIR-V with libpsbc at run time and reads
+// the compute resource metadata this repository's compiler patch exports.
+
+#version 450
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 0) buffer Output
+{
+    uint values[];
+}
+output_buffer;
+
+void main()
+{
+    output_buffer.values[0] = 0xA5A5A5A5u;
+}

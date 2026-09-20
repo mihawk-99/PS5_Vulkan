@@ -1,0 +1,1 @@
+WEB: http://<PS5-IP>:8080/log

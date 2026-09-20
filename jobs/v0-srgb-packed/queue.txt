@@ -1,0 +1,20 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the packed byte-reversed sRGB row.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-srgb-packed/queue.txt
+#
+# Round 17: A8B8G8R8_SRGB_PACK32's Vulkan layout puts red last, where the
+# console's sRGB curve -- which covers the first three *fetched* components --
+# cannot reach it. The driver stores the texels in the R, G, B, A order its
+# R8G8B8A8_SRGB twin has and swaps the four bytes at every application boundary,
+# so the fetch, the blits, the transfers and the attachment pair are all the
+# same paths as that twin's. The capture refreshes the two goldens whose row
+# tables grew; v0-formats and m2-solid are the regression.
+hold 60
+capture
+v0-formats-sampled
+c7-blit-formats
+v0-blit-dst
+v0-transfer-formats
+v0-targets
+v0-formats
+m2-solid
+exit

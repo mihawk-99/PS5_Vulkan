@@ -1,0 +1,11 @@
+# PS5 Vulkan test runner job queue (PPSA99988): shader compilation on the console.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/compile/queue.txt
+#
+# Milestone 5 Phase A3 (docs/M5_PHASE_A.md). "compile" makes every queued test
+# compile its package set on the console: probes/<set>/vertex.spv and
+# pixel.spv with the options in compile.txt, packaged by ps5-opengl's C
+# writer. Both packages must be byte-identical to probes/<set>/*.bin; the test
+# then links and draws with the compiled packages.
+compile
+hold 60
+all

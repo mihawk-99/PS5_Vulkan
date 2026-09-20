@@ -1,0 +1,34 @@
+# PS5 Vulkan test runner job queue (PPSA99988): V0-query's timestamp probe.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-timestamp/queue.txt
+#
+# Phase V0-query (docs/M5_REFERENCE.md). Vulkan 1.0 requires timestamp queries,
+# and the driver refuses vkCmdWriteTimestamp by name because no probe has
+# recorded whether this console has a readable GPU clock; the device reports
+# timestampValidBits 0 until one has. The command is a RELEASE_MEM with the
+# BOTTOM_OF_PIPE_TS event and an EOP selector naming the timestamp, which is how
+# radv writes one. Only the selector word is new: the header, the event word
+# (event 40, index 5, the cache actions) and the address words are those of the
+# completion marker the console executes in every captured frame, so the packet
+# is read out of the console's own stream rather than guessed.
+#
+# This probe submits two frames. The first writes the clock four times, twice
+# with radv's selector (memory, write confirmation, timestamp) and twice with the
+# same selector without the confirmation, with a ZPASS_DONE sample before them
+# (a timestamp event that does not follow one hangs GFX9). The second frame
+# writes both again one 100 ms sleep later. The log carries all eight slots, so
+# three questions are answered at once: whether either selector writes, whether
+# the clock advances inside a frame, and how fast it ticks against
+# CLOCK_MONOTONIC -- which is the timestampPeriod the driver has to report.
+#
+# Risk: low. Only the selector differs from a packet the console runs every
+# capture; a selector that names nothing writes nothing, which the log shows as
+# a zero slot. m2-solid last shows the console still renders.
+#
+# "exit" leaves the console when the batch is done, so the control payload
+# (payload/ps5vkctl) can load the next deploy without a hand on the console
+# (docs/DEPLOYMENT.md).
+capture
+hold 60
+v0-timestamp
+m2-solid
+exit

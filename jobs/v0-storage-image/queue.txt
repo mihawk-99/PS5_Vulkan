@@ -1,0 +1,17 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the storage images.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-storage-image/queue.txt
+#
+# Blocker round 7: the 16 rows whose VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT no entry
+# carried, stored through a 32-byte storage image descriptor at set 0, binding 0
+# and read back out of the image's own memory. One frame a format, a 64x2 image a
+# frame, two rows of four stores; the three probes are the float, unsigned and
+# signed classes, the signed one last because its shader is the one that has
+# faulted ACO before. v0-formats (the audit mirror) and m2-solid are the
+# regression.
+hold 60
+v0-formats-storage-image
+v0-formats-storage-image-uint
+v0-formats-storage-image-sint
+v0-formats
+m2-solid
+exit

@@ -1,0 +1,25 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase C2's staged geometry.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/c2-staging/queue.txt
+#
+# Milestone 5 Phase C2 (docs/M5_REFERENCE.md): the indexed square again, with its
+# geometry written into a mapped staging buffer instead of into the buffers the
+# draw binds. One command buffer copies staging into the vertex and index
+# buffers with vkCmdCopyBuffer, the frame follows in the next command buffer of
+# the same vkQueueSubmit, and the driver performs the copy at a submission split
+# point: submit the words before it, wait for the completion marker, copy, then
+# submit the rest (driver/ps5vk_queue.c). Memory is shared, so the copy is a CPU
+# memcpy; what the split buys is Vulkan's command order.
+#
+# What the run is for: the console's readback proves the GPU saw the copied
+# bytes, and the capture becomes the golden the PC comparison needs -- its own,
+# because a staging buffer shifts every address the submission names.
+#
+# Risk: moderate. The draw is the one pids 119-121 already ran; the split is new,
+# and its failure mode is a frame that reads back the staging buffer's contents
+# instead of the copy's, which the readback names exactly. If a submission does
+# not complete, the runner keeps the test's objects and stops the queue, and
+# m2-solid last shows whether the console still renders.
+capture
+hold 60
+c2-staging
+m2-solid

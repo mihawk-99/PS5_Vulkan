@@ -1,0 +1,21 @@
+/*
+ * PS5 Vulkan driver - exports of the PS5 shared object (libvulkan.so.1).
+ * Copyright (C) 2026 Mihawk-99
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * A frontend that loads this library itself starts at vkGetInstanceProcAddr
+ * (RetroArch's Vulkan driver does: it dlsyms that one symbol and resolves every
+ * other command through it), and the loader-interface spellings stay exported
+ * so the same object can also serve a Khronos loader on the PC tests' terms.
+ * Every other symbol, the runtime's and Mesa util's included, stays local;
+ * tools/build-driver.sh links with -Bsymbolic and --exclude-libs=ALL as well.
+ */
+{
+  global:
+    vkGetInstanceProcAddr;
+    vk_icdGetInstanceProcAddr;
+    vk_icdGetPhysicalDeviceProcAddr;
+    vk_icdNegotiateLoaderICDInterfaceVersion;
+  local:
+    *;
+};

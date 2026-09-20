@@ -1,0 +1,16 @@
+PS5 Vulkan v0-image-store shader packages, built by tools/build-probe-shaders.sh v0-image-store.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 1669156833f467a2352538c3421a51c7f09df0b814d04898589673099e8fc3fc
+pixel compiler (tools/build-psbc-cli.sh) sha256: 3a8d7a3681898cf8374f961a138a6bb7ad0bfe51dd9aacd6dc2cb825c436d849
+vertex: -g -s vertex --ngg --address32-hi 2; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2 --descriptor-binding 0:0:storage_image:1:0:32; writer --allow-unresolved
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+3fb53b25664f05eb8068f8e6e418915889b1f8c56bc88c6de600d26f2eb9131f  shaders/m2/fullscreen.vert
+b388d3ab478007fa1e0c067fbd4bb9c3ba99b60b53f2300d2a186b4def772f23  shaders/v0/image_store.frag
+ebc5c12b4c55b322bc1a61165e108bd3feb7b09d72f4d9a22b6f9d2a9c3143c9  build/shaders/v0-image-store/vertex.spv
+138276c728876e1e1176196407427522025dafb983d9ad7f447ce7f800073524  build/shaders/v0-image-store/pixel.spv
+229cfec58ba3b610e6e46f57865637408ccc075b5815e31e543240452b39e3f9  build/shaders/v0-image-store/vertex.ngg.bin
+3eb7eb67a69613a55aabe7781667eac5a519bb16afb7f34ed8bcffb59a011f08  build/shaders/v0-image-store/vertex.hw.json
+a76c80c48b5565d0c7df34c0e8c193775de3d0e34f2af68e9cabd0b5cb581f61  build/shaders/v0-image-store/pixel.raw.bin
+31db882c0590a00042f09c1577b1e7f067bf955ade6ab015252b0e48592b5f77  build/shaders/v0-image-store/pixel.hw.json

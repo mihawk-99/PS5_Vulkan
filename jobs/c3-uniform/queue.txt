@@ -1,0 +1,23 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase C3's uniform buffer.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/c3-uniform/queue.txt
+#
+# Milestone 5 Phase C3 (docs/M5_REFERENCE.md): the m3 canary's uniform colour,
+# but supplied the way a Vulkan application supplies it -- a descriptor set
+# layout with one uniform-buffer binding at set 0 binding 0, a pool, an
+# allocated and updated set, vkCmdBindDescriptorSets, and a mapped buffer the
+# application rewrites between frames. The canary itself is the hardware
+# reference: runner test m3-uniform wrote the same bytes into its stage
+# workspace and the console read them back exactly (golden/runner/m3-uniform-1.json),
+# so what this run proves is that the *driver* builds the set, programs the
+# table the shader reads, and that a changed buffer reads back as a different
+# exact colour.
+#
+# Risk: low. Every packet is the m3-uniform canary's, already run on hardware;
+# the new part is the descriptor the driver writes from the application's set.
+# The readback names any wrong colour exactly. If a submission does not
+# complete, the runner keeps the test's objects and stops the queue, and
+# m2-solid last shows the console still renders.
+capture
+hold 60
+c3-uniform
+m2-solid

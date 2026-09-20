@@ -1,0 +1,24 @@
+# PS5 Vulkan test runner job queue (PPSA99988): V0-formats' vertex rows.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-vertex-formats/queue.txt
+#
+# docs/V0_FORMATS_AUDIT.md: nine formats were missing VERTEX_BUFFER and are the
+# ones a PsbcVertexFormat value can express -- R32_UINT, R32_SINT, R32G32_UINT,
+# R32G32_SINT, R32G32B32A32_SINT, R8G8B8A8_UNORM, A8B8G8R8_UNORM_PACK32,
+# B8G8R8A8_UNORM and A2B10G10R10_UNORM_PACK32. Each one draws a full-screen
+# triangle whose single vertex attribute is bound as that format, through the
+# probe set for the attribute's class (float, unsigned or signed: one set a
+# class, not one a format), and the frame is the fetch's own result: the byte a
+# component carried for the integer classes, the decoded colour for the float
+# class, and Vulkan's fill-in (zero, and one for w) in the components the format
+# does not have. The check requires every pixel of the target within one count a
+# channel and logs the middle pixel's four channels, so a padded component that
+# is not the fill rule names itself.
+#
+# Risk: low. Nine small frames, one draw each, no depth, no MSAA, no clears;
+# m2-solid last shows the console still renders, and "exit" leaves the console
+# when the batch is done (docs/DEPLOYMENT.md).
+hold 60
+v0-vertex-formats
+v0-formats
+m2-solid
+exit

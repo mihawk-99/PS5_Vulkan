@@ -1,0 +1,15 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase B7.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/b7/queue.txt
+#
+# Milestone 5 Phase B7 (docs/M5_PHASE_B.md): the first frames drawn through
+# the Vulkan driver. b4-headless first shows that the GPU draws the runner's
+# own headless frame. b7-triangle draws the M2 triangle through the Vulkan API
+# into a Vulkan image and reads back every pixel. b7-corner draws a
+# half-target triangle and reads back the viewport orientation: Vulkan's puts
+# it on the top-left half. m2-solid last shows that the GPU is still healthy
+# and puts a frame on screen; nothing appears before it.
+hold 60
+b4-headless
+b7-triangle
+b7-corner
+m2-solid

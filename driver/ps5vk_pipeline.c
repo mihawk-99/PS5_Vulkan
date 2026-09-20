@@ -1,0 +1,1205 @@
+/*
+ * PS5 Vulkan driver - graphics pipelines.
+ * Copyright (C) 2026 Mihawk-99
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Milestone 5 Phase B6 (docs/M5_PHASE_B.md). A graphics pipeline compiles its
+ * vertex and fragment SPIR-V with the opengnm-psbc compiler and packages each
+ * stage with ps5-opengl's C writer, as the console compiled the probe shaders
+ * byte for byte in Phase A3. The compiler options come from the pipeline:
+ * - vertex stage: NGG, 32-bit GPU pointers at the address high word, and the
+ *   vertex attributes of the vertex input state;
+ * - both stages: the descriptor bindings of set 0 that name the stage, at
+ *   their table offsets and strides (ps5vk_descriptor_set_layout.c);
+ * - pixel stage: one SPI_SHADER_COL_FORMAT export per colour attachment,
+ *   FP16_ABGR (4) where the attachment blends and 32_ABGR (9) where it does
+ *   not, or the compiler's legacy default (0) when nothing blends. Blending
+ *   an 8-bit UNORM target is exact only with FP16_ABGR exports (M4 step 2),
+ *   while the other probes compiled with the default.
+ * Before compiling, each stage's SPIR-V must be a well-formed instruction
+ * stream declaring the named entry point for the stage: libpsbc checks only
+ * the magic number and crashes on a module without one, so invalid SPIR-V
+ * yields VK_ERROR_UNKNOWN here instead.
+ * AGC shader objects are created the first time a command buffer draws with
+ * the pipeline (ps5vk_pipeline_prepare_shaders, Phase B7), in a 64 KiB stage
+ * workspace laid out as the test runner lays it out, so pipelines that never
+ * draw use no GPU memory. Neither the runner nor ps5-opengl destroys AGC
+ * shader objects, so destroying a pipeline releases only its workspace.
+ * Draws refuse pipeline state the hardware has not rendered through the
+ * driver yet (ps5vk_draw_refusal), while creation still succeeds, so every
+ * package can be checked. What these probes have not proven is refused with VK_ERROR_UNKNOWN
+ * and a logged reason: other topologies, multisampling, instanced vertex
+ * input, descriptor sets other than 0, descriptor types without a proven
+ * table entry, specialization constants and pipelines without a vertex and
+ * a fragment stage.
+ */
+
+#include "ps5vk_private.h"
+#include "ps5vk_debug.h"
+
+#include <assert.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "ps5_agc_package.h"
+#include "util/detect_os.h"
+#include "vk_alloc.h"
+#include "vk_render_pass.h"
+#include "vk_util.h"
+
+#if DETECT_OS_LINUX
+#include <stdio.h>
+#endif
+
+/* The compiler's ESGS ring item size for packages, as in Phase A3. */
+#define PS5VK_ESGS_RING_ITEM_SIZE 1
+/* The compiler's per-MRT colour export nibbles (SPI_SHADER_COL_FORMAT). */
+#define PS5VK_EXPORT_32_ABGR 0x9u
+#define PS5VK_EXPORT_FP16_ABGR 0x4u
+#define PS5VK_MAX_COLOR_EXPORTS 8
+/* Vertex attribute formats the M3 and M4 probes drew with; each component is
+ * 4 bytes, the vertex-binding alignment the compiler takes. */
+#define PS5VK_VERTEX_COMPONENT_ALIGNMENT 4
+
+static const struct {
+   VkFormat format;
+   PsbcVertexFormat compiler_format;
+} ps5vk_vertex_formats[] = {
+   {VK_FORMAT_R32G32_SFLOAT, PSBC_VERTEX_FORMAT_R32G32_FLOAT},
+   {VK_FORMAT_R32G32B32_SFLOAT, PSBC_VERTEX_FORMAT_R32G32B32_FLOAT},
+   {VK_FORMAT_R32G32B32A32_SFLOAT, PSBC_VERTEX_FORMAT_R32G32B32A32_FLOAT},
+   {VK_FORMAT_R32G32B32A32_UINT, PSBC_VERTEX_FORMAT_R32G32B32A32_UINT},
+   /* V0-formats: the three-component integer formats, the last two
+    * VERTEX_BUFFER-only rows docs/V0_FORMATS_AUDIT.md lists that the compiler
+    * can express. The console probe is the runner's v0-vertex-sint and
+    * v0-vertex-uint cases, whose third component reaches the readback as the
+    * fragment's alpha. */
+   {VK_FORMAT_R32G32B32_SINT, PSBC_VERTEX_FORMAT_R32G32B32_SINT},
+   {VK_FORMAT_R32G32B32_UINT, PSBC_VERTEX_FORMAT_R32G32B32_UINT},
+   /* Rung round 3: the nine rows docs/V0_FORMATS_AUDIT.md leaves probe-reachable
+    * whose type a PsbcVertexFormat names, so a VkFormat the compiler has no word
+    * for stays out of this table and the assert below keeps it that way. The two
+    * packed 8888 layouts map by memory order: VK_FORMAT_A8B8G8R8_UNORM_PACK32
+    * names its bytes from the most significant end, so its lowest byte is red
+    * exactly as R8G8B8A8_UNORM's is (ps5-opengl's ps5_vertex_format maps the
+    * same two pipe formats), and VK_FORMAT_A2B10G10R10_UNORM_PACK32 keeps red in
+    * the low ten bits, which is PIPE_FORMAT_R10G10B10A2_UNORM's layout. The
+    * console probe is the runner's v0-vertex-formats case, one frame a row. */
+   {VK_FORMAT_R32_SINT, PSBC_VERTEX_FORMAT_R32_SINT},
+   {VK_FORMAT_R32_UINT, PSBC_VERTEX_FORMAT_R32_UINT},
+   {VK_FORMAT_R32G32_SINT, PSBC_VERTEX_FORMAT_R32G32_SINT},
+   {VK_FORMAT_R32G32_UINT, PSBC_VERTEX_FORMAT_R32G32_UINT},
+   {VK_FORMAT_R32G32B32A32_SINT, PSBC_VERTEX_FORMAT_R32G32B32A32_SINT},
+   {VK_FORMAT_R8G8B8A8_UNORM, PSBC_VERTEX_FORMAT_R8G8B8A8_UNORM},
+   {VK_FORMAT_A8B8G8R8_UNORM_PACK32, PSBC_VERTEX_FORMAT_R8G8B8A8_UNORM},
+   {VK_FORMAT_B8G8R8A8_UNORM, PSBC_VERTEX_FORMAT_B8G8R8A8_UNORM},
+   {VK_FORMAT_A2B10G10R10_UNORM_PACK32, PSBC_VERTEX_FORMAT_R10G10B10A2_UNORM},
+   /* The eight-bit component layouts (round 1 of the blocker work): the
+    * compiler's enum names them now (tooling/psbc/patch-vertex-formats.py) and
+    * the hardware fetches them -- the GFX10 format words 1, 2, 5, 6 and 14, 15,
+    * 18, 19 the vertex descriptor's DATA_FORMAT field takes. The console probe
+    * is v0-vertex-formats' eight new rows, one frame each. */
+   {VK_FORMAT_R8_UNORM, PSBC_VERTEX_FORMAT_R8_UNORM},
+   {VK_FORMAT_R8_SNORM, PSBC_VERTEX_FORMAT_R8_SNORM},
+   {VK_FORMAT_R8_UINT, PSBC_VERTEX_FORMAT_R8_UINT},
+   {VK_FORMAT_R8_SINT, PSBC_VERTEX_FORMAT_R8_SINT},
+   {VK_FORMAT_R8G8_UNORM, PSBC_VERTEX_FORMAT_R8G8_UNORM},
+   {VK_FORMAT_R8G8_SNORM, PSBC_VERTEX_FORMAT_R8G8_SNORM},
+   {VK_FORMAT_R8G8_UINT, PSBC_VERTEX_FORMAT_R8G8_UINT},
+   {VK_FORMAT_R8G8_SINT, PSBC_VERTEX_FORMAT_R8G8_SINT},
+   /* The sixteen-bit component layouts (blocker round 2): the enum names them
+    * now and the hardware's words 7, 8, 11, 12, 13, 23..29 and 65..71 are the
+    * ones Mesa's vertex-element table writes. The console probe is
+    * v0-vertex-formats-16's fifteen rows, one frame each. */
+   {VK_FORMAT_R16_UNORM, PSBC_VERTEX_FORMAT_R16_UNORM},
+   {VK_FORMAT_R16_SNORM, PSBC_VERTEX_FORMAT_R16_SNORM},
+   {VK_FORMAT_R16_UINT, PSBC_VERTEX_FORMAT_R16_UINT},
+   {VK_FORMAT_R16_SINT, PSBC_VERTEX_FORMAT_R16_SINT},
+   {VK_FORMAT_R16_SFLOAT, PSBC_VERTEX_FORMAT_R16_SFLOAT},
+   {VK_FORMAT_R16G16_UNORM, PSBC_VERTEX_FORMAT_R16G16_UNORM},
+   {VK_FORMAT_R16G16_SNORM, PSBC_VERTEX_FORMAT_R16G16_SNORM},
+   {VK_FORMAT_R16G16_UINT, PSBC_VERTEX_FORMAT_R16G16_UINT},
+   {VK_FORMAT_R16G16_SINT, PSBC_VERTEX_FORMAT_R16G16_SINT},
+   {VK_FORMAT_R16G16_SFLOAT, PSBC_VERTEX_FORMAT_R16G16_SFLOAT},
+   {VK_FORMAT_R16G16B16A16_UNORM, PSBC_VERTEX_FORMAT_R16G16B16A16_UNORM},
+   {VK_FORMAT_R16G16B16A16_SNORM, PSBC_VERTEX_FORMAT_R16G16B16A16_SNORM},
+   {VK_FORMAT_R16G16B16A16_UINT, PSBC_VERTEX_FORMAT_R16G16B16A16_UINT},
+   {VK_FORMAT_R16G16B16A16_SINT, PSBC_VERTEX_FORMAT_R16G16B16A16_SINT},
+   {VK_FORMAT_R16G16B16A16_SFLOAT, PSBC_VERTEX_FORMAT_R16G16B16A16_SFLOAT},
+   /* The 8888 SNORM, SINT and UINT layouts (blocker round 3): Vulkan's
+    * R8G8B8A8_X and A8B8G8R8_X_PACK32 name one memory order -- the packed form
+    * counts its bytes from the most significant end -- so three values close six
+    * rows, as the UNORM pair already shares one. The console probe is
+    * v0-vertex-formats-8888's six rows. */
+   {VK_FORMAT_R8G8B8A8_SNORM, PSBC_VERTEX_FORMAT_R8G8B8A8_SNORM},
+   {VK_FORMAT_A8B8G8R8_SNORM_PACK32, PSBC_VERTEX_FORMAT_R8G8B8A8_SNORM},
+   {VK_FORMAT_R8G8B8A8_SINT, PSBC_VERTEX_FORMAT_R8G8B8A8_SINT},
+   {VK_FORMAT_A8B8G8R8_SINT_PACK32, PSBC_VERTEX_FORMAT_R8G8B8A8_SINT},
+   {VK_FORMAT_R8G8B8A8_UINT, PSBC_VERTEX_FORMAT_R8G8B8A8_UINT},
+   {VK_FORMAT_A8B8G8R8_UINT_PACK32, PSBC_VERTEX_FORMAT_R8G8B8A8_UINT},
+};
+
+/* SPIR-V's header, OpEntryPoint, OpExecutionMode and the execution models are
+ * in ps5vk_private.h: the compute path checks its own stage with the same
+ * calls. */
+
+/* Neither the compiler nor AGC's shader creation is known to be reentrant:
+ * compilations and creations take turns. The compute path lives in
+ * ps5vk_compute.c and takes the same lock. */
+once_flag ps5vk_compile_once = ONCE_FLAG_INIT;
+mtx_t ps5vk_compile_mutex;
+
+void
+ps5vk_compile_mutex_init(void)
+{
+   mtx_init(&ps5vk_compile_mutex, mtx_plain);
+}
+
+void
+ps5vk_pipeline_free(struct ps5vk_device *device, struct ps5vk_pipeline *pipeline,
+                    const VkAllocationCallbacks *allocator)
+{
+   /* A pipeline that never drew has no stage mapping registered. */
+   if (pipeline->stage_registered) {
+      struct ps5vk_pipeline **at = &device->stages;
+      while (*at != NULL && *at != pipeline)
+         at = &(*at)->next_stage;
+      if (*at == pipeline)
+         *at = pipeline->next_stage;
+      pipeline->stage_registered = false;
+   }
+   for (unsigned stage = 0; stage < PS5VK_PIPELINE_STAGE_COUNT; stage++)
+      free(pipeline->stages[stage].data);
+   ps5vk_direct_mapping_destroy(&pipeline->compute.code);
+   ps5vk_direct_mapping_destroy(&pipeline->shaders.stage);
+   mtx_destroy(&pipeline->shaders.lock);
+   vk_object_free(&device->vk, allocator, pipeline);
+}
+
+/* Descriptor bindings of set 0 used by stage_bit, into the compiler options. */
+VkResult
+ps5vk_descriptor_options(struct ps5vk_device *device, const struct vk_pipeline_layout *layout,
+                         VkShaderStageFlags stage_bit, PsbcCompileOptions *options)
+{
+   for (uint32_t set = 0; layout && set < layout->set_count; set++) {
+      if (!layout->set_layouts[set])
+         continue;
+      const struct ps5vk_descriptor_set_layout *const set_layout =
+         container_of(layout->set_layouts[set], struct ps5vk_descriptor_set_layout, vk);
+      for (uint32_t index = 0; index < set_layout->binding_count; index++) {
+         const struct ps5vk_descriptor_binding *const binding = &set_layout->bindings[index];
+         if (binding->count == 0 || !(binding->stages & stage_bit))
+            continue;
+         if (set != 0)
+            return vk_errorf(device, VK_ERROR_UNKNOWN,
+                             "descriptor set %u: only set 0 is supported", set);
+         if (binding->stride == 0)
+            return vk_errorf(device, VK_ERROR_UNKNOWN,
+                             "set 0 binding %u: descriptor type %d has no proven table entry",
+                             index, binding->type);
+         if (options->descriptor_binding_count == PSBC_MAX_DESCRIPTOR_BINDINGS)
+            return vk_errorf(device, VK_ERROR_UNKNOWN, "more than %d descriptor bindings",
+                             PSBC_MAX_DESCRIPTOR_BINDINGS);
+         options->descriptor_bindings[options->descriptor_binding_count++] =
+            (PsbcDescriptorBinding){
+               .set = 0,
+               .binding = (uint8_t)index,
+               /* A dynamic uniform buffer is a uniform buffer to the
+                * compiler: the offset is the application's and never part of
+                * the shader's binding (Phase D1). */
+               .type = (binding->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||
+                        binding->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC)
+                          ? PSBC_DESCRIPTOR_UNIFORM_BUFFER
+                          : (binding->type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+                                ? PSBC_DESCRIPTOR_STORAGE_BUFFER
+                                : (binding->type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER
+                                      ? PSBC_DESCRIPTOR_UNIFORM_TEXEL_BUFFER
+                                      : (binding->type ==
+                                               VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER
+                                            ? PSBC_DESCRIPTOR_STORAGE_TEXEL_BUFFER
+                                            : (binding->type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                                                  ? PSBC_DESCRIPTOR_STORAGE_IMAGE
+                                                  : PSBC_DESCRIPTOR_COMBINED_IMAGE_SAMPLER)))),
+               .array_size = binding->count,
+               .offset = binding->offset,
+               .stride = binding->stride,
+            };
+      }
+   }
+   return VK_SUCCESS;
+}
+
+/* The vertex input state's attributes, into the compiler options, and its
+ * bindings' strides, which a draw's vertex-buffer descriptors need. */
+static VkResult
+ps5vk_vertex_input_options(struct ps5vk_device *device,
+                           const VkPipelineVertexInputStateCreateInfo *input,
+                           struct ps5vk_vertex_binding *bindings, PsbcCompileOptions *options)
+{
+   for (uint32_t i = 0; input && i < input->vertexBindingDescriptionCount; i++) {
+      const VkVertexInputBindingDescription *const binding = &input->pVertexBindingDescriptions[i];
+      if (binding->binding >= PS5VK_MAX_VERTEX_BINDINGS)
+         return vk_errorf(device, VK_ERROR_UNKNOWN, "vertex binding %u out of range",
+                          binding->binding);
+      bindings[binding->binding] =
+         (struct ps5vk_vertex_binding){.stride = binding->stride, .used = true};
+   }
+   for (uint32_t i = 0; input && i < input->vertexAttributeDescriptionCount; i++) {
+      const VkVertexInputAttributeDescription *const attribute =
+         &input->pVertexAttributeDescriptions[i];
+      const VkVertexInputBindingDescription *binding = NULL;
+      for (uint32_t b = 0; b < input->vertexBindingDescriptionCount; b++) {
+         if (input->pVertexBindingDescriptions[b].binding == attribute->binding)
+            binding = &input->pVertexBindingDescriptions[b];
+      }
+      /* Valid usage: every attribute names a described binding. */
+      assert(binding);
+      if (binding->inputRate != VK_VERTEX_INPUT_RATE_VERTEX)
+         return vk_errorf(device, VK_ERROR_UNKNOWN,
+                          "binding %u: per-instance vertex input is not supported",
+                          binding->binding);
+      PsbcVertexFormat format = PSBC_VERTEX_FORMAT_NONE;
+      for (size_t f = 0; f < ARRAY_SIZE(ps5vk_vertex_formats); f++) {
+         if (ps5vk_vertex_formats[f].format == attribute->format)
+            format = ps5vk_vertex_formats[f].compiler_format;
+      }
+      /* Valid usage: the format has VERTEX_BUFFER features, which only these
+       * formats report (ps5vk_image.c). */
+      assert(format != PSBC_VERTEX_FORMAT_NONE);
+      if (attribute->location >= PSBC_MAX_VERTEX_ATTRIBUTES || attribute->binding >= 32)
+         return vk_errorf(device, VK_ERROR_UNKNOWN, "vertex attribute %u out of range",
+                          attribute->location);
+      options->vertex_attributes[options->vertex_attribute_count++] = (PsbcVertexAttribute){
+         .location = (uint8_t)attribute->location,
+         .binding = (uint8_t)attribute->binding,
+         .format = format,
+         .offset = attribute->offset,
+         .stride = binding->stride,
+         .alignment = PS5VK_VERTEX_COMPONENT_ALIGNMENT,
+      };
+   }
+   return VK_SUCCESS;
+}
+
+/* The blend factors and equations this driver can program, as AMD's gfx103
+ * register headers number them for CB_BLEND0_CONTROL (V_028780_BLEND_* and
+ * V_028780_COMB_*). VkBlendFactor's numbering is not AMD's: Vulkan's 4 and 5 are
+ * the destination-colour factors where AMD's are the source-alpha ones, so the
+ * mapping is a table rather than a cast. The constant and SRC1 factors would
+ * need the blend-constant registers or a second colour source, which this
+ * driver programs neither of: they are refused by name. */
+static bool
+ps5vk_blend_factor(VkBlendFactor factor, uint32_t *value)
+{
+   switch (factor) {
+   case VK_BLEND_FACTOR_ZERO:
+      *value = 0; /* V_028780_BLEND_ZERO */
+      return true;
+   case VK_BLEND_FACTOR_ONE:
+      *value = 1; /* V_028780_BLEND_ONE */
+      return true;
+   case VK_BLEND_FACTOR_SRC_COLOR:
+      *value = 2;
+      return true;
+   case VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR:
+      *value = 3;
+      return true;
+   case VK_BLEND_FACTOR_SRC_ALPHA:
+      *value = 4;
+      return true;
+   case VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA:
+      *value = 5;
+      return true;
+   case VK_BLEND_FACTOR_DST_ALPHA:
+      *value = 6;
+      return true;
+   case VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA:
+      *value = 7;
+      return true;
+   case VK_BLEND_FACTOR_DST_COLOR:
+      *value = 8;
+      return true;
+   case VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR:
+      *value = 9;
+      return true;
+   case VK_BLEND_FACTOR_SRC_ALPHA_SATURATE:
+      *value = 10;
+      return true;
+   /* The constant factors read CB_BLEND_RED/GREEN/BLUE/ALPHA, which a blending
+    * draw records from the pipeline's blendConstants when one of them is used
+    * (ps5vk_draw.c). AMD numbers them 13, 14, 19 and 20 in the same field. */
+   case VK_BLEND_FACTOR_CONSTANT_COLOR:
+      *value = 13; /* V_028780_BLEND_CONSTANT_COLOR */
+      return true;
+   case VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR:
+      *value = 14; /* V_028780_BLEND_ONE_MINUS_CONSTANT_COLOR */
+      return true;
+   case VK_BLEND_FACTOR_CONSTANT_ALPHA:
+      *value = 19; /* V_028780_BLEND_CONSTANT_ALPHA */
+      return true;
+   case VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA:
+      *value = 20; /* V_028780_BLEND_ONE_MINUS_CONSTANT_ALPHA */
+      return true;
+   default:
+      /* The SRC1 factors (15 to 18) are the ones left: Vulkan requires
+       * dualSrcBlend for them, this device reports maxFragmentDualSrcAttachments
+       * 0, and a valid application cannot ask for them. */
+      return false;
+   }
+}
+
+/* Whether the attachment's state reads the pipeline's blend constants. */
+static bool
+ps5vk_blend_uses_constants(const VkPipelineColorBlendAttachmentState *attachment)
+{
+   const VkBlendFactor factors[4] = {attachment->srcColorBlendFactor,
+                                     attachment->dstColorBlendFactor,
+                                     attachment->srcAlphaBlendFactor,
+                                     attachment->dstAlphaBlendFactor};
+   for (unsigned index = 0; index < 4; index++) {
+      switch (factors[index]) {
+      case VK_BLEND_FACTOR_CONSTANT_COLOR:
+      case VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR:
+      case VK_BLEND_FACTOR_CONSTANT_ALPHA:
+      case VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA:
+         return true;
+      default:
+         break;
+      }
+   }
+   return false;
+}
+
+static bool
+ps5vk_blend_function(VkBlendOp op, uint32_t *value)
+{
+   switch (op) {
+   case VK_BLEND_OP_ADD:
+      *value = 0; /* V_028780_COMB_DST_PLUS_SRC */
+      return true;
+   case VK_BLEND_OP_SUBTRACT:
+      *value = 1; /* V_028780_COMB_SRC_MINUS_DST */
+      return true;
+   case VK_BLEND_OP_REVERSE_SUBTRACT:
+      *value = 4; /* V_028780_COMB_DST_MINUS_SRC */
+      return true;
+   case VK_BLEND_OP_MIN:
+      *value = 2; /* V_028780_COMB_MIN_DST_SRC */
+      return true;
+   case VK_BLEND_OP_MAX:
+      *value = 3; /* V_028780_COMB_MAX_DST_SRC */
+      return true;
+   default:
+      return false;
+   }
+}
+
+/* The CB_BLEND0_CONTROL word the attachment's state becomes: 0 when it does not
+ * blend, and false for a state whose factors or equations this driver cannot
+ * program. The fields are the register's own: colour source and destination
+ * factors in bits 0-4 and 8-12, colour equation in bits 5-7, and the alpha
+ * half at 16, 24 and 21 with SEPARATE_ALPHA_BLEND (bit 29) set only when it
+ * differs from the colour half, which is the word the M4 blend canary proved on
+ * the console (docs/HARDWARE_FINDINGS.md). */
+static bool
+ps5vk_blend_control(const VkPipelineColorBlendAttachmentState *attachment, uint32_t *word)
+{
+   if (!attachment || !attachment->blendEnable) {
+      *word = 0;
+      return true;
+   }
+   uint32_t src_colour, dst_colour, src_alpha, dst_alpha, function_colour, function_alpha;
+   if (!ps5vk_blend_factor(attachment->srcColorBlendFactor, &src_colour) ||
+       !ps5vk_blend_factor(attachment->dstColorBlendFactor, &dst_colour) ||
+       !ps5vk_blend_factor(attachment->srcAlphaBlendFactor, &src_alpha) ||
+       !ps5vk_blend_factor(attachment->dstAlphaBlendFactor, &dst_alpha) ||
+       !ps5vk_blend_function(attachment->colorBlendOp, &function_colour) ||
+       !ps5vk_blend_function(attachment->alphaBlendOp, &function_alpha))
+      return false;
+   uint32_t state = (UINT32_C(1) << 30) | src_colour | (function_colour << 5) | (dst_colour << 8);
+   if (src_alpha != src_colour || dst_alpha != dst_colour || function_alpha != function_colour)
+      state |= (UINT32_C(1) << 29) | (src_alpha << 16) | (function_alpha << 21) | (dst_alpha << 24);
+   *word = state;
+   return true;
+}
+
+/* Colour exports: FP16_ABGR where an attachment blends, 32_ABGR elsewhere,
+ * the legacy default 0 when nothing blends. */
+static VkResult
+ps5vk_color_export_options(struct ps5vk_device *device, const VkGraphicsPipelineCreateInfo *info,
+                           uint32_t *spi_shader_col_format)
+{
+   const VkPipelineRenderingCreateInfo *const rendering =
+      vk_get_pipeline_rendering_create_info(info);
+   const uint32_t count = rendering ? rendering->colorAttachmentCount : 0;
+   const VkPipelineColorBlendStateCreateInfo *const blend = info->pColorBlendState;
+   if (count > PS5VK_MAX_COLOR_EXPORTS)
+      return vk_errorf(device, VK_ERROR_UNKNOWN, "more than %d colour attachments",
+                       PS5VK_MAX_COLOR_EXPORTS);
+
+   /* A format whose table entry names an export takes it whatever the blend
+    * state -- the integer targets export UINT16_ABGR or SINT16_ABGR, and a
+    * single-channel 32-bit one 32_R -- and every other format keeps the legacy
+    * 32_ABGR default until its attachment blends, when the pixel stage exports
+    * FP16_ABGR: what Mesa's ac_choose_spi_color_formats picks for the
+    * normalized, sRGB and half-float classes. A pipeline whose attachments all
+    * take the default passes 0, which is the compiler's own default. */
+   bool named = false;
+   uint32_t exports = 0;
+   for (uint32_t index = 0; index < PS5VK_MAX_COLOR_EXPORTS; index++) {
+      const bool used = index < count &&
+                        rendering->pColorAttachmentFormats[index] != VK_FORMAT_UNDEFINED;
+      const bool blends = used && blend && index < blend->attachmentCount &&
+                          blend->pAttachments[index].blendEnable;
+      const struct ps5vk_colour_format *const colour =
+         used ? ps5vk_find_colour_format(rendering->pColorAttachmentFormats[index]) : NULL;
+      if (used && colour == NULL)
+         return vk_errorf(device, VK_ERROR_UNKNOWN, "colour attachment %u: format %d", index,
+                          rendering->pColorAttachmentFormats[index]);
+      const uint32_t format = used && colour->export_format != 0
+                                 ? colour->export_format
+                                 : (blends ? PS5VK_EXPORT_FP16_ABGR : PS5VK_EXPORT_32_ABGR);
+      named = named || (used && (colour->export_format != 0 || blends));
+      exports |= format << (4 * index);
+   }
+   *spi_shader_col_format = named ? exports : 0;
+   return VK_SUCCESS;
+}
+
+/* Whether the module is a well-formed SPIR-V instruction stream in host byte
+ * order that declares an entry point named name for the execution model. */
+bool
+ps5vk_spirv_has_entry_point(const struct ps5vk_shader_module *module, uint32_t model,
+                            const char *name)
+{
+   const size_t count = module->size / sizeof(uint32_t);
+   if (count < PS5VK_SPIRV_HEADER_WORDS || module->words[0] != PS5VK_SPIRV_MAGIC)
+      return false;
+   bool found = false;
+   for (size_t at = PS5VK_SPIRV_HEADER_WORDS; at < count;) {
+      const uint32_t word_count = module->words[at] >> 16;
+      const uint32_t opcode = module->words[at] & 0xffff;
+      if (word_count == 0 || word_count > count - at)
+         return false;
+      /* OpEntryPoint: execution model, function, name, interface. */
+      if (opcode == PS5VK_SPIRV_OP_ENTRY_POINT && word_count >= 4 && module->words[at + 1] == model) {
+         const char *const literal = (const char *)&module->words[at + 3];
+         const size_t bytes = (word_count - 3) * sizeof(uint32_t);
+         found = found || (memchr(literal, '\0', bytes) && strcmp(literal, name) == 0);
+      }
+      at += word_count;
+   }
+   return found;
+}
+
+/* A stage's shader, as SPIR-V from a shader module or as the NIR Mesa's meta
+ * operations hand the driver directly
+ * (VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_NIR_CREATE_INFO_MESA). */
+static VkResult
+ps5vk_compile_stage(struct ps5vk_device *device, const VkPipelineShaderStageCreateInfo *stage,
+                    const PsbcCompileOptions *options, uint32_t push_constant_bytes,
+                    struct ps5vk_shader_package *package)
+{
+   VK_FROM_HANDLE(ps5vk_shader_module, module, stage->module);
+   const VkPipelineShaderStageNirCreateInfoMESA *const nir_info =
+      vk_find_struct_const(stage->pNext, PIPELINE_SHADER_STAGE_NIR_CREATE_INFO_MESA);
+   const bool vertex = options->stage == PSBC_STAGE_VERTEX;
+   const char *const stage_name = vertex ? "vertex" : "fragment";
+   if (!module && !nir_info)
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "shader stages without a shader module are not supported");
+   if (stage->pSpecializationInfo && stage->pSpecializationInfo->mapEntryCount != 0)
+      return vk_errorf(device, VK_ERROR_UNKNOWN, "specialization constants are not supported");
+   if (!nir_info && !ps5vk_spirv_has_entry_point(module,
+                                                 vertex ? PS5VK_SPIRV_EXECUTION_MODEL_VERTEX
+                                                        : PS5VK_SPIRV_EXECUTION_MODEL_FRAGMENT,
+                                                 stage->pName))
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "%s stage: not well-formed SPIR-V with an entry point \"%s\"", stage_name,
+                       stage->pName);
+
+   /* Lowering runs outside the compiler lock: it touches only this clone. */
+   struct nir_shader *const nir =
+      nir_info ? ps5vk_nir_prepare(nir_info->nir, push_constant_bytes) : NULL;
+   if (nir_info && !nir)
+      return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
+
+   call_once(&ps5vk_compile_once, ps5vk_compile_mutex_init);
+   mtx_lock(&ps5vk_compile_mutex);
+   PsbcShaderOutput output;
+   memset(&output, 0, sizeof(output));
+   const PsbcResult result = nir ? psbc_compile_nir(nir, options, &output)
+                                 : psbc_compile_shader(module->words, module->size, options,
+                                                       &output);
+   const int written = result == PSBC_RESULT_OK
+                          ? ps5_agc_package_build(&output, PS5VK_ESGS_RING_ITEM_SIZE,
+                                                  &package->data, &package->size)
+                          : -1;
+   if (result == PSBC_RESULT_OK)
+      package->metadata = output.metadata;
+   psbc_free_output(&output);
+   mtx_unlock(&ps5vk_compile_mutex);
+   if (nir)
+      ps5vk_nir_free(nir);
+
+   if (result != PSBC_RESULT_OK)
+      return vk_errorf(device, VK_ERROR_UNKNOWN, "%s stage: %s", stage_name,
+                       psbc_result_string(result));
+   if (written != 0 || !package->data)
+      return vk_errorf(device, VK_ERROR_UNKNOWN, "the AGC package writer failed: %d", written);
+   return VK_SUCCESS;
+}
+
+#if DETECT_OS_LINUX
+/* PC checks compare packages with the probe sets: PS5VK_PIPELINE_DUMP names a
+ * path prefix, and each new pipeline writes <prefix>-vertex.bin and
+ * <prefix>-pixel.bin. */
+static void
+ps5vk_pipeline_dump(const struct ps5vk_pipeline *pipeline)
+{
+   const char *const prefix = getenv("PS5VK_PIPELINE_DUMP");
+   static const char *const names[PS5VK_PIPELINE_STAGE_COUNT] = {"vertex", "pixel"};
+   for (unsigned stage = 0; prefix && stage < PS5VK_PIPELINE_STAGE_COUNT; stage++) {
+      char path[4096];
+      snprintf(path, sizeof(path), "%s-%s.bin", prefix, names[stage]);
+      FILE *const file = fopen(path, "wb");
+      if (!file)
+         continue;
+      fwrite(pipeline->stages[stage].data, 1, pipeline->stages[stage].size, file);
+      fclose(file);
+   }
+}
+#endif
+
+/* AGC shader packages as the test runner checks them before creating shaders
+ * (validate_shader_package): the hardware stage byte of each header. */
+#define PS5VK_PACKAGE_VERTEX_STAGE 2
+#define PS5VK_PACKAGE_PIXEL_STAGE 1
+#define PS5VK_PACKAGE_HEADER_MAGIC 0x34333231u
+#define PS5VK_PACKAGE_MIN_HEADER_BYTES 96
+/* Stage workspace regions start on 4 KiB boundaries (link_shader_packages). */
+#define PS5VK_STAGE_REGION_ALIGNMENT 0x1000
+/* The link's primitive type for triangle lists (DI_PT_TRILIST). */
+#define PS5VK_LINK_TRIANGLE_LIST 4
+/* A shader object's context and SH table pointers and their record counts,
+ * with the bounds the runner accepts (emit_linked_shader_state). */
+#define PS5VK_SHADER_CX_TABLE_OFFSET 24
+#define PS5VK_SHADER_SH_TABLE_OFFSET 32
+#define PS5VK_SHADER_CX_COUNT_BYTE 91
+#define PS5VK_SHADER_SH_COUNT_BYTE 92
+#define PS5VK_SHADER_MAX_CX_RECORDS 32
+#define PS5VK_SHADER_MAX_SH_RECORDS 16
+
+static uint16_t
+ps5vk_read16(const uint8_t *at)
+{
+   uint16_t value;
+   memcpy(&value, at, sizeof(value));
+   return value;
+}
+
+static uint32_t
+ps5vk_read32(const uint8_t *at)
+{
+   uint32_t value;
+   memcpy(&value, at, sizeof(value));
+   return value;
+}
+
+static uint64_t
+ps5vk_read64(const uint8_t *at)
+{
+   uint64_t value;
+   memcpy(&value, at, sizeof(value));
+   return value;
+}
+
+/* A register-table pointer stored in a shader object. */
+static const struct ps5vk_agc_register *
+ps5vk_read_table(const uint8_t *at)
+{
+   const struct ps5vk_agc_register *table;
+   memcpy(&table, at, sizeof(table));
+   return table;
+}
+
+/* A package's .shader_header and .shader_text sections: an ELF whose section
+ * table and sections lie inside it, and a header with the expected magic,
+ * sizes and hardware stage. */
+static bool
+ps5vk_package_sections(const struct ps5vk_shader_package *package, uint8_t hardware_stage,
+                       const uint8_t **header, size_t *header_bytes, const uint8_t **code,
+                       size_t *code_bytes)
+{
+   const uint8_t *const data = package->data;
+   const size_t size = package->size;
+   *header = NULL;
+   *code = NULL;
+   *header_bytes = 0;
+   *code_bytes = 0;
+   if (size < 64 || memcmp(data, "\x7f" "ELF", 4) != 0)
+      return false;
+   const uint64_t sections = ps5vk_read64(data + 40);
+   const uint16_t entry_bytes = ps5vk_read16(data + 58);
+   const uint16_t count = ps5vk_read16(data + 60);
+   const uint16_t names_index = ps5vk_read16(data + 62);
+   if (sections == 0 || entry_bytes < 64 || count == 0 || names_index >= count || sections > size ||
+       count > (size - sections) / entry_bytes)
+      return false;
+   const uint8_t *const names_record = data + sections + (size_t)names_index * entry_bytes;
+   const uint64_t names_offset = ps5vk_read64(names_record + 24);
+   const uint64_t names_bytes = ps5vk_read64(names_record + 32);
+   if (names_offset > size || names_bytes > size - names_offset)
+      return false;
+   const char *const names = (const char *)data + names_offset;
+   for (uint16_t index = 0; index < count; index++) {
+      const uint8_t *const record = data + sections + (size_t)index * entry_bytes;
+      const uint32_t name = ps5vk_read32(record);
+      const uint64_t offset = ps5vk_read64(record + 24);
+      const uint64_t bytes = ps5vk_read64(record + 32);
+      if (name >= names_bytes || offset > size || bytes > size - offset ||
+          !memchr(names + name, '\0', names_bytes - name))
+         return false;
+      if (strcmp(names + name, ".shader_header") == 0) {
+         *header = data + offset;
+         *header_bytes = (size_t)bytes;
+      } else if (strcmp(names + name, ".shader_text") == 0) {
+         *code = data + offset;
+         *code_bytes = (size_t)bytes;
+      }
+   }
+   const uint8_t *const h = *header;
+   return h && *code && *header_bytes >= PS5VK_PACKAGE_MIN_HEADER_BYTES && *code_bytes != 0 &&
+          ps5vk_read32(h) == PS5VK_PACKAGE_HEADER_MAGIC && ps5vk_read32(h + 4) == 24 &&
+          ps5vk_read64(h + 8) != 0 && ps5vk_read64(h + 16) == 0 &&
+          ps5vk_read32(h + 64) == *header_bytes && ps5vk_read32(h + 68) == *code_bytes &&
+          h[0x5a] == hardware_stage;
+}
+
+/* The runner's staging, creation and linking (link_shader_packages): vertex
+ * header, vertex code, pixel header and pixel code on 4 KiB boundaries from
+ * the start of the workspace; sceAgcCreateShader relocates each header in
+ * place; sceAgcLinkShaders writes the linked context and uniforms. */
+static VkResult
+ps5vk_pipeline_create_shaders(struct ps5vk_device *device, struct ps5vk_pipeline *pipeline)
+{
+   struct ps5vk_pipeline_shaders *const shaders = &pipeline->shaders;
+   const uint8_t *vertex_header, *vertex_code, *pixel_header, *pixel_code;
+   size_t vertex_header_bytes, vertex_code_bytes, pixel_header_bytes, pixel_code_bytes;
+   if (!ps5vk_package_sections(&pipeline->stages[PS5VK_PIPELINE_STAGE_VERTEX],
+                               PS5VK_PACKAGE_VERTEX_STAGE, &vertex_header, &vertex_header_bytes,
+                               &vertex_code, &vertex_code_bytes) ||
+       !ps5vk_package_sections(&pipeline->stages[PS5VK_PIPELINE_STAGE_PIXEL],
+                               PS5VK_PACKAGE_PIXEL_STAGE, &pixel_header, &pixel_header_bytes,
+                               &pixel_code, &pixel_code_bytes))
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "the compiled shaders are not valid AGC shader packages");
+
+   const size_t vertex_code_offset = ALIGN_POT(vertex_header_bytes, PS5VK_STAGE_REGION_ALIGNMENT);
+   const size_t pixel_offset =
+      vertex_code_offset + ALIGN_POT(vertex_code_bytes, PS5VK_STAGE_REGION_ALIGNMENT);
+   const size_t pixel_code_offset =
+      pixel_offset + ALIGN_POT(pixel_header_bytes, PS5VK_STAGE_REGION_ALIGNMENT);
+   if (pixel_code_offset + pixel_code_bytes > PS5VK_STAGE_CONTEXT_OFFSET)
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "shaders of %zu bytes do not fit before the linked context",
+                       pixel_code_offset + pixel_code_bytes);
+
+   const int32_t mapped = ps5vk_direct_mapping_create(&shaders->stage, PS5VK_STAGE_BYTES,
+                                                      PS5VK_DIRECT_PAGE_BYTES);
+   if (mapped != 0)
+      return vk_errorf(device, VK_ERROR_OUT_OF_DEVICE_MEMORY,
+                       "the stage workspace could not be mapped in the address window: 0x%08x",
+                       (unsigned)mapped);
+   uint8_t *const stage = shaders->stage.address;
+   memset(stage, 0, PS5VK_STAGE_BYTES);
+   memcpy(stage, vertex_header, vertex_header_bytes);
+   memcpy(stage + vertex_code_offset, vertex_code, vertex_code_bytes);
+   memcpy(stage + pixel_offset, pixel_header, pixel_header_bytes);
+   memcpy(stage + pixel_code_offset, pixel_code, pixel_code_bytes);
+
+   void *vertex_shader = NULL;
+   void *pixel_shader = NULL;
+   call_once(&ps5vk_compile_once, ps5vk_compile_mutex_init);
+   mtx_lock(&ps5vk_compile_mutex);
+   int32_t result = sceAgcCreateShader(&vertex_shader, stage, stage + vertex_code_offset);
+   if (result == 0 && vertex_shader)
+      result = sceAgcCreateShader(&pixel_shader, stage + pixel_offset, stage + pixel_code_offset);
+   if (result == 0 && pixel_shader)
+      result = sceAgcLinkShaders(stage + PS5VK_STAGE_CONTEXT_OFFSET,
+                                 stage + PS5VK_STAGE_UNIFORM_OFFSET, NULL, vertex_shader,
+                                 pixel_shader, PS5VK_LINK_TRIANGLE_LIST);
+   mtx_unlock(&ps5vk_compile_mutex);
+   if (result != 0 || !vertex_shader || !pixel_shader) {
+      ps5vk_direct_mapping_destroy(&shaders->stage);
+      return vk_errorf(device, VK_ERROR_UNKNOWN, "AGC shader creation or linking failed: 0x%08x",
+                       (unsigned)result);
+   }
+
+   const uint8_t *const objects[PS5VK_PIPELINE_STAGE_COUNT] = {vertex_shader, pixel_shader};
+   for (unsigned index = 0; index < PS5VK_PIPELINE_STAGE_COUNT; index++) {
+      struct ps5vk_shader_tables *const tables = &shaders->tables[index];
+      tables->cx = ps5vk_read_table(objects[index] + PS5VK_SHADER_CX_TABLE_OFFSET);
+      tables->sh = ps5vk_read_table(objects[index] + PS5VK_SHADER_SH_TABLE_OFFSET);
+      tables->cx_count = objects[index][PS5VK_SHADER_CX_COUNT_BYTE];
+      tables->sh_count = objects[index][PS5VK_SHADER_SH_COUNT_BYTE];
+      /* The tables live in this stage mapping: AGC's relocation writes their
+       * addresses into the header, so a header that was never relocated (a
+       * PC model with no capture of this pipeline, say) names somewhere else.
+       * Reading a table from there is a crash rather than a wrong frame, so
+       * the addresses are checked, not just their counts. */
+      const uintptr_t begin = (uintptr_t)stage;
+      const uintptr_t end = begin + PS5VK_STAGE_BYTES;
+      const uintptr_t cx_at = (uintptr_t)tables->cx;
+      const uintptr_t sh_at = (uintptr_t)tables->sh;
+      if (!tables->cx || !tables->sh || cx_at < begin || cx_at >= end || sh_at < begin ||
+          sh_at >= end || tables->cx_count > PS5VK_SHADER_MAX_CX_RECORDS ||
+          tables->sh_count > PS5VK_SHADER_MAX_SH_RECORDS) {
+         ps5vk_direct_mapping_destroy(&shaders->stage);
+         return vk_errorf(device, VK_ERROR_UNKNOWN,
+                          "a created shader's register tables are out of bounds");
+      }
+   }
+   ps5vk_flush_cpu_cache(stage, PS5VK_STAGE_BYTES);
+   /* The runner's capture logs these mappings: a PC rebuild replays what AGC
+    * wrote here, and a pipeline the capture does not carry cannot be modelled
+    * (ps5vk_debug.h, ps5vk_debug_pipeline_stages). */
+   pipeline->next_stage = device->stages;
+   device->stages = pipeline;
+   pipeline->stage_registered = true;
+   return VK_SUCCESS;
+}
+
+uint32_t
+ps5vk_debug_pipeline_stages(VkDevice _device, ps5vk_debug_stage *stages, uint32_t capacity)
+{
+   VK_FROM_HANDLE(ps5vk_device, device, _device);
+   uint32_t count = 0;
+   for (struct ps5vk_pipeline *pipeline = device ? device->stages : NULL; pipeline != NULL;
+        pipeline = pipeline->next_stage)
+      count++;
+   if (stages == NULL || capacity == 0)
+      return count;
+   /* The list is newest first; the caller logs creation order, which is the
+    * order the pipelines linked their stages. */
+   uint32_t at = MIN2(count, capacity);
+   for (struct ps5vk_pipeline *pipeline = device->stages; pipeline != NULL && at > 0;
+        pipeline = pipeline->next_stage) {
+      at--;
+      /* A compute pipeline has no AGC stage workspace: its mapping is the
+       * compiled ISA the dispatch points at (Phase D2). */
+      const struct ps5vk_direct_mapping *const mapping =
+         pipeline->bind_point == VK_PIPELINE_BIND_POINT_COMPUTE ? &pipeline->compute.code
+                                                                : &pipeline->shaders.stage;
+      stages[at] = (ps5vk_debug_stage){
+         .address = mapping->address,
+         .bytes = mapping->bytes,
+      };
+   }
+   return count;
+}
+
+VkResult
+ps5vk_pipeline_prepare_shaders(struct ps5vk_device *device, struct ps5vk_pipeline *pipeline)
+{
+   struct ps5vk_pipeline_shaders *const shaders = &pipeline->shaders;
+   mtx_lock(&shaders->lock);
+   if (!shaders->attempted) {
+      shaders->attempted = true;
+      shaders->result = ps5vk_pipeline_create_shaders(device, pipeline);
+   }
+   const VkResult result = shaders->result;
+   mtx_unlock(&shaders->lock);
+   return result;
+}
+
+/* Whether the pipeline declares a dynamic state. */
+static bool
+ps5vk_state_is_dynamic(const VkGraphicsPipelineCreateInfo *info, VkDynamicState state)
+{
+   for (uint32_t index = 0; info->pDynamicState && index < info->pDynamicState->dynamicStateCount;
+        index++) {
+      if (info->pDynamicState->pDynamicStates[index] == state)
+         return true;
+   }
+   return false;
+}
+
+/* Why command buffers cannot draw with a pipeline of this state yet, or NULL.
+ * The draw path encodes the vertex input, the reserved push-constant buffer
+ * and the viewport and scissor the command buffer holds (ps5vk_draw.c); it
+ * encodes no descriptor sets, no dynamic state beyond the viewport and
+ * scissor, and no rasterization, depth, stencil or blend state beyond what
+ * b4-headless and the c1-clear probe used. */
+static const char *
+ps5vk_draw_refusal(const VkGraphicsPipelineCreateInfo *info,
+                   const struct vk_pipeline_layout *layout)
+{
+   const VkPipelineRasterizationStateCreateInfo *const raster = info->pRasterizationState;
+   const VkPipelineDepthStencilStateCreateInfo *const depth = info->pDepthStencilState;
+   const VkPipelineColorBlendStateCreateInfo *const blend = info->pColorBlendState;
+   const VkPipelineViewportStateCreateInfo *const viewport = info->pViewportState;
+   /* Set 0's bindings are encoded from the set the application bound (Phase C3,
+    * ps5vk_draw.c); a stage's table holds one set, so a layout that declares
+    * more than that is refused here rather than at the draw. */
+   for (uint32_t set = 1; layout && set < layout->set_count; set++) {
+      if (layout->set_layouts[set])
+         return "drawing with descriptor sets beyond set 0 is not supported yet";
+   }
+   for (uint32_t index = 0; info->pDynamicState && index < info->pDynamicState->dynamicStateCount;
+        index++) {
+      const VkDynamicState state = info->pDynamicState->pDynamicStates[index];
+      if (state != VK_DYNAMIC_STATE_VIEWPORT && state != VK_DYNAMIC_STATE_SCISSOR &&
+          state != VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE &&
+          state != VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE &&
+          state != VK_DYNAMIC_STATE_DEPTH_COMPARE_OP &&
+          state != VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE &&
+          state != VK_DYNAMIC_STATE_STENCIL_OP &&
+          state != VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK &&
+          state != VK_DYNAMIC_STATE_STENCIL_WRITE_MASK &&
+          state != VK_DYNAMIC_STATE_STENCIL_REFERENCE)
+         return "drawing with dynamic state other than the viewport, scissor, depth and stencil "
+                "state is not supported yet";
+   }
+   /* Valid usage: rasterization state is always present. */
+   if (raster->rasterizerDiscardEnable || raster->depthClampEnable || raster->depthBiasEnable ||
+       raster->polygonMode != VK_POLYGON_MODE_FILL || raster->cullMode != VK_CULL_MODE_NONE)
+      return "drawing other than filled, unculled polygons is not supported yet";
+   /* Depth test, write and compare are Phase C5 and the stencil test is round
+    * 12: a pipeline that enables it records the three stencil state words from
+    * the dynamic state beside its depth ones (ps5vk_stencil_registers), and a
+    * rendering with no stencil attachment ignores the test the way Vulkan says
+    * it does. Depth bounds is the state still refused by name. */
+   if (depth && depth->depthBoundsTestEnable)
+      return "drawing with a depth-bounds test is not supported yet";
+   if (blend && blend->logicOpEnable)
+      return "drawing with logic operations is not supported yet";
+   const VkPipelineRenderingCreateInfo *const rendering =
+      vk_get_pipeline_rendering_create_info(info);
+   for (uint32_t index = 0; blend && index < blend->attachmentCount; index++) {
+      uint32_t word = 0;
+      if (!ps5vk_blend_control(&blend->pAttachments[index], &word))
+         return "drawing with a blend factor this driver cannot program: the second-source "
+                "factors need dual-source blending, which this device does not advertise "
+                "(maxFragmentDualSrcAttachments 0)";
+      /* Vulkan: blending is not supported for an integer attachment, and the CB
+       * bypasses it for one (Mesa's ac_build_cb_state). A pipeline that asks for
+       * both is refused rather than drawn unblended. */
+      if (word != 0 && rendering != NULL && index < rendering->colorAttachmentCount) {
+         const struct ps5vk_colour_format *const colour =
+            ps5vk_find_colour_format(rendering->pColorAttachmentFormats[index]);
+         if (colour != NULL &&
+             (colour->cb_number_type == 4 /* UINT */ || colour->cb_number_type == 5 /* SINT */))
+            return "drawing with blending into an integer colour attachment, which the "
+                   "hardware bypasses and Vulkan forbids";
+      }
+      /* 0xf writes every channel and 0 writes none, which is what vk_meta's
+       * depth clear asks for; anything between them would need the target's
+       * channel order. */
+      if (blend->pAttachments[index].colorWriteMask != 0xf &&
+          blend->pAttachments[index].colorWriteMask != 0)
+         return "drawing with colour write masks other than RGBA or none is not supported yet";
+   }
+   if (!viewport || viewport->viewportCount != 1 || viewport->scissorCount != 1)
+      return "drawing without one viewport and one scissor is not supported yet";
+   if ((!ps5vk_state_is_dynamic(info, VK_DYNAMIC_STATE_VIEWPORT) && !viewport->pViewports) ||
+       (!ps5vk_state_is_dynamic(info, VK_DYNAMIC_STATE_SCISSOR) && !viewport->pScissors))
+      return "drawing without a static or dynamic viewport and scissor is not supported yet";
+   return NULL;
+}
+
+/* The state vkCmdBindPipeline puts into the command buffer: the viewport and
+ * scissor a pipeline declares statically, and, for a pipeline that declares
+ * them dynamic, the count alone. Vulkan's count is the pipeline's: every
+ * viewport vkCmdSetViewport sets has to lie inside it, and this driver accepts
+ * one viewport and one scissor (ps5vk_draw_refusal), so a pipeline names 1
+ * whatever the command buffer set. What the pipeline declares dynamic stays
+ * otherwise unset, so the command buffer keeps the arrays vkCmdSetViewport and
+ * vkCmdSetScissor left there. */
+static void
+ps5vk_pipeline_dynamic_state(const VkGraphicsPipelineCreateInfo *info,
+                             struct vk_dynamic_graphics_state *dynamic)
+{
+   vk_dynamic_graphics_state_init(dynamic);
+   dynamic->vp.viewport_count = 1;
+   BITSET_SET(dynamic->set, MESA_VK_DYNAMIC_VP_VIEWPORT_COUNT);
+   dynamic->vp.scissor_count = 1;
+   BITSET_SET(dynamic->set, MESA_VK_DYNAMIC_VP_SCISSOR_COUNT);
+   if (!ps5vk_state_is_dynamic(info, VK_DYNAMIC_STATE_VIEWPORT)) {
+      dynamic->vp.viewports[0] = info->pViewportState->pViewports[0];
+      BITSET_SET(dynamic->set, MESA_VK_DYNAMIC_VP_VIEWPORTS);
+   }
+   if (!ps5vk_state_is_dynamic(info, VK_DYNAMIC_STATE_SCISSOR)) {
+      dynamic->vp.scissors[0] = info->pViewportState->pScissors[0];
+      BITSET_SET(dynamic->set, MESA_VK_DYNAMIC_VP_SCISSORS);
+   }
+   /* The depth state a draw's DB_DEPTH_CONTROL comes from, static unless the
+    * pipeline declares it dynamic (Phase C5, ps5vk_depth_control). */
+   if (info->pDepthStencilState != NULL) {
+      if (!ps5vk_state_is_dynamic(info, VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE)) {
+         dynamic->ds.depth.test_enable = info->pDepthStencilState->depthTestEnable;
+         BITSET_SET(dynamic->set, MESA_VK_DYNAMIC_DS_DEPTH_TEST_ENABLE);
+      }
+      if (!ps5vk_state_is_dynamic(info, VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE)) {
+         dynamic->ds.depth.write_enable = info->pDepthStencilState->depthWriteEnable;
+         BITSET_SET(dynamic->set, MESA_VK_DYNAMIC_DS_DEPTH_WRITE_ENABLE);
+      }
+      if (!ps5vk_state_is_dynamic(info, VK_DYNAMIC_STATE_DEPTH_COMPARE_OP)) {
+         dynamic->ds.depth.compare_op = info->pDepthStencilState->depthCompareOp;
+         BITSET_SET(dynamic->set, MESA_VK_DYNAMIC_DS_DEPTH_COMPARE_OP);
+      }
+      /* The stencil test's own state (round 12): the enable, the two faces'
+       * operations and their reference, compare mask and write mask, which the
+       * draw turns into DB_DEPTH_CONTROL's stencil bits, DB_STENCIL_CONTROL and
+       * the two DB_STENCILREFMASK words (ps5vk_stencil_registers). Each is
+       * static unless the pipeline declares that state dynamic, the same rule
+       * the depth state above follows. */
+      if (!ps5vk_state_is_dynamic(info, VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE)) {
+         dynamic->ds.stencil.test_enable = info->pDepthStencilState->stencilTestEnable;
+         BITSET_SET(dynamic->set, MESA_VK_DYNAMIC_DS_STENCIL_TEST_ENABLE);
+      }
+      for (unsigned face = 0; face < 2; face++) {
+         struct vk_stencil_test_face_state *const state =
+            face == 0 ? &dynamic->ds.stencil.front : &dynamic->ds.stencil.back;
+         const VkStencilOpState *const op =
+            face == 0 ? &info->pDepthStencilState->front : &info->pDepthStencilState->back;
+         if (!ps5vk_state_is_dynamic(info, VK_DYNAMIC_STATE_STENCIL_OP)) {
+            state->op.fail = op->failOp;
+            state->op.pass = op->passOp;
+            state->op.depth_fail = op->depthFailOp;
+            state->op.compare = op->compareOp;
+            BITSET_SET(dynamic->set, MESA_VK_DYNAMIC_DS_STENCIL_OP);
+         }
+         if (!ps5vk_state_is_dynamic(info, VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK)) {
+            state->compare_mask = op->compareMask;
+            BITSET_SET(dynamic->set, MESA_VK_DYNAMIC_DS_STENCIL_COMPARE_MASK);
+         }
+         if (!ps5vk_state_is_dynamic(info, VK_DYNAMIC_STATE_STENCIL_WRITE_MASK)) {
+            state->write_mask = op->writeMask;
+            BITSET_SET(dynamic->set, MESA_VK_DYNAMIC_DS_STENCIL_WRITE_MASK);
+         }
+         if (!ps5vk_state_is_dynamic(info, VK_DYNAMIC_STATE_STENCIL_REFERENCE)) {
+            state->reference = (uint8_t)op->reference;
+            BITSET_SET(dynamic->set, MESA_VK_DYNAMIC_DS_STENCIL_REFERENCE);
+         }
+      }
+   }
+}
+
+/* The push-constant bytes a layout declares and the stages that read them. */
+static void
+ps5vk_push_constant_range(const struct vk_pipeline_layout *layout, uint32_t *bytes,
+                          VkShaderStageFlags *stages)
+{
+   *bytes = 0;
+   *stages = 0;
+   for (uint32_t index = 0; layout && index < layout->push_range_count; index++) {
+      const VkPushConstantRange *const range = &layout->push_ranges[index];
+      *bytes = MAX2(*bytes, range->offset + range->size);
+      *stages |= range->stageFlags;
+   }
+}
+
+/* The reserved uniform-buffer binding the push constants reach a stage
+ * through, into the compiler options (ps5vk_nir.c). It is one descriptor at
+ * the END of the set-0 table a draw builds: the application's own set-0
+ * bindings start at the table's first entry (ps5vk_descriptor_options), and
+ * two bindings cannot share one entry, so a stage that reads both a push
+ * constant and an application uniform buffer gets a table holding both. A
+ * layout with no set 0 leaves it at the start, where it has always been. */
+static void
+ps5vk_push_constant_options(const struct vk_pipeline_layout *layout, PsbcCompileOptions *options)
+{
+   uint32_t offset = 0;
+   if (layout != NULL && layout->set_count > 0 && layout->set_layouts[0] != NULL) {
+      const struct ps5vk_descriptor_set_layout *const set_layout =
+         container_of(layout->set_layouts[0], struct ps5vk_descriptor_set_layout, vk);
+      offset = set_layout->table_bytes;
+   }
+   options->descriptor_bindings[options->descriptor_binding_count++] = (PsbcDescriptorBinding){
+      .set = 0,
+      .binding = PS5VK_PUSH_CONSTANT_BINDING,
+      .type = PSBC_DESCRIPTOR_UNIFORM_BUFFER,
+      .array_size = 1,
+      .offset = offset,
+      .stride = PS5VK_UNIFORM_BUFFER_DESCRIPTOR_BYTES,
+   };
+}
+
+static VkResult
+ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipelineCreateInfo *info,
+                               const VkAllocationCallbacks *allocator, VkPipeline *out_pipeline)
+{
+   VK_FROM_HANDLE(vk_pipeline_layout, layout, info->layout);
+   const VkPipelineShaderStageCreateInfo *vertex = NULL;
+   const VkPipelineShaderStageCreateInfo *pixel = NULL;
+   for (uint32_t i = 0; i < info->stageCount; i++) {
+      if (info->pStages[i].stage == VK_SHADER_STAGE_VERTEX_BIT)
+         vertex = &info->pStages[i];
+      else if (info->pStages[i].stage == VK_SHADER_STAGE_FRAGMENT_BIT)
+         pixel = &info->pStages[i];
+   }
+   if (!vertex || !pixel)
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "only pipelines with a vertex and a fragment stage are supported");
+   /* Mesa's meta draws use a rectangle topology whose vertex buffer already
+    * holds two triangles per rectangle, so it is a triangle list here, as it
+    * is in nvk (vk_to_nv9097_primitive_topology). */
+   if (!info->pInputAssemblyState ||
+       (info->pInputAssemblyState->topology != VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST &&
+        info->pInputAssemblyState->topology != VK_PRIMITIVE_TOPOLOGY_META_RECT_LIST_MESA) ||
+       info->pInputAssemblyState->primitiveRestartEnable)
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "only triangle lists without primitive restart are supported");
+   /* One sample or four (C8): the colour target's register block carries the
+    * count (ps5vk_draw.c, CB_COLOR0_ATTRIB.NUM_SAMPLES), and nothing in the
+    * compiled shader does. */
+   if (info->pMultisampleState &&
+       info->pMultisampleState->rasterizationSamples != VK_SAMPLE_COUNT_1_BIT &&
+       info->pMultisampleState->rasterizationSamples != VK_SAMPLE_COUNT_4_BIT)
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "only one-sample and four-sample pipelines are supported");
+
+   uint32_t push_constant_bytes = 0;
+   VkShaderStageFlags push_constant_stages = 0;
+   ps5vk_push_constant_range(layout, &push_constant_bytes, &push_constant_stages);
+   if (push_constant_bytes > PS5VK_MAX_PUSH_CONSTANT_BYTES)
+      return vk_errorf(device, VK_ERROR_UNKNOWN, "push-constant ranges reach %u bytes, past %d",
+                       push_constant_bytes, PS5VK_MAX_PUSH_CONSTANT_BYTES);
+
+   PsbcCompileOptions vertex_options = {
+      .target = PSBC_TARGET_PS5,
+      .stage = PSBC_STAGE_VERTEX,
+      .entrypoint = vertex->pName,
+      .optimise = true,
+      .ngg = true,
+      .address32_hi = (uint32_t)PS5VK_ADDRESS_HIGH_WORD,
+   };
+   PsbcCompileOptions pixel_options = {
+      .target = PSBC_TARGET_PS5,
+      .stage = PSBC_STAGE_FRAGMENT,
+      .entrypoint = pixel->pName,
+      .optimise = true,
+      .address32_hi = (uint32_t)PS5VK_ADDRESS_HIGH_WORD,
+      /* The pipeline's sample count reaches the compiler as well as the
+       * rasterizer registers (ps5vk_draw.c, ps5vk_multisample_registers): the
+       * fragment stage's sample-mask and barycentric lowerings are built for
+       * it. Only a four-sample pipeline sets it, so a one-sample pipeline
+       * compiles to exactly the stage every frame before Phase C8 ran
+       * (docs/M5_PHASE_C.md). */
+      .rasterization_samples =
+         info->pMultisampleState &&
+               info->pMultisampleState->rasterizationSamples == VK_SAMPLE_COUNT_4_BIT
+            ? 4u
+            : 0u,
+   };
+   struct ps5vk_vertex_binding vertex_bindings[PS5VK_MAX_VERTEX_BINDINGS] = {0};
+   VkResult result =
+      ps5vk_vertex_input_options(device, info->pVertexInputState, vertex_bindings, &vertex_options);
+   if (result == VK_SUCCESS)
+      result = ps5vk_descriptor_options(device, layout, VK_SHADER_STAGE_VERTEX_BIT, &vertex_options);
+   if (result == VK_SUCCESS)
+      result = ps5vk_descriptor_options(device, layout, VK_SHADER_STAGE_FRAGMENT_BIT, &pixel_options);
+   uint32_t exports = 0;
+   if (result == VK_SUCCESS)
+      result = ps5vk_color_export_options(device, info, &exports);
+   if (result != VK_SUCCESS)
+      return result;
+   pixel_options.spi_shader_col_format = exports;
+   if (push_constant_stages & VK_SHADER_STAGE_VERTEX_BIT)
+      ps5vk_push_constant_options(layout, &vertex_options);
+   if (push_constant_stages & VK_SHADER_STAGE_FRAGMENT_BIT)
+      ps5vk_push_constant_options(layout, &pixel_options);
+
+   struct ps5vk_pipeline *const pipeline =
+      vk_object_zalloc(&device->vk, allocator, sizeof(*pipeline), VK_OBJECT_TYPE_PIPELINE);
+   if (!pipeline)
+      return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
+   pipeline->spi_shader_col_format = exports;
+   /* The colour write mask a draw has to program: the first attachment's, which
+    * Vulkan requires to be present and the same for all of them here (the draw
+    * refuses anything but RGBA or none, ps5vk_draw_refusal). */
+   pipeline->colour_write_mask =
+      info->pColorBlendState != NULL && info->pColorBlendState->attachmentCount > 0
+         ? (uint32_t)info->pColorBlendState->pAttachments[0].colorWriteMask
+         : 0xfu;
+   /* The word a blending draw records, 0 for one that does not blend. A state
+    * this driver cannot program has already set draw_refusal below, so the word
+    * only has to be safe here. A state that reads the blend constants takes
+    * them from the pipeline: the draw records CB_BLEND_RED/GREEN/BLUE/ALPHA
+    * beside the blend word when blend_uses_constants is set, and every pipeline
+    * that does not leaves those registers alone, so no earlier draw's stream
+    * changes. */
+   uint32_t blend_control = 0;
+   bool blend_uses_constants = false;
+   if (info->pColorBlendState != NULL && info->pColorBlendState->attachmentCount > 0) {
+      (void)ps5vk_blend_control(&info->pColorBlendState->pAttachments[0], &blend_control);
+      blend_uses_constants =
+         blend_control != 0 && ps5vk_blend_uses_constants(&info->pColorBlendState->pAttachments[0]);
+   }
+   pipeline->blend_control = blend_control;
+   pipeline->blend_uses_constants = blend_uses_constants;
+   for (unsigned index = 0; index < 4; index++) {
+      const float value = blend_uses_constants ? info->pColorBlendState->blendConstants[index] : 0.0f;
+      memcpy(&pipeline->blend_constants[index], &value, sizeof(value));
+   }
+   pipeline->shaders.stage.start = -1;
+   pipeline->push_constant_bytes = push_constant_bytes;
+   pipeline->push_constant_stages = push_constant_stages;
+   memcpy(pipeline->vertex_bindings, vertex_bindings, sizeof(vertex_bindings));
+   mtx_init(&pipeline->shaders.lock, mtx_plain);
+   pipeline->draw_refusal = ps5vk_draw_refusal(info, layout);
+   if (!pipeline->draw_refusal)
+      ps5vk_pipeline_dynamic_state(info, &pipeline->dynamic);
+
+   result = ps5vk_compile_stage(device, vertex, &vertex_options, push_constant_bytes,
+                                &pipeline->stages[PS5VK_PIPELINE_STAGE_VERTEX]);
+   if (result == VK_SUCCESS)
+      result = ps5vk_compile_stage(device, pixel, &pixel_options, push_constant_bytes,
+                                   &pipeline->stages[PS5VK_PIPELINE_STAGE_PIXEL]);
+   if (result != VK_SUCCESS) {
+      ps5vk_pipeline_free(device, pipeline, allocator);
+      return result;
+   }
+#if DETECT_OS_LINUX
+   ps5vk_pipeline_dump(pipeline);
+#endif
+
+   *out_pipeline = ps5vk_pipeline_to_handle(pipeline);
+   return VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL
+ps5vk_CreateGraphicsPipelines(VkDevice _device, VkPipelineCache pipelineCache, uint32_t createInfoCount,
+                              const VkGraphicsPipelineCreateInfo *pCreateInfos,
+                              const VkAllocationCallbacks *pAllocator, VkPipeline *pPipelines)
+{
+   VK_FROM_HANDLE(ps5vk_device, device, _device);
+   /* There is no pipeline cache: every pipeline compiles. */
+   (void)pipelineCache;
+   VkResult result = VK_SUCCESS;
+   uint32_t index = 0;
+   for (; index < createInfoCount; index++) {
+      pPipelines[index] = VK_NULL_HANDLE;
+      const VkResult created =
+         ps5vk_graphics_pipeline_create(device, &pCreateInfos[index], pAllocator, &pPipelines[index]);
+      if (created == VK_SUCCESS)
+         continue;
+      if (result == VK_SUCCESS)
+         result = created;
+      if (pCreateInfos[index].flags & VK_PIPELINE_CREATE_EARLY_RETURN_ON_FAILURE_BIT)
+         break;
+   }
+   for (; index < createInfoCount; index++)
+      pPipelines[index] = VK_NULL_HANDLE;
+   return result;
+}
+
+VKAPI_ATTR void VKAPI_CALL
+ps5vk_DestroyPipeline(VkDevice _device, VkPipeline _pipeline, const VkAllocationCallbacks *pAllocator)
+{
+   VK_FROM_HANDLE(ps5vk_device, device, _device);
+   VK_FROM_HANDLE(ps5vk_pipeline, pipeline, _pipeline);
+   if (pipeline)
+      ps5vk_pipeline_free(device, pipeline, pAllocator);
+}

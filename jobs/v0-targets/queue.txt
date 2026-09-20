@@ -1,0 +1,25 @@
+# PS5 Vulkan test runner job queue (PPSA99988): V0-formats' colour targets.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-targets/queue.txt
+#
+# Phase V0-formats (docs/V0_FORMATS_AUDIT.md): the CB_COLOR0_INFO words. The
+# v0-targets case draws the whole 3840x2160 target twice per format through the
+# driver -- one pipeline and one device a frame -- and reads the target's
+# storage back through the tiled word map: R8G8B8A8_UNORM and B8G8R8A8_UNORM
+# (whose COLOR_ATTACHMENT the M2/M4 frames proved) and A8B8G8R8_UNORM_PACK32,
+# R8G8B8A8_SRGB and A2B10G10R10_UNORM_PACK32, whose attachment bits that
+# readback is what closes; the second frame adds the same formats'
+# COLOR_ATTACHMENT_BLEND. The colour each frame draws is one the format
+# quantises exactly, and the frame must hold the 32-bit word its own
+# CB_COLOR0_INFO word (data format, number type, component order) writes.
+#
+# Risk: low. Two frames a format -- the solid one and one that clears to a
+# destination colour and adds a source over it with CB_BLEND0_CONTROL and the
+# FP16_ABGR export -- so ten full-target quad frames, no depth; m2-solid after
+# them shows the console still renders, and "exit" leaves the console when the
+# batch is done (docs/DEPLOYMENT.md).
+capture
+hold 60
+v0-targets
+v0-targets-uint
+m2-solid
+exit

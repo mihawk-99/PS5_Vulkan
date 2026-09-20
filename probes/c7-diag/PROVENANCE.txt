@@ -1,0 +1,16 @@
+PS5 Vulkan c7-diag shader packages, built by tools/build-probe-shaders.sh c7-diag.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 197c7fedfe8a25d29b03f8a0835bd166592938276036a9f199fbc6781faa4cdf
+vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32_float:0:0:16:4 --vertex-attribute 1:r32g32_float:0:8:16:4; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2; writer --allow-unresolved
+vertex attributes: location 0 r32g32_float offset 0, location 1 r32g32_float offset 8, stride 16, binding 0
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+f736356815a7bd2e561683d5a6d3f460813b74015545102d4df66ddcecf30c8d  shaders/c7/band.vert
+04b8f4202a387d43721d183a80d5226c22d9261ee49590caa85e1e6a47ddcfdc  shaders/c7/const.frag
+26a020c3fe92d88b23c73ea10711b41b2d4b8f9225d4ce6bba6feabc66fe13ea  build/shaders/c7-diag/vertex.spv
+ebe93adbf85b59117a30b332069b1f65820b0ae62d12c27b166af090b6ce3655  build/shaders/c7-diag/pixel.spv
+9797d9dc72fab55a72b118538a98ef6cf9f474810034021ab2d2a3083a9cf0f3  build/shaders/c7-diag/vertex.ngg.bin
+45249b9c0a1af98d249d2022417bd29d7d9ade341c2c1e521d48e8049b9adac4  build/shaders/c7-diag/vertex.hw.json
+1e8e8ca3dc2e1f1522dbc5bd5680454fc2bd8da781ee1c5c18acc9e27be0b4a2  build/shaders/c7-diag/pixel.raw.bin
+090755aa5f4d6f4f6eac79fc67c794c0d4ccfccf794924f213b17a2ce304935a  build/shaders/c7-diag/pixel.hw.json

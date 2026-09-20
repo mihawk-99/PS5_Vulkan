@@ -1,0 +1,18 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase C8's four-sample target.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/c8-msaa/queue.txt
+#
+# Phase C8 (docs/M5_REFERENCE.md): 4x multisampling. The M2 solid frame is drawn
+# into a four-sample R8G8B8A8_UNORM target, whose sample count the driver's
+# colour-target registers carry (CB_COLOR0_ATTRIB.NUM_SAMPLES). The whole target
+# is covered, so every sample of every texel must hold the frame's colour; the
+# probe counts the words that do, names the first one and dumps an address per
+# word, which is the layout the resolve (this phase's other half) has to walk.
+#
+# Risk: low. One frame into a 133 MiB target, no depth, no clears; m2-solid after
+# it shows the console still renders, and "exit" leaves the console when the
+# batch is done (docs/DEPLOYMENT.md).
+capture
+hold 60
+c8-msaa
+m2-solid
+exit

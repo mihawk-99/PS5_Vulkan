@@ -1,0 +1,13 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the 8888 SNORM, SINT and UINT
+# vertex layouts.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-vertex-formats-8888/queue.txt
+#
+# Blocker round 3: the six rows whose fetch word the compiler's enum could not
+# name -- R8G8B8A8_SNORM/_SINT/_UINT and their A8B8G8R8_*_PACK32 twins, which
+# name one memory order each. One frame a format; v0-formats (the audit mirror)
+# and m2-solid follow as the regression.
+hold 60
+v0-vertex-formats-8888
+v0-formats
+m2-solid
+exit

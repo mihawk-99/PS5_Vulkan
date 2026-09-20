@@ -1,0 +1,15 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the ten signed colour targets.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-sint/queue.txt
+#
+# One case draws all ten signed rows, one frame a format: the same shape as the
+# unsigned family (v0-targets-uint), with shaders/v0/target_sint.frag's constant
+# ivec4(0x20, 0x40, 0x60, 0x7f) and the ten signed CB words. The rows need the
+# driver's COLOR_ATTACHMENT bit before their targets can be created at all: the
+# three rounds that read this case's failure as a compiler fault were reading
+# vkCreateImage's old assert's stale backtrace (round 17's diagnosis,
+# docs/HARDWARE_FINDINGS.md). v0-formats and m2-solid follow as canaries.
+hold 60
+v0-targets-sint
+v0-formats
+m2-solid
+exit

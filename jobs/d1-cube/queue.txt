@@ -1,0 +1,28 @@
+# PS5 Vulkan test runner job queue (PPSA99988): D1's cubemaps.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/d1-cube/queue.txt
+#
+# Phase D1 (docs/M5_REFERENCE.md). A cube is six slices of a cube-compatible
+# image -- the oracle's six-slice array row is byte-identical to it, because
+# AddrLib's ADDR2 API has no cube flag (docs/HARDWARE_FINDINGS.md) -- and the
+# descriptor says cube with word 3's TYPE 11, the same DEPTH and BASE_ARRAY
+# fields the array case confirmed (pid 153).
+#
+# This battery confirms the cube kind on the hardware: six horizontal bands, each
+# sampling one face's direction through a samplerCube shader (probes/v0-cube)
+# over a six-layer cube whose faces are six solid colours the frame uploads
+# itself. Vulkan's face order is +X, -X, +Y, -Y, +Z, -Z, so band f must read
+# layer f's colour; a descriptor left at TYPE 9, or with the layer fields at
+# zero, would sample one face everywhere and the log would show one colour in all
+# six bands.
+#
+# Risk: low. One 256x256 six-layer cube, six uploads and one full-target frame.
+# m2-solid last shows the console still renders.
+#
+# "exit" leaves the console when the batch is done, so the control payload
+# (payload/ps5vkctl) can load the next deploy without a hand on the console
+# (docs/DEPLOYMENT.md).
+capture
+hold 60
+v0-cube-faces
+m2-solid
+exit

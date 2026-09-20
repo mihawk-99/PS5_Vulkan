@@ -1,0 +1,18 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the stencil path.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-stencil/queue.txt
+#
+# Blocker round 12: the audit's second must: clause, which requires
+# VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT of at least one of
+# D24_UNORM_S8_UINT and D32_SFLOAT_S8_UINT. One frame a signal: the setup pass
+# stores the stencil reference and gl_FragDepth 0.75, the test pass compares the
+# plane against 0x5a (green: both planes worked), against 0x00 (red: the stencil
+# test rejected every fragment) and behind the plane's depth (red: the depth test
+# rejected them). v0-formats (the audit mirror) and m2-solid are the regression.
+hold 60
+# The capture records the frames' command streams: the golden the host test
+# tools/check-driver.sh compares (golden/v0-stencil) and the replay it runs with.
+capture
+v0-stencil
+v0-formats
+m2-solid
+exit

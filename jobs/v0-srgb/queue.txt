@@ -1,0 +1,19 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the byte-reversed sRGB row.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-srgb/queue.txt
+#
+# Round 13: B8G8R8A8_SRGB's memory order is B, G, R, A, so the console's sRGB
+# curve -- which linearises the first three *fetched* components -- lands on the
+# format's whole colour triple, and the ZYXW selectors place them. The four
+# probes are its fetch and linear filter (v0-formats-sampled), its blit source
+# (c7-blit-formats), its blit destination (v0-blit-dst) and the transfer pair
+# (v0-transfer-formats); v0-formats and m2-solid are the regression. The capture
+# refreshes the two goldens whose row tables grew.
+hold 60
+capture
+v0-formats-sampled
+c7-blit-formats
+v0-blit-dst
+v0-transfer-formats
+v0-formats
+m2-solid
+exit

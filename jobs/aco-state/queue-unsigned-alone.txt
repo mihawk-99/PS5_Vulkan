@@ -1,0 +1,7 @@
+# The ACO state probe's isolation step: the unsigned texture case alone, then the
+# runner exits. It faulted after its last frame with another case queued
+# (jobs/aco-state/queue.txt, Klog_Logs/aco-state-run1.log); alone, the same fault
+# puts it in the case's own teardown rather than in the next case's compile.
+hold 60
+v0-formats-sampled-uint
+exit

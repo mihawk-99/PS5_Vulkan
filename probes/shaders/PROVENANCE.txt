@@ -1,0 +1,6 @@
+ProsperoLight split AGC assets; headers and text copied byte-for-byte.
+vertex text: geometry.text.bin
+pixel text: pixel.text.linear-buffer.bin
+vertex checksum register 0x080 = 0xe1465c3f
+pixel checksum register 0x006 = 0xd71f53cf
+resources: netflix-video-resources.bin copied byte-for-byte

@@ -1,0 +1,10 @@
+address32_hi 2
+vertex_user_sgpr_count 3
+vertex_buffer_table_dword 0
+vertex_base_vertex_dword 1
+vertex_ngg_lds_dword 2
+vertex_ngg_lds_layout 512
+pixel_user_sgpr_count 3
+pixel_descriptor_set0_dword 2
+pixel_set0_binding0_offset 0
+pixel_set0_binding0_stride 16

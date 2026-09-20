@@ -1,0 +1,16 @@
+PS5 Vulkan v0-texel-buffer shader packages, built by tools/build-probe-shaders.sh v0-texel-buffer.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 197c7fedfe8a25d29b03f8a0835bd166592938276036a9f199fbc6781faa4cdf
+pixel compiler (tools/build-psbc-cli.sh) sha256: c6a17f8587793fb2c63b86173cfc6918b2ea82628785e38e40ee6c49e924da14
+vertex: -g -s vertex --ngg --address32-hi 2; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2 --descriptor-binding 0:0:uniform_texel_buffer:1:0:16; writer --allow-unresolved
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+3fb53b25664f05eb8068f8e6e418915889b1f8c56bc88c6de600d26f2eb9131f  shaders/m2/fullscreen.vert
+5c365a65e8ff711040c6298dd5ae4413ccc65ce7334b6cd65157a0ef4869bd35  shaders/v0/texel_buffer.frag
+ebc5c12b4c55b322bc1a61165e108bd3feb7b09d72f4d9a22b6f9d2a9c3143c9  build/shaders/v0-texel-buffer/vertex.spv
+57e4c7b07f68d7735d7727e9597185a078c7876930e2efb74848c2d4738cab3e  build/shaders/v0-texel-buffer/pixel.spv
+229cfec58ba3b610e6e46f57865637408ccc075b5815e31e543240452b39e3f9  build/shaders/v0-texel-buffer/vertex.ngg.bin
+3eb7eb67a69613a55aabe7781667eac5a519bb16afb7f34ed8bcffb59a011f08  build/shaders/v0-texel-buffer/vertex.hw.json
+7ed31654da43107cd9fef3fc25aa8b0e54ede036ba7163976135ea1e8173f4a8  build/shaders/v0-texel-buffer/pixel.raw.bin
+c21a6a1ac041c08648742410f9021248a248f07009b1d85f8563d537108acae0  build/shaders/v0-texel-buffer/pixel.hw.json

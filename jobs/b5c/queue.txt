@@ -1,0 +1,16 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase B5c.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/b5c/queue.txt
+#
+# Milestone 5 Phase B5c (docs/M5_PHASE_B.md): does the completion marker wait
+# for rendering? Run pid 107 saw markers arrive before 128 full-target draws
+# could have rendered. b5-order draws two headless frames, 16 and 256 heavy
+# full-target triangles in one colour and then one last triangle in another;
+# the centre pixel is sampled at submission and at the marker, then polled
+# until the last draw's colour arrives. b4-headless and m2-solid afterwards
+# show that the GPU is still healthy. Capture records every frame.
+# Nothing appears on screen until m2-solid.
+capture
+hold 60
+b5-order
+b4-headless
+m2-solid

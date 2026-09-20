@@ -1,0 +1,13 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the byte-reversed sRGB target.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-srgb-target/queue.txt
+#
+# Round 14: B8G8R8A8_SRGB's colour-attachment pair. Its CB_COLOR0_INFO word is
+# 8_8_8_8 with the sRGB number type and SWAP_ALT, so the hardware encodes the
+# linear colour into B, G, R order -- the solid frame holds 0xff89bce1 and the
+# additively blended frame 0xffbcbce1. v0-formats (the audit mirror) and
+# m2-solid are the regression.
+hold 60
+v0-targets
+v0-formats
+m2-solid
+exit

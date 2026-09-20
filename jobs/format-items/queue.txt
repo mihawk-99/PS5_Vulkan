@@ -1,0 +1,55 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the three format items.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/format-items/queue.txt
+#
+# docs/VULKAN_PROBE_ACTIVE.md, "The three format items approved this session",
+# and the two driver commits before this queue: a two-byte element, the
+# constant blend factors, and a four-sample depth copy.
+#
+# v0-transfer-16: a two-byte element through the driver's own transfer paths.
+# The case first settles what the console can be asked of a two-byte format: the
+# driver's storage is tiled only for an attachment and no two-byte format in its
+# table can be one, so a two-byte image is always the row layout and the
+# two-byte tile map has no reachable path (the row tools/check-mip-layout.sh
+# compares with AddrLib stays a derivation with no console witness). What the
+# case then proves is the rows: a 500x128 R16_UNORM image that a staging buffer
+# fills with vkCmdCopyBufferToImage and vkCmdCopyImageToBuffer reads back, every
+# word of the 1000-byte source rows required in the 1024-byte stored rows, and
+# the image's memory requirement required to be those padded rows.
+#
+# v0-blend-constant: the m4-blend rectangle over a cleared attachment, with
+# CONSTANT_COLOR/ONE_MINUS_CONSTANT_COLOR and CONSTANT_ALPHA/
+# ONE_MINUS_CONSTANT_ALPHA and the constants {0.25, 0.5, 0.75, 1.0} one a
+# channel. The m4-blend set is the one whose pixel stage exports the FP16_ABGR a
+# blending 8-bit target takes; the b8-corner shaders export 32_ABGR, and the
+# first console run of this case (which drew with them) came back with every
+# pixel more than one count off the expected blend, which is what a shader whose
+# export the pipeline's SPI format does not match looks like. Every pixel must
+# now hold red 0xfb, green 0x58, blue 0x58 and opaque alpha (one count of slack a
+# channel, the FP16 export's rounding): four different constants are what makes a
+# CB_BLEND_* register the driver wrote at the wrong offset, or wrote with the
+# channels in another order, a channel this blend is not.
+#
+# c8-depth4-copy: two four-sample D32 images of whole tiles (256x128 is four
+# tile columns by two of the 64x64-texel rows), one cleared to 0.5 and the other
+# to 0.25, then vkCmdCopyImage between them: every word of both allocations is a
+# texel's and every word has to hold the source's value, so a copy the driver
+# refuses, one that writes one sample a texel, and one that stops short each
+# leave the destination's own clear behind. This is the console proof of the
+# copy the driver now accepts end to end -- the transfer usage a D32 image needs
+# before it can be created for one, the region walk over the sixteen-byte texels,
+# and the storage it writes. A copy is address-preserving, so the map itself
+# stays what unknowns-depth4x measures. The extent is small on purpose: the
+# driver records one copy a texel for a sixteen-byte texel, and 1024x512 (524288
+# records) ran the app's heap out on the console.
+#
+# Risk: low to moderate. The three frames are one draw each plus two clears and
+# one image copy; the four-sample depth pair is 256 MiB of mapped image memory.
+# m2-solid last shows the console still renders, and "exit" leaves the console
+# when the batch is done (docs/DEPLOYMENT.md).
+capture
+hold 60
+c8-depth4-copy
+v0-transfer-16
+v0-blend-constant
+m2-solid
+exit

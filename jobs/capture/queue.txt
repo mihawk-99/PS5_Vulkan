@@ -1,0 +1,14 @@
+# PS5 Vulkan test runner job queue (PPSA99988): golden capture.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/capture/queue.txt
+#
+# "capture" makes every frame log its AGC helper calls, its whole command
+# stream and its stage workspace image. Turn the klog into golden files with:
+#   python3 tools/golden.py extract <klog> golden/runner
+#
+# m2-solid runs again last: its second capture must equal its first except
+# where the VideoOut handle appears, which shows a capture does not depend on
+# the tests before it.
+capture
+hold 60
+all
+m2-solid

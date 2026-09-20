@@ -1,0 +1,43 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase C7's mip-sampling probe.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/c7-mip/queue.txt
+#
+# Phase C7 (docs/M5_REFERENCE.md): mip levels in descriptors and sampling. The
+# driver sizes a chain's levels with ps5-opengl's rules and its sampler now
+# encodes the mip filter and the LOD range; what has never run on the hardware
+# is a descriptor that names more than one level.
+#
+# The probe creates a 256x256 RGBA8 image with five levels, each level one solid
+# grey (0, 100, 200, 40, 60), and uploads every level through its own
+# vkCmdCopyBufferToImage. One frame draws four horizontal bands whose vertices
+# carry an explicit LOD, so one draw reads four levels:
+#   c7-mip-nearest  LODs 0, 1, 2, 3, 4 with a nearest mip filter: each band must
+#                   hold its own level's grey exactly
+#   c7-mip-linear   LODs 0.5, 1.5, 2.5, 3.5, 4.5 with a linear mip filter: each
+#                   band must hold the mean of the two levels around its LOD,
+#                   which the chosen greys make a whole number (55, 150, 120,
+#                   50), and the last band its own level alone, the range's top
+#                   having clamped the LOD
+#   c7-mip-tiled    the same chain in the storage a colour attachment uses --
+#                   64 KiB tiles of 128x128 texels, one level after another --
+#                   which the probe writes itself through the tile map the
+#                   target readbacks decode, because the driver records no copy
+#                   into tiled storage: the one property the linear bisection
+#                   could not vary
+#
+# Risk: low. Two headless frames of a quad with one sampled image, no clears and
+# no depth; m2-solid after them shows the console still renders, and "exit"
+# leaves the console when the batch is done (docs/DEPLOYMENT.md).
+# NOTE: the probe now samples the whole chain through a view of all five levels
+# with the application's own LOD range, and the driver writes the image's last
+# level into the descriptor's MAX_MIP field, which it left zero before -- a
+# sampler whose chain length is zero can only read level 0. The earlier runs
+# pinned the LOD range to (0, 0) per frame as well, which clamps every LOD to
+# level 0 on its own (docs/M5_PHASE_C.md, docs/HARDWARE_FINDINGS.md).
+capture
+hold 60
+c7-mip-pages
+c7-mip-tiled
+c7-mip-nearest
+c7-mip-linear
+m2-solid
+exit

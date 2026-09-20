@@ -1,0 +1,436 @@
+/*
+ * PS5 Vulkan driver - command buffers.
+ * Copyright (C) 2026 Mihawk-99
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Milestone 5 Phases B5 and B7 (docs/M5_PHASE_B.md). Command pools,
+ * allocation, reset and freeing are Mesa's common implementation. A command
+ * buffer adds the PM4 words recorded into it (ps5vk_draw.c), which submission
+ * copies into the queue's GPU-visible buffer (ps5vk_queue.c), and the register
+ * tables those words point at. The tables live in GPU-visible chunks the
+ * command buffer keeps across resets: submission is synchronous, so once
+ * vkQueueSubmit returns the GPU no longer reads them.
+ */
+
+#include "ps5vk_private.h"
+#include "ps5vk_debug.h"
+
+#include <assert.h>
+#include <stdlib.h>
+
+#include "vk_alloc.h"
+#include "vk_command_pool.h"
+
+static void
+ps5vk_cmd_buffer_release_tables(struct ps5vk_cmd_buffer *cmd_buffer)
+{
+   struct ps5vk_device *const device =
+      container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk);
+   struct ps5vk_table_chunk *chunk = cmd_buffer->table_chunks;
+   while (chunk != NULL) {
+      struct ps5vk_table_chunk *const next = chunk->next_in_buffer;
+      /* The device's list is what the runner's capture reads, so a chunk that
+       * goes away leaves it. */
+      struct ps5vk_table_chunk **at = &device->table_chunks;
+      while (*at != NULL && *at != chunk)
+         at = &(*at)->next_in_device;
+      if (*at == chunk)
+         *at = chunk->next_in_device;
+      ps5vk_direct_mapping_destroy(&chunk->mapping);
+      free(chunk);
+      chunk = next;
+   }
+   cmd_buffer->table_chunks = NULL;
+   cmd_buffer->table_chunk = NULL;
+   cmd_buffer->table_bytes_used = 0;
+}
+
+/* Forgets what was recorded: words, table use, bound pipeline, bound sets and
+ * rendering. */
+static void
+ps5vk_cmd_buffer_clear_state(struct ps5vk_cmd_buffer *cmd_buffer)
+{
+   util_dynarray_clear(&cmd_buffer->words);
+   util_dynarray_clear(&cmd_buffer->targets);
+   /* A vkCmdUpdateBuffer snapshot belongs to the recording it was made for. */
+   util_dynarray_foreach (&cmd_buffer->copies, struct ps5vk_memory_copy, copy)
+      free(copy->owned_source);
+   util_dynarray_clear(&cmd_buffer->copies);
+   /* The chunks stay mapped across resets -- submission is synchronous -- but
+    * the next recording starts at the first of them again. */
+   cmd_buffer->table_chunk = cmd_buffer->table_chunks;
+   cmd_buffer->table_bytes_used = 0;
+   cmd_buffer->pipeline = NULL;
+   /* A set bound before the reset does not stay bound: the recording that
+    * follows is a new command buffer's, and a stale set there would be one the
+    * application never bound in it (ps5vk_descriptor_set.c). */
+   memset(cmd_buffer->descriptor_sets, 0, sizeof(cmd_buffer->descriptor_sets));
+   cmd_buffer->rendering = false;
+}
+
+static VkResult
+ps5vk_cmd_buffer_create(struct vk_command_pool *pool, VkCommandBufferLevel level,
+                        struct vk_command_buffer **out_command_buffer)
+{
+   struct vk_device *const device = pool->base.device;
+   struct ps5vk_cmd_buffer *const cmd_buffer =
+      vk_zalloc(&pool->alloc, sizeof(*cmd_buffer), 8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (!cmd_buffer)
+      return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
+
+   const VkResult result =
+      vk_command_buffer_init(pool, &cmd_buffer->vk, &ps5vk_cmd_buffer_ops, level);
+   if (result != VK_SUCCESS) {
+      vk_free(&pool->alloc, cmd_buffer);
+      return result;
+   }
+   util_dynarray_init(&cmd_buffer->words, NULL);
+   util_dynarray_init(&cmd_buffer->targets, NULL);
+   util_dynarray_init(&cmd_buffer->copies, NULL);
+   ps5vk_cmd_buffer_clear_state(cmd_buffer);
+
+   *out_command_buffer = &cmd_buffer->vk;
+   return VK_SUCCESS;
+}
+
+static void
+ps5vk_cmd_buffer_reset(struct vk_command_buffer *vk_cmd_buffer, VkCommandBufferResetFlags flags)
+{
+   struct ps5vk_cmd_buffer *const cmd_buffer =
+      container_of(vk_cmd_buffer, struct ps5vk_cmd_buffer, vk);
+   vk_command_buffer_reset(&cmd_buffer->vk);
+   if (flags & VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT) {
+      ps5vk_cmd_buffer_release_tables(cmd_buffer);
+      util_dynarray_fini(&cmd_buffer->words);
+      util_dynarray_init(&cmd_buffer->words, NULL);
+   }
+   ps5vk_cmd_buffer_clear_state(cmd_buffer);
+}
+
+static void
+ps5vk_cmd_buffer_destroy(struct vk_command_buffer *vk_cmd_buffer)
+{
+   struct ps5vk_cmd_buffer *const cmd_buffer =
+      container_of(vk_cmd_buffer, struct ps5vk_cmd_buffer, vk);
+   struct vk_command_pool *const pool = cmd_buffer->vk.pool;
+   ps5vk_cmd_buffer_release_tables(cmd_buffer);
+   util_dynarray_foreach (&cmd_buffer->copies, struct ps5vk_memory_copy, copy)
+      free(copy->owned_source);
+   util_dynarray_fini(&cmd_buffer->targets);
+   util_dynarray_fini(&cmd_buffer->copies);
+   util_dynarray_fini(&cmd_buffer->words);
+   vk_command_buffer_finish(&cmd_buffer->vk);
+   vk_free(&pool->alloc, cmd_buffer);
+}
+
+const struct vk_command_buffer_ops ps5vk_cmd_buffer_ops = {
+   .create = ps5vk_cmd_buffer_create,
+   .reset = ps5vk_cmd_buffer_reset,
+   .destroy = ps5vk_cmd_buffer_destroy,
+};
+
+void *
+ps5vk_cmd_buffer_table(struct ps5vk_cmd_buffer *cmd_buffer, size_t bytes, size_t alignment)
+{
+   assert(alignment != 0 && (alignment & (alignment - 1)) == 0);
+   bytes = ALIGN_POT(bytes, sizeof(uint64_t));
+   assert(bytes <= PS5VK_TABLE_CHUNK_BYTES);
+   for (;;) {
+      if (cmd_buffer->table_chunk != NULL) {
+         const struct ps5vk_direct_mapping *const chunk = &cmd_buffer->table_chunk->mapping;
+         /* A descriptor's address has to keep its low byte zero, and the
+          * chunk's first byte is aligned, so padding between tables is
+          * enough. */
+         const size_t offset = ALIGN_POT(cmd_buffer->table_bytes_used, alignment);
+         if (offset <= chunk->bytes && bytes <= chunk->bytes - offset) {
+            void *const table = (uint8_t *)chunk->address + offset;
+            cmd_buffer->table_bytes_used = offset + bytes;
+            return table;
+         }
+         cmd_buffer->table_chunk = cmd_buffer->table_chunk->next_in_buffer;
+         cmd_buffer->table_bytes_used = 0;
+         continue;
+      }
+
+      struct ps5vk_table_chunk *const node = malloc(sizeof(*node));
+      if (node == NULL) {
+         ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
+                                 "no memory to track register tables");
+         return NULL;
+      }
+      *node = (struct ps5vk_table_chunk){};
+      const int32_t result =
+         ps5vk_direct_mapping_create(&node->mapping, PS5VK_TABLE_CHUNK_BYTES,
+                                     PS5VK_DIRECT_PAGE_BYTES);
+      if (result != 0) {
+         free(node);
+         ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_DEVICE_MEMORY,
+                                 "register tables could not be mapped in the address window: "
+                                 "0x%08x", (unsigned)result);
+         return NULL;
+      }
+      /* Append to the command buffer's list: the next table goes in this
+       * chunk, and the chunks before it are full. */
+      node->next_in_buffer = NULL;
+      struct ps5vk_table_chunk **tail = &cmd_buffer->table_chunks;
+      while (*tail != NULL)
+         tail = &(*tail)->next_in_buffer;
+      *tail = node;
+      cmd_buffer->table_chunk = node;
+      /* The device's list is what the runner's capture reads. */
+      struct ps5vk_device *const device =
+         container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk);
+      node->next_in_device = device->table_chunks;
+      device->table_chunks = node;
+   }
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL
+ps5vk_BeginCommandBuffer(VkCommandBuffer commandBuffer, const VkCommandBufferBeginInfo *pBeginInfo)
+{
+   VK_FROM_HANDLE(ps5vk_cmd_buffer, cmd_buffer, commandBuffer);
+   /* Resets a command buffer that is not in the initial state first. */
+   vk_command_buffer_begin(&cmd_buffer->vk, pBeginInfo);
+   /* A secondary recorded to continue a render pass inherits the framebuffer's
+    * targets, because its draws run inside the primary's rendering and the
+    * primary executes it between the rendering's begin and end (Phase B8,
+    * ps5vk_cmd_buffer_inherit). The refusal a framebuffer this driver cannot
+    * render into records ends the recording, as any refusal does. */
+   if ((pBeginInfo->flags & VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT) != 0)
+      (void)ps5vk_cmd_buffer_inherit(cmd_buffer, pBeginInfo->pInheritanceInfo);
+   return VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL
+ps5vk_EndCommandBuffer(VkCommandBuffer commandBuffer)
+{
+   VK_FROM_HANDLE(ps5vk_cmd_buffer, cmd_buffer, commandBuffer);
+   return vk_command_buffer_end(&cmd_buffer->vk);
+}
+
+/* A synchronization split with no copy: everything the queue needs is where it
+ * falls in the words (ps5vk_queue.c, ps5vk_draw.c). */
+bool
+ps5vk_cmd_buffer_split(struct ps5vk_cmd_buffer *cmd_buffer)
+{
+   struct ps5vk_memory_copy *const split =
+      util_dynarray_grow(&cmd_buffer->copies, struct ps5vk_memory_copy, 1);
+   if (!split) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
+                              "no memory to record a submission split");
+      return false;
+   }
+   *split = (struct ps5vk_memory_copy){
+      .after_words = (uint32_t)util_dynarray_num_elements(&cmd_buffer->words, uint32_t),
+   };
+   return true;
+}
+
+/* A copy is a CPU memcpy here: memory is shared, and the queue performs it at
+ * a submission split point so it keeps Vulkan's command order. Recording it
+ * is therefore a record of the ranges and where they fall in the words
+ * (ps5vk_queue.c). */
+VKAPI_ATTR void VKAPI_CALL
+ps5vk_CmdCopyMemoryKHR(VkCommandBuffer commandBuffer, const VkCopyDeviceMemoryInfoKHR *pInfo)
+{
+   VK_FROM_HANDLE(ps5vk_cmd_buffer, cmd_buffer, commandBuffer);
+   if (vk_command_buffer_has_error(&cmd_buffer->vk))
+      return;
+   for (uint32_t r = 0; r < pInfo->regionCount; r++) {
+      const VkDeviceMemoryCopyKHR *const region = &pInfo->pRegions[r];
+      /* The common entry point copies one region as the same size on both
+       * sides; the smaller of the two ranges is what a copy may touch. */
+      const uint64_t bytes = MIN2(region->srcRange.size, region->dstRange.size);
+      /* An unbound buffer has no address, and a copy of no bytes copies
+       * nothing. */
+      if (region->srcRange.address == 0 || region->dstRange.address == 0 || bytes == 0)
+         continue;
+      struct ps5vk_memory_copy *const copy =
+         util_dynarray_grow(&cmd_buffer->copies, struct ps5vk_memory_copy, 1);
+      if (!copy) {
+         ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
+                                 "no memory to record a buffer copy");
+         return;
+      }
+      /* after_words is where the copy falls in this command buffer's own
+       * words, which is what the queue splits the submission at. */
+      *copy = (struct ps5vk_memory_copy){
+         .source = region->srcRange.address,
+         .destination = region->dstRange.address,
+         .bytes = bytes,
+         .after_words = (uint32_t)util_dynarray_num_elements(&cmd_buffer->words, uint32_t),
+      };
+   }
+}
+
+/* vkCmdExecuteCommands: the secondary's recorded words are copied into this
+ * command buffer's stream where the call is, which is what the queue submits --
+ * not jumped to through the INDIRECT_BUFFER packet B8 measured as faulting the
+ * GPU (docs/M5_PHASE_B.md). The secondary's CPU work moves with them, its
+ * records' offsets shifted by where its words landed, and the targets it renders
+ * into become this submission's, so the queue evicts their cache lines and waits
+ * for the swapchain buffers among them (ps5vk_queue.c). The secondary's table
+ * chunks stay alive: Vulkan requires a command buffer not to be reset or freed
+ * while its commands are pending, and this driver's words point into them. */
+VKAPI_ATTR void VKAPI_CALL
+ps5vk_CmdExecuteCommands(VkCommandBuffer commandBuffer, uint32_t commandBufferCount,
+                         const VkCommandBuffer *pCommandBuffers)
+{
+   VK_FROM_HANDLE(ps5vk_cmd_buffer, cmd_buffer, commandBuffer);
+   if (vk_command_buffer_has_error(&cmd_buffer->vk))
+      return;
+   if (cmd_buffer->vk.level != VK_COMMAND_BUFFER_LEVEL_PRIMARY) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                              "vkCmdExecuteCommands is recorded into a primary: a secondary that "
+                              "executes another would have to be copied twice");
+      return;
+   }
+   for (uint32_t i = 0; i < commandBufferCount; i++) {
+      VK_FROM_HANDLE(ps5vk_cmd_buffer, secondary, pCommandBuffers[i]);
+      if (secondary == NULL || secondary->vk.level != VK_COMMAND_BUFFER_LEVEL_SECONDARY) {
+         ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                                 "vkCmdExecuteCommands executes secondary command buffers");
+         return;
+      }
+      const uint32_t at = (uint32_t)util_dynarray_num_elements(&cmd_buffer->words, uint32_t);
+      const uint32_t words = (uint32_t)util_dynarray_num_elements(&secondary->words, uint32_t);
+      if (words != 0) {
+         uint32_t *const destination = util_dynarray_grow(&cmd_buffer->words, uint32_t, words);
+         if (destination == NULL) {
+            ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
+                                    "no memory to record an executed command buffer's words");
+            return;
+         }
+         memcpy(destination, util_dynarray_begin(&secondary->words),
+                (size_t)words * sizeof(uint32_t));
+      }
+      util_dynarray_foreach (&secondary->copies, struct ps5vk_memory_copy, copy)
+      {
+         struct ps5vk_memory_copy *const moved =
+            util_dynarray_grow(&cmd_buffer->copies, struct ps5vk_memory_copy, 1);
+         if (moved == NULL) {
+            ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
+                                    "no memory to record an executed command buffer's copies");
+            return;
+         }
+         *moved = *copy;
+         moved->after_words += at;
+         /* The snapshot stays the secondary's to free: the record is a copy of
+          * the pointers, and both command buffers read the same bytes. */
+         moved->owned_source = NULL;
+      }
+      util_dynarray_foreach (&secondary->targets, struct ps5vk_render_target, target)
+      {
+         bool known = false;
+         util_dynarray_foreach (&cmd_buffer->targets, struct ps5vk_render_target, existing)
+            known = known || existing->address == target->address;
+         if (known)
+            continue;
+         struct ps5vk_render_target *const added =
+            util_dynarray_grow(&cmd_buffer->targets, struct ps5vk_render_target, 1);
+         if (added == NULL) {
+            ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
+                                    "no memory to track an executed command buffer's targets");
+            return;
+         }
+         *added = *target;
+      }
+   }
+}
+
+/* vkCmdFillBuffer and vkCmdUpdateBuffer are CPU work at the same submission
+ * split point a copy uses: memory is shared, so the queue writes where the
+ * recording reaches it and Vulkan's command order holds (ps5vk_queue.c). The
+ * application's data is snapshotted here, because it may free it as soon as the
+ * call returns. */
+VKAPI_ATTR void VKAPI_CALL
+ps5vk_CmdFillBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer, VkDeviceSize dstOffset,
+                    VkDeviceSize size, uint32_t data)
+{
+   VK_FROM_HANDLE(ps5vk_cmd_buffer, cmd_buffer, commandBuffer);
+   VK_FROM_HANDLE(ps5vk_buffer, buffer, dstBuffer);
+   if (vk_command_buffer_has_error(&cmd_buffer->vk))
+      return;
+   /* Valid usage: the range is inside the buffer and four-byte aligned, and
+    * VK_WHOLE_SIZE fills the rest of the buffer. */
+   assert((dstOffset % 4) == 0 && dstOffset <= buffer->vk.size);
+   if (size == VK_WHOLE_SIZE)
+      size = buffer->vk.size - dstOffset;
+   assert((size % 4) == 0 && size <= buffer->vk.size - dstOffset);
+   /* A buffer that is not bound has no address, and filling no bytes fills
+    * nothing; valid usage forbids the first. */
+   if (buffer->vk.device_address == 0 || size == 0)
+      return;
+   struct ps5vk_memory_copy *const copy =
+      util_dynarray_grow(&cmd_buffer->copies, struct ps5vk_memory_copy, 1);
+   if (!copy) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
+                              "no memory to record a buffer fill");
+      return;
+   }
+   *copy = (struct ps5vk_memory_copy){
+      .destination = buffer->vk.device_address + dstOffset,
+      .bytes = size,
+      .fill = true,
+      .fill_value = data,
+      .after_words = (uint32_t)util_dynarray_num_elements(&cmd_buffer->words, uint32_t),
+   };
+}
+
+VKAPI_ATTR void VKAPI_CALL
+ps5vk_CmdUpdateBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer, VkDeviceSize dstOffset,
+                      VkDeviceSize dataSize, const void *pData)
+{
+   VK_FROM_HANDLE(ps5vk_cmd_buffer, cmd_buffer, commandBuffer);
+   VK_FROM_HANDLE(ps5vk_buffer, buffer, dstBuffer);
+   if (vk_command_buffer_has_error(&cmd_buffer->vk))
+      return;
+   /* Valid usage: at most 64 KiB, four-byte aligned, inside the buffer. */
+   assert((dstOffset % 4) == 0 && (dataSize % 4) == 0 && dataSize <= 65536 &&
+          dstOffset + dataSize <= buffer->vk.size);
+   if (buffer->vk.device_address == 0 || dataSize == 0)
+      return;
+   void *const snapshot = malloc((size_t)dataSize);
+   if (!snapshot) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
+                              "no memory to record a buffer update");
+      return;
+   }
+   memcpy(snapshot, pData, (size_t)dataSize);
+   struct ps5vk_memory_copy *const copy =
+      util_dynarray_grow(&cmd_buffer->copies, struct ps5vk_memory_copy, 1);
+   if (!copy) {
+      free(snapshot);
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
+                              "no memory to record a buffer update");
+      return;
+   }
+   *copy = (struct ps5vk_memory_copy){
+      .source = (uint64_t)(uintptr_t)snapshot,
+      .destination = buffer->vk.device_address + dstOffset,
+      .bytes = dataSize,
+      .owned_source = snapshot,
+      .after_words = (uint32_t)util_dynarray_num_elements(&cmd_buffer->words, uint32_t),
+   };
+}
+
+uint32_t
+ps5vk_debug_table_chunks(VkDevice _device, ps5vk_debug_stage *chunks, uint32_t capacity)
+{
+   VK_FROM_HANDLE(ps5vk_device, device, _device);
+   uint32_t count = 0;
+   for (const struct ps5vk_table_chunk *chunk = device ? device->table_chunks : NULL;
+        chunk != NULL; chunk = chunk->next_in_device)
+      count++;
+   if (chunks == NULL || capacity == 0)
+      return count;
+   uint32_t at = 0;
+   for (const struct ps5vk_table_chunk *chunk = device ? device->table_chunks : NULL;
+        chunk != NULL && at < capacity; chunk = chunk->next_in_device) {
+      chunks[at++] = (ps5vk_debug_stage){
+         .address = chunk->mapping.address,
+         .bytes = chunk->mapping.bytes,
+      };
+   }
+   return count;
+}

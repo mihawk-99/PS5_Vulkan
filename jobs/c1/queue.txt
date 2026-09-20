@@ -1,0 +1,19 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase C1 presentation probe.
+# Upload: copy this file under the name queue.txt, then
+#   python3 tools/ps5_console.py push-jobs --replace PPSA99988 <dir>/queue.txt
+#
+# Milestone 5 Phase C1 (docs/M5_REFERENCE.md): Vulkan renders into a
+# swapchain image in vkQueueSubmit and flips it later in vkQueuePresentKHR,
+# but every recorded frame had the wait packet, the draw and the flip in one
+# stream. c1-present draws four frames alternating framebuffers 0 and 1, each
+# as the wait packet, the draw and a completion marker, read back, then the
+# flip alone. m2-solid first shows the flip path the runner already uses.
+# Capture records every stream as golden files for the driver's C1 checks.
+#
+# Risk: a flip in a stream of its own is new to the console. If it does not
+# complete, the runner keeps its buffers and stops the queue; a fault could
+# freeze the console as B8's indirect buffer did.
+capture
+hold 60
+m2-solid
+c1-present

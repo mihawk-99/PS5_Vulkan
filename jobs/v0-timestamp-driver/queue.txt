@@ -1,0 +1,29 @@
+# PS5 Vulkan test runner job queue (PPSA99988): timestamps through the driver.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-timestamp-driver/queue.txt
+#
+# Phase V0-query (docs/M5_REFERENCE.md). V0-query's probe measured the console's
+# GPU clock at the AGC level (pid 143: a RELEASE_MEM with the BOTTOM_OF_PIPE_TS
+# event and an EOP selector naming the timestamp, about 100 MHz). This battery
+# asks the driver for it: the frame records vkCmdWriteTimestamp into query 0
+# before its draws and query 1 after them, and records
+# vkCmdCopyQueryPoolResults for the second write, so the readback has to advance
+# and the copy has to carry the same value with availability 1. The driver
+# creates the timestamp pool and records the packet
+# (driver/ps5vk_query.c); the PC arm is driver/tests/vk_v0_timestamp_test.c,
+# which sees no clock at all and checks the availability rule instead.
+#
+# The capture is what gives the golden its register defaults and the submission
+# tools/golden.py compare-run compares the PC's stream with, so m2-solid runs
+# after it for the same run's runner-driven sibling.
+#
+# Risk: low. One full-target frame of the B7 triangle with two extra packet
+# writes; a wrong packet leaves the readings at zero, which the log names.
+#
+# "exit" leaves the console when the batch is done, so the control payload
+# (payload/ps5vkctl) can load the next deploy without a hand on the console
+# (docs/DEPLOYMENT.md).
+capture
+hold 60
+v0-timestamp-driver
+m2-solid
+exit

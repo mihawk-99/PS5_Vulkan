@@ -1,0 +1,27 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase C5's depth controls.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/c5-depth/queue.txt
+#
+# Two runs have recorded the depth tables the M4 canary proved and read back no
+# depth at all, with the colour drawn only partly (Klog_Logs/c5-depth-run1.log,
+# c5-depth-run2.log; docs/M5_PHASE_C.md). This queue separates the two remaining
+# explanations with the same geometry, the same shaders and one thing changed:
+#   c5-depth-nodepth  NO depth attachment at all: if it draws the rectangles
+#                     correctly, this probe's geometry and pipeline are fine and
+#                     a failure with an attachment is the attachment's doing.
+#   c5-depth-nostate   the attachment bound, test and write off: the attachment
+#                     is present and untouched, so its colour must be what the
+#                     control above draws and its depth must stay zero.
+#   c5-depth          the criterion's own frame, unchanged, as the reference.
+#   m2-solid          the console still renders afterwards.
+#
+# Risk: low. c5-depth-nodepth records what the c4/b7 frames record (no depth
+# registers), and c5-depth-nostate only adds the attachment and its registers.
+capture
+hold 60
+c5-depth-notest
+c5-depth
+m2-solid
+# Phase C5's image clear: vkCmdClearDepthStencilImage, whose value decides the
+# frame's depth test (a broken clear leaves the stale 1.0 and both rectangles
+# pass). It runs after the depth frames so a fault costs them nothing.
+c5-depth-clear

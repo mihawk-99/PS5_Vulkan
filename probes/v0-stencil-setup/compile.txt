@@ -1,0 +1,5 @@
+# Compiler options of tools/build-probe-shaders.sh v0-stencil-setup, in opengnm-psbc CLI syntax.
+# The runner's compile mode compiles <stage>.spv with them and packages the result
+# with ps5-opengl's C writer (ESGS ring item size 1).
+vertex -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32b32_float:0:0:28:4 --vertex-attribute 1:r32g32b32a32_float:0:12:28:4
+pixel -g -s fragment --raw --address32-hi 2

@@ -1,0 +1,27 @@
+# PS5 Vulkan test runner job queue (PPSA99988): V0-formats' sampled formats.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-formats-sampled/queue.txt
+#
+# Phase V0-formats (docs/V0_FORMATS_AUDIT.md): the Required Format Support
+# tables. This queue is the sampled family: seventeen required formats -- the
+# 4-byte layout under its other Vulkan name, the sRGB and signed-normalised
+# forms of it, the 1- and 2-channel 8-bit families and the 16- and 32-bit float
+# and 16-bit unorm ones -- each sampled once through the C4 square, over a
+# texture whose every texel is one value chosen so the decode is exact, with the
+# linear filter. Every frame must hold the colour that value decodes to, within
+# one 8-bit level; the last six are V0-formats' packed families (R5G6B5, A1R5G5B5,
+# B4G4R4A4, E5B9G9R9, B10G11R11, A2B10G10R10), whose texels are not byte-aligned, and
+# v0-formats-sampled-uint samples the three unsigned 8-bit integer formats through a
+# usampler probe set (the byte the frame keeps is the integer the texel held).
+# one 8-bit level; the descriptor's format word is the register database's
+# GFX10_FORMAT_* value per format.
+#
+# Risk: low. Twenty-three full-target quad frames over 256x4 textures, no depth,
+# no clears; m2-solid after them shows the console still renders, and "exit" leaves
+# the console when the batch is done (docs/DEPLOYMENT.md).
+capture
+hold 60
+v0-formats-sampled
+v0-formats-sampled-uint
+v0-formats-sampled-sint
+m2-solid
+exit

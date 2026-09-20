@@ -1,0 +1,17 @@
+PS5 Vulkan c1-clear shader packages, built by tools/build-probe-shaders.sh c1-clear.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 197c7fedfe8a25d29b03f8a0835bd166592938276036a9f199fbc6781faa4cdf
+vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32b32a32_uint:0:0:16:4; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2 --descriptor-binding 0:0:uniform_buffer:1:0:16; writer --allow-unresolved
+vertex attributes: location 0 r32g32b32a32_uint offset 0, stride 16, binding 0
+pixel binding metadata: {"array_size": 1, "binding": 0, "offset": 0, "set": 0, "stride": 16, "type": 1}
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+1c005171c17c475e5be1bedf5c96db31540ec15576958d456c4e936c2cd4a4eb  shaders/c1/rect.vert
+227496e4bbf9f4770372afa4ad2e200016f1e871ba7bbda9c01fa6a1f974eb42  shaders/c1/clear_colour.frag
+cc8dfe89c2e0ab609630884339600f8085cf404885778b53cebdfa9b541197b1  build/shaders/c1-clear/vertex.spv
+eb565b3e56a80fb69b0db88f35def2b66dfdff82bf1751219213722b212b1294  build/shaders/c1-clear/pixel.spv
+f26c8b8cab7261121f103b96fc5d0e6683d63c8ecb253a8e2f7fa11e0b26fd2c  build/shaders/c1-clear/vertex.ngg.bin
+bc0de3f9d28ec999eb057a0a4c8785bd09f3e04ad63c27b6fd0f2d13a36de777  build/shaders/c1-clear/vertex.hw.json
+ac16ada42bcf66348ce13dd07bf2b49d077ffe617b3a46982a7ab73182fbe76b  build/shaders/c1-clear/pixel.raw.bin
+c198970b091feb4f8e734f205691240891e9114b9f0026b6a5df18f23859ae6c  build/shaders/c1-clear/pixel.hw.json

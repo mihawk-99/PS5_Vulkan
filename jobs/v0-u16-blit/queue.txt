@@ -1,0 +1,14 @@
+# PS5 Vulkan test runner job queue (PPSA99988): round 7's blit halves.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-u16-blit/queue.txt
+#
+# R16G16B16A16_UINT's row-layout half: c7-blit-formats converts it into RGBA8
+# (the resampler's decode, BLIT_SRC) and v0-blit-dst writes it (the encode,
+# BLIT_DST), with v0-formats reading the reported bits back against the audit.
+# The typed fetch runs in its own battery (jobs/v0-u16): compiling the unsigned
+# case's shader leaves the compiler where the next compile faults.
+hold 60
+c7-blit-formats
+v0-blit-dst
+v0-formats
+m2-solid
+exit

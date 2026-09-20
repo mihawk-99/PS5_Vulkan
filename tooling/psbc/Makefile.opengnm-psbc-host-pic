@@ -1,0 +1,48 @@
+# PS5 Vulkan driver - position-independent PC archive of the shader compiler.
+# Copyright (C) 2026 Mihawk-99
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Milestone 5 Phase B2 (docs/M5_PHASE_B.md). The PC Vulkan loader loads the
+# driver as a shared library, and Mesa's runtime links NIR, SPIR-V to NIR and
+# Mesa util out of the compiler archive. The SDK's host libpsbc.a is built as
+# position-dependent code (local-exec TLS in u_call_once.o, among others),
+# which a shared library cannot contain. This builds the same archive, with
+# the SDK's host configuration plus -fPIC, as libpsbc.pic.a with .pic.o objects
+# beside the PS5 build's .ps5.o objects in the work copy of the tree.
+#
+# Invoked by tools/build-driver.sh from the tree:
+#   make -C TREE -f Makefile.opengnm-psbc-host-pic CONFIG=.../opengnm-psbc-host.mak
+
+# Skips the tree's own archive and CLI rules, as the SDK's PS5 makefile does;
+# the tree reads it nowhere else.
+OPENGNM_PSBC_ORBIS := 1
+PSBC :=
+CLI_SRCS :=
+CLI_OBJS :=
+LIBPSBC := libpsbc.pic.a
+CONFIG ?= $(error CONFIG is not set)
+
+include Makefile
+
+CFLAGS += -fPIC
+CXXFLAGS += -fPIC
+
+# The tree's own object list, renamed.
+PIC_OBJS := $(patsubst %.cpp.o,%.pic.cpp.o,$(filter %.cpp.o,$(LIBPSBC_OBJS))) \
+	$(patsubst %.o,%.pic.o,$(filter-out %.cpp.o,$(LIBPSBC_OBJS)))
+
+%.pic.o: %.c | $(GENERATED)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+%.pic.cpp.o: %.cpp | $(GENERATED)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+libpsbc/psbc_compile.pic.o: libpsbc/psbc_compile.h
+
+libpsbc: $(LIBPSBC)
+
+$(LIBPSBC): $(PIC_OBJS)
+	rm -f $@
+	$(AR) rcs $@ $(PIC_OBJS)
+
+.DEFAULT_GOAL := libpsbc

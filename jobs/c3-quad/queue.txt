@@ -1,0 +1,25 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase C3's transformed quad.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/c3-quad/queue.txt
+#
+# Milestone 5 Phase C3 (docs/M5_REFERENCE.md): the step's console criterion names
+# "a transformed quad read back exactly across frames with changing uniforms".
+# The quad's geometry comes from a vertex buffer and its transform from a 16-byte
+# uniform buffer at set 0, binding 0, both supplied by the application through
+# the driver -- the first program in this project whose *vertex* stage reads a
+# descriptor as well as vertex attributes (probes/c3-quad). Two frames draw it
+# with scale 0.5 and offsets (-0.5,-0.5) then (+0.5,+0.5): under Vulkan's
+# viewport, whose y points down in framebuffer space, the quad fills the top-left
+# quadrant of the target and then the bottom-right one, so the readback proves
+# both that the uniform reached the vertex stage and where it put the geometry.
+#
+# Risk: low. The descriptor and vertex-table encoding is the one pids 121-123
+# already ran; what is new is a vertex stage whose user data carries both a
+# vertex-buffer table and a descriptor table, which the driver writes from the
+# compiler's metadata (four distinct dwords: table, base vertex, descriptor set,
+# NGG LDS). The readback names any wrong pixel exactly. If a submission does not
+# complete, the runner keeps the test's objects and stops the queue, and
+# m2-solid last shows the console still renders.
+capture
+hold 60
+c3-quad
+m2-solid

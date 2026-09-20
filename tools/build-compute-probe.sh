@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# ps5-native-app-boilerplate - Build the V0-compute dispatch probe payload.
+# Copyright (C) 2026 Mihawk-99
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Compiles shaders/c0/dispatch.comp to the SPIR-V the runner compiles at run
+# time, and writes it with a provenance receipt. Unlike the graphics probe sets
+# this one has no AGC package: a compute dispatch programs its own
+# COMPUTE_PGM_RSRC1/2 and user SGPRs, so the payload is the SPIR-V plus the
+# metadata the compiler reports when the runner compiles it.
+#
+# Usage: bash tools/build-compute-probe.sh
+
+set -euo pipefail
+
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+set_name=c0
+source_file="$root/shaders/$set_name/dispatch.comp"
+output="$root/probes/$set_name"
+work="$root/build/probes/$set_name"
+glslang=${GLSLANG:-glslang}
+
+[[ -f $source_file ]] || { echo "missing source: $source_file" >&2; exit 2; }
+command -v "$glslang" >/dev/null 2>&1 || command -v "$glslang" >/dev/null ||
+    { echo "missing glslang; install it or set GLSLANG" >&2; exit 2; }
+
+mkdir -p "$work" "$output"
+"$glslang" -V --target-env vulkan1.0 -S comp "$source_file" -o "$work/dispatch.spv" \
+    > "$work/glslang.log" 2>&1 || { cat "$work/glslang.log" >&2; exit 1; }
+
+cp "$work/dispatch.spv" "$output/dispatch.spv"
+spirv_words=$(python3 - "$output/dispatch.spv" <<'PY'
+import struct, sys
+data = open(sys.argv[1], "rb").read()
+if len(data) % 4 or data[:4] != b"\x03\x02\x23\x07":
+    raise SystemExit("not a SPIR-V module")
+print(len(data) // 4)
+PY
+)
+
+# The words a dispatch programs that the archive this repository's PC builds
+# link cannot report: ps5-opengl's own libpsbc has no field for them. They are
+# recorded beside the payload so the PC runner compiles the same shader and
+# programs the same registers (probes/c0/resources.txt). The recorder has to be
+# the patched compiler, which is the host copy tools/build-driver.sh builds.
+psbc_archive="$root/build/driver/host/libpsbc_driver.pic.a"
+psbc_include="$root/.deps/native/psbc/include"
+[[ -f $psbc_archive && -f $psbc_include/psbc_compile.h ]] ||
+    { echo "missing the patched host compiler; run tools/build-driver.sh first" >&2; exit 2; }
+gcc -std=c11 -O1 -Wall -Wextra -Werror -I "$psbc_include" \
+    -c "$root/tooling/psbc/compute-resources.c" -o "$work/compute-resources.o"
+g++ "$work/compute-resources.o" "$psbc_archive" -pthread -lm -o "$work/compute-resources"
+"$work/compute-resources" "$output/dispatch.spv" > "$work/resources.txt"
+{
+    echo "# PS5 Vulkan c0 compute dispatch probe: the words a compute dispatch"
+    echo "# programs, which ps5-opengl's own libpsbc cannot report. Written by"
+    echo "# tools/build-compute-probe.sh with the patched compiler"
+    echo "# (tooling/psbc/patch-compute-metadata.py), for the runner's PC builds."
+    cat "$work/resources.txt"
+} > "$output/resources.txt"
+
+{
+    echo "PS5 Vulkan c0 compute dispatch probe, built by tools/build-compute-probe.sh."
+    echo "source: shaders/$set_name/dispatch.comp"
+    echo "pipeline: GLSL -> SPIR-V (glslang, vulkan1.0), compiled on the console by libpsbc"
+    printf 'glslang: %s\n' "$("$glslang" --version | head -n 1)"
+    printf 'dispatch.spv: %s words, sha256 %s\n' "$spirv_words" \
+        "$(sha256sum "$output/dispatch.spv" | cut -d' ' -f1)"
+    printf 'resources.txt: sha256 %s\n' \
+        "$(sha256sum "$output/resources.txt" | cut -d' ' -f1)"
+} > "$output/PROVENANCE.txt"
+
+cat "$output/PROVENANCE.txt"

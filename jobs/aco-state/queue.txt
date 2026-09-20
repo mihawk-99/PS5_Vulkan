@@ -1,0 +1,16 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the recorded compile-order fault.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/aco-state/queue.txt
+#
+# Blocker round 8, the ACO state probe: the recorded SIGFPE in
+# aco::schedule_program followed the *unsigned texture* case's compile, and the
+# next case's compile in the same process faulted (Klog_Logs/v0-u16-run1.log,
+# v0-snorm-run1.log; docs/HARDWARE_FINDINGS.md). This queue is that shape,
+# bounded to three cases: the unsigned case, then two cases whose own compiles
+# follow it in the same process. A fault names the compile in flight; no fault
+# means the shape is gone and the caution that case carried can be re-read.
+hold 60
+v0-formats-sampled-uint
+m2-solid
+v0-formats
+m2-solid
+exit

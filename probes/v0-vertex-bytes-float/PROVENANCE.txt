@@ -1,0 +1,15 @@
+PS5 Vulkan v0-vertex-bytes-float shader packages, built by tools/build-probe-shaders.sh v0-vertex-bytes-float.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 197c7fedfe8a25d29b03f8a0835bd166592938276036a9f199fbc6781faa4cdf
+vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32b32a32_float:0:0:16:4; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2; writer --allow-unresolved
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+55ef043a67fd07d3cb007903af3eb6790e7d87b93b969459c220d34bc01687cc  shaders/v0/vertex_bytes_float.vert
+0c3d885ecb73d4a2d53e083b7ea8a8cbddd5635415795957123aa7d282474a5d  shaders/m3/vertex_colour.frag
+d8cfe73bcd00b4d42b2760e8bd9d1a62215f9b773cbdbf35c574a9c3d256afc8  build/shaders/v0-vertex-bytes-float/vertex.spv
+b57f4b8de678250582aa36b47cfb8e22e99eb47511ce911e6bca90f3d46fcfcd  build/shaders/v0-vertex-bytes-float/pixel.spv
+1aa49432796c4fb5963d28ff287b551c6f385e60005d63011257b335cbb8a7de  build/shaders/v0-vertex-bytes-float/vertex.ngg.bin
+8fb6c4a29a8bdbb7e2ea70e314f7bed5d85fec41e5ffc7806151256d3ac3335f  build/shaders/v0-vertex-bytes-float/vertex.hw.json
+585664b0b5c47f9d10aad61f184a59b9b7f4cf4484b79c538077c8d8d39eb99c  build/shaders/v0-vertex-bytes-float/pixel.raw.bin
+e247d16f0984054a1172f9212fe52eebaa89527a54d0f8aec047a16536ee4d4a  build/shaders/v0-vertex-bytes-float/pixel.hw.json

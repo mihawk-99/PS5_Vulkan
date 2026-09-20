@@ -1,0 +1,12 @@
+# PS5 Vulkan test runner job queue (PPSA99988): round 7, the eight-byte unsigned
+# row's typed fetch. Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-u16/queue.txt
+#
+# R16G16B16A16_UINT had no driver entry at all. This battery proves its fetch
+# (word 69, GFX10_FORMAT_16_16_16_16_UINT) through the unsigned sampled case and
+# ends there: compiling that case's shader leaves the compiler in a state where
+# the *next* case's compile faults (SIGFPE in aco::schedule_program, runs 1 and
+# 2 of this round), so the row's blit halves run in their own battery
+# (jobs/v0-blit-dst).
+hold 60
+v0-formats-sampled-uint
+exit

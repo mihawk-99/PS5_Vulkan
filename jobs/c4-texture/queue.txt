@@ -1,0 +1,25 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase C4's texture.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/c4-texture/queue.txt
+#
+# Milestone 5 Phase C4 (docs/M5_REFERENCE.md): the tutorial's texture chapter
+# through the driver. The m3-texture set's pixel shader samples a combined image
+# sampler at set 0, binding 0 over the indexed square, and the console's own
+# hardware run of that set is runner test m3-texture (golden/runner/m3-texture-1.json):
+# what this run adds is that the *driver* gets the texels there -- an image
+# uploaded from a staging buffer with vkCmdCopyBufferToImage, an image view, a
+# VkSampler, and the 48-byte descriptor the canary recorded.
+#
+# What the readback decides: nearest sampling must be exact texel for texel,
+# bilinear is accepted within the canary's recorded tolerance (2 levels), which
+# is the criterion C4 is judged by.
+#
+# Risk: moderate. The descriptor's every word is the canary's, and the driver's
+# buffer-to-image copy is the same split-point path pids 121-122 already ran for
+# buffer copies; what is new is a sampled (non-attachment) image's storage and
+# its view. A wrong texel is named exactly by the readback. If a submission does
+# not complete, the runner keeps the test's objects and stops the queue, and
+# m2-solid last shows the console still renders.
+capture
+hold 60
+c4-texture
+m2-solid

@@ -1,0 +1,25 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase C2 indexed draws.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/c2-indexed/queue.txt
+#
+# Milestone 5 Phase C2 (docs/M5_REFERENCE.md): the indexed square of the
+# m3-vertex canary, drawn through the Vulkan driver instead of raw AGC --
+# vkCmdBindVertexBuffers, vkCmdBindIndexBuffer and vkCmdDrawIndexed, whose
+# recorded encoding is INDEX_BASE (0x26), INDEX_BUFFER_SIZE (0x13) and
+# DRAW_INDEX_2 (0x27) after INDEX_TYPE (0x7a), host/agc/agc_host.cpp and
+# golden/runner/m3-vertex-1.json.
+#
+# What the run is for: the driver's own submission, captured, becomes the
+# golden the PC comparison needs. The runner's m3-vertex frame cannot serve:
+# it keeps its vertex and index data inside its 64 KiB stage workspace, while
+# the driver allocates buffers of its own, and a submission names those
+# addresses.
+#
+# Risk: moderate. Every packet this draws with has run on the console before
+# (m3-vertex, runner pid 107/113), but the driver has never encoded an indexed
+# draw. A wrong index address or count is a GPU fault; if a submission does not
+# complete, the runner keeps the program's objects and stops the queue, and
+# m2-solid last still shows whether the console renders after it.
+capture
+hold 60
+c2-indexed
+m2-solid

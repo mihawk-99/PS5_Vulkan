@@ -1,0 +1,32 @@
+# PS5 Vulkan test runner job queue (PPSA99988): three-component integer vertex
+# formats.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-vertex-int/queue.txt
+#
+# Phase V0-formats (docs/V0_FORMATS_AUDIT.md). Two of the 55 format rows miss
+# VERTEX_BUFFER alone -- R32G32B32_SINT and R32G32B32_UINT -- and they are the
+# last two the shader compiler can express: libpsbc has both in its vertex-format
+# enum, while the sixteen-bit unorm/snorm families it has no enum for. Every
+# other vertex format the driver reports was proved by a probe that drew with it;
+# these two had none, so the bit stays off until this battery.
+#
+# The geometry is the m3-vertex canary's square with its own colours, the
+# position an integer triple scaled by exactly 0.5, and its third component
+# carried out as the fragment's alpha. The readback therefore proves all three
+# components were fetched: red and the green and blue gradients as in the float
+# frames, and alpha rising from 0 to 255 across the square (the shader's z is 1
+# on the left vertices and 0 on the right ones). A format the hardware fetched
+# wrongly would move the square, flatten a gradient or leave the alpha at one
+# value, and the log names which.
+#
+# Risk: low. One indexed draw of four vertices each, into the offscreen target
+# the other C2 frames use. m2-solid last shows the console still renders.
+#
+# "exit" leaves the console when the batch is done, so the control payload
+# (payload/ps5vkctl) can load the next deploy without a hand on the console
+# (docs/DEPLOYMENT.md).
+capture
+hold 60
+v0-vertex-sint
+v0-vertex-uint
+m2-solid
+exit

@@ -1,0 +1,22 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase B8.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/b8/queue.txt
+#
+# Milestone 5 Phase B8 (docs/M5_PHASE_B.md): command streams in several
+# buffers. b4-headless first shows that the GPU draws the runner's headless
+# frame. b7-triangle repeats the Vulkan draw of B7. b8-groups draws two
+# triangles of two colours per frame through the Vulkan driver, in one command
+# buffer, two command buffers, two submit infos and two submissions, and reads
+# every frame back. b8-indirect draws the b4-headless frame from PM4 indirect
+# buffers, called once, called twice and chained; it comes last because the
+# GPU has never run such buffers from this title. m2-solid shows that the GPU
+# is still healthy and puts a frame on screen; nothing appears before it.
+#
+# Run pid 122 recorded this queue: b8-indirect faulted the GPU in its first
+# variant and the runner stopped before m2-solid. Do not queue b8-indirect
+# again (docs/M5_PHASE_B.md).
+hold 60
+b4-headless
+b7-triangle
+b8-groups
+b8-indirect
+m2-solid

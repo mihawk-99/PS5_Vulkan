@@ -1,0 +1,16 @@
+PS5 Vulkan c2-instance shader packages, built by tools/build-probe-shaders.sh c2-instance.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 197c7fedfe8a25d29b03f8a0835bd166592938276036a9f199fbc6781faa4cdf
+vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32_float:0:0:24:4 --vertex-attribute 1:r32g32b32a32_float:0:8:24:4; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2; writer --allow-unresolved
+vertex attributes: location 0 r32g32_float offset 0, location 1 r32g32b32a32_float offset 8, stride 24, binding 0
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+2671f95cbd7f3aeb9ee318e733e47702f4816a95c8bdb7129274075ce6d9694e  shaders/c2/instance.vert
+0c3d885ecb73d4a2d53e083b7ea8a8cbddd5635415795957123aa7d282474a5d  shaders/m3/vertex_colour.frag
+16426fbba2cc0110e10afaa8a58b6873b1f11bf82a0a2b7d13de9f05ccad7d51  build/shaders/c2-instance/vertex.spv
+b57f4b8de678250582aa36b47cfb8e22e99eb47511ce911e6bca90f3d46fcfcd  build/shaders/c2-instance/pixel.spv
+f07e1c629e9ff95d46a26c06c335d98ab8a7478fa842848f8dde52ed38d81790  build/shaders/c2-instance/vertex.ngg.bin
+ba2f5d51c01785a585b0758fde93d0a2af970a4a752b5e5c7a1b0db7caa6ca05  build/shaders/c2-instance/vertex.hw.json
+585664b0b5c47f9d10aad61f184a59b9b7f4cf4484b79c538077c8d8d39eb99c  build/shaders/c2-instance/pixel.raw.bin
+e247d16f0984054a1172f9212fe52eebaa89527a54d0f8aec047a16536ee4d4a  build/shaders/c2-instance/pixel.hw.json

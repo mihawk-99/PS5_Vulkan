@@ -1,0 +1,5 @@
+address32_hi 0
+vertex_user_sgpr_count 2
+vertex_base_vertex_dword 0
+vertex_ngg_lds_dword 1
+vertex_ngg_lds_layout 512

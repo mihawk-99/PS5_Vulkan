@@ -1,0 +1,16 @@
+PS5 Vulkan m3-vertex shader packages, built by tools/build-probe-shaders.sh m3-vertex.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 197c7fedfe8a25d29b03f8a0835bd166592938276036a9f199fbc6781faa4cdf
+vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32_float:0:0:24:4 --vertex-attribute 1:r32g32b32a32_float:0:8:24:4; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2; writer --allow-unresolved
+vertex attributes: location 0 r32g32_float offset 0, location 1 r32g32b32a32_float offset 8, stride 24, binding 0
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+5500908fc9d5aed6631e979107151c649fa312cd64d125db2fb539726cdf2074  shaders/m3/vertex_colour.vert
+0c3d885ecb73d4a2d53e083b7ea8a8cbddd5635415795957123aa7d282474a5d  shaders/m3/vertex_colour.frag
+be236871968b6913c2a48067e563f2a0941f44fbd8eae08d1bfaf12196058510  build/shaders/m3-vertex/vertex.spv
+b57f4b8de678250582aa36b47cfb8e22e99eb47511ce911e6bca90f3d46fcfcd  build/shaders/m3-vertex/pixel.spv
+4423a822375338eb6d4ccb7c5b19f893b4cdda4ee515753aa4c0c35a7348e7ee  build/shaders/m3-vertex/vertex.ngg.bin
+4526c61cd26f3f61884a14b70aae1b250114ef32c81e33f1bb1a63f5b7a87609  build/shaders/m3-vertex/vertex.hw.json
+585664b0b5c47f9d10aad61f184a59b9b7f4cf4484b79c538077c8d8d39eb99c  build/shaders/m3-vertex/pixel.raw.bin
+e247d16f0984054a1172f9212fe52eebaa89527a54d0f8aec047a16536ee4d4a  build/shaders/m3-vertex/pixel.hw.json

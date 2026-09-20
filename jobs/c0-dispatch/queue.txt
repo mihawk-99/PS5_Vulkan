@@ -1,0 +1,23 @@
+# PS5 Vulkan test runner job queue (PPSA99988): V0-compute dispatch probe.
+# Upload: copy this file under the name queue.txt, then
+#   python3 tools/ps5_console.py push-jobs --replace PPSA99988 <dir>/queue.txt
+#
+# Milestone 5 V0-compute (docs/M5_REFERENCE.md): nothing has run compute on AGC,
+# and the modelled helper surface has no dispatch entry. c0-dispatch compiles
+# probes/c0/dispatch.spv on the console with the patched compiler, lays the ISA,
+# the descriptor table and the storage buffer out in its own stage workspace,
+# dispatches one 1x1x1 workgroup through sceAgcDriverSubmitDcb, waits for the
+# completion marker and reads the word 0xa5a5a5a5 back. capture records the
+# stream, the helper calls and the workspace as a golden frame. m2-solid last
+# shows that the console still renders a frame after the dispatch.
+#
+# Risk: high, and the reason the test stays out of the default queues
+# (kFaultingTests). Every packet is new to this console: the direct SH register
+# writes, PM4 DISPATCH_DIRECT, the CS partial flush and the user-data descriptor
+# table. A wrong address, a descriptor the shader cannot read, or a wave size
+# that disagrees with COMPUTE_PGM_RSRC1 would fault the GPU the way B8's
+# indirect buffer did, and the title would have to be closed by hand.
+capture
+hold 60
+c0-dispatch
+m2-solid

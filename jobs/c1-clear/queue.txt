@@ -1,0 +1,25 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase C1b clear probe.
+# Upload: copy this file under the name queue.txt, then
+#   python3 tools/ps5_console.py push-jobs --replace PPSA99988 <dir>/queue.txt
+#
+# Milestone 5 Phase C1b (docs/M5_PHASE_C.md): colour clears go through Mesa's
+# vk_meta, which draws a rectangle from a vertex buffer with a dynamic
+# viewport and the clear colour in a uniform block, and an application draw
+# follows it with a different pipeline. c1-clear builds that frame by hand:
+# frame 0 clears on the GPU and draws the corner triangle over it in one
+# stream, frame 1 clears the other framebuffer on the CPU and draws the same
+# triangle, and both are read back exactly and flipped alone. m2-solid first
+# shows the flip path the runner already uses. Capture records every stream as
+# golden files for the driver's C1b checks.
+#
+# Risk: four behaviours here are new to the console. A viewport and scissor
+# larger than the target (vk_meta rounds 3840x2160 up to 4096x4096), a second
+# pipeline's linked shader state mid-stream, a non-indexed draw reading a
+# vertex buffer, and vertex user data written per draw. If the second draw
+# reads the first draw's user data as its base vertex it would fetch vertices
+# far outside the buffer, which is an unmapped page and a GPU fault: about a
+# two-second stall as B8's indirect buffer caused, or a freeze.
+capture
+hold 60
+m2-solid
+c1-clear

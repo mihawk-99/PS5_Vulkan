@@ -1,0 +1,15 @@
+PS5 Vulkan v0-stencil-setup shader packages, built by tools/build-probe-shaders.sh v0-stencil-setup.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 1669156833f467a2352538c3421a51c7f09df0b814d04898589673099e8fc3fc
+vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32b32_float:0:0:28:4 --vertex-attribute 1:r32g32b32a32_float:0:12:28:4; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2; writer --allow-unresolved
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+8fb6e32c3d11a8c558959d30a3b6db8a54a5dafce9334befbc9f0645b405ede7  shaders/m4/depth_colour.vert
+e3821f9f4bef9860b594a8ae5dbbd68a5f51071bf5b400b189bd4bacd2212135  shaders/v0/stencil_setup.frag
+020c1ba1e23ad81341c5950b379976887a3f71142536219f075d9dc71b0e3771  build/shaders/v0-stencil-setup/vertex.spv
+6bd6effb68e59d1e50c83785c913f08a0fcd71e8553e57e6388fd086432df20f  build/shaders/v0-stencil-setup/pixel.spv
+05130f4e7818f0d6a912dd279dac55b883f2f3c5260b21fed9e9a696989c6320  build/shaders/v0-stencil-setup/vertex.ngg.bin
+5ff050b6b182c94d6af7c2e0f887227c7086c9c9b618b44084d4128be88cb474  build/shaders/v0-stencil-setup/vertex.hw.json
+eabfd4a07aaa5baa620268f12cfae0a2fe0d6fef28dbcdef30ed683b4eb117d0  build/shaders/v0-stencil-setup/pixel.raw.bin
+be53718f33765947fd92db66161e79a167dee4e3a9d80fdfb1614c9be05162d7  build/shaders/v0-stencil-setup/pixel.hw.json

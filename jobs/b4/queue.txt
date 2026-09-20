@@ -1,0 +1,13 @@
+# PS5 Vulkan test runner job queue (PPSA99988): completion without a flip.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/b4/queue.txt
+#
+# Milestone 5 Phase B4 (docs/M5_REFERENCE.md). b4-marker is m2-solid with
+# its flip replaced by ps5-opengl's completion marker; b4-headless draws the
+# same triangle with no VideoOut at all. m2-solid runs last to show the flip
+# path still works after flip-free submissions. "capture" records the new
+# RELEASE_MEM packet for the PC models.
+capture
+hold 60
+b4-marker
+b4-headless
+m2-solid

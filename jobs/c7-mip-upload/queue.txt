@@ -1,0 +1,31 @@
+# PS5 Vulkan test runner job queue (PPSA99988): C7's tiled upload.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/c7-mip-upload/queue.txt
+#
+# Phase C7 (docs/M5_REFERENCE.md). The driver refused "a copy into an image
+# stored in 64 KiB tiles" by name: C7's tiled cases proved the chain's layout on
+# the console with the probe writing the tiles itself, and the hardware's own
+# rule for the level bases was measured by the address map (0x20000, 0x10000,
+# 0x8400, 0x4800, 0x800 in 0x60000 for a five-level 256x256 chain, checked
+# against the pinned AddrLib by tools/check-mip-layout.sh).
+#
+# This battery asks the driver to do it: the frame records one
+# vkCmdCopyBufferToImage a level out of the harness's mapped staging buffer, so
+# the driver places each level at the measured base and every texel at the place
+# the tiled map gives it (ps5vk_image_tiled_level_base, ps5vk_image_write_execute).
+# The frame then samples the chain through a view of all five levels with the
+# sampler's own LOD range, exactly as c7-mip-tiled does, so each band's colour
+# must be that level's grey: a level placed at the wrong base reads another
+# level's colour, and the log names which band.
+#
+# Risk: low. One 256x256 five-level image, five copies on the CPU at a submission
+# split, then six frames of the c7-mip shader. m2-solid last shows the console
+# still renders.
+#
+# "exit" leaves the console when the batch is done, so the control payload
+# (payload/ps5vkctl) can load the next deploy without a hand on the console
+# (docs/DEPLOYMENT.md).
+capture
+hold 60
+c7-mip-upload
+m2-solid
+exit

@@ -1,0 +1,93 @@
+/*
+ * PS5 Vulkan driver - descriptor set layouts.
+ * Copyright (C) 2026 Mihawk-99
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Milestone 5 Phase B6 (docs/M5_PHASE_B.md). A set's descriptors live in a
+ * GPU-visible table whose address the shaders read from user data. Bindings
+ * take consecutive table entries in binding order, each descriptor the size
+ * the shader compiler expects for its type: 16 bytes for a uniform buffer and
+ * 48 for a combined image sampler, the layouts the M3 probes compiled and the
+ * hardware ran (binding 0 at offset 0). Other types get stride 0, and
+ * pipelines refuse them until a probe proves their entries.
+ *
+ * Pipeline layouts and destruction are Mesa's common implementation.
+ */
+
+#include "ps5vk_private.h"
+
+#include <assert.h>
+
+#include "util/macros.h"
+
+static uint32_t
+ps5vk_descriptor_stride(VkDescriptorType type)
+{
+   switch (type) {
+   /* A dynamic uniform buffer is the same 16-byte descriptor: the offset the
+    * application passes to vkCmdBindDescriptorSets is added to the address the
+    * descriptor names when the draw writes it (ps5vk_draw.c, D1). */
+   case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+   case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+      return PS5VK_UNIFORM_BUFFER_DESCRIPTOR_BYTES;
+   case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+      return PS5VK_COMBINED_IMAGE_SAMPLER_DESCRIPTOR_BYTES;
+   /* A compute dispatch's operand (Phase D2): the same 16 bytes, whose entry
+    * the dispatch writes in the storage-buffer form (ps5vk_compute.c). */
+   case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+      return PS5VK_STORAGE_BUFFER_DESCRIPTOR_BYTES;
+   /* A texel buffer is a buffer descriptor with the view's format in it, and
+    * the compiler reads it as one 16-byte entry (docs/BLOCKERS.md). */
+   case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+   case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+      return PS5VK_TEXEL_BUFFER_DESCRIPTOR_BYTES;
+   /* A storage image is the image descriptor alone: the compiler reads its
+    * 32-byte entry where a combined image sampler's is 48 (docs/BLOCKERS.md). */
+   case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+      return PS5VK_STORAGE_IMAGE_DESCRIPTOR_BYTES;
+   default:
+      return 0;
+   }
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL
+ps5vk_CreateDescriptorSetLayout(VkDevice _device, const VkDescriptorSetLayoutCreateInfo *pCreateInfo,
+                                const VkAllocationCallbacks *pAllocator,
+                                VkDescriptorSetLayout *pSetLayout)
+{
+   VK_FROM_HANDLE(ps5vk_device, device, _device);
+   /* Mesa allocates reference-counted set layouts from the device. */
+   (void)pAllocator;
+
+   uint32_t binding_count = 0;
+   for (uint32_t i = 0; i < pCreateInfo->bindingCount; i++)
+      binding_count = MAX2(binding_count, pCreateInfo->pBindings[i].binding + 1);
+
+   struct ps5vk_descriptor_set_layout *const layout = vk_descriptor_set_layout_zalloc(
+      &device->vk, sizeof(*layout) + binding_count * sizeof(layout->bindings[0]), pCreateInfo);
+   if (!layout)
+      return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
+   layout->binding_count = binding_count;
+
+   for (uint32_t i = 0; i < pCreateInfo->bindingCount; i++) {
+      const VkDescriptorSetLayoutBinding *const source = &pCreateInfo->pBindings[i];
+      struct ps5vk_descriptor_binding *const binding = &layout->bindings[source->binding];
+      /* Valid usage: binding numbers are unique. */
+      assert(binding->count == 0);
+      binding->type = source->descriptorType;
+      binding->count = source->descriptorCount;
+      binding->stages = source->stageFlags;
+      binding->stride = ps5vk_descriptor_stride(source->descriptorType);
+   }
+
+   uint32_t offset = 0;
+   for (uint32_t index = 0; index < binding_count; index++) {
+      struct ps5vk_descriptor_binding *const binding = &layout->bindings[index];
+      binding->offset = offset;
+      offset += binding->count * binding->stride;
+   }
+   layout->table_bytes = offset;
+
+   *pSetLayout = ps5vk_descriptor_set_layout_to_handle(layout);
+   return VK_SUCCESS;
+}

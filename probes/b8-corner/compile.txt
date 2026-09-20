@@ -1,0 +1,5 @@
+# Compiler options of tools/build-probe-shaders.sh b8-corner, in opengnm-psbc CLI syntax.
+# The runner's compile mode compiles <stage>.spv with them and packages the result
+# with ps5-opengl's C writer (ESGS ring item size 1).
+vertex -g -s vertex --ngg
+pixel -g -s fragment --raw

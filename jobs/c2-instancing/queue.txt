@@ -1,0 +1,29 @@
+# PS5 Vulkan test runner job queue (PPSA99988): C2's instancing.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/c2-instancing/queue.txt
+#
+# Phase C2 (docs/M5_REFERENCE.md): vertex, staging and index buffers, base
+# vertex and instancing. The driver programs the instance count with the AGC
+# library's own packet (sceAgcDcbSetNumInstances) immediately before the draw
+# and puts it back to one after it -- the order ps5-opengl's runtime uses
+# (driver/ps5vk_draw.c, ps5vk_cmd_draw). Console run 17 asked for three
+# instances and drew one, because the count was programmed before the register
+# tables and the reset that followed the previous draw landed between it and the
+# draw itself (docs/M5_PHASE_C.md).
+#
+# The probe draws the m3-vertex square twice through probes/c2-instance, whose
+# vertex shader moves each instance sideways by 0.6 of NDC space and colours it
+# by gl_InstanceIndex: one instance must fill the left fifth of the target and
+# leave the middle and right fifths clear, and three must fill all three with
+# their own colours (src/diagnostics.cpp, run_vulkan_instance_frames).
+#
+# Risk: low. The frames are the M2 battery's own indexed square, one draw
+# parameter larger; m2-solid after them shows the console still renders, and
+# "exit" leaves the console when the batch is done (docs/DEPLOYMENT.md).
+# NOTE: c2-instancing runs FIRST: its image is freshly allocated, so a frame
+# that does not clear reads zeros outside its geometry -- and the vk_meta clear
+# is exactly what corrupts the draw after it (docs/M5_PHASE_C.md).
+capture
+hold 60
+c2-instancing
+m2-solid
+exit

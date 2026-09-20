@@ -1,0 +1,5 @@
+# Compiler options of tools/build-probe-shaders.sh c7-mip, in opengnm-psbc CLI syntax.
+# The runner's compile mode compiles <stage>.spv with them and packages the result
+# with ps5-opengl's C writer (ESGS ring item size 1).
+vertex -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32_float:0:0:16:4 --vertex-attribute 1:r32g32_float:0:8:16:4
+pixel -g -s fragment --raw --address32-hi 2 --descriptor-binding 0:0:combined_image_sampler:1:0:48

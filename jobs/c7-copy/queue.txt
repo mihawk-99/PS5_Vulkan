@@ -1,0 +1,30 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase C7's image copies.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/c7-copy/queue.txt
+#
+# Phase C7 (docs/M5_REFERENCE.md, docs/M5_PHASE_C.md): vkCmdCopyImage and
+# vkCmdBlitImage, which the driver records as CPU work at a submission split
+# point -- copies as one 16-byte run at a time where a tiled image is one side
+# (the longest run the measured XOR map keeps contiguous), and a blit whose
+# rectangles differ as a resample of the region, nearest or filtered.
+# Four frames over four programs and devices: the copy, the one-to-one blit, and
+# the same destination filled with the canary's middle half scaled 2x, nearest
+# and then filtered. c7-blit-formats then blits a solid texture of each of the
+# seventeen reported sampled formats into the same kind of tiled destination, so
+# every one of them earns BLIT_SRC with the colour its fetch decodes to read
+# back. v0-formats-sampled re-runs the sampling probe beside it: its textures now
+# carry distinct channels, so a byte order a format does not have shows up, and
+# its golden follows the run. Each frame is checked twice -- the destination's mapped
+# bytes against the map's addresses and the probe's own reference, and the
+# square's readback against what the transfer put there.
+#
+# Risk: low. Thirty-seven frames over small images, no depth, no clears; m2-solid after
+# them shows the console still renders, and "exit" leaves the console when the
+# batch is done (docs/DEPLOYMENT.md).
+capture
+hold 60
+c7-copy
+c7-blit-formats
+v0-formats
+v0-formats-sampled
+m2-solid
+exit

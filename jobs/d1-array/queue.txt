@@ -1,0 +1,32 @@
+# PS5 Vulkan test runner job queue (PPSA99988): D1's array layers.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/d1-array/queue.txt
+#
+# Phase D1 (docs/M5_REFERENCE.md). Texture arrays needed two things. Where layer
+# i of a tiled image lives: the oracle answered it -- a slice is a chain of its
+# own and the layers are consecutive (tools/check-mip-layout.sh and
+# tools/array-layout-check.py hold that reference row by row). Which descriptor
+# field makes a view read a layer: the register database names it --
+# SQ_IMG_RSRC_WORD4.DEPTH (the count minus one, bits 0-12) and BASE_ARRAY (bits
+# 16-28), with word 3's TYPE a 2D array (13) rather than a 2D (9)
+# (docs/HARDWARE_FINDINGS.md).
+#
+# This battery confirms the second half on the hardware, which is what makes the
+# first half usable: the case draws two bands through a sampler2DArray shader
+# over a two-layer 256x256 tiled image, each layer a solid colour the frame
+# uploads itself through the driver's per-layer copy (the driver places a
+# layer's texels at the slice the oracle measured). The bottom band reads layer 0
+# and the top band layer 1, so the readback must hold each layer's colour in one
+# band and the other's in the other; a descriptor that ignored DEPTH/BASE_ARRAY
+# would read one layer twice, and the log would show one colour in both bands.
+#
+# Risk: low. One 256x256 two-layer image, two uploads and one full-target frame.
+# m2-solid last shows the console still renders.
+#
+# "exit" leaves the console when the batch is done, so the control payload
+# (payload/ps5vkctl) can load the next deploy without a hand on the console
+# (docs/DEPLOYMENT.md).
+capture
+hold 60
+v0-array-layers
+m2-solid
+exit

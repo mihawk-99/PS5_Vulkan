@@ -1,0 +1,17 @@
+# PS5 Vulkan test runner job queue (PPSA99988): round 6, the missing fetch rows.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-snorm/queue.txt
+#
+# The rows docs/V0_FORMATS_AUDIT.md still lists as probe-reachable samplers: the
+# one- and two-channel SNORM forms (new driver entries, descriptor words 2 and
+# 15 from the register database) and the two rows the table never claimed
+# (B8G8R8A8_UNORM, whose sampler word is 8_8_8_8_UNORM with the ZYXW selectors,
+# and A8B8G8R8_UINT_PACK32, 8_8_8_8_UINT with RGBA). v0-formats-sampled draws
+# a bilinear frame a format from the whole table, c7-blit-formats blits each
+# into a tiled R8G8B8A8_UNORM destination, and v0-formats reads the reported
+# bits back against the audit's own record.
+hold 60
+v0-formats-sampled
+c7-blit-formats
+v0-formats
+m2-solid
+exit

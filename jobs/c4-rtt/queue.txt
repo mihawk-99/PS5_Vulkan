@@ -1,0 +1,29 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase C4's render to texture.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/c4-rtt/queue.txt
+#
+# Milestone 5 Phase C4 (docs/M5_REFERENCE.md): the step's console criterion ends
+# "and render to texture exact", which the M4 canary proved on the hardware and
+# nothing has driven through the driver yet. The frame renders the canary's
+# texel pattern into an image and, in the SAME command buffer, draws a square
+# whose pixel shader samples that image; the readback is the texels it drew.
+#
+# That same-command-buffer case is what the colour barrier and the submission
+# split exist for: the queue writes RELEASE_MEM event 45 once at the end of a
+# submission, which orders a render in an earlier submission but not one earlier
+# in the same command buffer, so the draw that samples carries the packet itself
+# AND splits the submission where it starts, so the queue waits for the step's
+# completion marker -- which the step's own colour flush precedes -- before
+# running it (commit 37bb5ad and this step's fix, HARDWARE_FINDINGS.md). The
+# packet alone was not enough: runs pid 143-145 read the image's most recently
+# written rows as zero, 40661, 38325 and 36006 of the frame's 2073600 pixels.
+#
+# Risk: low now. The descriptor, the sampler, the copy and the barrier are the
+# ones pids 126-145 proved; what the split adds is the wait the queue already
+# gives its CPU copies. The probe also reads the image the fill pass rendered
+# back through the tiled layout, so a failure names the half that failed. If a
+# submission does not complete, the runner keeps the test's objects and stops
+# the queue, and m2-solid last shows the console still renders.
+capture
+hold 60
+c4-rtt
+m2-solid

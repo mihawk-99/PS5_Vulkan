@@ -1,0 +1,16 @@
+PS5 Vulkan v0-image-atomic shader packages, built by tools/build-probe-shaders.sh v0-image-atomic.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 1669156833f467a2352538c3421a51c7f09df0b814d04898589673099e8fc3fc
+pixel compiler (tools/build-psbc-cli.sh) sha256: 3a8d7a3681898cf8374f961a138a6bb7ad0bfe51dd9aacd6dc2cb825c436d849
+vertex: -g -s vertex --ngg --address32-hi 2; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2 --descriptor-binding 0:0:storage_image:1:0:32; writer --allow-unresolved
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+3fb53b25664f05eb8068f8e6e418915889b1f8c56bc88c6de600d26f2eb9131f  shaders/m2/fullscreen.vert
+612b5ace2d5827c8cf5f0d6ac49f411afac2b2b0522f286fb059e51bb01dd83a  shaders/v0/image_atomic_uint.frag
+ebc5c12b4c55b322bc1a61165e108bd3feb7b09d72f4d9a22b6f9d2a9c3143c9  build/shaders/v0-image-atomic/vertex.spv
+eac18b5a3cfdfba3d3d7a048b9e2d4a7a57eb239445ab9d21f4acc95b524bcdc  build/shaders/v0-image-atomic/pixel.spv
+229cfec58ba3b610e6e46f57865637408ccc075b5815e31e543240452b39e3f9  build/shaders/v0-image-atomic/vertex.ngg.bin
+3eb7eb67a69613a55aabe7781667eac5a519bb16afb7f34ed8bcffb59a011f08  build/shaders/v0-image-atomic/vertex.hw.json
+88a242af14ff48262ada1e059b85068e99de4815f23a16ad7c2c4b3b0154070f  build/shaders/v0-image-atomic/pixel.raw.bin
+7b1c74c2e6eafec9a9ea9a6aa2dc3231822acbdd274c26a0e80de9e0b022b47c  build/shaders/v0-image-atomic/pixel.hw.json

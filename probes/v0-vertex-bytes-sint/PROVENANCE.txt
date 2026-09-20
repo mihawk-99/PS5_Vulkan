@@ -1,0 +1,15 @@
+PS5 Vulkan v0-vertex-bytes-sint shader packages, built by tools/build-probe-shaders.sh v0-vertex-bytes-sint.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 197c7fedfe8a25d29b03f8a0835bd166592938276036a9f199fbc6781faa4cdf
+vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32b32a32_sint:0:0:16:4; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2; writer --allow-unresolved
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+25f629bc437d5bc6fdfcb9d839dacc66160c45d7eca8ed10ed9e375cf180e5ee  shaders/v0/vertex_bytes_sint.vert
+0c3d885ecb73d4a2d53e083b7ea8a8cbddd5635415795957123aa7d282474a5d  shaders/m3/vertex_colour.frag
+d5d274dd93b5a836d138082db0df1283bf2c2416ebf2f0e09c103fdcd4b23fe8  build/shaders/v0-vertex-bytes-sint/vertex.spv
+b57f4b8de678250582aa36b47cfb8e22e99eb47511ce911e6bca90f3d46fcfcd  build/shaders/v0-vertex-bytes-sint/pixel.spv
+947ad583678ff04c4c7a7ce87573f4952e9e995d3cc6f00f4549ac6a5e72b044  build/shaders/v0-vertex-bytes-sint/vertex.ngg.bin
+6401bdff0d0859517725c94bdd4828f546f2fc6959ed151cccc065cb990886f9  build/shaders/v0-vertex-bytes-sint/vertex.hw.json
+585664b0b5c47f9d10aad61f184a59b9b7f4cf4484b79c538077c8d8d39eb99c  build/shaders/v0-vertex-bytes-sint/pixel.raw.bin
+e247d16f0984054a1172f9212fe52eebaa89527a54d0f8aec047a16536ee4d4a  build/shaders/v0-vertex-bytes-sint/pixel.hw.json

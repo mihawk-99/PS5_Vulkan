@@ -1,0 +1,15 @@
+PS5 Vulkan b8-corner shader packages, built by tools/build-probe-shaders.sh b8-corner.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 197c7fedfe8a25d29b03f8a0835bd166592938276036a9f199fbc6781faa4cdf
+vertex: -g -s vertex --ngg; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw; writer --allow-unresolved
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+43b6bb51d839e17953ad02966fe478a509bc11ffaf7b1875a5c028395651e033  shaders/b7/corner.vert
+b2549dee1069e366c76c5d706a206cb10541df4616cc9568aa95e2941da009e5  shaders/b8/second.frag
+28707aa35f4dc45760481eb6b27e7611dcb8ecdaa31553cd65e1788ab8e67680  build/shaders/b8-corner/vertex.spv
+b83135092254a21d913a71e4825b10ba24dc30fe1b279f05a463c0ffbc310c1f  build/shaders/b8-corner/pixel.spv
+5ce005b53519de9e199d6ce6f4d5fbc10706a9268f4968a9d6bed9aa63590de7  build/shaders/b8-corner/vertex.ngg.bin
+b9fe5ef67824fc8db13d17aebe175c5cf86b2312ab6292b5d284717919519a88  build/shaders/b8-corner/vertex.hw.json
+44faba87aff240281bfd35a8d5adf7f8d644dcc3d9852a0c1461164c937937ee  build/shaders/b8-corner/pixel.raw.bin
+b552a7e1c52625f18efc43ea4c9e9a6112c493ffc2ad31600458a8793e7601e0  build/shaders/b8-corner/pixel.hw.json

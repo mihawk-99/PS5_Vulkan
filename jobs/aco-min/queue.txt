@@ -1,0 +1,19 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the ACO fault's minimal shape.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/aco-min/queue.txt
+#
+# Blocker round 15, the reduction half of the ACO item: the recorded fault
+# followed the *unsigned texture* case's compile with another case queued. This
+# queue asks whether repetition of that one case alone is enough -- four runs of
+# it compile its shader sets four times in one process -- and whether the fault
+# needs a following case at all (m2-solid and v0-formats compile after it).
+# Fault-capable: bounded to four cases plus the regression, with the runner's
+# own cleanup, and read from the klog afterwards.
+hold 60
+v0-formats-sampled-uint
+v0-formats-sampled-uint
+v0-formats-sampled-uint
+v0-formats-sampled-uint
+m2-solid
+v0-formats
+m2-solid
+exit

@@ -1,0 +1,25 @@
+# PS5 Vulkan test runner job queue (PPSA99988): Phase C8's four-sample depth
+# clear.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/c8-depth4x/queue.txt
+#
+# Phase C8 and the format audit (docs/M5_REFERENCE.md). The console measured the
+# four-sample depth target's storage: four words a texel, one a sample, over an
+# allocation that is the image and nothing else, and the same 64x64-texel tiles
+# the colour side has (unknowns-depth4x-map: the hardware's own clear wrote
+# 33,177,600 words, four a texel; unknowns-depth4x-rects read the map's masks
+# back). vkCmdClearDepthStencilImage on such an image is therefore one fill of
+# that storage, which is what the driver records, and this case is its console
+# proof: every word of the 128 MiB target holds the clear value, four a texel.
+# A clear that wrote one sample in four, or walked the one-sample map's
+# four-byte texels, leaves three quarters of the target at other values.
+#
+# Risk: low. One 4K four-sample depth target, one clear command, no draws that
+# write depth and no resolve. m2-solid last shows the console still renders.
+#
+# "exit" leaves the console when the batch is done, so the control payload
+# (payload/ps5vkctl) can load the next deploy without a hand on the console
+# (docs/DEPLOYMENT.md).
+hold 60
+c8-depth-clear
+m2-solid
+exit
