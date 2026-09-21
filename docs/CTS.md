@@ -149,6 +149,18 @@ implementation below pins, so its results and ours are comparable. Later rises
 pin the tag that matches the version they claim, at the point they are
 scheduled.
 
+The checkout is `tools/fetch-vk-gl-cts.sh`: it clones the tag shallow into
+`.deps/work/vk-gl-cts` (moved by `PS5VK_CTS_DIR`), refuses a checkout that is not
+the pinned commit, and writes `conformance_inventory/cts_pin.json`. That record
+carries two kinds of pin, which are not the same thing -- the CTS revision, which
+the script verifies from the checkout, and the revisions the CTS's own
+`external/fetch_sources.py` **declares** for glslang, SPIRV-Tools, SPIRV-Headers,
+amber, jsoncpp, Vulkan-Docs and the NVIDIA video samples. Declared is not
+compiled: the reference project's manifest records different commits for four of
+those than the script declares. The record gains the compiled revisions when the
+payload build can report them, and `make lint` checks it against this file's pin
+so the two cannot drift.
+
 ## Why this is not a small task
 
 The CTS is not a program to run. It is a framework that has to be built for the

@@ -1,0 +1,50 @@
+{
+  "cts": {
+    "commit": "a0270c1897597e6c77679870e10415398a13001c",
+    "repo": "https://github.com/KhronosGroup/VK-GL-CTS.git",
+    "tag": "vulkan-cts-1.3.8.4",
+    "verified_head": "a0270c1897597e6c77679870e10415398a13001c"
+  },
+  "external_declared": {
+    "files": {
+      "renderdoc": [
+        {
+          "file": "renderdoc_app.h",
+          "sha256": "e7b5f0aa5b1b0eadc63a1c624c0ca7f5af133aa857d6a4271b0ef3d0bdb6868e",
+          "url": "https://raw.githubusercontent.com/baldurk/renderdoc/v1.1/renderdoc/api/app/renderdoc_app.h"
+        }
+      ]
+    },
+    "git": {
+      "amber": {
+        "revision": "8e90b2d2f532bcd4a80069e3f37a9698209a21bc",
+        "url": "https://github.com/google/amber.git"
+      },
+      "glslang": {
+        "revision": "bada5c87ec6db4441db129d8506742c4a72bd610",
+        "url": "https://github.com/KhronosGroup/glslang.git"
+      },
+      "jsoncpp": {
+        "revision": "9059f5cad030ba11d37818847443a53918c327b1",
+        "url": "https://github.com/open-source-parsers/jsoncpp.git"
+      },
+      "nvidia-video-samples": {
+        "revision": "6821adf11eb4f84a2168264b954c170d03237699",
+        "url": "https://github.com/Igalia/vk_video_samples.git"
+      },
+      "spirv-headers": {
+        "revision": "d3c2a6fa95ad463ca8044d7fc45557db381a6a64",
+        "url": "https://github.com/KhronosGroup/SPIRV-Headers.git"
+      },
+      "spirv-tools": {
+        "revision": "f9184c6501f7e349e0664d281ac93b1db9c1e5ad",
+        "url": "https://github.com/KhronosGroup/SPIRV-Tools.git"
+      },
+      "vulkan-docs": {
+        "revision": "d99193d3fcc4b2a0dacc0a9d7e4951ea611a3e96",
+        "url": "https://github.com/KhronosGroup/Vulkan-Docs.git"
+      }
+    }
+  },
+  "note": "Phase E1 pin (docs/CTS.md). The CTS revision is verified from the checkout; the external revisions are what the CTS's external/fetch_sources.py declares, not necessarily what a build compiles."
+}

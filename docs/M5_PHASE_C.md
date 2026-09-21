@@ -6812,3 +6812,30 @@ inventory is for:
    to agree; CTS reads both.
 
 Both are findings, not fixes: each gets its own round, with the regression test first.
+
+## 2026-09-21 — the CTS pin is a fetch, and its record separates declared from compiled
+
+Phase E1's third piece makes the pinned CTS reproducible instead of a one-off clone.
+`tools/fetch-vk-gl-cts.sh` clones tag `vulkan-cts-1.3.8.4` shallow into
+`.deps/work/vk-gl-cts` (1.7 GB, `.deps/` is ignored, so the CTS is fetched and not
+distributed by this repository), refuses a checkout whose `HEAD` is not
+`a0270c1897597e6c77679870e10415398a13001c` -- verified on this host, it is -- and writes
+`conformance_inventory/cts_pin.json`.
+
+That record keeps apart two kinds of pin that are easy to conflate:
+
+| | |
+| --- | --- |
+| the CTS revision | verified from the checkout: tag, commit, and the `HEAD` that was actually read |
+| the external revisions | what the CTS's own `external/fetch_sources.py` **declares**: 7 git repositories (SPIRV-Tools `f9184c65…`, glslang `bada5c87…`, SPIRV-Headers `d3c2a6fa…`, Vulkan-Docs `d99193d3…`, amber `8e90b2d2…`, jsoncpp `9059f5ca…`, vk_video_samples `6821adf1…`) and one file with its sha256 (renderdoc's `renderdoc_app.h`) |
+
+Declared is not compiled, and the reference project's manifest is the evidence: it records
+`1b65bd60…` for glslang, `ce37fd67…` for SPIRV-Tools, `e7294a8e…` for SPIRV-Headers and
+`8e90b2d2…` for amber, where the pinned tag's own script declares different revisions for
+the first three. A build's manifest therefore has to record what was really compiled, which
+this record does not claim to know yet -- it says so in its own note and gains those
+revisions when the payload build can report them.
+
+`tools/fetch-vk-gl-cts.sh --check` verifies the record against `docs/CTS.md`'s pin without
+needing the checkout or the network, and `make lint` runs it, so the pin cannot drift
+between the two files.

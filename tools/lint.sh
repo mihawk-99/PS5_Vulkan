@@ -50,6 +50,9 @@ while IFS= read -r script; do
     bash -n "$script"
 done < <(find tools -maxdepth 1 -type f -name '*.sh' -print)
 bash tools/validate-assets.sh
+# The committed CTS pin record has to agree with the pin in docs/CTS.md; the
+# check needs neither the checkout nor the network (tools/fetch-vk-gl-cts.sh).
+bash tools/fetch-vk-gl-cts.sh --check
 
 python3 - <<'PY'
 from pathlib import Path
