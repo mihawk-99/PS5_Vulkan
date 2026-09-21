@@ -75,10 +75,10 @@ enum, depth/stencil, sRGB or console-fault families.
 | R7 Round 1, the compiler (host, then the console) | One layout per set: `psbc_multiset` 9 of 9 checks direct ("set 0 at user-data dword 2, set 1 at 3, 4 user SGPRs"), loader and PS5 link PASS; every probe package byte-identical to its pre-patch build except `probes/v0-push`, which the rebuild *corrected* (its package predated the R9 fix); `tools/check-driver.sh` 288 comparisons identical, none `DIFFERENT`, 47 tests PASS; `build/gates.sh` 11 of 11 -- the new `check-probe-packages.sh` rebuilds all 41 buildable probe sets byte-identically and asserts its own coverage; the console regression 9 of 9 PASS (pid 114, digest `9adf1241…`, `Klog_Logs/r7-round1.log`), only the named clamp refusal in the FAIL records |
 | the second batch, one sweep (pid 380) | Ten of ten tests PASS on title digest `c9c57b40…`: R8's `v0-dynamic-depth-bias`, R7's `v0-two-sets`, R5's `v0-resolve-usage`, R1's `v0-depth-bias`, R6's `v0-two-passes`, R2's `v0-sampler-address`, R3's `v0-stencil-clear`, `v0-cull`, `c8-resolve` and `m2-solid`, with all three refusal sentences in the klog (`Klog_Logs/r-coverage.log`). `v0-push-constant` (R9) is red on purpose and is not in that sweep |
 | R7's two-set layout (pid 378) | The pipeline was created and its draw refused: "descriptor set 1 is beyond the 1 this driver binds; sets past 0 are D1" (`Klog_Logs/r7-two-sets.log`, digest `084a7c84…`) |
-| the R round on the rebuilt runtime (pid 331, digest `b33b813c…`) | Nine of nine tests PASS, 1509 PASS records, **no `signal:`** (`Klog_Logs/r-verify-runtime.log`) |
-| the six requests' probes | R6's guard proved the overflow on the console before the fix and is silent after; R1's four frames read back 132 / 65 / 67 / 0 drawn pixels (no cull, back, front, discard); R2's probe samples a four-group texture across u 0 -> 4 and reads each group back; R3's stencil plane reads 65536 zero bytes at both clear depths (`Klog_Logs/r2-final.log`, `r1-cull-run4.log`, `r3-stencil-clear-{before,after}.log`) |
+| the R round on the rebuilt runtime (pid 331, digest `b33b813c…`) | Nine of nine tests PASS, 1509 PASS records, no `signal:` |
+| the six requests' probes | R6's guard, R1's four cull frames (132/65/67/0 drawn pixels), R2's four-group sampling, R3's 65536-byte stencil plane |
 | the linked runtime | rebuilt: the Sep 16 archive predated the fork (stamp tree `a92a1228…`, script `cf4765ca…`); the rebuild changes the stubs and moves the title digest. All 60 objects differ, three of them by source |
-| the goldens and the replay model | `tools/check-driver.sh` PASS again on the rebuilt build: 288 run comparisons identical, no `DIFFERENT` record, no fault (`build/check-driver-final.log`); the first clean run closed 148 failing comparisons and 8 host-test segfaults. `tools/check-runner-cases.sh` PASS (7 cases, 204 PASS records) |
+| the goldens and the replay model | `check-driver.sh` PASS: 288 comparisons identical, no `DIFFERENT`, no fault; `check-runner-cases.sh` PASS |
 | the host gates | `make lint` (199 files), `make test` (30 tests), the three audits (`--check`, counts unchanged), `check-sdk-fork-migration.sh`, `check-mip-layout.sh`, `check-psbc-link.sh`, `check-probe-packages.sh` (43 committed sets, 41 rebuilt byte-identically, 2 named as not rebuildable), `check-vulkan-runtime.sh`, `check-runner-cases.sh`, `check-driver.sh` |
 
 **Phase E1 is open: the capability set is an artefact** (2026-09-21). The runner's
@@ -98,6 +98,15 @@ external tree, its revision verified and its `conformance_inventory/cts_pin.json
 separating the revision, the externals the CTS only *declares*, and the ones actually
 checked out (all seven equal the declared pins) -- with `make lint` holding the record to
 the pin in `docs/CTS.md`.
+
+**The CTS runs against this driver** (2026-09-21). `tools/run-cts-host.sh` builds the
+pinned `deqp-vk` (vulkan_headless, 1,841,090 cases) and runs a group against the host ICD
+through the loader: `dEQP-VK.info.*` is 16 pass / **0 fail**, `dEQP-VK.api.info.*` is 2539
+pass / **5 fail** / 1342 not supported, and all five failures are reporting -- two missing
+`STORAGE_TEXEL_BUFFER_ATOMIC_BIT` claims, a missing `COLOR_ATTACHMENT_BIT` for R32_SFLOAT,
+an illegal compressed-format feature combination, and `VK_KHR_surface`'s version word
+(`conformance_inventory/cts_host_baseline.json`). Each is its own round, regression test
+first; the console payload is still to come.
 
 **An upstream AGC source was checked against this driver** (2026-09-21). The
 static-recompilation project's published tile-equation table agrees, texel for texel, with

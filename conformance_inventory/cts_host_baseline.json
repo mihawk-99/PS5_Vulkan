@@ -1,0 +1,89 @@
+{
+  "cts": {
+    "commit": "a0270c1897597e6c77679870e10415398a13001c",
+    "tag": "vulkan-cts-1.3.8.4",
+    "target": "vulkan_headless"
+  },
+  "driver": {
+    "build": "host ICD (build/driver/host/libvulkan_ps5vk.so)"
+  },
+  "note": "Phase E1's first CTS runs, against the host build of this driver through the Khronos loader at the pinned tag vulkan-cts-1.3.8.4 (a0270c18). The driver here is the host model, so these are the groups that read what the device reports and how it handles the API; the console payload is still to come. Reproduce with tools/run-cts-host.sh '<group>'.",
+  "runs": {
+    "dEQP-VK.api.info.*": {
+      "failures": [
+        {
+          "case": "dEQP-VK.api.info.format_properties.r32_uint",
+          "reason": "bufferFeatures: required: VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT|VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT|VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_ATOMIC_BIT|VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT  missing: VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_ATOMIC_BIT",
+          "status": "Fail"
+        },
+        {
+          "case": "dEQP-VK.api.info.format_properties.r32_sint",
+          "reason": "bufferFeatures: required: VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT|VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT|VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_ATOMIC_BIT|VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT  missing: VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_ATOMIC_BIT",
+          "status": "Fail"
+        },
+        {
+          "case": "dEQP-VK.api.info.format_properties.r32_sfloat",
+          "reason": "optimalTilingFeatures: required: VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT|VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT|VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT|VK_FORMAT_FEATURE_BLIT_SRC_BIT|VK_FORMAT_FEATURE_BLIT_DST_BIT|VK_FORMAT_FEATURE_TRANSFER_SRC_BIT|VK_FORMAT_FEATURE_TRANSFER_DST_BIT  missing: VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT",
+          "status": "Fail"
+        },
+        {
+          "case": "dEQP-VK.api.info.format_properties.compressed_formats",
+          "reason": "Compressed format support not valid",
+          "status": "Fail"
+        },
+        {
+          "case": "dEQP-VK.api.info.extension_core_versions.extension_core_versions",
+          "reason": "Required core version for VK_KHR_surface not met (1.0)",
+          "status": "Fail"
+        }
+      ],
+      "totals": {
+        "failed": {
+          "count": 5,
+          "total": 3886
+        },
+        "not_supported": {
+          "count": 1342,
+          "total": 3886
+        },
+        "passed": {
+          "count": 2539,
+          "total": 3886
+        },
+        "waived": {
+          "count": 0,
+          "total": 3886
+        },
+        "warnings": {
+          "count": 0,
+          "total": 3886
+        }
+      }
+    },
+    "dEQP-VK.info.*": {
+      "failures": [],
+      "totals": {
+        "failed": {
+          "count": 0,
+          "total": 19
+        },
+        "not_supported": {
+          "count": 3,
+          "total": 19
+        },
+        "passed": {
+          "count": 16,
+          "total": 19
+        },
+        "waived": {
+          "count": 0,
+          "total": 19
+        },
+        "warnings": {
+          "count": 0,
+          "total": 19
+        }
+      }
+    }
+  }
+}

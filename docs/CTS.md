@@ -165,6 +165,18 @@ SPIRV-Headers, Vulkan-Docs, amber, jsoncpp and the NVIDIA video samples, 988 MB 
 and adds the revisions actually checked out, which on this host equal the declared
 ones for all seven.
 
+## The harness runs on the host first
+
+The console payload below is the destination; the harness itself is proved on this host
+before any of it is cross-compiled. `tools/run-cts-host.sh '<group>'` configures and builds
+`deqp-vk` from the pinned checkout with `-DDEQP_TARGET=vulkan_headless`, runs one group
+against the **host build of this driver** through the Khronos loader, and writes
+`stdout.log`, `results.qpa` and `summary.json` under `build/cts-host/runs/`. The host
+driver is a model -- it records and replays AGC work -- so the groups that belong there are
+the ones that read what the device reports and how it handles the API, which is also where
+the selection is decided. The first runs and their failures are in
+`conformance_inventory/cts_host_baseline.json` and `docs/M5_PHASE_C.md`.
+
 ## Why this is not a small task
 
 The CTS is not a program to run. It is a framework that has to be built for the

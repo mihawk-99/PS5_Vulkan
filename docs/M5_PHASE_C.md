@@ -6865,3 +6865,46 @@ SPIRV-Tools 58 MB, the NVIDIA video samples 29 MB, amber, jsoncpp, libpng, zlib,
 renderdoc's header). Disk: 239 GB free. What a *build* compiles can still differ from all
 three of these, which is why the record says the compiled revisions belong in the build's
 own manifest, and not here.
+
+## 2026-09-21 — the CTS runs against this driver, and its first five failures are all reporting
+
+Phase E1 has a working harness and its first real results. The pinned CTS is built for this
+host with `-DDEQP_TARGET=vulkan_headless` (Vulkan only: no GLES, EGL or X11) and run
+against the **host build of this driver** through the Khronos loader -- the same path
+`tools/check-driver.sh` already uses for its loader tests. The host driver is a model, so
+what belongs here are the groups that read what the device reports and how it handles the
+API; the console payload is still to come. `tools/run-cts-host.sh '<group>'` is the runner:
+it builds `deqp-vk` if needed, runs a group, writes `stdout.log`, `results.qpa` and
+`summary.json` under `build/cts-host/runs/`, prints the totals and every failing case, and
+exits non-zero when one failed.
+
+**One build detail worth recording**: the pinned tag's Amber dependency does not compile
+under this host's GCC 16 (2024 code missing the `<cstdint>` that libstdc++ used to include
+transitively). The build therefore adds `-include cstdint -include cstddef -include
+cstring`, which is a compiler flag rather than a source change, so the pin stays exact and
+a run remains comparable with the reference project's. `deqp-vk` is 80 MB and exports
+**1,841,090 cases**.
+
+Two groups run (`conformance_inventory/cts_host_baseline.json`):
+
+| group | passed | failed | not supported |
+| --- | --- | --- | --- |
+| `dEQP-VK.info.*` | 16/19 | **0** | 3 |
+| `dEQP-VK.api.info.*` | 2539/3886 | **5** | 1342 |
+
+The five failures are all *reporting* -- the driver claiming a capability it does not have,
+or not claiming one the specification requires -- which is precisely the class the
+selection policy is built around:
+
+| case | what it says |
+| --- | --- |
+| `format_properties.r32_uint` | bufferFeatures missing `VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_ATOMIC_BIT` |
+| `format_properties.r32_sint` | the same missing bit |
+| `format_properties.r32_sfloat` | optimalTilingFeatures missing `VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT` |
+| `format_properties.compressed_formats` | "Compressed format support not valid": the compressed formats' feature bits are not a legal combination |
+| `extension_core_versions` | "Required core version for `VK_KHR_surface` not met (1.0)" -- the instance extension's reported version does not satisfy what the extension requires |
+
+Each becomes its own round, with the regression test landed before the fix: three of them
+are required-feature gaps the specification does not let a 1.0 device decline, one is a
+feature-bit combination CTS rejects outright, and one is a version word in the instance
+extension list -- the last is the smallest and the one to take first.
