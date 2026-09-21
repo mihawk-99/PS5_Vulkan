@@ -2209,10 +2209,21 @@ create_pipeline(struct ps5vk_triangle *triangle, uint32_t index,
       .front = stencil_face,
       .back = stencil_face,
    };
+   /* R8: a frame whose draws set the depth bias themselves declares it dynamic,
+    * so the pipeline's rasterization state does not bake it (Vulkan ignores the
+    * three factors then, Valid Usage). No other frame declares any dynamic
+    * state, which is what every pipeline before this did. */
+   const VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_DEPTH_BIAS};
+   const VkPipelineDynamicStateCreateInfo dynamic_state = {
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+      .dynamicStateCount = 1,
+      .pDynamicStates = dynamic_states,
+   };
    const VkGraphicsPipelineCreateInfo pipeline_info = {
       .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
       .stageCount = 2,
       .pStages = stages,
+      .pDynamicState = input->dynamic_depth_bias ? &dynamic_state : NULL,
       .pVertexInputState = input->attribute_count != 0 ? &geometry_input : &vertex_input,
       .pInputAssemblyState = &assembly,
       .pViewportState = &viewport_state,
@@ -2409,6 +2420,16 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
     * create_resolve_target (Phase C8). */
    triangle->resolve_output = input->resolve_output;
    triangle->resolve_destination_transfer_only = input->resolve_destination_transfer_only;
+   triangle->dynamic_depth_bias = input->dynamic_depth_bias;
+   memcpy(triangle->depth_bias_first, input->depth_bias_first, sizeof(triangle->depth_bias_first));
+   memcpy(triangle->depth_bias_second, input->depth_bias_second, sizeof(triangle->depth_bias_second));
+   triangle->push_constant_bytes = input->push_constant_bytes;
+   triangle->push_constant_stages = input->push_constant_stages;
+   memcpy(triangle->push_constant_first, input->push_constant_first,
+          sizeof(triangle->push_constant_first));
+   memcpy(triangle->push_constant_second, input->push_constant_second,
+          sizeof(triangle->push_constant_second));
+   triangle->first_draw_indices = input->first_draw_indices;
    triangle->two_passes = input->two_passes;
    triangle->texture_address_mode_set = input->texture_address_mode_set;
    triangle->texture_address_mode = input->texture_address_mode;
@@ -2516,10 +2537,19 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
       triangle->descriptor_sets[triangle->set_count] = triangle->texture_set;
       triangle->set_count++;
    }
+   /* R9: the push-constant range the caller's shaders read, for the stages it
+    * names. A caller that declares none leaves the layout exactly as it was. */
+   const VkPushConstantRange push_range = {
+      .stageFlags = triangle->push_constant_stages,
+      .offset = 0,
+      .size = triangle->push_constant_bytes,
+   };
    const VkPipelineLayoutCreateInfo layout_info = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
       .setLayoutCount = triangle->set_count,
       .pSetLayouts = triangle->set_layouts,
+      .pushConstantRangeCount = triangle->push_constant_bytes != 0 ? 1u : 0u,
+      .pPushConstantRanges = triangle->push_constant_bytes != 0 ? &push_range : NULL,
    };
    if (!step(triangle, "create_pipeline_layout",
              CALL(triangle, CreatePipelineLayout)(triangle->device, &layout_info, NULL,
@@ -2590,6 +2620,25 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
 static void
 draw(struct ps5vk_triangle *triangle, VkCommandBuffer command)
 {
+   /* R8/R9: the state the *draw* carries rather than the pipeline. Each draw
+    * sets its own values before it records, so a frame of two draws tells a
+    * driver that reads them from the first draw's and one that ignores them
+    * apart: the first draw takes the first values and the second the second. */
+   const bool first_draw = triangle->draws_recorded == 0;
+   if (triangle->dynamic_depth_bias) {
+      const float *const bias = first_draw ? triangle->depth_bias_first : triangle->depth_bias_second;
+      /* vkCmdSetDepthBias's own argument order: the constant factor, the clamp,
+       * then the slope factor (vulkan_core.h). */
+      CALL(triangle, CmdSetDepthBias)(command, bias[0], bias[1], bias[2]);
+   }
+   if (triangle->push_constant_bytes != 0) {
+      const void *const bytes =
+         first_draw ? triangle->push_constant_first : triangle->push_constant_second;
+      CALL(triangle, CmdPushConstants)(command, triangle->layout,
+                                       triangle->push_constant_stages, 0,
+                                       triangle->push_constant_bytes, bytes);
+   }
+   triangle->draws_recorded++;
    const uint32_t instances = triangle->instance_count != 0 ? triangle->instance_count : 1u;
    if (triangle->index_count == 0) {
       if (!triangle->indirect) {
@@ -2607,15 +2656,30 @@ draw(struct ps5vk_triangle *triangle, VkCommandBuffer command)
    const VkDeviceSize zero = 0;
    CALL(triangle, CmdBindVertexBuffers)(command, 0, 1, &triangle->vertex_buffer, &zero);
    CALL(triangle, CmdBindIndexBuffer)(command, triangle->index_buffer, 0, VK_INDEX_TYPE_UINT16);
-   const uint32_t indices =
+   uint32_t indices =
       triangle->draw_index_count != 0 ? triangle->draw_index_count : triangle->index_count;
+   /* A frame whose two draws must differ in what they drew splits the index
+    * buffer between them: the first draw takes first_draw_indices, the second
+    * the rest. Zero leaves both draws the whole buffer. */
+   uint32_t first_index = 0;
+   if (triangle->first_draw_indices != 0) {
+      if (first_draw) {
+         indices = triangle->first_draw_indices < indices ? triangle->first_draw_indices : indices;
+      } else {
+         first_index = triangle->first_draw_indices < indices ? triangle->first_draw_indices
+                                                              : indices;
+         indices -= first_index;
+      }
+   }
    if (!triangle->indirect) {
-      CALL(triangle, CmdDrawIndexed)(command, indices, instances, 0, triangle->base_vertex, 0);
+      CALL(triangle, CmdDrawIndexed)(command, indices, instances, first_index, triangle->base_vertex,
+                                     0);
       return;
    }
    /* VkDrawIndexedIndirectCommand: indexCount, instanceCount, firstIndex,
     * vertexOffset, firstInstance. */
-   const uint32_t parameters[5] = {indices, instances, 0, (uint32_t)triangle->base_vertex, 0};
+   const uint32_t parameters[5] = {indices, instances, first_index,
+                                   (uint32_t)triangle->base_vertex, 0};
    memcpy(triangle->indirect_mapped, parameters, sizeof(parameters));
    CALL(triangle, CmdDrawIndexedIndirect)(command, triangle->indirect_buffer, 0, 1,
                                           (uint32_t)sizeof(parameters));
@@ -3062,6 +3126,9 @@ ps5vk_triangle_draw(struct ps5vk_triangle *triangle, enum ps5vk_triangle_groupin
    }
    triangle->target = NULL;
    triangle->target_bytes = 0;
+   /* R8/R9: the draws of this frame are counted from zero, so the first takes
+    * the first per-draw values and the second the second. */
+   triangle->draws_recorded = 0;
    if (display) {
       if (triangle->acquired) {
          step(triangle, "acquire_next_image", VK_ERROR_INITIALIZATION_FAILED,

@@ -16181,9 +16181,10 @@ constexpr float kDepthBiasPast = 0.5002f;
 constexpr float kDepthBiasConstant = 4096.0f;
 constexpr std::uint32_t kDepthBiasNearBits = 0x3effe000u; // 0.5 - 8192 ULP
 constexpr std::uint32_t kDepthBiasFarBits = 0x3f001000u;  // 0.5 + 8192 ULP
-// The clamp the capped frame uses: an order of magnitude below the gap, so a
-// clamp that applies -- in whatever unit the hardware reads the register -- can
-// only leave the fragment on the failing side of the clear.
+// The clamp a frame carries to prove the refusal: any non-zero depthBiasClamp is
+// refused by name, because this hardware's clamp register measured inert on the
+// D32 float path and capping the bias in the driver would report a wrong depth
+// as a success (PS5_VULKAN_REQUESTSv2.md, the clamp decision).
 constexpr float kDepthBiasCap = 2e-5f;
 constexpr float kDepthBiasRampFar = 0.75f;
 // The slope factor the ramp frames use, both signs: the ramp's left edge is at
@@ -16251,24 +16252,25 @@ void run_vulkan_depth_bias_frames(const TestContext &test, TestOutcome &outcome)
         float clamp;
         VkCompareOp compare;
         bool ramp;
+        bool expect_refused;
     };
     static constexpr Frame kFrames[kDepthBiasFrames] = {
         {"flat at 0.25, no bias", kDepthBiasBracket, false, 0.0f, 0.0f, 0.0f, VK_COMPARE_OP_LESS,
-         false},
+         false, false},
         {"flat at the clear, no bias", kDepthBiasClear, false, 0.0f, 0.0f, 0.0f, VK_COMPARE_OP_LESS,
-         false},
+         false, false},
         {"constant -4096, LESS", kDepthBiasClear, true, -kDepthBiasConstant, 0.0f, 0.0f,
-         VK_COMPARE_OP_LESS, false},
+         VK_COMPARE_OP_LESS, false, false},
         {"constant +4096, GREATER", kDepthBiasClear, true, kDepthBiasConstant, 0.0f, 0.0f,
-         VK_COMPARE_OP_GREATER, false},
+         VK_COMPARE_OP_GREATER, false, false},
         {"0.0002 past the clear, no clamp", kDepthBiasPast, true, -kDepthBiasConstant, 0.0f, 0.0f,
-         VK_COMPARE_OP_LESS, false},
-        {"0.0002 past the clear, clamped", kDepthBiasPast, true, -kDepthBiasConstant, 0.0f,
-         kDepthBiasCap, VK_COMPARE_OP_LESS, false},
+         VK_COMPARE_OP_LESS, false, false},
+        {"0.0002 past the clear, clamp 2e-5, refused", kDepthBiasPast, true, -kDepthBiasConstant,
+         0.0f, kDepthBiasCap, VK_COMPARE_OP_LESS, false, true},
         {"slope -4 on the ramp", kDepthBiasClear, true, 0.0f, -kDepthBiasSlope, 0.0f,
-         VK_COMPARE_OP_LESS, true},
+         VK_COMPARE_OP_LESS, true, false},
         {"slope +4 on the ramp", kDepthBiasClear, true, 0.0f, kDepthBiasSlope, 0.0f,
-         VK_COMPARE_OP_LESS, true},
+         VK_COMPARE_OP_LESS, true, false},
     };
     const VkVertexInputAttributeDescription attributes[2] = {
         {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0},
@@ -16281,6 +16283,7 @@ void run_vulkan_depth_bias_frames(const TestContext &test, TestOutcome &outcome)
     unsigned drawn[kDepthBiasFrames] = {0};
     unsigned biased_texels[kDepthBiasFrames] = {0};
     unsigned sampled = 0;
+    bool clamped_refused = false;
     for (unsigned index = 0; index < kDepthBiasFrames; index++)
     {
         const Frame &frame = kFrames[index];
@@ -16326,6 +16329,28 @@ void run_vulkan_depth_bias_frames(const TestContext &test, TestOutcome &outcome)
         {
             log_driver_submission(triangle.device, frame.name, log);
             log_driver_stages(triangle.device, log);
+        }
+        if (frame.expect_refused)
+        {
+            /* The clamp decision (PS5_VULKAN_REQUESTSv2.md): a non-zero
+             * depthBiasClamp is refused by name rather than capped, so this
+             * frame's recording ends at its draw and the harness's messenger
+             * carries the driver's sentence into this log (R4). Nothing is read
+             * back. */
+            clamped_refused = status != PS5VK_TRIANGLE_OK;
+            log.event("agc_depth_bias_frame", clamped_refused ? "INFO" : "FAIL", (long long)status,
+                      clamped_refused
+                          ? "the clamped draw was refused, as the clamp decision requires"
+                          : "the clamped draw was accepted");
+            if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+            {
+                outcome.stage_in_use = true;
+                log.event("agc_depth_bias", "FAIL", -1,
+                          "a submission did not complete; the program's objects stay allocated");
+                return;
+            }
+            ps5vk_triangle_finish(&triangle);
+            continue;
         }
         bool checked = false;
         if (status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes)
@@ -16428,13 +16453,13 @@ void run_vulkan_depth_bias_frames(const TestContext &test, TestOutcome &outcome)
     // none under a push.
     const bool passed = drawn[0] == sampled && drawn[1] == 0 && drawn[2] == sampled &&
                         drawn[3] == sampled && biased_texels[2] > 0 && biased_texels[3] > 0 &&
-                        drawn[4] == sampled && drawn[5] == 0 && drawn[6] > 0 && drawn[7] == 0;
+                        drawn[4] == sampled && clamped_refused && drawn[6] > 0 && drawn[7] == 0;
     log.number("agc_depth_bias", "bracket_drawn", drawn[0]);
     log.number("agc_depth_bias", "no_bias_drawn", drawn[1]);
     log.number("agc_depth_bias", "near_drawn", drawn[2]);
     log.number("agc_depth_bias", "far_drawn", drawn[3]);
     log.number("agc_depth_bias", "past_unclamped_drawn", drawn[4]);
-    log.number("agc_depth_bias", "past_clamped_drawn", drawn[5]);
+    log.number("agc_depth_bias", "clamp_refused", clamped_refused ? 1u : 0u);
     log.number("agc_depth_bias", "slope_pull_drawn", drawn[6]);
     log.number("agc_depth_bias", "slope_push_drawn", drawn[7]);
     log.number("agc_depth_bias", "biased_texels", biased_texels[2]);
@@ -16444,10 +16469,10 @@ void run_vulkan_depth_bias_frames(const TestContext &test, TestOutcome &outcome)
     char detail[200]{};
     std::snprintf(detail, sizeof(detail),
                   "the bracket frame kept %u of %u samples, no bias %u, the constant factor %u and "
-                  "%u, past the clear %u unclamped and %u clamped, the ramp %u under a pull and %u "
-                  "under a push",
-                  drawn[0], sampled, drawn[1], drawn[2], drawn[3], drawn[4], drawn[5], drawn[6],
-                  drawn[7]);
+                  "%u, past the clear %u unclamped, the clamp %s, and the ramp %u under a pull and "
+                  "%u under a push",
+                  drawn[0], sampled, drawn[1], drawn[2], drawn[3], drawn[4],
+                  clamped_refused ? "refused by name" : "accepted", drawn[6], drawn[7]);
     outcome.command_built = true;
     outcome.passed = passed;
     log.event("agc_depth_bias", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
@@ -16551,6 +16576,221 @@ void run_vulkan_resolve_usage_frames(const TestContext &test, TestOutcome &outco
     outcome.command_built = true;
     outcome.passed = passed;
     log.event("agc_resolve_usage", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
+}
+
+// R8 (PS5_VULKAN_REQUESTSv2.md): the depth bias through
+// VK_DYNAMIC_STATE_DEPTH_BIAS. One pipeline, two draws, and the bias set between
+// them with vkCmdSetDepthBias: the same depth attachment cleared to 0.5, two
+// quads drawn at 0.5 -- one per half of the target, so the two draws can be told
+// apart by *what* they drew -- and the test LESS, which only a bias that pulls
+// the fragment closer than the clear can pass. A driver that used the first
+// draw's values for both draws, or ignored the upload and used the pipeline's
+// zeroes, draws a different half than this case expects.
+constexpr unsigned kDynamicBiasFrames = 3;
+constexpr float kDynamicBiasPull = -4096.0f;
+constexpr float kDynamicBiasHalfPull = -2048.0f;
+// The depths those two pulls write, which the console's static case measured
+// (one unit is 2^-23 of depth, so 4096 units is 8192 ULP at 0.5).
+constexpr std::uint32_t kDynamicBiasFullBits = 0x3effe000u; // 0.5 - 4096 units
+constexpr std::uint32_t kDynamicBiasHalfBits = 0x3efff000u; // 0.5 - 2048 units
+constexpr std::uint32_t kDynamicBiasClearBits = 0x3f000000u;
+
+// One rectangle covering the target columns [left, right) at a single depth, as
+// four records the m4-depth vertex shader reads, at vertex slot `at` (and its
+// six indices at index slot at/4*6).
+void put_dynamic_bias_rect(float *records, std::uint16_t *indices, unsigned at, std::uint32_t left,
+                           std::uint32_t right, float depth, std::uint32_t red, std::uint32_t green,
+                           std::uint32_t blue) noexcept
+{
+    const float colour[4] = {red / 255.0f, green / 255.0f, blue / 255.0f, 1.0f};
+    const float corners[4][3] = {{ndc_x(left), ndc_y(kOutputHeight), depth},
+                                 {ndc_x(right), ndc_y(kOutputHeight), depth},
+                                 {ndc_x(right), ndc_y(0), depth},
+                                 {ndc_x(left), ndc_y(0), depth}};
+    for (unsigned corner = 0; corner < 4; corner++)
+    {
+        float *const record = records + (at + corner) * 7;
+        std::memcpy(record, corners[corner], sizeof(corners[corner]));
+        std::memcpy(record + 3, colour, sizeof(colour));
+    }
+    const std::uint16_t quad[6] = {(std::uint16_t)at,       (std::uint16_t)(at + 1),
+                                   (std::uint16_t)(at + 2), (std::uint16_t)(at + 2),
+                                   (std::uint16_t)(at + 3), (std::uint16_t)at};
+    std::memcpy(indices + (at / 4) * 6, quad, sizeof(quad));
+}
+
+void run_vulkan_dynamic_depth_bias_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12},
+    };
+    struct Frame
+    {
+        const char *name;
+        float first;
+        float second;
+        bool left_drawn;
+        bool right_drawn;
+    };
+    // The left half is what the first draw covers, the right half the second, and
+    // the values are the two pulls the console measured. The first frame biases
+    // only the second draw, the second frame only the first (the mirror image),
+    // and the third both, by different amounts -- so the two halves of the depth
+    // plane hold two different biased depths in one frame.
+    static constexpr Frame kFrames[kDynamicBiasFrames] = {
+        {"second draw biased", 0.0f, kDynamicBiasPull, false, true},
+        {"first draw biased", kDynamicBiasPull, 0.0f, true, false},
+        {"both draws biased, by different amounts", kDynamicBiasHalfPull, kDynamicBiasPull, true,
+         true},
+    };
+    const std::uint32_t clear_word = 0xffff8040u;
+    const std::uint32_t left_column = kOutputWidth / 4;
+    const std::uint32_t right_column = kOutputWidth * 3 / 4;
+    const std::uint32_t row = kOutputHeight / 2;
+    unsigned drawn_left[kDynamicBiasFrames] = {0};
+    unsigned drawn_right[kDynamicBiasFrames] = {0};
+    unsigned sampled = 0;
+    bool depths_differ = false;
+    for (unsigned index = 0; index < kDynamicBiasFrames; index++)
+    {
+        const Frame &frame = kFrames[index];
+        log.event("agc_dynamic_bias_frame", "INFO", 0, frame.name);
+        std::array<float, 8 * 7> vertices{};
+        std::array<std::uint16_t, 12> indices{};
+        put_dynamic_bias_rect(vertices.data(), indices.data(), 0, 0, kOutputWidth / 2,
+                              kDepthBiasClear, 0, 255, 255);
+        put_dynamic_bias_rect(vertices.data(), indices.data(), 4, kOutputWidth / 2, kOutputWidth,
+                              kDepthBiasClear, 255, 128, 0);
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = vertices.data();
+        input.vertex_count = 8;
+        input.vertex_stride = kDriverDepthVertexStride;
+        input.index_data = indices.data();
+        input.index_count = 12;
+        input.attribute_count = 2;
+        input.attributes[0] = attributes[0];
+        input.attributes[1] = attributes[1];
+        input.depth = true;
+        input.depth_test = true;
+        input.depth_write = true;
+        input.depth_compare_op = VK_COMPARE_OP_LESS;
+        input.depth_load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.depth_clear_value = kDepthBiasClear;
+        // The pipeline declares VK_DYNAMIC_STATE_DEPTH_BIAS and every draw sets
+        // its own values: the first six indices are the left half's, the rest the
+        // right half's.
+        // The enable is static state even here: Vulkan 1.0's dynamic depth bias
+        // covers the three factors, and depthBiasEnable stays the pipeline's.
+        input.depth_bias_enable = true;
+        input.dynamic_depth_bias = true;
+        input.depth_bias_first[0] = frame.first;
+        input.depth_bias_second[0] = frame.second;
+        input.first_draw_indices = 6;
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+            return;
+        ps5vk_triangle triangle{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_COMMAND_BUFFER);
+        if (test.capture && status == PS5VK_TRIANGLE_OK)
+        {
+            log_driver_submission(triangle.device, frame.name, log);
+            log_driver_stages(triangle.device, log);
+        }
+        bool checked = false;
+        if (status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes)
+        {
+            flush_gpu_data(const_cast<void *>(triangle.target), kFramebufferBytes);
+            const auto *const words = static_cast<const std::uint32_t *>(triangle.target);
+            const FramebufferView view{words, kTiledRgba8Layout};
+            sampled = 0;
+            drawn_left[index] = 0;
+            drawn_right[index] = 0;
+            for (std::uint32_t at = kOutputHeight / 4; at < kOutputHeight; at += kOutputHeight / 4)
+            {
+                ++sampled;
+                drawn_left[index] += view.word(left_column, at) != clear_word ? 1u : 0u;
+                drawn_right[index] += view.word(right_column, at) != clear_word ? 1u : 0u;
+            }
+            log.number("agc_dynamic_bias_frame", "left_drawn", drawn_left[index]);
+            log.number("agc_dynamic_bias_frame", "right_drawn", drawn_right[index]);
+            log.number("agc_dynamic_bias_frame", "of", sampled);
+            // What each half's depth holds: the clear where the draw failed, and
+            // the biased depth where it passed -- which is where the two values
+            // of one frame are told apart.
+            std::uint32_t left_bits = 0;
+            std::uint32_t right_bits = 0;
+            if (triangle.depth_target != nullptr &&
+                triangle.depth_target_bytes >=
+                    static_cast<std::size_t>(kOutputWidth) * kOutputHeight * 4u)
+            {
+                flush_gpu_data(const_cast<void *>(triangle.depth_target),
+                               static_cast<std::size_t>(kOutputWidth) * kOutputHeight * 4u);
+                const auto *const depth = static_cast<const std::uint8_t *>(triangle.depth_target);
+                std::memcpy(&left_bits, depth + tiled_depth_offset(left_column, row),
+                            sizeof(left_bits));
+                std::memcpy(&right_bits, depth + tiled_depth_offset(right_column, row),
+                            sizeof(right_bits));
+                log.hex("agc_dynamic_bias_frame", "left_bits", left_bits);
+                log.hex("agc_dynamic_bias_frame", "right_bits", right_bits);
+                if (index == kDynamicBiasFrames - 1)
+                    depths_differ = left_bits != right_bits;
+            }
+            log.event("agc_dynamic_bias_frame", "PASS", 0,
+                      "the frame recorded and its pixels were read");
+            checked = true;
+        }
+        else
+        {
+            log.event("agc_dynamic_bias_frame", "FAIL", -1,
+                      "the frame could not be recorded or submitted");
+        }
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            log.event("agc_dynamic_bias", "FAIL", -1,
+                      "a submission did not complete; the program's objects stay allocated");
+            return;
+        }
+        ps5vk_triangle_finish(&triangle);
+        if (!checked)
+        {
+            outcome.command_built = false;
+            log.event("agc_dynamic_bias", "FAIL", -1, "a frame could not be recorded or submitted");
+            return;
+        }
+    }
+    // What the three frames have to show: each draw used the values set
+    // immediately before it (the drawn half flips between the first two frames),
+    // and the frame that biased both draws kept two different biased depths in
+    // one image, which one pipeline can only do through the dynamic state.
+    const bool passed = drawn_left[0] == 0 && drawn_right[0] == sampled &&
+                        drawn_left[1] == sampled && drawn_right[1] == 0 &&
+                        drawn_left[2] == sampled && drawn_right[2] == sampled && depths_differ;
+    log.number("agc_dynamic_bias", "second_only_left", drawn_left[0]);
+    log.number("agc_dynamic_bias", "second_only_right", drawn_right[0]);
+    log.number("agc_dynamic_bias", "first_only_left", drawn_left[1]);
+    log.number("agc_dynamic_bias", "first_only_right", drawn_right[1]);
+    log.number("agc_dynamic_bias", "both_left", drawn_left[2]);
+    log.number("agc_dynamic_bias", "both_right", drawn_right[2]);
+    log.number("agc_dynamic_bias", "sampled", sampled);
+    char detail[200]{};
+    std::snprintf(detail, sizeof(detail),
+                  "biasing the second draw kept %u of %u left samples and %u right, biasing the "
+                  "first %u and %u, and biasing both %u and %u with the two halves' depths %s",
+                  drawn_left[0], sampled, drawn_right[0], drawn_left[1], drawn_right[1],
+                  drawn_left[2], drawn_right[2], depths_differ ? "different" : "equal");
+    outcome.command_built = true;
+    outcome.passed = passed;
+    log.event("agc_dynamic_bias", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
 }
 
 void run_vulkan_stencil_clear_frames(const TestContext &test, TestOutcome &outcome) noexcept
@@ -20909,6 +21149,10 @@ constexpr RunnerTest kRunnerTests[] = {
     // with COLOR_ATTACHMENT added, which is the workaround
     // (run_vulkan_resolve_usage_frames).
     {"v0-resolve-usage", "m3-vertex", run_vulkan_resolve_usage_frames},
+    // R8: the depth bias through VK_DYNAMIC_STATE_DEPTH_BIAS, one pipeline and
+    // two draws whose bias vkCmdSetDepthBias changes between them
+    // (run_vulkan_dynamic_depth_bias_frames).
+    {"v0-dynamic-depth-bias", "m4-depth", run_vulkan_dynamic_depth_bias_frames},
     // R1's depth bias: the quad drawn at the depth its attachment clears to with
     // no bias, with each sign of the constant factor, and the ramp the slope
     // factor and the clamp move, read back in pixels and in the depth plane

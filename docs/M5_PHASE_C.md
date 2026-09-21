@@ -6313,3 +6313,59 @@ wording is what an application's own messenger receives. And the case is console
 evidence only -- no golden and no host gate -- because nothing about the driver's
 stream changed: the same resolve with the colour-attachment bit is the stream
 `golden/c8-resolve` already holds, and the second frame is byte for byte that frame.
+
+## 2026-09-20 — R8 and the clamp decision: the depth bias through VK_DYNAMIC_STATE_DEPTH_BIAS
+
+R8 was a prediction read from vkQuake's source (PS5_VULKAN_REQUESTSv2.md): its
+pipelines declare three dynamic states and the driver's whitelist held neither
+`VK_DYNAMIC_STATE_DEPTH_BIAS` nor anything else outside the viewport, scissor, depth
+and stencil set. Re-checked at HEAD before anything was written: the whitelist at
+`ps5vk_draw_refusal` refused it, so the prediction held, and R1's completion had
+already made the rest small -- the bias is programmable, and what was missing was the
+same three values arriving per draw.
+
+**The bias is the command buffer's state now.** `ps5vk_pipeline_dynamic_state` fills
+the three factors from the pipeline unless it declares the dynamic state, and the
+*enable* always from the pipeline, because Vulkan 1.0's `VK_DYNAMIC_STATE_DEPTH_BIAS`
+covers the factors and leaves `depthBiasEnable` static -- which is why Mesa's state
+has two separate bits for them, and the first console run failed for exactly that
+reason (`Klog_Logs/r8-dynamic-bias.log`: everything drew nothing, because the enable
+was never set). The draw reads the command buffer's dynamic state either way, so the
+static and the dynamic form meet in one place and record the same words.
+
+**The clamp is refused by name, in both forms.** The decision taken on the first
+batch: `PA_SU_POLY_OFFSET_CLAMP` measured inert on this D32 float path, and capping
+the bias in the driver would report a wrong depth as a success. The static form is
+refused in `ps5vk_draw_refusal`, the dynamic form at the draw, and the sentence names
+the register, the measurement and the probe that would widen it
+(PS5_VULKAN_REQUESTSv2.md, the clamp decision). `v0-depth-bias`'s clamp frame now
+expects the refusal instead of the capped draw it used to measure, and the harness's
+debug messenger carries the sentence into the log, where it appears as the frame's own
+`b7_vk_message` record.
+
+**The probe.** `v0-dynamic-depth-bias` (`jobs/v0-dynamic-depth-bias/queue.txt`,
+`golden/v0-dynamic-depth-bias`, run pid 371, title digest 4aec17c7e589f3d8): one
+pipeline that declares the dynamic state, two draws whose bias `vkCmdSetDepthBias`
+changes between them, and one quad per half of the target at the depth the attachment
+clears to. The console measured:
+
+| frame | left half kept | right half kept | the depth the halves hold |
+| --- | --- | --- | --- |
+| second draw biased | 0 of 3 | 3 of 3 | clear, 0x3effe000 |
+| first draw biased | 3 of 3 | 0 of 3 | 0x3effe000, clear |
+| both biased, by different amounts | 3 of 3 | 3 of 3 | 0x3efff000 (-2048), 0x3effe000 (-4096) |
+
+The first two frames are mirror images, which is what says each draw used the values
+set immediately before it rather than the first draw's or the pipeline's; the third
+leaves two different biased depths in one image, which one pipeline can only do
+through the dynamic state. `v0-depth-bias` (the static form, whose clamp frame is now
+the refusal), `v0-cull` (the same refusal function) and `m2-solid` regress: four of
+four tests PASS, pid 371.
+
+**The gates.** `driver/tests/vk_c5_depth_bias_test.c` is the focused host gate for the
+dynamic form: one pipeline, two draws with different values, and the tables the debug
+API hands back must hold the *second* draw's words (offset 0x45000000 for 2048, scale
+0x41800000 for 1 * 16, clamp zero) -- which a driver that ignored the upload could not
+produce. 12 of 12 checks in the direct build, 4 of 4 through the loader and the PS5
+link arm pass. `golden/v0-depth-bias` is re-extracted from the same run, since its
+clamp frame no longer records a submission.

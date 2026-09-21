@@ -95,6 +95,10 @@ enum ps5vk_triangle_output {
  * compiling byte for byte as they are. */
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 
+/* The push-constant bytes a frame may upload: VkPhysicalDeviceLimits'
+ * maxPushConstantsSize, which the driver reports as 128. */
+#define PS5VK_TRIANGLE_MAX_PUSH_CONSTANTS 128
+
 struct ps5vk_triangle_input {
    ps5vk_get_instance_proc_addr get_instance_proc_addr;
    /* One or two pipelines; a frame's second draw uses the second, or the
@@ -481,7 +485,35 @@ struct ps5vk_triangle_input {
     * image is what the framebuffers name. Appended at the end for the same
     * reason as target_format. */
    bool resolve_destination_transfer_only;
+   /* R8: the frame's pipelines declare VK_DYNAMIC_STATE_DEPTH_BIAS and every
+    * draw sets its bias with vkCmdSetDepthBias -- the first draw from
+    * depth_bias_first, the second from depth_bias_second, each a
+    * {depthBiasConstantFactor, depthBiasClamp, depthBiasSlopeFactor} triple --
+    * vkCmdSetDepthBias's own argument order. A driver that ignored
+    * the upload would use the first triple for both draws. False, and the
+    * zeroed triples, are the state every earlier frame ran. Appended at the end
+    * for the same reason as target_format. */
+   bool dynamic_depth_bias;
+   float depth_bias_first[3];
+   float depth_bias_second[3];
+   /* R9: the pipeline layout declares a push-constant range of this many bytes
+    * for push_constant_stages, and every draw uploads them with
+    * vkCmdPushConstants -- the first from push_constant_first, the second from
+    * push_constant_second. Zero declares no range, which is every frame before
+    * this (no probe or test of this driver has ever used a push constant).
+    * Appended at the end for the same reason as target_format. */
+   uint32_t push_constant_bytes;
+   VkShaderStageFlags push_constant_stages;
+   uint8_t push_constant_first[PS5VK_TRIANGLE_MAX_PUSH_CONSTANTS];
+   uint8_t push_constant_second[PS5VK_TRIANGLE_MAX_PUSH_CONSTANTS];
+   /* R8/R9: how many indices the first of a frame's two draws takes, the second
+    * the rest of them: the two draws must then be told apart by what each drew
+    * (one half of the target each, say), not only by the depth they wrote. Zero
+    * gives both draws the whole index buffer, which is what the two-draw
+    * groupings did before. Appended at the end for the same reason. */
+   uint32_t first_draw_indices;
 };
+
 
 /* The colour a clearing render pass clears to: red 0x40, green 0x80, blue
  * 0xff, opaque. ps5vk_triangle.c clears to those bytes as floats, and a
@@ -634,6 +666,20 @@ struct ps5vk_triangle {
    /* R5: the usage the resolve destination declares, from
     * input->resolve_destination_transfer_only. */
    bool resolve_destination_transfer_only;
+   /* R8's per-draw depth bias (input->dynamic_depth_bias and its triples) and
+    * R9's per-draw push constants (input->push_constant_bytes and its bytes),
+    * with how many draws this frame has recorded (each draw sets its state
+    * before it draws, so the first draw takes the first values and the second
+    * the second). */
+   bool dynamic_depth_bias;
+   float depth_bias_first[3];
+   float depth_bias_second[3];
+   uint32_t push_constant_bytes;
+   VkShaderStageFlags push_constant_stages;
+   uint8_t push_constant_first[PS5VK_TRIANGLE_MAX_PUSH_CONSTANTS];
+   uint8_t push_constant_second[PS5VK_TRIANGLE_MAX_PUSH_CONSTANTS];
+   uint32_t first_draw_indices;
+   uint32_t draws_recorded;
    /* R6: whether the frame records a second render pass in the same command
     * buffer (input->two_passes). */
    bool two_passes;

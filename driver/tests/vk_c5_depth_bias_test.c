@@ -6,13 +6,15 @@
  * R1 (docs/M5_PHASE_C.md, PS5_VULKAN_REQUESTS.md); built and run through the
  * loader and directly by tools/check-driver.sh (see ps5vk_test.h).
  *
- * The runner's v0-depth-bias case proves the state on the console: every frame
- * clears its D32_SFLOAT depth attachment to 0.5 and draws geometry that starts at
- * that same depth, so the unbiased frame fails LESS against the equal clear and
- * keeps no pixel, while each sign of the constant factor and the slope factor
- * move fragments through the test and the depth plane carries what they wrote.
- * This program is that case's host half: one frame through the same harness and
- * the same m4-depth package, judged by the register words the driver records --
+ * The runner's v0-depth-bias and v0-dynamic-depth-bias cases prove the state on
+ * the console: the first clears its D32_SFLOAT depth attachment to 0.5 and draws
+ * geometry that starts at that same depth, so the unbiased frame fails LESS
+ * against the equal clear and keeps no pixel, while each sign of the constant
+ * factor and the slope factor move fragments through the test; the second sets
+ * the bias per draw with vkCmdSetDepthBias, one pipeline and two draws. This
+ * program is the dynamic form's host half: one frame of two draws through the
+ * same harness and the same m4-depth package, judged by the register words the
+ * driver records for the second draw --
  *
  *   PA_SU_POLY_OFFSET_DB_FMT_CNTL 0x2de = 0x000001e9, ps5-opengl's GFX10 D32F
  *     word: -23 in the signed low byte's POLY_OFFSET_NEG_NUM_DB_BITS and
@@ -197,20 +199,27 @@ main(void)
           * write with LESS, and a clear of 1.0 vk_meta draws. */
          true, true, true, VK_COMPARE_OP_LESS, VK_ATTACHMENT_LOAD_OP_CLEAR, 1.0f,
       };
-      /* R1's depth bias, the frames the console case runs: a constant factor
-       * toward the viewer, a slope factor, and a clamp small enough that the
-       * driver has to cap the constant term itself -- the hardware's own clamp
-       * word is inert on this path, which the console run measured
-       * (Klog_Logs/r-depth-bias5.log). 4096 units is 4096 * 2^-23 = 4.88e-4 of
-       * depth, so a 1e-4 clamp caps it to 1e-4 * 2^23 = 838.8608 units. */
+      /* R8's dynamic depth bias: the pipeline declares
+       * VK_DYNAMIC_STATE_DEPTH_BIAS and the frame's two draws set their own
+       * values, so the tables the debug API hands back hold the *second*
+       * draw's -- which is what says the upload reached the draw rather than
+       * the pipeline. The first draw's values are different on purpose (4096
+       * units and a slope of 2, against the second's 2048 and 1), so a driver
+       * that ignored vkCmdSetDepthBias would leave the first draw's words in
+       * the table and fail every check below. depthBiasEnable is static state
+       * even here: Vulkan 1.0's dynamic depth bias covers the three factors. */
       input.depth_bias_enable = true;
-      input.depth_bias_constant = 4096.0f;
-      input.depth_bias_slope = 2.0f;
-      input.depth_bias_clamp = 1e-4f;
+      input.dynamic_depth_bias = true;
+      input.depth_bias_first[0] = 4096.0f; /* constant */
+      input.depth_bias_first[1] = 0.0f;    /* clamp */
+      input.depth_bias_first[2] = 2.0f;    /* slope */
+      input.depth_bias_second[0] = 2048.0f;
+      input.depth_bias_second[1] = 0.0f;
+      input.depth_bias_second[2] = 1.0f;
       struct ps5vk_triangle triangle = {0};
       enum ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
       if (status == PS5VK_TRIANGLE_OK)
-         status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+         status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_COMMAND_BUFFER);
       check(status == PS5VK_TRIANGLE_OK,
             "the depth-biased frame renders through its depth attachment and signals its fence");
       check(steps.failed == NULL, "no step of the create or the draw failed before the fence");
@@ -244,17 +253,14 @@ main(void)
                "PA_SU_SC_MODE_CNTL carries the polygon offset enables and nothing else");
          check(table_holds(chunks, chunk_count, 0x2de, 0x000001e9u),
                "PA_SU_POLY_OFFSET_DB_FMT_CNTL is the D32 float word ps5-opengl writes");
-         check(table_holds(chunks, chunk_count, 0x2e1, 0x4451b717u) &&
-                  table_holds(chunks, chunk_count, 0x2e3, 0x4451b717u),
-               "the front and back offsets hold the constant factor's bits, capped by the clamp");
-         /* The clamp itself, and that capping the constant left the scale alone:
-          * the slope term's gradient is the polygon's, so the driver's cap can
-          * only cover this half (ps5vk_pipeline.c). */
-         check(table_holds(chunks, chunk_count, 0x2df, 0x38d1b717u),
-               "PA_SU_POLY_OFFSET_CLAMP holds the clamp's float bits");
-         check(table_holds(chunks, chunk_count, 0x2e0, 0x42000000u) &&
-                  table_holds(chunks, chunk_count, 0x2e2, 0x42000000u),
-               "the scales are still the slope factor's bits, times sixteen");
+         check(table_holds(chunks, chunk_count, 0x2e1, 0x45000000u) &&
+                  table_holds(chunks, chunk_count, 0x2e3, 0x45000000u),
+               "the front and back offsets hold the second draw's constant factor (2048.0)");
+         check(table_holds(chunks, chunk_count, 0x2df, 0x0u),
+               "PA_SU_POLY_OFFSET_CLAMP is zero: a non-zero clamp is refused by name");
+         check(table_holds(chunks, chunk_count, 0x2e0, 0x41800000u) &&
+                  table_holds(chunks, chunk_count, 0x2e2, 0x41800000u),
+               "the front and back scales hold the second draw's slope factor (1 * 16 = 16.0)");
 #endif
       }
       if (status != PS5VK_TRIANGLE_IN_FLIGHT)

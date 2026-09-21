@@ -956,10 +956,23 @@ ps5vk_draw_refusal(const VkGraphicsPipelineCreateInfo *info,
           state != VK_DYNAMIC_STATE_STENCIL_OP &&
           state != VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK &&
           state != VK_DYNAMIC_STATE_STENCIL_WRITE_MASK &&
-          state != VK_DYNAMIC_STATE_STENCIL_REFERENCE)
+          state != VK_DYNAMIC_STATE_STENCIL_REFERENCE &&
+          state != VK_DYNAMIC_STATE_DEPTH_BIAS)
          return "drawing with dynamic state other than the viewport, scissor, depth and stencil "
-                "state is not supported yet";
+                "state, and the depth bias (VK_DYNAMIC_STATE_DEPTH_BIAS), is not supported yet";
    }
+   /* The depth bias's clamp, refused in the static form here and in the dynamic
+    * form at the draw (ps5vk_draw.c): Vulkan clamps the bias to
+    * +-depthBiasClamp, this hardware's PA_SU_POLY_OFFSET_CLAMP measured inert on
+    * the D32 float path, and capping the bias in the driver would report a wrong
+    * depth as a success. A pipeline that declares VK_DYNAMIC_STATE_DEPTH_BIAS
+    * ignores this member (Valid Usage), so the refusal is the draw's there. */
+   if (raster->depthBiasEnable && raster->depthBiasClamp != 0.0f &&
+       !ps5vk_state_is_dynamic(info, VK_DYNAMIC_STATE_DEPTH_BIAS))
+      return "drawing with a depth bias clamped to a non-zero value: the clamp needs a runner "
+             "probe, because this hardware's PA_SU_POLY_OFFSET_CLAMP (0x2df) measured inert on "
+             "the D32 float path and capping the bias in the driver would report a wrong depth "
+             "as a success (PS5_VULKAN_REQUESTSv2.md, the clamp decision)";
    /* Valid usage: rasterization state is always present. The two states left
     * are the ones a feature bit gates -- polygonMode by fillModeNonSolid and
     * depthClampEnable by depthClamp, both reported false -- so refusing them is
@@ -1046,6 +1059,27 @@ ps5vk_pipeline_dynamic_state(const VkGraphicsPipelineCreateInfo *info,
    if (!ps5vk_state_is_dynamic(info, VK_DYNAMIC_STATE_SCISSOR)) {
       dynamic->vp.scissors[0] = info->pViewportState->pScissors[0];
       BITSET_SET(dynamic->set, MESA_VK_DYNAMIC_VP_SCISSORS);
+   }
+   /* R8: the depth bias's own state, static unless the pipeline declares
+    * VK_DYNAMIC_STATE_DEPTH_BIAS -- the rule the viewport, scissor, depth and
+    * stencil states above follow. A pipeline that declares it leaves the
+    * command buffer's values alone, so vkCmdSetDepthBias is the only source;
+    * the draw reads whichever arrived (ps5vk_draw.c), and both forms refuse the
+    * same thing, a non-zero depthBiasClamp. */
+   const VkPipelineRasterizationStateCreateInfo *const raster = info->pRasterizationState;
+   if (raster != NULL) {
+      /* Vulkan 1.0's VK_DYNAMIC_STATE_DEPTH_BIAS makes the three *factors*
+       * dynamic and leaves depthBiasEnable static (the two are separate bits in
+       * Mesa's state for that reason), so the enable always comes from the
+       * pipeline and only the factors are skipped when they are dynamic. */
+      dynamic->rs.depth_bias.enable = raster->depthBiasEnable;
+      BITSET_SET(dynamic->set, MESA_VK_DYNAMIC_RS_DEPTH_BIAS_ENABLE);
+      if (!ps5vk_state_is_dynamic(info, VK_DYNAMIC_STATE_DEPTH_BIAS)) {
+         dynamic->rs.depth_bias.constant_factor = raster->depthBiasConstantFactor;
+         dynamic->rs.depth_bias.clamp = raster->depthBiasClamp;
+         dynamic->rs.depth_bias.slope_factor = raster->depthBiasSlopeFactor;
+         BITSET_SET(dynamic->set, MESA_VK_DYNAMIC_RS_DEPTH_BIAS_FACTORS);
+      }
    }
    /* The depth state a draw's DB_DEPTH_CONTROL comes from, static unless the
     * pipeline declares it dynamic (Phase C5, ps5vk_depth_control). */
@@ -1287,52 +1321,8 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
    else if (raster->frontFace != VK_FRONT_FACE_COUNTER_CLOCKWISE)
       return vk_errorf(device, VK_ERROR_UNKNOWN, "front face %d is not a Vulkan front face",
                        (int)raster->frontFace);
-   /* The polygon offset block's own two enables, in the same word: without
-    * PA_SU_SC_MODE_CNTL's POLY_OFFSET_FRONT_ENABLE (bit 11) and
-    * POLY_OFFSET_BACK_ENABLE (bit 12) the six PA_SU_POLY_OFFSET_* words do
-    * nothing at all -- measured, not read: with the block recorded and the
-    * depth plane read back, a bias of four thousand units left every texel at
-    * the clear's value (Klog_Logs/r-depth-bias2.log). ps5-opengl's own
-    * rasterizer word sets both for a fill-mode polygon offset
-    * (src/gallium/ps5/ps5_screen.c:2036), and Vulkan's bias is the one state
-    * for every face. */
-   if (raster->depthBiasEnable)
-      rasterizer_word |= (UINT32_C(1) << 11) | (UINT32_C(1) << 12);
    pipeline->rasterizer_word = rasterizer_word;
    pipeline->discard_rasterizer = raster->rasterizerDiscardEnable;
-   /* R1's depth bias, in ps5-opengl's own words for GFX10 D32F
-    * (src/gallium/ps5/ps5_screen.c:2149, the block its AGC runtime writes at
-    * PA_SU_POLY_OFFSET_* 0x2de to 0x2e3): the clamp and the constant factor as
-    * float bits, and the slope factor scaled by sixteen, with the back pair
-    * mirroring the front's. The block's first word is the depth attachment's
-    * format word, which the draw adds -- a Vulkan 1.0 pipeline names a render
-    * pass, not its attachment formats (ps5vk_draw.c). */
-   pipeline->depth_bias = raster->depthBiasEnable;
-   const float bias_clamp = raster->depthBiasClamp;
-   const float bias_scale = raster->depthBiasSlopeFactor * 16.0f;
-   float bias_offset = raster->depthBiasConstantFactor;
-   /* Vulkan clamps the bias o = constant*r + slope*m to +-depthBiasClamp, and the
-    * console measured what this hardware's D32F path does with the register that
-    * is meant to do it: nothing, twice over -- a 2e-5 clamp left a 0.00049 pull
-    * intact and a clamp on a ramp's slope changed no pixel
-    * (Klog_Logs/r-depth-bias5.log, before this cap; the run that pinned the unit
-    * is Klog_Logs/r-depth-bias3.log). The constant term is the driver's to cap:
-    * one unit is 2^-23 of depth for the D32F word, which that run measured by
-    * writing 0.5 - 4096 units and reading 0x3effe000 back. The slope term's m is
-    * the polygon's own gradient, which a pipeline does not have, so that half
-    * stays the hardware's clamp word with the gap named in
-    * docs/M5_PHASE_C.md (R1). A clamp of zero is the unclamped default and
-    * leaves both words exactly as they were. */
-   if (bias_clamp > 0.0f) {
-      const float offset_depth = bias_offset * 0x1p-23f;
-      if (offset_depth > bias_clamp)
-         bias_offset = bias_clamp * 0x1p23f;
-      else if (offset_depth < -bias_clamp)
-         bias_offset = -bias_clamp * 0x1p23f;
-   }
-   memcpy(&pipeline->depth_bias_clamp, &bias_clamp, sizeof(bias_clamp));
-   memcpy(&pipeline->depth_bias_scale, &bias_scale, sizeof(bias_scale));
-   memcpy(&pipeline->depth_bias_offset, &bias_offset, sizeof(bias_offset));
    pipeline->blend_uses_constants = blend_uses_constants;
    for (unsigned index = 0; index < 4; index++) {
       const float value = blend_uses_constants ? info->pColorBlendState->blendConstants[index] : 0.0f;

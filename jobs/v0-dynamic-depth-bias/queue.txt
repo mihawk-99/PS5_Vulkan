@@ -1,0 +1,19 @@
+# PS5 Vulkan test runner job queue (PPSA99988): R8's dynamic depth bias.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-dynamic-depth-bias/queue.txt
+#
+# v0-dynamic-depth-bias records one pipeline that declares
+# VK_DYNAMIC_STATE_DEPTH_BIAS and two draws whose bias vkCmdSetDepthBias changes
+# between them, with the quads covering one half of the target each: biasing the
+# second draw must keep the right half only, biasing the first the left half
+# only, and biasing both by different amounts must leave two different biased
+# depths in one image. A driver that used the first draw's values for both, or
+# the pipeline's zeroes, draws a different half than the case expects
+# (docs/M5_PHASE_C.md, R8). v0-depth-bias (the static form), v0-cull (the same
+# ps5vk_draw_refusal function) and m2-solid are the regressions behind it.
+hold 60
+capture
+v0-dynamic-depth-bias
+v0-depth-bias
+v0-cull
+m2-solid
+exit

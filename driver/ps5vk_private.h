@@ -1048,19 +1048,6 @@ struct ps5vk_pipeline {
     * (rasterizerDiscardEnable): the draw records PA_CL_CLIP_CNTL (0x204) with
     * DX_RASTERIZATION_KILL set. */
    bool discard_rasterizer;
-   /* R1's depth bias: whether the pipeline enabled one, and the three words of
-    * ps5-opengl's six-word PA_SU_POLY_OFFSET_* block the draw records beside
-    * the rasterizer's -- CLAMP (0x2df), FRONT_SCALE (0x2e0) and FRONT_OFFSET
-    * (0x2e1), with the back pair (0x2e2, 0x2e3) mirroring the front's. The
-    * block's first word, PA_SU_POLY_OFFSET_DB_FMT_CNTL (0x2de), is the *depth
-    * attachment's* format word, which the rendering knows and a Vulkan 1.0
-    * pipeline does not: the draw adds it (ps5vk_draw.c). False is the state
-    * every draw before this ran with, so no recorded stream changes. */
-   bool depth_bias;
-   uint32_t depth_bias_clamp;
-   uint32_t depth_bias_scale;
-   uint32_t depth_bias_offset;
-
    /* Why command buffers cannot draw with the pipeline yet, or NULL. */
    const char *draw_refusal;
    /* What vkCmdBindPipeline puts into the command buffer's dynamic state:
