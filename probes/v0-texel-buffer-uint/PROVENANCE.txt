@@ -2,7 +2,7 @@ PS5 Vulkan v0-texel-buffer-uint shader packages, built by tools/build-probe-shad
 pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
 glslang: Glslang Version: 11:16.4.0
 opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
-pixel compiler (tools/build-psbc-cli.sh) sha256: 4d53a41ef9c8aea7645e8642ef020d65eb39c4840ae7b26f115766f68d61fa20
+pixel compiler (tools/build-psbc-cli.sh) sha256: 4aed15832de45888b8ecc93a57348219958a9cde83edca7b886b04eb7ab9dffa
 vertex: -g -s vertex --ngg --address32-hi 2; writer --esgs-ring-itemsize 1 --allow-unresolved
 pixel: -g -s fragment --raw --address32-hi 2 --descriptor-binding 0:0:uniform_texel_buffer:1:0:16; writer --allow-unresolved
 program-checksum registers are unresolved, as in ps5-opengl's runtime packages

@@ -92,6 +92,7 @@ tests=(
     v0_array
     v0_cube
     v0_texel_buffer
+    psbc_multiset
 )
 # Negative tests: name, and the host variable that breaks the rule it checks
 # unless the test sets it itself (b3_window).
@@ -345,7 +346,10 @@ want c4_texture &&
 want c4_rtt &&
     python3 "$root/tools/golden.py" replay "$rtt_run" "$work/c4-rtt.replay" --test c4-rtt
 declare -A results
-flags=(-std=c11 -O2 -Wall -Wextra -Werror -I "$headers" -I "$tests_dir")
+# psbc_include (the compiler's public header, which driver/ps5vk_private.h
+# includes by name and driver/tests/vk_psbc_multiset_test.c includes to read the
+# metadata struct) comes from tools/psbc-link.sh, sourced above.
+flags=(-std=c11 -O2 -Wall -Wextra -Werror -I "$headers" -I "$tests_dir" "${psbc_include[@]}")
 # The B7 draw program links into every PC test; only b7_draw calls it. The
 # compute program is Phase D2's harness: the D2 test and the runner's d2-compute
 # case share it (driver/tests/ps5vk_compute.c).

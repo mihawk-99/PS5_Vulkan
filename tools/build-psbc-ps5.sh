@@ -132,6 +132,14 @@ python3 "$root/tooling/psbc/patch-descriptor-types.py" "$tree"
 # the driver can refuse it by name); docs/M5_PHASE_C.md, R9.
 python3 "$root/tooling/psbc/patch-push-constant-location.py" "$tree"
 
+# Descriptor sets: the wrapper built one flat set-0 layout and handed the ABI
+# num_sets = 1, so a program binding more than set 0 could not be compiled at
+# all -- while RADV's ABI already declares one set pointer per set bit. The
+# patch splits the table per set, sizes each from its own bindings, names every
+# used set in desc_set_used_mask and reports one user-data dword per set;
+# docs/M5_PHASE_C.md, R7.
+python3 "$root/tooling/psbc/patch-descriptor-sets.py" "$tree"
+
 # libpsbc_support.ps5.a completes the archive for titles that link only the
 # compiler: ps5-opengl's C package writer (identical to the Python writer for
 # every probe package, A2), S3TC (ps5-opengl leaves it out because its Mesa

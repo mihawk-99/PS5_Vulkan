@@ -5,7 +5,7 @@ Specifications belong in `docs/VULKAN_PROBE_PLAN.md`, and run results belong in
 the phase logs (`docs/M5_PHASE_A.md`, `docs/M5_PHASE_B.md`,
 `docs/M5_PHASE_C.md`).
 
-_Updated: 2026-09-20_
+_Updated: 2026-09-21_
 
 ## Now
 
@@ -14,38 +14,36 @@ per item, and its evidence was weaker on purpose -- each item was a prediction r
 from vkQuake's source, so each was re-checked at HEAD before anything was written:
 
 - **R8 is closed**: `VK_DYNAMIC_STATE_DEPTH_BIAS` is in the whitelist and the bias is
-  the command buffer's state, with the *enable* still the pipeline's (Vulkan 1.0's
-  dynamic depth bias covers the three factors only). `v0-dynamic-depth-bias` proves it
-  with one pipeline and two draws whose bias changes between them.
+  the command buffer's state, with the *enable* still the pipeline's.
+  `v0-dynamic-depth-bias` proves it with one pipeline and two draws.
 - **The clamp decision is taken and implemented**: a non-zero `depthBiasClamp` is
-  refused by name in both the static and the dynamic form, because the hardware's
-  register measured inert and a silent cap would report a wrong depth as a success.
-  The driver no longer caps anything.
-- **R9 is closed**: the compiler's shader-info pass ran before the lowering that makes
-  a push constant a load, so the ABI never declared the argument and ACO read an
-  unwritten SGPR. The patch hoists the lowering, switches off the inlining heuristic
-  and reports the pointer's dword; the driver writes the block there. Both symptoms are
-  proved (each draw's own colour arrives *and* the frame submits), and the port can
-  revert W4.
+  refused by name in both forms; the driver no longer caps anything.
+- **R9 is closed**: the compiler's shader-info pass ran before the lowering that makes a
+  push constant a load, so the ABI never declared the argument and ACO read an unwritten
+  SGPR. Both symptoms are proved, and the port can revert W4.
 - **R4's residual gap is closed**: `v0-colour-clear` reads a non-black colour clear
   back with nothing drawn over it (36 of 36 samples), with a drawn control frame at 0
   of 36, and the audits' sampler line now says which fields the covering case
   exercises.
-- **R7 is confirmed, the route is chosen and its reconnaissance is done**: the two-set
-  refusal happens at the *draw*, not at creation, and route (b) is chosen -- multi-set
-  within the advertised four, vkQuake merging five layouts into four. What remains is
-  the compiler wrapper's single-set assumption (`psbc_descriptor_layout` and its
-  validation), then N tables in the draw, per-set binding and a two-set probe; it is
-  the larger piece by a wide margin and is not started.
+- **R7 is confirmed, the route is chosen, and Round 1 of four is done**: the two-set
+  refusal happens at the *draw*, and route (b) -- multi-set within the advertised four --
+  is chosen. Round 1 removed the compiler wrapper's single-set assumption (one layout per
+  set, per-set tables sized per set, a pointer per set in the metadata, a total slot
+  budget), with `probes/v0-multiset` (two sets that differ in kind) and the host test
+  `psbc_multiset` proving it: set 0's pointer at user-data dword 2, set 1's at 3, and both
+  new bounds refusing. **Round 2** is the driver's per-set tables, per-set
+  `vkCmdBindDescriptorSets` and its "more than the four advertised" refusal; **Round 3**
+  the console case that shows a value arriving from set 1 and a command buffer that
+  submits; **Round 4** the fallout. The round also corrected a stale artifact: the shipped
+  `probes/v0-push` package had been written by a probe CLI built *before* the R9 compiler
+  fix (R9's own conclusion is unaffected).
 - **R4's coverage note is answered by correcting our own claim**: the runner *does*
   install a `VK_EXT_debug_utils` messenger and forwards every refusal to the log; the
   gap was that a frame expecting a refusal passed no report. Fixed, and one sweep now
   carries all three refusal sentences.
 
-**The first batch (R1-R6) is answered too**, one commit each: R6 (a split
-submission's step capture), R2 (the sampler's address modes), R1 (cull, discard and
-depth bias), R3 (the stencil clear's own value), R5 (the resolve refusal's usage bit)
-and R4 (the audits' blind spots), with `docs/REQUESTS_RESPONSE.md` as the hand-off.
+**The first batch (R1-R6) is answered too**, one commit each: R6, R2, R1, R3, R5 and
+R4, with `docs/REQUESTS_RESPONSE.md` as the hand-off.
 
 Eight console-proved cases carry them -- `v0-two-passes`, `v0-sampler-address`,
 `v0-cull`, `v0-stencil-clear`, `v0-depth-bias`, `v0-dynamic-depth-bias`, `v0-two-sets`
@@ -54,13 +52,9 @@ queue under `jobs/`, a golden under `golden/` and, for the depth bias, a focused
 gate (`driver/tests/vk_c5_depth_bias_test.c`).
 
 **The linked runtime was four days older than the migration.** The stale
-`libvk_runtime.ps5.a` (its stamp named the pre-fork tree and an older build
-script) is rebuilt, the title digest moved with it (`c3a99b98…` ->
-`b33b813c…`), and the nine-case battery was re-run against the rebuilt artifact.
-The one recorded stream that moved is `golden/v0-stencil`'s first submission,
-which the migration's extra user-data word explains and which
-`tools/check-driver.sh` uses as a replay input rather than a comparison target
-(`docs/M5_PHASE_C.md`, 2026-09-20).
+`libvk_runtime.ps5.a` was rebuilt, the title digest moved with it (`c3a99b98…` ->
+`b33b813c…`), and the nine-case battery was re-run against the rebuilt artifact. The one
+recorded stream that moved is `golden/v0-stencil`'s first submission (`docs/M5_PHASE_C.md`).
 
 **What is left in the objective.** Nothing from either mission: the next gate is
 the CTS subset (`docs/CTS.md`).
@@ -89,10 +83,10 @@ reported by the driver; the rows left are the hardware's and one footnote clause
 
 | Check | Result |
 | --- | --- |
+| R7 Round 1, the compiler (host) | One layout per set: `psbc_multiset` 9 of 9 checks direct ("set 0 at user-data dword 2, set 1 at 3, 4 user SGPRs"), loader and PS5 link PASS; every probe package byte-identical to its pre-patch build except `probes/v0-push`, which the rebuild *corrected* (its package predated the R9 fix); `tools/check-driver.sh` 288 comparisons identical, none `DIFFERENT`, 47 tests PASS; `build/gates.sh` 10 of 10, migration gate includes the new patch |
 | the second batch, one sweep (pid 380) | Ten of ten tests PASS on title digest `c9c57b40…`: R8's `v0-dynamic-depth-bias`, R7's `v0-two-sets`, R5's `v0-resolve-usage`, R1's `v0-depth-bias`, R6's `v0-two-passes`, R2's `v0-sampler-address`, R3's `v0-stencil-clear`, `v0-cull`, `c8-resolve` and `m2-solid`, with all three refusal sentences in the klog (`Klog_Logs/r-coverage.log`). `v0-push-constant` (R9) is red on purpose and is not in that sweep |
-| R9's push constants, before and after the fix (pid 377, pid 110) | The driver's block held the second draw's bytes (0,0,1,1) with the descriptor and user data naming it, and both halves read back 0x00000000: the upload arrives, the stage's read does not (`Klog_Logs/r9-push-constant-final2.log`, digest `6306b4aa…`) |
 | R7's two-set layout (pid 378) | The pipeline was created and its draw refused: "descriptor set 1 is beyond the 1 this driver binds; sets past 0 are D1" (`Klog_Logs/r7-two-sets.log`, digest `084a7c84…`) |
-| the R round on the rebuilt runtime (`jobs/verify`, pid 331) | Nine of nine tests PASS, 1509 PASS records, **no `signal:`**: the four new cases, `v0-stencil`, `c8-resolve`, `m3-texture` and `m2-solid` twice (`Klog_Logs/r-verify-runtime.log`). Title digest `b33b813c…` |
+| the R round on the rebuilt runtime (pid 331, digest `b33b813c…`) | Nine of nine tests PASS, 1509 PASS records, **no `signal:`** (`Klog_Logs/r-verify-runtime.log`) |
 | the six requests' probes | R6's guard proved the overflow on the console before the fix and is silent after; R1's four frames read back 132 / 65 / 67 / 0 drawn pixels (no cull, back, front, discard); R2's probe samples a four-group texture across u 0 -> 4 and reads each group back; R3's stencil plane reads 65536 zero bytes at both clear depths (`Klog_Logs/r2-final.log`, `r1-cull-run4.log`, `r3-stencil-clear-{before,after}.log`) |
 | the linked runtime | rebuilt: the Sep 16 archive predated the fork (stamp tree `a92a1228…`, script `cf4765ca…`); the rebuild changes the stubs and moves the title digest. All 60 objects differ, three of them by source |
 | the goldens and the replay model | `tools/check-driver.sh` PASS again on the rebuilt build: 288 run comparisons identical, no `DIFFERENT` record, no fault (`build/check-driver-final.log`); the first clean run closed 148 failing comparisons and 8 host-test segfaults. `tools/check-runner-cases.sh` PASS (7 cases, 204 PASS records) |

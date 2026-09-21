@@ -6585,3 +6585,84 @@ exercises (repeat, mirrored repeat, clamp to edge); the filters, LOD bias, aniso
 compare and border colours are refusals it does not cover", and the pixels-a-clear-wrote
 line names both planes now that the colour target has its own case. All three audits'
 `--check` modes still exit 0: the statements are printed, not counted.
+
+## 2026-09-21 — R7, Round 1: one descriptor set layout per set, and the push-constant package that was stale
+
+Round 0 found that the single-set restriction is this project's compiler wrapper, not the
+core: RADV's ABI already declares one descriptor-set pointer per set bit
+(`declare_global_input_sgprs`, `src/amd/vulkan/radv_shader_args.c`) and its lowering looks
+a set's layout up by set number (`layout->set[desc_set].layout`). Round 1 removes the
+wrapper's half.
+
+**The compiler change** is `tooling/psbc/patch-descriptor-sets.py`, 2 header edits and 9
+compiler edits (the migration gate prints that line), with `PSBC_SHADER_METADATA_VERSION`
+left at 14 because every field is appended:
+
+  1. `PSBC_MAX_DESCRIPTOR_SETS` is the **wrapper's own** cap, 8. The core's is 32
+     (`MAX_SETS`, `radv_constants.h`) and the driver that consumes this advertises four
+     (`maxBoundDescriptorSets`); the wrapper takes neither number -- it is a general
+     facility whose layout blob is a fixed-size array. The driver names its own four, and
+     refuses past them, in Round 2.
+  2. validation accepts a set index below that cap instead of requiring 0, and bounds the
+     **total** binding slots across sets at `PSBC_MAX_DESCRIPTOR_BINDINGS`. Each set's
+     table is indexed by its own binding numbers, so two sets may each name binding 127
+     from two array entries; the sum is what the blob has to hold, and 129 slots are
+     refused.
+  3. `psbc_descriptor_layout` builds one layout per set in one blob, each followed by that
+     set's own binding table, each sized from **that set's** bindings (a set is not limited
+     to one binding, and two sets cannot share a table). A set with no bindings between
+     two used sets gets an empty layout rather than a NULL pointer, so a shader that reads
+     it fails in the lowering rather than in a later dereference.
+  4. every set the caller binds gets its bit in `desc_set_used_mask` -- the mask the ABI
+     turns into one pointer per set -- instead of only set 0.
+  5. `PsbcShaderMetadata` reports one user-data dword per set
+     (`descriptor_sets_valid[]` / `descriptor_sets_user_data_dword[]`, 8 entries), with set
+     0 mirroring the existing singular fields for a reader built against the v14 prefix.
+
+**The probe** is `probes/v0-multiset` (`shaders/v0/multiset.frag`, the `v0-multiset` set in
+`tools/build-probe-shaders.sh`): set 0 binding 0 is a uniform block and set 1 binding 0 a
+combined image sampler, so the two sets differ **in kind** -- set 1's table is sized from
+48-byte image-sampler entries, and its pointer is a second user-data dword. Its
+`bindings.txt` records both bindings, `pixel_user_sgpr_count 4` and set 0's pointer at
+dword 2. The set needs the probe CLI from `tools/build-psbc-cli.sh`: the SDK's pinned CLI
+has none of this repository's patches and refuses a binding whose set is not 0.
+
+**The host gate is `psbc_multiset`** (`driver/tests/vk_psbc_multiset_test.c`, one line in
+`tools/check-driver.sh`'s test list; the compiler's own header joins its include path). It
+compiles the probe's fragment stage with both bindings and asserts what R7 promised: the
+compile succeeds, the metadata carries a pointer for set 0 **and** set 1, the two are
+different dwords, no set above 1 claims one, and the v14 set-0 field names the same dword
+as the array. It then asserts the two refusals -- a binding in a set past the wrapper's cap,
+and two sets whose tables need 129 slots -- so the new bounds are exercised, not just
+written. Measured: **9 of 9 checks direct** ("set 0 at user-data dword 2, set 1 at 3, 4 user
+SGPRs, 160 bytes of code"), loader PASS with no checks (that build links no compiler), PS5
+link PASS.
+
+**The byte-identical sweep, and the one package that did change.** Every probe set was
+rebuilt with the pre-patch probe CLI and with the post-patch one and the packages compared
+byte for byte: 42 sets in the script, 40 that build (two are recorded in it as "kept for the
+record, and it does NOT build"), and the result is that **every package is identical except
+`probes/v0-push`**, whose `pixel.bin` grew 856 to 880 bytes and whose checksum moved. The
+cause is not R7: that package was written by a probe CLI built **before** the R9 compiler
+patch (`probes/v0-push` was committed at 00:30 as `028dc83`; the R9 fix landed at 08:15 as
+`8de2580`; the CLI binary on disk was from the previous afternoon), so the shipped package
+held the *pre-fix* compilation -- 7 user SGPRs, 48 bytes, push constants inlined into
+SGPRs -- while the driver's compiler and the console both had the fix (4 user SGPRs, the
+pointer form, matching `Klog_Logs/r9-sweep.log`'s result). Nothing compared the two for
+this set: its queue has no `compile` keyword, and the only `byte-identical` results in the
+logs are from an older klog. Round 1's rebuild corrects the package, and `b6_pipeline` --
+which compiles the probe sets and compares their packages -- passes against the corrected
+one. R9's own conclusions are untouched: the console's draws never used that package, the
+driver compiles the shipped SPIR-V itself.
+
+The metadata struct growing by the per-set array changed **no** package: the writer
+serialises the fields it names (`src/platform/ps5_agc_package.c:200` writes
+`descriptor_set0_*`), not the struct, so appending fields is invisible to the package
+format.
+
+**What is not in this round.** The driver still refuses a draw that binds more than one set
+-- Round 2 is the driver's per-set tables, and Round 3 the console case that shows a value
+arriving from set 1. One gap worth naming now: the AGC package writer writes **one**
+descriptor-set pointer, set 0's, so a *packaged* multi-set shader would carry one pointer;
+the driver's path does not go through packages (it compiles the application's SPIR-V), so
+nothing in R7 depends on it, but a future AGC-native multi-set consumer would.

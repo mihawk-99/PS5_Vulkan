@@ -392,3 +392,60 @@ entry each), and the probe's two sets differ in kind -- set 0 supplies the colou
 image needs, set 1 a scale, so a driver that reads the wrong table draws a
 recognisably wrong picture; four sets, not two; one commit per item; every round ends
 green with gates plus a console cycle.
+
+# R7, Round 1: the compiler builds one layout per set
+
+The wrapper's single-set restriction is gone, verified without touching the driver. What
+moved, in the order the plan set out:
+
+**The change.** `tooling/psbc/patch-descriptor-sets.py` (2 header edits, 9 compiler edits;
+metadata stays at version 14 because every field is appended): a wrapper cap
+`PSBC_MAX_DESCRIPTOR_SETS` = 8 that is deliberately neither the core's 32 nor the driver's
+four; validation by set index plus a **total** slot budget across sets, because each set's
+table is indexed by its own binding numbers; one layout per set in one blob, each sized from
+that set's own bindings, with empty layouts for sets in between so a shader that reads one
+fails in the lowering rather than on a NULL pointer; every bound set's bit in
+`desc_set_used_mask`, which is what the ABI turns into one pointer per set; and
+`descriptor_sets_valid[]` / `descriptor_sets_user_data_dword[]` in the metadata, with set 0
+mirroring the v14 singular fields.
+
+**The probe.** `probes/v0-multiset`: set 0 binding 0 a uniform block (the colour), set 1
+binding 0 a combined image sampler (the scale) -- two sets that differ in kind, so set 1's
+table is sized from 48-byte image-sampler entries and its pointer is a second user-data
+dword. `bindings.txt` records both bindings and `pixel_user_sgpr_count 4`. It is built with
+the probe CLI, not the SDK's pinned compiler: the latter has none of this repository's
+patches and refuses any binding whose set is not 0, which is precisely the refusal R7 is
+about.
+
+**The host gate.** `psbc_multiset` (new test, in `tools/check-driver.sh`'s list) compiles
+that fragment stage with both bindings and asserts the compile succeeds, the metadata
+carries a pointer for set 0 **and** set 1 in two different dwords, no set above 1 claims
+one, the v14 field agrees with the array, and both new bounds refuse (a set past the cap;
+two sets whose tables need 129 slots). Measured: 9 of 9 checks direct, "set 0 at user-data
+dword 2, set 1 at 3, 4 user SGPRs, 160 bytes of code"; loader PASS; PS5 link PASS.
+`v0_push_constant` (R9's dword) still passes in all three modes, and
+`tools/check-driver.sh` is **288 run comparisons identical, none `DIFFERENT`**, 47 tests
+PASS; `build/gates.sh` is 10 of 10.
+
+**The byte-identical check, and one correction it turned up.** Every probe set was
+recompiled with the pre-patch CLI and the post-patch CLI and the packages diffed: of the 40
+sets that build, **every package is byte-identical except `probes/v0-push`** -- and that one
+was already wrong before R7. It was written by a probe CLI built before the R9 compiler
+patch landed (package committed 00:30 as `028dc83`, R9 fix at 08:15 as `8de2580`, CLI binary
+from the previous afternoon), so it carried the pre-fix compilation: push constants inlined
+into user SGPRs, 7 of them, 48 bytes of code, where the driver and the console have the
+pointer form, 4 user SGPRs, 68 bytes. No queue ran `compile` for that set, and no other log
+compares the two, so it stayed invisible. Round 1's rebuild corrects it, `b6_pipeline`
+(which compiles the probe sets and compares packages) passes against the corrected package,
+and R9's conclusions do not move: the console's draws were compiled by the driver, never
+from that package. The other 39 packages are byte-identical, and the only other file churn
+is the compiler-hash line in the `PROVENANCE.txt` files of the sets that use the probe CLI.
+
+**No driver and no console work in this round**, as planned: the driver still refuses a
+draw that binds more than one set, which Round 2 replaces with per-set tables sized per set
+and `vkCmdBindDescriptorSets` per set, refusing past the four it advertises. Round 3 is the
+console case that shows a value arriving from set 1 with a command buffer that submits.
+One gap named here rather than later: the AGC package writer emits only set 0's pointer
+(`src/platform/ps5_agc_package.c:200`), so a *packaged* multi-set shader would carry one
+pointer; the driver compiles the application's SPIR-V and never reads those packages, so
+nothing in R7 depends on it.

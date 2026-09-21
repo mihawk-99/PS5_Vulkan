@@ -240,6 +240,26 @@ v0-push)
         --vertex-attribute 1:r32g32b32a32_float:0:8:24:4)
     pixel_flags=(--address32-hi 2 --descriptor-binding 0:32:uniform_buffer:1:0:16)
     ;;
+v0-multiset)
+    # R7's two descriptor sets: the colour from a uniform block at set 0,
+    # binding 0 and the scale from a combined image sampler at set 1, binding 0.
+    # Two sets that differ in kind, so the compiler has to build one layout per
+    # set -- set 1's table is sized from an image-sampler binding and its pointer
+    # is a second user-data dword -- and the geometry is m3-texture's quad, so
+    # one vertex buffer and one texture serve the draw.
+    vertex_source=shaders/m3/texture.vert
+    pixel_source=shaders/v0/multiset.frag
+    output=probes/v0-multiset
+    # The two-set layout is this repository's compiler patch, not the SDK's
+    # pinned compiler, so this set needs the probe CLI from tools/build-psbc-cli.sh.
+    pixel_compiler="$root/build/host/opengnm-psbc-probe"
+    vertex_flags=(--address32-hi 2
+        --vertex-attribute 0:r32g32_float:0:0:16:4
+        --vertex-attribute 1:r32g32_float:0:8:16:4)
+    pixel_flags=(--address32-hi 2
+        --descriptor-binding 0:0:uniform_buffer:1:0:16
+        --descriptor-binding 1:0:combined_image_sampler:1:0:48)
+    ;;
 v0-stencil-setup)
     # Round 12's stencil path: the pass that writes the stencil plane. The
     # geometry is the m4-depth vertex layout (position and colour, 28-byte
@@ -783,6 +803,33 @@ elif set_name == "v0-push":
                  dword(pixel, "descriptor_set0_user_data_dword", "pixel")),
                 ("pixel_set0_binding32_offset", declared[0]["offset"]),
                 ("pixel_set0_binding32_stride", declared[0]["stride"])]
+elif set_name == "v0-multiset":
+    # R7: two sets that differ in kind. The compiler has to build one layout per
+    # set from the set index each binding carries, size each from that set's own
+    # bindings, and give the ABI one pointer per set. The per-set pointers
+    # themselves are asserted on the host by driver/tests/vk_psbc_multiset_test.c,
+    # which reads the whole metadata struct -- the CLI prints only set 0's.
+    declared = pixel.get("descriptor_bindings") or []
+    expected = [(0, 0, 0, 16), (1, 0, 0, 48)]
+    got = [(b.get("set"), b.get("binding"), b.get("offset"), b.get("stride"))
+           for b in declared]
+    if sorted(got) != sorted(expected):
+        fail(f"pixel bindings {got!r}, expected set 0 binding 0 (16-byte uniform) "
+             f"and set 1 binding 0 (48-byte image sampler)")
+    if vertex.get("descriptor_bindings"):
+        fail("vertex stage unexpectedly declares descriptor bindings")
+    for binding in declared:
+        notes.append(f"pixel binding metadata: {json.dumps(binding, sort_keys=True)}")
+    bindings = [("address32_hi", expected_hi),
+                *vertex_input("vertex attributes: location 0 r32g32_float offset 0, "
+                              "location 1 r32g32_float offset 8, stride 16, binding 0"),
+                ("pixel_user_sgpr_count", pixel["user_sgpr_count"]),
+                ("pixel_descriptor_set0_dword",
+                 dword(pixel, "descriptor_set0_user_data_dword", "pixel")),
+                ("pixel_set0_binding0_offset", 0),
+                ("pixel_set0_binding0_stride", 16),
+                ("pixel_set1_binding0_offset", 0),
+                ("pixel_set1_binding0_stride", 48)]
 elif set_name == "m3-vertex":
     if pixel.get("descriptor_bindings"):
         fail("pixel stage unexpectedly declares descriptor bindings")

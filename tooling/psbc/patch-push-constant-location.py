@@ -22,9 +22,8 @@ Two edits, each with a job:
      `push_constant_user_data_dword` (the first of the two dwords the 64-bit
      pointer occupies), plus `push_constant_inline` and
      `push_constant_inline_count` so the other form is named rather than
-     silently unsupported. The fields are appended at the end of the struct, and
-     `PSBC_SHADER_METADATA_VERSION` goes to 15, because the struct grew -- a
-     consumer compiled against 14 reads a shorter struct.
+     silently unsupported. The fields are appended at the end of the struct, so
+     `PSBC_SHADER_METADATA_VERSION` stays 14 (see the note below).
 
   2. `psbc_compile.c` fills them beside the descriptor-set field it already
      computes from the same `user_sgprs_locs` table.
