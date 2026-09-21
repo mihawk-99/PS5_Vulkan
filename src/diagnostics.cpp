@@ -16131,6 +16131,125 @@ bool check_stencil_frame(const void *framebuffer, const StencilFrame &frame, Jso
     return matching == total;
 }
 
+// R3: a render pass's stencil clear, which took its value from the depth member.
+//
+// Mesa's vk_meta_clear unwraps a stencil attachment's clear value with
+// `clearValue.depthStencil.depth` where the value it wants is the `.stencil`
+// member (src/vulkan/runtime/vk_meta_clear.c), so a render pass that clears a
+// combined depth-stencil attachment with depth = 1.0 and stencil = 0 leaves the
+// stencil plane holding 1 (PS5_VULKAN_REQUESTS.md, R3). The driver's own
+// v0-stencil case never saw it: it clears and then *writes* the stencil with a
+// pipeline before reading it, so the cleared value is never the thing read.
+//
+// This case clears and draws nothing -- the pipeline discards every primitive,
+// which is R1's rasterizerDiscardEnable -- and reads the stencil plane back.
+// Two frames, because the request's discriminating follow-up separates "the
+// depth member's value" from "clamped or defaulted": with the workaround the
+// plane is 0 for depth 1.0 and for depth 0.5, and before it the plane held the
+// depth clear's own byte.
+void run_vulkan_stencil_clear_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    static constexpr float kDepths[] = {1.0f, 0.5f};
+    unsigned passed = 0;
+    for (float depth : kDepths)
+    {
+        log.number("agc_stencil_clear_frame", "depth", (long long)(depth * 100.0f));
+        // One rectangle over the whole target, drawn but discarded: what writes
+        // the attachment is the pass's clear and nothing else.
+        std::array<float, 4 * 7> vertices{};
+        std::array<std::uint16_t, 6> indices{};
+        put_driver_depth_rect(vertices.data(), indices.data(), 0, 0, 0, 0, kOutputWidth,
+                              kOutputHeight, 0.0f, 0xff, 0x00, 0x00);
+        const VkVertexInputAttributeDescription attributes[2] = {
+            {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0},
+            {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12},
+        };
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = vertices.data();
+        input.vertex_count = 4;
+        input.vertex_stride = kDriverDepthVertexStride;
+        input.index_data = indices.data();
+        input.index_count = 6;
+        input.attribute_count = 2;
+        input.attributes[0] = attributes[0];
+        input.attributes[1] = attributes[1];
+        // The combined depth/stencil attachment, cleared to `depth` with the
+        // stencil member 0 (the harness's own clear value): the case reads both
+        // planes' first tile back.
+        input.depth = true;
+        input.depth_test = true;
+        input.depth_write = true;
+        input.depth_compare_op = VK_COMPARE_OP_LESS;
+        input.depth_load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.depth_clear_value = depth;
+        input.depth_format = VK_FORMAT_D32_SFLOAT_S8_UINT;
+        input.stencil_load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        // R1: nothing is rasterized, so the stencil plane can only hold what the
+        // clear wrote.
+        input.rasterization_discard = true;
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+            return;
+        ps5vk_triangle triangle{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (test.capture && status == PS5VK_TRIANGLE_OK)
+        {
+            log_driver_submission(triangle.device, "clear only", log);
+            log_driver_stages(triangle.device, log);
+        }
+        bool cleared = false;
+        if (status == PS5VK_TRIANGLE_OK && triangle.depth_mapped != nullptr &&
+            triangle.depth_bytes > kStencilPlaneOffset + 0x10000u)
+        {
+            log_stencil_planes(triangle.depth_mapped, triangle.depth_bytes, log);
+            const auto *const plane =
+                static_cast<const std::uint8_t *>(triangle.depth_mapped) + kStencilPlaneOffset;
+            std::size_t zeros = 0;
+            for (std::size_t index = 0; index < 0x10000u; index++)
+                zeros += plane[index] == 0 ? 1u : 0u;
+            // The whole first tile of the stencil plane, not a sample of it: a
+            // clear writes every texel the pass covers, which is the target.
+            cleared = zeros == 0x10000u;
+            log.number("agc_stencil_clear", "stencil_zero_bytes", zeros);
+            log.number("agc_stencil_clear", "of", 0x10000u);
+            log.event("agc_stencil_clear", cleared ? "PASS" : "FAIL", cleared ? 0 : -1,
+                      cleared ? "the cleared stencil plane holds 0 everywhere"
+                              : "the cleared stencil plane does not hold 0");
+        }
+        else
+        {
+            log.event("agc_stencil_clear", "FAIL", -1,
+                      "the frame could not be recorded or the depth image was not mapped");
+        }
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            log.event("agc_stencil_clears", "FAIL", -1,
+                      "a submission did not complete; the program's objects stay allocated");
+            return;
+        }
+        ps5vk_triangle_finish(&triangle);
+        if (cleared)
+            ++passed;
+    }
+    outcome.command_built = true;
+    outcome.passed = passed == std::size(kDepths);
+    char detail[160]{};
+    std::snprintf(detail, sizeof(detail),
+                  "%u of %zu clears left the stencil plane at 0 (depth 1.0 and 0.5)", passed,
+                  std::size(kDepths));
+    log.event("agc_stencil_clears", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1,
+              detail);
+}
+
 void run_vulkan_stencil_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
     JsonLog &log = test.log;
@@ -20379,6 +20498,9 @@ constexpr RunnerTest kRunnerTests[] = {
     // R1: cull none, cull back, cull front and rasterizer discard, one frame
     // each over the same quad, read back in pixels (run_vulkan_cull_frames).
     {"v0-cull", "m3-vertex", run_vulkan_cull_frames},
+    // R3: a combined depth/stencil attachment cleared with stencil 0 and read
+    // back with nothing drawn (run_vulkan_stencil_clear_frames).
+    {"v0-stencil-clear", "v0-stencil-setup", run_vulkan_stencil_clear_frames},
     // Phase D2: a compute dispatch through the driver, its storage buffer and
     // its own pipeline (probes/c0/dispatch.spv, which the case reads itself:
     // the m2 set is only what the runner stages for every test).

@@ -6079,3 +6079,41 @@ observable only in a depth readback, and no probe has read a biased depth back:
 the refusal names that probe rather than accepting the state on a reading. The
 case's golden is `golden/v0-cull` with `jobs/v0-cull/queue.txt`, and `m2-solid`
 regresses.
+
+## 2026-09-20 — R3: the stencil clear's value, and the workaround that names its own retirement
+
+Mesa's `vk_meta_clear` unwraps a stencil attachment's clear value with
+`clearValue.depthStencil.depth` where the value it wants is the `.stencil`
+member (`src/vulkan/runtime/vk_meta_clear.c`), so a render pass that clears a
+combined depth-stencil attachment with depth 1.0 and stencil 0 leaves the
+stencil plane holding the depth clear's own byte. The driver's `v0-stencil` case
+never saw it: it clears and then *writes* the stencil with a pipeline before
+reading it, so the cleared value is never the thing read (PS5_VULKAN_REQUESTS.md,
+R3).
+
+`v0-stencil-clear` clears with depth 1.0 and then 0.5, draws nothing -- R1's
+rasterizer discard, so the clear is the only thing that writes -- and reads the
+stencil plane's whole first tile back. Measured on the console before the fix
+(`Klog_Logs/r3-stencil-clear-before.log`, pid 327):
+
+| depth clear | stencil tile bytes equal to 0 (of 65536) |
+| --- | --- |
+| 1.0 | 0 |
+| 0.5 | 65536 |
+
+which is the request's discriminating follow-up: the plane follows the *depth
+member's* value rather than being clamped or defaulted, and with depth 1.0 it
+holds no zero at all.
+
+**The workaround, at the driver's boundary.** `ps5vk_CmdBeginRendering` hands
+`vk_meta_clear_rendering` a copy of the rendering info whose *stencil*
+attachment carries the stencil's own value in the `depth` member -- the member
+`vk_meta` reads -- and leaves the depth attachment's copy alone, so the depth
+clear still takes the depth. It is marked `WORKAROUND(R3)` with the upstream
+line that retires it, and it is deliberately not a patch to Mesa: the driver
+links a prebuilt runtime whose sources this repository does not own, and the
+defect is upstream's and already reported as a measurement rather than a
+request. After the fix the same run reads 65536 zero bytes for both depths
+(`Klog_Logs/r3-stencil-clear-after.log`, pid 329), with `v0-stencil` (round 12's
+write-then-read case) and `m2-solid` regressing. The case's golden is
+`golden/v0-stencil-clear` with `jobs/v0-stencil-clear/queue.txt`.

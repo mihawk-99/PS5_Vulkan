@@ -1,0 +1,14 @@
+# PS5 Vulkan test runner job queue (PPSA99988): R3's cleared stencil plane.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-stencil-clear/queue.txt
+#
+# v0-stencil-clear clears a combined D32_SFLOAT_S8_UINT attachment with
+# depth 1.0 and then 0.5, draws nothing (rasterizer discard), and reads the
+# stencil plane's first tile back: it must hold 0 for both, which is what tells
+# a clear that took the depth member's value from one that took its own
+# (docs/M5_PHASE_C.md, R3). v0-stencil is the round-12 case behind it and
+# m2-solid the regression.
+hold 60
+v0-stencil-clear
+v0-stencil
+m2-solid
+exit

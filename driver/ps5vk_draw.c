@@ -797,7 +797,30 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
          container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk);
       struct ps5vk_meta_saved_state saved;
       ps5vk_meta_save(cmd_buffer, &saved);
-      vk_meta_clear_rendering(&device->meta, &cmd_buffer->vk, info);
+      /* WORKAROUND(R3): Mesa's vk_meta_clear unwraps a stencil attachment's
+       * clear value with `.depthStencil.depth` where the value it wants is the
+       * `.stencil` member (src/vulkan/runtime/vk_meta_clear.c, the
+       * clear_att[clear_count].clearValue.depthStencil.stencil assignment), so
+       * a render pass that clears a combined depth-stencil attachment with
+       * depth 1.0 and stencil 0 leaves the stencil plane holding the depth
+       * clear's own byte. Measured on the console: with depth 1.0 no byte of
+       * the plane's first tile is 0, and with depth 0.5 every byte is
+       * (PS5_VULKAN_REQUESTS.md R3, Klog_Logs/r3-stencil-clear-before.log). The
+       * copy below carries the stencil's own value in the member vk_meta reads;
+       * the depth attachment's copy is untouched, so the depth clear still
+       * takes the depth. Retire this when that line takes `.stencil`. */
+      const VkRenderingAttachmentInfo *corrected_stencil = NULL;
+      VkRenderingAttachmentInfo stencil;
+      VkRenderingInfo corrected;
+      if (info->pStencilAttachment != NULL) {
+         stencil = *info->pStencilAttachment;
+         stencil.clearValue.depthStencil.depth = stencil.clearValue.depthStencil.stencil;
+         corrected = *info;
+         corrected.pStencilAttachment = &stencil;
+         corrected_stencil = &stencil;
+      }
+      vk_meta_clear_rendering(&device->meta, &cmd_buffer->vk,
+                              corrected_stencil != NULL ? &corrected : info);
       ps5vk_meta_restore(cmd_buffer, &saved);
    }
 }
