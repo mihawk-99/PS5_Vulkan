@@ -208,6 +208,22 @@ def classify(name, symbols):
     return "gap"
 
 
+# What a command list cannot show, one line each, with the runner case that
+# covers it: the request that found R1, R2 and R3 asked the audits to be as
+# honest about what they cannot see as the runtime is about what it will not do
+# (PS5_VULKAN_REQUESTS.md, R4).
+BLIND_SPOTS = (
+    ("pipeline state: cullMode, rasterizerDiscardEnable, polygon offset",
+     "v0-cull (jobs/v0-cull/queue.txt)"),
+    ("sampler state: address modes, filters, LOD bias, anisotropy",
+     "v0-sampler-address (jobs/v0-sampler-address/queue.txt)"),
+    ("the pixels a clear wrote, before anything draws over them",
+     "v0-stencil-clear (jobs/v0-stencil-clear/queue.txt)"),
+    ("how a submission splits into steps, and what a step's capture holds",
+     "v0-two-passes (jobs/v0-two-passes/queue.txt)"),
+)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true", help="exit 1 on any gap")
@@ -289,6 +305,15 @@ def main():
         print("\nthe core commands that are unaccounted for:")
         for name in classified["gap"]:
             print(f"  {name}")
+    # What this audit cannot see, and the probes that do see it. A command list
+    # says nothing about pipeline state, sampler state or the pixels a clear
+    # wrote: R1 lived in the first, R2 in the second and R3 in the third, and
+    # none of them showed up here (PS5_VULKAN_REQUESTS.md, R4). The cases named
+    # beside each blind spot are its coverage, and each is a console-proved
+    # runner case rather than a one-off test.
+    print("\nnot visible here, and the case that covers it:")
+    for blind, case in BLIND_SPOTS:
+        print(f"  {blind}: {case}")
     if args.check and (classified["gap"] or extension_gaps or unpointed):
         return 1
     return 0

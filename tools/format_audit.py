@@ -253,6 +253,16 @@ def main():
     if extra:
         print("reported beyond the required set (the probes' own formats):")
         print("  " + " ".join(extra))
+    # What this audit cannot see: the format *properties* are what the driver
+    # reports, and two uses of a format are decided elsewhere -- what a clear
+    # actually writes into the pixels (R3) and whether an image is stored tiled
+    # for a use its usage bits do not name (R5). The cases beside them are that
+    # coverage (PS5_VULKAN_REQUESTS.md, R4).
+    print()
+    print("not visible here, and the case that covers it:")
+    print("  the pixels a clear wrote: v0-stencil-clear (jobs/v0-stencil-clear/queue.txt)")
+    print("  a resolve destination's usage: the vkCmdResolveImage refusal names it "
+          "(PS5_VULKAN_REQUESTS.md R5)")
     return 1 if args.check and (missing or unmet) else 0
 
 

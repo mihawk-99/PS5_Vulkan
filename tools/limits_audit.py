@@ -405,6 +405,14 @@ def main():
         f"table (footnotes 2 and 8 applied), {len(wrong)} missing its minimum or maximum, "
         f"{len(skipped)} not compared (--verbose lists them)"
     )
+    # What this audit cannot see: the limits are numbers, and sampler state is
+    # not one -- a device can report every maximum correctly and still accept
+    # exactly one sampler configuration (PS5_VULKAN_REQUESTS.md R2, the request
+    # that found R1, R2 and R3 and asked the audits to say what they cannot see,
+    # R4). The runner case beside it is that state's coverage.
+    print("\nnot visible here, and the case that covers it:")
+    print("  sampler state: address modes, filters, LOD bias, anisotropy: "
+          "v0-sampler-address (jobs/v0-sampler-address/queue.txt)")
     if args.check and wrong:
         return 1
     return 0

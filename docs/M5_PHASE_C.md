@@ -6136,3 +6136,21 @@ destination would move every sampled image's descriptor (the tiled kind bit) and
 with it every golden that samples a texture. The sentence is one line; the tiling
 is a repository-wide re-capture for the same behaviour. Both are the request's
 own two options, and it makes no recommendation between them.
+**R4, the audits' blind spots, stated.** The three audits now print what they
+cannot see beside the case that covers it, which is the request's own point --
+a command list says nothing about pipeline state (R1 lived there), a limit is
+not sampler state (R2), and a clear that writes the wrong value is still a clear
+(R3):
+
+| audit | what it cannot see | the case |
+| --- | --- | --- |
+| `command_audit.py` | pipeline state, sampler state, cleared pixels, a submission's steps | `v0-cull`, `v0-sampler-address`, `v0-stencil-clear`, `v0-two-passes` |
+| `limits_audit.py` | sampler state | `v0-sampler-address` |
+| `format_audit.py` | the pixels a clear wrote, a resolve destination's usage | `v0-stencil-clear`, the R5 refusal |
+
+Each of those cases is a console-proved runner case with a queue under `jobs/`
+and a golden under `golden/`, not a one-off test: `v0-two-passes` (R6),
+`v0-sampler-address` (R2), `v0-cull` (R1) and `v0-stencil-clear` (R3) were added
+by the rounds above, each with the console run that proves it recorded in its own
+section. The audits' `--check` modes exit 0 unchanged: the statements are
+printed, not counted.
