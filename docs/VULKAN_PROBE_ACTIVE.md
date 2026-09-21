@@ -21,16 +21,22 @@ from vkQuake's source, so each was re-checked at HEAD before anything was writte
   refused by name in both the static and the dynamic form, because the hardware's
   register measured inert and a silent cap would report a wrong depth as a success.
   The driver no longer caps anything.
-- **R9 is confirmed open, with the mechanism measured**: push constants reach the
-  driver's own block (the debug API reads the second draw's bytes back) and never reach
-  the shader, because the standalone compiler lowers an application's
-  `layout(push_constant)` to a user-data location its metadata does not report. The
-  port must keep W4; two fix routes are named in `docs/M5_PHASE_C.md`.
-- **R7 is confirmed and the route is chosen**: the two-set refusal happens at the
-  *draw*, not at creation (the prediction's one wrong detail), and the route favoured
-  is (b) -- multi-set within the advertised four, vkQuake merging five layouts into
-  four -- because Vulkan requires at least four sets, which makes today's one-set
-  behaviour a conformance gap.
+- **R9 is closed**: the compiler's shader-info pass ran before the lowering that makes
+  a push constant a load, so the ABI never declared the argument and ACO read an
+  unwritten SGPR. The patch hoists the lowering, switches off the inlining heuristic
+  and reports the pointer's dword; the driver writes the block there. Both symptoms are
+  proved (each draw's own colour arrives *and* the frame submits), and the port can
+  revert W4.
+- **R4's residual gap is closed**: `v0-colour-clear` reads a non-black colour clear
+  back with nothing drawn over it (36 of 36 samples), with a drawn control frame at 0
+  of 36, and the audits' sampler line now says which fields the covering case
+  exercises.
+- **R7 is confirmed, the route is chosen and its reconnaissance is done**: the two-set
+  refusal happens at the *draw*, not at creation, and route (b) is chosen -- multi-set
+  within the advertised four, vkQuake merging five layouts into four. What remains is
+  the compiler wrapper's single-set assumption (`psbc_descriptor_layout` and its
+  validation), then N tables in the draw, per-set binding and a two-set probe; it is
+  the larger piece by a wide margin and is not started.
 - **R4's coverage note is answered by correcting our own claim**: the runner *does*
   install a `VK_EXT_debug_utils` messenger and forwards every refusal to the log; the
   gap was that a frame expecting a refusal passed no report. Fixed, and one sweep now
@@ -84,10 +90,8 @@ reported by the driver; the rows left are the hardware's and one footnote clause
 | Check | Result |
 | --- | --- |
 | the second batch, one sweep (pid 380) | Ten of ten tests PASS on title digest `c9c57b40…`: R8's `v0-dynamic-depth-bias`, R7's `v0-two-sets`, R5's `v0-resolve-usage`, R1's `v0-depth-bias`, R6's `v0-two-passes`, R2's `v0-sampler-address`, R3's `v0-stencil-clear`, `v0-cull`, `c8-resolve` and `m2-solid`, with all three refusal sentences in the klog (`Klog_Logs/r-coverage.log`). `v0-push-constant` (R9) is red on purpose and is not in that sweep |
-| R8's dynamic depth bias (pid 371) | Biasing the second draw kept 0 of 3 left samples and 3 of 3 right; biasing the first kept 3 and 0; biasing both left two different depths in one image (0x3efff000 and 0x3effe000). The clamp frame was refused by name (`Klog_Logs/r8-dynamic-bias2.log`, digest `4aec17c7…`) |
-| R9's push constants (pid 377) | The driver's block held the second draw's bytes (0,0,1,1) with the descriptor and user data naming it, and both halves read back 0x00000000: the upload arrives, the stage's read does not (`Klog_Logs/r9-push-constant-final2.log`, digest `6306b4aa…`) |
+| R9's push constants, before and after the fix (pid 377, pid 110) | The driver's block held the second draw's bytes (0,0,1,1) with the descriptor and user data naming it, and both halves read back 0x00000000: the upload arrives, the stage's read does not (`Klog_Logs/r9-push-constant-final2.log`, digest `6306b4aa…`) |
 | R7's two-set layout (pid 378) | The pipeline was created and its draw refused: "descriptor set 1 is beyond the 1 this driver binds; sets past 0 are D1" (`Klog_Logs/r7-two-sets.log`, digest `084a7c84…`) |
-| R1's depth bias and R5's refusal, on the committed build (one sweep, pid 369) | Five of five tests PASS, no FAIL, no `signal:`: the depth-bias frames kept 2880 / 0 / 2880 / 2880 / 2880 / 0 of 2880 samples and 3 / 0 on the two ramps, with the biased depth in the plane (0x3effe000 and 0x3f001000) and the capped factor 0xc327c5ac in the recorded table, and the probe the ask described (`v0-resolve-usage`) was refused without the colour-attachment bit and submitted with it (`Klog_Logs/r-verify3.log`, `golden/v0-depth-bias`). Title digest `998037c4…`. The focused host gate is `c5_depth_bias`: 12 of 12 checks direct, 4 of 4 loader, PS5 link PASS |
 | the R round on the rebuilt runtime (`jobs/verify`, pid 331) | Nine of nine tests PASS, 1509 PASS records, **no `signal:`**: the four new cases, `v0-stencil`, `c8-resolve`, `m3-texture` and `m2-solid` twice (`Klog_Logs/r-verify-runtime.log`). Title digest `b33b813c…` |
 | the six requests' probes | R6's guard proved the overflow on the console before the fix and is silent after; R1's four frames read back 132 / 65 / 67 / 0 drawn pixels (no cull, back, front, discard); R2's probe samples a four-group texture across u 0 -> 4 and reads each group back; R3's stencil plane reads 65536 zero bytes at both clear depths (`Klog_Logs/r2-final.log`, `r1-cull-run4.log`, `r3-stencil-clear-{before,after}.log`) |
 | the linked runtime | rebuilt: the Sep 16 archive predated the fork (stamp tree `a92a1228…`, script `cf4765ca…`); the rebuild changes the stubs and moves the title digest. All 60 objects differ, three of them by source |

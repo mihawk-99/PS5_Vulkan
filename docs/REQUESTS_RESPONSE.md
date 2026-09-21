@@ -259,3 +259,73 @@ R7's `v0-two-sets` and R5's `v0-resolve-usage` carry their refusal sentences int
 log, and the Klog also shows the clamp's. `v0-push-constant` is the one case
 that stays red, on purpose: it is R9's measurement, not a claim, and its message says
 which half of the path arrived.
+
+---
+
+# Third batch: R9 fixed, R7's reconnaissance, R4's residual
+
+## The two reconnaissance answers, first
+
+**(a) The R9 fix is small, and it is done.** The route that works is the compiler-side
+one, and it is three edits in one patch script, not a re-architecture: the standalone
+path's shader-info pass runs *before* `radv_postprocess_nir`, which is where
+`nir_lower_explicit_io` turns a push-constant variable into the loads that make
+`radv_shader_info.loads_push_constants` true. So the ABI never declared
+`AC_UD_PUSH_CONSTANTS`, ACO still lowered the loads through it, and the shader read an
+unwritten SGPR: the silent zero. Hoisting the (idempotent) lowering above the info
+pass, switching off the info pass's inlining heuristic for this path (the pointer is
+the only form a driver can program when 128 bytes exceed a stage's 16 user-data
+dwords), and reporting the pointer's dword in `PsbcShaderMetadata` is the whole fix;
+the driver writes the block's address there. One trap is recorded in
+`docs/M5_PHASE_C.md`: bumping the metadata version made the console refuse *every*
+pipeline, because title builds compile ps5-opengl's package writer against the SDK's
+header; the fields are appended, so the version stays 14.
+
+**(b) R9 and R7 share the mechanism, not the change.** Both need per-stage user-data
+pointers that the compiler reports and the driver writes, and R9's patch is the exact
+template for that part. But R7 additionally needs the compiler wrapper's **single-set
+assumption** removed: `psbc_descriptor_layout` builds one `radv_descriptor_set_layout`
+into one storage and the validation rejects any binding whose `set` is not 0. R7 is
+therefore N set layouts, N ABI pointers, N tables in the draw, per-set binding in
+`vkCmdBindDescriptorSets`, the "beyond the 1 this driver binds" refusal replaced by an
+"at most 4" one, and a two-set probe -- the larger piece by a wide margin. They are
+not one change; doing R9 first was right, and it is what unblocks W4 now.
+
+## R9 -- closed, both symptoms proved
+
+Fixed in `8de2580`. The probe (`jobs/v0-push-constant/queue.txt`,
+`golden/v0-push-constant`) records one pipeline whose fragment shader exports its
+`layout(push_constant)` colour and two draws that upload different values without
+recreating the pipeline, one half of the target each. On the console (pid 110, title
+digest `dd035edd…`, `Klog_Logs/r9-sweep.log`): the left half holds `0xff0000ff` and the
+right `0xffff0000` -- each draw's own value, 3 of 3 samples each -- and the frame
+submits with no refusal, which is the second symptom the demos saw and the silent-zero
+mechanism alone does not explain. The whole regression list passes with it (11 of 11),
+`tools/check-driver.sh` reports 288 run comparisons identical with no `DIFFERENT`
+(nothing else uses push constants, so no golden moved), and the focused host gate is
+6 of 6 direct, loader and PS5 link.
+
+**The port can revert W4.** The probe is a per-draw 16-byte transform, which is the
+shape the request asked for.
+
+## R4's residual -- closed
+
+`v0-colour-clear` (`jobs/v0-colour-clear/queue.txt`, `golden/v0-colour-clear`) clears
+the colour target to the canary `0xffff8040` (not black), records a rasterizer discard
+so the clear is the only writer, and reads it back; a second frame draws the same pass
+so the readback is proved to be the clear's value. Measured (pid 112, digest
+`24deafbe…`): 36 of 36 samples hold the clear word in the clear-only frame and 0 of 36
+in the drawn control. The audits' sampler line now names what `v0-sampler-address`
+actually exercises (the address modes) and the fields that are refusals rather than
+coverage, in both the command and the limits audit; the pixels-a-clear-wrote line names
+both planes. All three `--check` modes still exit 0.
+
+## R7 -- reconnaissance done, implementation not started
+
+Status unchanged from the v2 answer: confirmed open, route (b) chosen, and the probe
+still refuses with `descriptor set 1 is beyond the 1 this driver binds; sets past 0 are
+D1`. What is new is the estimate above and the first concrete step: the compiler
+wrapper has to grow N set layouts before anything else can move, and that is a
+multi-session change with its own console cycles, not a field away from R9. The
+application's own half (five world layouts into four) is independent of it and can
+start whenever it likes.
