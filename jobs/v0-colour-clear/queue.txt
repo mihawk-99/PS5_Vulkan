@@ -1,0 +1,17 @@
+# PS5 Vulkan test runner job queue (PPSA99988): R4's colour-clear readback.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-colour-clear/queue.txt
+#
+# v0-colour-clear clears the colour target to the canary colour -- deliberately
+# not black -- records a rasterizer discard so the clear is the only thing that
+# writes, and reads the frame back: every sample must hold the clear's word. A
+# second frame draws the same pass without the discard, so the readback is proved
+# to be the clear's value rather than anyway-the-clear's. This is the shape that
+# let R3 hide on the stencil plane for as long as it did (R4's residual gap,
+# docs/M5_PHASE_C.md). v0-stencil-clear (the stencil plane's own case, which R3
+# added) and m2-solid are the regressions behind it.
+hold 60
+capture
+v0-colour-clear
+v0-stencil-clear
+m2-solid
+exit

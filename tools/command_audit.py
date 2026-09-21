@@ -217,10 +217,13 @@ BLIND_SPOTS = (
      "v0-cull (jobs/v0-cull/queue.txt)"),
     ("pipeline state: depthBiasEnable, its factors and the depth it writes",
      "v0-depth-bias (jobs/v0-depth-bias/queue.txt)"),
-    ("sampler state: address modes, filters, LOD bias, anisotropy",
+    ("sampler state: the address modes v0-sampler-address exercises (repeat, "
+     "mirrored repeat, clamp to edge); the filters, LOD bias, anisotropy, compare "
+     "and border colours are refusals it does not cover",
      "v0-sampler-address (jobs/v0-sampler-address/queue.txt)"),
-    ("the pixels a clear wrote, before anything draws over them",
-     "v0-stencil-clear (jobs/v0-stencil-clear/queue.txt)"),
+    ("the pixels a clear wrote, before anything draws over them -- the stencil plane "
+     "and the colour target",
+     "v0-stencil-clear and v0-colour-clear (jobs/*/queue.txt)"),
     ("how a submission splits into steps, and what a step's capture holds",
      "v0-two-passes (jobs/v0-two-passes/queue.txt)"),
 )

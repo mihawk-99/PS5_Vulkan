@@ -17045,6 +17045,123 @@ void run_vulkan_two_sets_frames(const TestContext &test, TestOutcome &outcome) n
     ps5vk_triangle_finish(&triangle);
 }
 
+// R4's residual gap (PS5_VULKAN_REQUESTS.md, R4; docs/REQUESTS_RESPONSE.md): the
+// colour clear, read back with nothing drawn over it. The stencil plane has had a
+// case of this shape since R3; the colour target has not -- and it is the shape
+// that let R3 hide, because a clear that writes a value nothing reads back looks
+// exactly like a working clear. The pass clears to the canary colour
+// (0xffff8040, deliberately not black), the first frame records a rasterizer
+// discard so the clear is the only thing that writes, and the second draws the
+// same frame without it: the readback is then proved to be the clear's value
+// rather than anyway-the-clear's.
+constexpr unsigned kColourClearFrames = 2;
+
+void run_vulkan_colour_clear_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    struct Frame
+    {
+        const char *name;
+        bool discard;
+    };
+    static constexpr Frame kFrames[kColourClearFrames] = {
+        {"clear, nothing drawn over it", true},
+        {"the same frame drawn", false},
+    };
+    // The colour the harness's pass clears to, which v0-cull measured as this
+    // word in the frame's own pixels: red 0x40, green 0x80, blue 0xff, opaque.
+    const std::uint32_t clear_word = 0xffff8040u;
+    unsigned cleared[kColourClearFrames] = {0};
+    unsigned sampled = 0;
+    for (unsigned index = 0; index < kColourClearFrames; index++)
+    {
+        const Frame &frame = kFrames[index];
+        log.event("agc_colour_clear_frame", "INFO", 0, frame.name);
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        // No geometry: the m2 set draws its own full-target triangle, so the
+        // control frame needs no binding and the case needs no vertex buffer.
+        input.vertex_count = 0;
+        input.index_count = 0;
+        input.rasterization_discard = frame.discard;
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+            return;
+        ps5vk_triangle triangle{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (test.capture && status == PS5VK_TRIANGLE_OK)
+        {
+            log_driver_submission(triangle.device, frame.name, log);
+            log_driver_stages(triangle.device, log);
+        }
+        bool checked = false;
+        if (status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes)
+        {
+            flush_gpu_data(const_cast<void *>(triangle.target), kFramebufferBytes);
+            const auto *const words = static_cast<const std::uint32_t *>(triangle.target);
+            const FramebufferView view{words, kTiledRgba8Layout};
+            sampled = 0;
+            cleared[index] = 0;
+            for (std::uint32_t row = kOutputHeight / 8; row < kOutputHeight * 7 / 8;
+                 row += kOutputHeight / 8)
+                for (std::uint32_t column = kOutputWidth / 8; column < kOutputWidth * 7 / 8;
+                     column += kOutputWidth / 8)
+                {
+                    ++sampled;
+                    cleared[index] += view.word(column, row) == clear_word ? 1u : 0u;
+                }
+            log.number("agc_colour_clear_frame", "cleared", cleared[index]);
+            log.number("agc_colour_clear_frame", "of", sampled);
+            log.hex("agc_colour_clear_frame", "centre_word",
+                    view.word(kOutputWidth / 2, kOutputHeight / 2));
+            log.hex("agc_colour_clear_frame", "clear_word", clear_word);
+            log.event("agc_colour_clear_frame", "PASS", 0,
+                      "the frame recorded and its pixels were read");
+            checked = true;
+        }
+        else
+        {
+            log.event("agc_colour_clear_frame", "FAIL", -1,
+                      "the frame could not be recorded or submitted");
+        }
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            log.event("agc_colour_clear", "FAIL", -1,
+                      "a submission did not complete; the program's objects stay allocated");
+            return;
+        }
+        ps5vk_triangle_finish(&triangle);
+        if (!checked)
+        {
+            outcome.command_built = false;
+            log.event("agc_colour_clear", "FAIL", -1, "a frame could not be recorded or submitted");
+            return;
+        }
+    }
+    // The clear's own frames hold the clear's value in every sample, and the
+    // control frame holds it in none: the readback is the clear's doing and the
+    // case can tell a clear from a draw.
+    const bool passed = sampled > 0 && cleared[0] == sampled && cleared[1] == 0;
+    log.number("agc_colour_clear", "clear_only_cleared", cleared[0]);
+    log.number("agc_colour_clear", "drawn_cleared", cleared[1]);
+    log.number("agc_colour_clear", "sampled", sampled);
+    log.hex("agc_colour_clear", "clear_word", clear_word);
+    char detail[176]{};
+    std::snprintf(detail, sizeof(detail),
+                  "the clear-only frame held %u of %u samples at %08x and the drawn control %u",
+                  cleared[0], sampled, clear_word, cleared[1]);
+    outcome.command_built = true;
+    outcome.passed = passed;
+    log.event("agc_colour_clear", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
+}
+
 void run_vulkan_stencil_clear_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
     JsonLog &log = test.log;
@@ -21401,6 +21518,9 @@ constexpr RunnerTest kRunnerTests[] = {
     // with COLOR_ATTACHMENT added, which is the workaround
     // (run_vulkan_resolve_usage_frames).
     {"v0-resolve-usage", "m3-vertex", run_vulkan_resolve_usage_frames},
+    // R4's residual: the colour clear read back with nothing drawn over it, and a
+    // drawn control frame (run_vulkan_colour_clear_frames).
+    {"v0-colour-clear", "m2", run_vulkan_colour_clear_frames},
     // R7: a pipeline layout with two descriptor set layouts, whose draw this
     // driver refuses by name (run_vulkan_two_sets_frames).
     {"v0-two-sets", "m2", run_vulkan_two_sets_frames},

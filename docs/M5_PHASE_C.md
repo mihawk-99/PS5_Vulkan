@@ -6553,3 +6553,35 @@ and PS5 link PASS), which asserts the block, the descriptor and the pointer dwor
 shape the request asked for -- a per-draw 16-byte transform through
 `vkCmdPushConstants`, changed between two draws without recreating the pipeline, both
 draws read back and different.
+
+## 2026-09-20 — R4's residual gap: the colour clear, read back with nothing over it
+
+The first batch's R4 answered pipeline state, sampler state and submission steps, and R3
+gave the *stencil* plane a clear readback -- but no case cleared a **colour** target to a
+value that is not black, drew nothing over it, and read it back. That is the shape that
+let R3 hide for as long as it did: a clear that writes a value nothing reads looks
+exactly like a working clear.
+
+`v0-colour-clear` (`jobs/v0-colour-clear/queue.txt`, `golden/v0-colour-clear`) is that
+probe. The pass clears to the canary colour -- `0xffff8040`, deliberately not black --
+and the first frame records a rasterizer discard, so the clear is the only thing that
+writes; the second frame draws the same pass without the discard, which is what proves
+the readback is the clear's value rather than anyway-the-clear's. Measured on the
+console (pid 112, title digest `24deafbe…`, `Klog_Logs/r4-colour-clear.log`):
+
+| frame | samples holding the clear word (of 36) | the centre pixel |
+| --- | --- | --- |
+| clear, nothing drawn over it | **36** | `0xffff8040` |
+| the same frame drawn (control) | 0 | `0xffffa020` |
+
+`v0-stencil-clear` (the stencil plane's own case) and `m2-solid` regress: three of three
+tests PASS.
+
+**The audits' sampler line now says what the case exercises.** Both the command and the
+limits audit named "sampler state: address modes, filters, LOD bias, anisotropy" beside
+`v0-sampler-address`, which covers the address modes only -- the rest are refusals by
+design (R2's answer), not coverage. The line reads "the address modes v0-sampler-address
+exercises (repeat, mirrored repeat, clamp to edge); the filters, LOD bias, anisotropy,
+compare and border colours are refusals it does not cover", and the pixels-a-clear-wrote
+line names both planes now that the colour target has its own case. All three audits'
+`--check` modes still exit 0: the statements are printed, not counted.

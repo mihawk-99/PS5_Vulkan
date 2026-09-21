@@ -260,7 +260,8 @@ def main():
     # coverage (PS5_VULKAN_REQUESTS.md, R4).
     print()
     print("not visible here, and the case that covers it:")
-    print("  the pixels a clear wrote: v0-stencil-clear (jobs/v0-stencil-clear/queue.txt)")
+    print("  the pixels a clear wrote: v0-stencil-clear (the stencil plane) and "
+          "v0-colour-clear (the colour target, jobs/v0-colour-clear/queue.txt)")
     print("  a resolve destination's usage: the vkCmdResolveImage refusal names it "
           "(PS5_VULKAN_REQUESTS.md R5)")
     return 1 if args.check and (missing or unmet) else 0

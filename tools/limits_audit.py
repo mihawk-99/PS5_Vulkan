@@ -411,7 +411,9 @@ def main():
     # that found R1, R2 and R3 and asked the audits to say what they cannot see,
     # R4). The runner case beside it is that state's coverage.
     print("\nnot visible here, and the case that covers it:")
-    print("  sampler state: address modes, filters, LOD bias, anisotropy: "
+    print("  sampler state: the address modes v0-sampler-address exercises (repeat, "
+          "mirrored repeat, clamp to edge); the filters, LOD bias, anisotropy, compare "
+          "and border colours are refusals it does not cover: "
           "v0-sampler-address (jobs/v0-sampler-address/queue.txt)")
     if args.check and wrong:
         return 1
