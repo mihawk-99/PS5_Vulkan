@@ -105,11 +105,27 @@
 /* R1's rasterization registers, in the context table's own numbering (the
  * register database's MMIO address over four, minus 0xA000, which is what every
  * offset here is): PA_CL_CLIP_CNTL at 0x204, PA_SU_SC_MODE_CNTL at 0x205 and
- * polygon offset's block at 0x2de, which a later round programs when its probe
- * exists (PS5_VULKAN_REQUESTS.md, R1). */
+ * polygon offset's block -- PA_SU_POLY_OFFSET_DB_FMT_CNTL at 0x2de through
+ * PA_SU_POLY_OFFSET_BACK_OFFSET at 0x2e3, the six words ps5-opengl's runtime
+ * writes in that order (src/platform/ps5_agc_native_runtime.c:3393) and the
+ * ones a depth-biased pipeline's draw records (PS5_VULKAN_REQUESTS.md, R1). */
 #define PS5VK_CLIP_CONTROL_REGISTER 0x204
 #define PS5VK_RASTERIZER_REGISTER 0x205
 #define PS5VK_CLIP_CONTROL_DISCARD (UINT32_C(1) << 22)
+#define PS5VK_POLY_OFFSET_DB_FMT_REGISTER 0x2de
+#define PS5VK_POLY_OFFSET_COUNT 6
+/* The block's own two enables, in PA_SU_SC_MODE_CNTL (0x205): without them the
+ * six words do nothing (ps5vk_pipeline.c, measured in Klog_Logs/r-depth-bias2.log
+ * before they were set). */
+#define PS5VK_RASTERIZER_POLY_OFFSET_FRONT (UINT32_C(1) << 11)
+#define PS5VK_RASTERIZER_POLY_OFFSET_BACK (UINT32_C(1) << 12)
+/* PA_SU_POLY_OFFSET_DB_FMT_CNTL for a 32-bit float depth attachment, which is
+ * ps5-opengl's own word for GFX10 D32F: -23 in the low byte's signed
+ * POLY_OFFSET_NEG_NUM_DB_BITS and POLY_OFFSET_DB_IS_FLOAT_FMT set
+ * (src/gallium/ps5/ps5_screen.c:2151, "GFX10 D32F: -23 depth bits plus
+ * floating-point format"). A UNORM depth attachment's word is not measured, so
+ * a bias through one is refused by name rather than guessed at. */
+#define PS5VK_POLY_OFFSET_DB_FMT_D32F 0x000001e9u
 #define PS5VK_BLEND_CONSTANT_COUNT 4
 #define PS5VK_COLOR_CONTROL_REGISTER 0x202
 #define PS5VK_COLOR_CONTROL_WORD 0x00cc0011u
@@ -760,6 +776,7 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
       return;
    }
    cmd_buffer->depth_bound = depth_address != NULL;
+   cmd_buffer->depth_format = cmd_buffer->depth_bound ? depth_format : VK_FORMAT_UNDEFINED;
    cmd_buffer->stencil_bound = cmd_buffer->depth_bound &&
                                vk_format_has_stencil(depth_format) && stencil_address != 0;
    if (cmd_buffer->depth_bound)
@@ -928,6 +945,7 @@ ps5vk_cmd_buffer_inherit(struct ps5vk_cmd_buffer *cmd_buffer,
       ps5vk_depth_registers(depth->address, depth->address + depth->stencil_offset, extent,
                             depth->vk.samples, depth->vk.format, cmd_buffer->depth_registers);
       cmd_buffer->depth_bound = true;
+      cmd_buffer->depth_format = depth->vk.format;
       cmd_buffer->stencil_bound = vk_format_has_stencil(depth->vk.format) &&
                                   depth->stencil_offset != 0;
    }
@@ -1261,6 +1279,24 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
 
    if (pipeline->draw_refusal) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN, "%s", pipeline->draw_refusal);
+      return;
+   }
+   /* R1's depth bias, gated by the depth attachment's format: the block's own
+    * DB_FMT_CNTL word is the format's (the register database's field), and only
+    * the D32 float word is measured -- ps5-opengl's 0x1e9 for GFX10 D32F. A
+    * rendering with no depth attachment makes the bias inert, which is what
+    * Vulkan says, and records no word; a UNORM depth attachment's word is not
+    * measured, so the draw is refused by name rather than guessed at. */
+   if (pipeline->depth_bias && cmd_buffer->depth_bound &&
+       cmd_buffer->depth_format != VK_FORMAT_D32_SFLOAT &&
+       cmd_buffer->depth_format != VK_FORMAT_D32_SFLOAT_S8_UINT) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                              "drawing with a depth bias through a depth attachment of format %d: "
+                              "the six PA_SU_POLY_OFFSET_* words are ps5-opengl's D32 float block "
+                              "(PA_SU_POLY_OFFSET_DB_FMT_CNTL 0x1e9), and another depth format's "
+                              "word is not measured and needs its own probe "
+                              "(PS5_VULKAN_REQUESTS.md, R1)",
+                              (int)cmd_buffer->depth_format);
       return;
    }
    if (first_instance != 0 || (first_vertex != 0 && indexed == NULL)) {
@@ -1672,9 +1708,16 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
                                 blend_constant_count;
    /* R1's rasterization words go behind everything else, and only the state a
     * pipeline asks for: a draw that culls nothing, discards nothing and biases
-    * nothing records exactly the words it recorded before R1. */
+    * nothing records exactly the words it recorded before R1. A depth-biased
+    * pipeline's six PA_SU_POLY_OFFSET_* words follow, in the block's own order
+    * (the format word, then the clamp, the front scale and offset and the back
+    * pair), and only when the rendering bound a depth attachment: with none the
+    * bias is inert and the words would be the only thing asking for a depth
+    * format the draw does not have. */
+   const uint32_t depth_bias_count =
+      pipeline->depth_bias && cmd_buffer->depth_bound ? PS5VK_POLY_OFFSET_COUNT : 0u;
    const uint32_t raster_count = (pipeline->rasterizer_word != 0 ? 1u : 0u) +
-                                 (pipeline->discard_rasterizer ? 1u : 0u);
+                                 (pipeline->discard_rasterizer ? 1u : 0u) + depth_bias_count;
    const uint32_t fixed = PS5VK_TARGET_REGISTER_COUNT + msaa_count + depth_count +
                           stencil_count + PS5VK_VIEWPORT_REGISTER_COUNT;
    const uint32_t cx_count = fixed + PS5VK_STAGE_CONTEXT_RECORDS + vertex->cx_count +
@@ -1740,6 +1783,22 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
       if (pipeline->discard_rasterizer)
          *raster++ = (struct ps5vk_agc_register){.offset = PS5VK_CLIP_CONTROL_REGISTER,
                                                  .value = PS5VK_CLIP_CONTROL_DISCARD};
+      if (depth_bias_count != 0) {
+         /* Vulkan's one bias is the front face's and the back face's alike, as
+          * ps5-opengl's block writes it: the back pair mirrors the front's. */
+         const uint32_t words[PS5VK_POLY_OFFSET_COUNT] = {
+            PS5VK_POLY_OFFSET_DB_FMT_D32F,
+            pipeline->depth_bias_clamp,
+            pipeline->depth_bias_scale,
+            pipeline->depth_bias_offset,
+            pipeline->depth_bias_scale,
+            pipeline->depth_bias_offset,
+         };
+         for (uint32_t index = 0; index < PS5VK_POLY_OFFSET_COUNT; index++)
+            *raster++ = (struct ps5vk_agc_register){
+               .offset = (uint16_t)(PS5VK_POLY_OFFSET_DB_FMT_REGISTER + index),
+               .value = words[index]};
+      }
    }
    memcpy(sh, vertex->sh, vertex->sh_count * sizeof(*sh));
    memcpy(sh + vertex->sh_count, pixel->sh, pixel->sh_count * sizeof(*sh));

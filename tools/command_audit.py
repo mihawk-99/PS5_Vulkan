@@ -213,8 +213,10 @@ def classify(name, symbols):
 # honest about what they cannot see as the runtime is about what it will not do
 # (PS5_VULKAN_REQUESTS.md, R4).
 BLIND_SPOTS = (
-    ("pipeline state: cullMode, rasterizerDiscardEnable, polygon offset",
+    ("pipeline state: cullMode and rasterizerDiscardEnable",
      "v0-cull (jobs/v0-cull/queue.txt)"),
+    ("pipeline state: depthBiasEnable, its factors and the depth it writes",
+     "v0-depth-bias (jobs/v0-depth-bias/queue.txt)"),
     ("sampler state: address modes, filters, LOD bias, anisotropy",
      "v0-sampler-address (jobs/v0-sampler-address/queue.txt)"),
     ("the pixels a clear wrote, before anything draws over them",

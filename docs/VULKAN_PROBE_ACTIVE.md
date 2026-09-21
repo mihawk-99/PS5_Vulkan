@@ -21,10 +21,13 @@ were worked:
   REPEAT 0, MIRROR_REPEAT 1, CLAMP_TO_EDGE 2 -- so the default a zeroed
   `VkSamplerCreateInfo` holds is no longer refused; the two modes that are not
   core Vulkan 1.0 are refused by name.
-- **R1**: `cullMode` and `rasterizerDiscardEnable` are programmed
-  (PA_SU_SC_MODE_CNTL's CULL_FRONT/CULL_BACK/FACE, PA_CL_CLIP_CNTL's
-  DX_RASTERIZATION_KILL); `depthBiasEnable` stays refused with its own named
-  probe, and `polygonMode`/`depthClampEnable` stay refused by their feature bits.
+- **R1**: `cullMode`, `rasterizerDiscardEnable` and now `depthBiasEnable` are
+  programmed (PA_SU_SC_MODE_CNTL's CULL_FRONT/CULL_BACK/FACE and its
+  POLY_OFFSET_FRONT/BACK_ENABLE, PA_CL_CLIP_CNTL's DX_RASTERIZATION_KILL, and the
+  six PA_SU_POLY_OFFSET_* words ps5-opengl writes); `polygonMode`/`depthClampEnable`
+  stay refused by their feature bits. The hardware's clamp register measured inert
+  on this path, so the driver caps the constant factor itself and the slope half's
+  clamp is a named gap (docs/HARDWARE_FINDINGS.md).
 - **R3**: `vk_meta` unwraps a stencil clear from the depth member, so the driver
   hands it a copy whose stencil attachment carries the stencil value
   (`WORKAROUND(R3)`, retirement in the comment).
@@ -32,9 +35,10 @@ were worked:
   rule and the workaround in one sentence.
 - **R4**: each audit prints what it cannot see beside the case that covers it.
 
-Four console-proved cases carry them -- `v0-two-passes`, `v0-sampler-address`,
-`v0-cull`, `v0-stencil-clear` -- each with a queue under `jobs/` and a golden
-under `golden/`.
+Five console-proved cases carry them -- `v0-two-passes`, `v0-sampler-address`,
+`v0-cull`, `v0-stencil-clear` and, for the depth bias, `v0-depth-bias` -- each with a
+queue under `jobs/`, a golden under `golden/` and, for the depth bias, a focused host
+gate (`driver/tests/vk_c5_depth_bias_test.c`).
 
 **The linked runtime was four days older than the migration.** The stale
 `libvk_runtime.ps5.a` (its stamp named the pre-fork tree and an older build
@@ -72,6 +76,7 @@ reported by the driver; the rows left are the hardware's and one footnote clause
 
 | Check | Result |
 | --- | --- |
+| R1's depth bias, on the committed build (`jobs/v0-depth-bias`, pid 367) | Three of three tests PASS, no FAIL: the eight frames kept 2880 / 0 / 2880 / 2880 / 2880 / 0 of 2880 samples and 3 / 0 on the two ramps, with the biased depth in the plane (0x3effe000 and 0x3f001000) and the capped factor 0xc327c5ac in the recorded table (`Klog_Logs/r-depth-bias-final2.log`, `golden/v0-depth-bias`). Title digest `356754d6…`. The focused host gate is `c5_depth_bias`: 12 of 12 checks direct, 4 of 4 loader, PS5 link PASS |
 | the R round on the rebuilt runtime (`jobs/verify`, pid 331) | Nine of nine tests PASS, 1509 PASS records, **no `signal:`**: the four new cases, `v0-stencil`, `c8-resolve`, `m3-texture` and `m2-solid` twice (`Klog_Logs/r-verify-runtime.log`). Title digest `b33b813c…` |
 | the six requests' probes | R6's guard proved the overflow on the console before the fix and is silent after; R1's four frames read back 132 / 65 / 67 / 0 drawn pixels (no cull, back, front, discard); R2's probe samples a four-group texture across u 0 -> 4 and reads each group back; R3's stencil plane reads 65536 zero bytes at both clear depths (`Klog_Logs/r2-final.log`, `r1-cull-run4.log`, `r3-stencil-clear-{before,after}.log`) |
 | the linked runtime | rebuilt: the Sep 16 archive predated the fork (stamp tree `a92a1228…`, script `cf4765ca…`); the rebuild changes the stubs and moves the title digest. All 60 objects differ, three of them by source |

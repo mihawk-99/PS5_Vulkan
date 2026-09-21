@@ -2962,3 +2962,26 @@ in an image the loader placed; rebase them by the base the crash report's own
 `xotext:` line gives before symbolizing anything. Matching the build is not
 enough when the build is a PIE: `build/llvm-pie.elf`'s vaddrs start at zero and
 the console's do not.
+
+## Depth bias: the two enables, the 2^-23 unit, and an inert clamp (R1)
+
+Three measurements from the console (`Klog_Logs/r-depth-bias{2,3,5}.log`, pids 362,
+363, 364; the committed build's run is pid 367), each read out of a D32_SFLOAT depth
+plane the frame itself wrote:
+
+- **The six `PA_SU_POLY_OFFSET_*` words (0x2de through 0x2e3) do nothing without
+  `PA_SU_SC_MODE_CNTL`'s POLY_OFFSET_FRONT_ENABLE (bit 11) and POLY_OFFSET_BACK_ENABLE
+  (bit 12).** With the block recorded and the bits clear, a constant factor of 4096
+  units left every texel at the clear's value and kept no pixel; with the bits set the
+  same frame kept all of them. ps5-opengl sets both for a fill-mode polygon offset
+  (`src/gallium/ps5/ps5_screen.c:2036`), which is where the bits come from.
+- **One unit of the constant factor is 2^-23 of depth for the D32F word**, not the
+  fragment's own exponent: 4096 units moved 0.5 (0x3f000000) by 8192 ULP to
+  0x3effe000, i.e. 4096 x 2^-23 of depth. The field's -23 is therefore the unit of the
+  register and not a per-fragment scale.
+- **The clamp register (0x2df) is inert on this path.** A 2e-5 clamp (0x3727c5ac) left
+  a 0.00049 pull intact, and the same clamp on a ramp's slope changed no pixel, so the
+  driver caps the constant factor in the register it writes (the slope half's gradient
+  is the polygon's, so that half is the hardware's word plus a named gap). Whether the
+  register needs a mode this path does not set is not measured; what is measured is
+  that it does not clamp here.

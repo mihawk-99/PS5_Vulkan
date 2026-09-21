@@ -6222,3 +6222,72 @@ from a program whose `min_waves` was never computed. Every program that reaches
 register allocation here computes it first, so that route is latent rather than
 live; what matters is that the guard names it on stderr instead of hiding it, and
 the witness has not appeared in any build or console log.
+
+## 2026-09-20 — R1's depth bias: the two enables, the unit the console measured, and the clamp the hardware does not do
+
+R1's three core states were cullMode, rasterizerDiscardEnable and depthBiasEnable;
+the round above closed the first two and left depth bias refused with its own named
+gap, because a bias is only observable in a depth readback and no probe had read one
+back. This closes it, and what it cost was not the six words.
+
+**The block alone does nothing.** `ps5vk_graphics_pipeline_create` keeps ps5-opengl's
+own factors (`PA_SU_POLY_OFFSET_CLAMP` and the scale and offset words as floats, the
+slope factor times sixteen, the back pair mirroring the front's), and the draw records
+the six-word block behind the rasterizer words. The first console run of the new case
+(pid 362, `Klog_Logs/r-depth-bias2.log`) recorded all six -- `0x2de` = 0x1e9, the
+offsets 0xc5800000 and 0x45800000 for -4096 and +4096 -- and not one pixel kept, with
+every depth texel still the clear's 0x3f000000: a bias of four thousand units, and
+nothing about the frame moved. ps5-opengl's own rasterizer word is what names the
+missing half: `PA_SU_SC_MODE_CNTL`'s **POLY_OFFSET_FRONT_ENABLE (bit 11)** and
+**POLY_OFFSET_BACK_ENABLE (bit 12)**, which its fill-mode polygon offset sets
+(`src/gallium/ps5/ps5_screen.c:2036`). With those two bits the same frames drew.
+
+**The unit is 2^-23, measured rather than read.** The sign frames write the biased
+depth and the case reads it back: 4096 units moved 0x3f000000 to 0x3effe000, 8192 ULP
+at 0.5, so one unit is 2^-23 of depth -- the -23 the D32F word's
+`POLY_OFFSET_NEG_NUM_DB_BITS` names, not the fragment's own exponent, and 4096 units
+is 0.00049 of depth. That is the number the rest of the probe is built on: the frame
+drawn 0.0002 past the clear is kept by that pull, and the frame drawn 0.0005 past it
+is not (pid 363, `Klog_Logs/r-depth-bias4.log` -- the gap was 0.0005 in the first
+attempt and the honest failure is recorded there).
+
+**The clamp register is inert on this path.** Vulkan requires the bias be clamped to
++-depthBiasClamp. The hardware has the register for it and ps5-opengl writes it, and
+the console measured what the D32F path does with it: a 2e-5 clamp (0x3727c5ac) left
+the whole 0.00049 pull intact, and the same clamp on the ramp's slope changed no pixel
+(pid 364, `Klog_Logs/r-depth-bias5.log`). So the driver caps the half it can compute:
+the constant factor is clamped in the very register it writes, one unit being the
+2^-23 the same run measured, and the block's clamp word is still programmed for the
+slope half -- whose `m` is the polygon's own depth gradient, which no pipeline state
+has. That limit is named in ps5vk_pipeline.c and here. Capping is what the clamped
+frame measures: 0.0002 past the clear keeps 2880 of 2880 samples unclamped and none
+clamped, with 0xc327c5ac (167.77 units, the capped factor) in the recorded table
+(pid 365, `Klog_Logs/r-depth-bias6.log`; pid 367 is the committed build's run).
+
+**The probe and its table.** `v0-depth-bias` (`jobs/v0-depth-bias/queue.txt`,
+`golden/v0-depth-bias`, run pid 367, title digest 356754d6bb194001) clears a
+D32_SFLOAT attachment to 0.5 and draws quads at a depth the test can decide, eight
+frames, each read back in pixels, in the written depth and in the driver's own
+recorded registers:
+
+| frame | pixels kept (of 2880) | what the depth plane holds | the block the draw recorded |
+| --- | --- | --- | --- |
+| flat at 0.25, no bias | 2880 | 0x3e800000 | none of the six |
+| flat at the clear 0.5, no bias | 0 | the clear, every texel | none of the six |
+| constant -4096, LESS | 2880 | 0x3effe000 (the biased depth, every texel) | 0x1e9, offset 0xc5800000 |
+| constant +4096, GREATER | 2880 | 0x3f001000 | 0x1e9, offset 0x45800000 |
+| 0.0002 past the clear, no clamp | 2880 | the pulled value 0x3efffa36 | 0x1e9, offset 0xc5800000 |
+| 0.0002 past the clear, clamped 2e-5 | 0 | the clear, every texel | clamp 0x37a7c5ac, offset 0xc327c5ac |
+| slope -4 on the ramp (0.5 at its left edge) | 3 | the clear outside the band | scale 0xc2800000 |
+| slope +4 on the ramp | 0 | the clear, every texel | scale 0x42800000 |
+
+The bracket frame is what separates "the bias did not apply" from "the depth path is
+broken", and the two slope frames are the sign: only the pull keeps a band.
+
+**The gates.** `driver/tests/vk_c5_depth_bias_test.c` is the focused host gate: one
+biased frame through the same harness, judged by the words the draw records -- the
+block's own two enables in PA_SU_SC_MODE_CNTL (0x205 = 0x1800), the D32F word, the
+clamp, the scales, and the *capped* offset -- 12 of 12 checks in the direct build, 4
+of 4 through the loader and the PS5 link arm. `tools/check-driver.sh` gains the test,
+with the case's own capture as its replay. `make lint` (195 files) and `make test`
+(30) are green, and the whole driver gate runs with no `DIFFERENT` comparison.

@@ -1,0 +1,18 @@
+# PS5 Vulkan test runner job queue (PPSA99988): R1's depth bias.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-depth-bias/queue.txt
+#
+# v0-depth-bias clears its D32_SFLOAT depth attachment to 0.5 and draws geometry
+# that starts at that same depth, so the unbiased frame fails LESS against the
+# equal clear and keeps no pixel. The frames that follow measure the six words
+# of ps5-opengl's PA_SU_POLY_OFFSET_* block: each sign of the constant factor
+# (LESS with a bias toward the viewer, GREATER with one away from it), the slope
+# factor on a ramp, and that slope capped by depthBiasClamp. Every frame's
+# pixels and its depth plane are read back, so the words are proved by what the
+# hardware did rather than by the draw being accepted
+# (docs/M5_PHASE_C.md, R1). m2-solid and v0-cull are the regressions behind it.
+hold 60
+capture
+v0-depth-bias
+v0-cull
+m2-solid
+exit

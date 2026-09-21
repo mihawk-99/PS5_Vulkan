@@ -16147,6 +16147,312 @@ bool check_stencil_frame(const void *framebuffer, const StencilFrame &frame, Jso
 // depth member's value" from "clamped or defaulted": with the workaround the
 // plane is 0 for depth 1.0 and for depth 0.5, and before it the plane held the
 // depth clear's own byte.
+// R1's depth bias (PS5_VULKAN_REQUESTS.md): the six words of ps5-opengl's own
+// PA_SU_POLY_OFFSET_* block and the two PA_SU_SC_MODE_CNTL enables they need,
+// measured in the pixels the depth test keeps, in the depth the biased fragment
+// wrote, and in the words the driver itself recorded. Every frame clears its
+// D32_SFLOAT depth attachment to 0.5, so an unbiased quad drawn *at* 0.5 fails
+// LESS against the equal clear and keeps no pixel: nothing but a programmed bias
+// can put a pixel there. The frames that follow bracket that control -- one
+// drawing at 0.25, which the test cannot reject, one at 0.5002, which only a
+// bias large enough to cover the gap keeps, one with that gap's own bias capped
+// by depthBiasClamp, and two slopes on a *ramp* (0.5 at its left edge to 0.75 at
+// its right, because the slope factor multiplies the polygon's depth gradient
+// and a flat polygon has none).
+//
+// Every word is also read back out of the draw's own register table
+// (ps5vk_debug_table_chunks), so the case says what the driver recorded as well
+// as what the hardware did -- and a frame without a bias must record none of it.
+constexpr unsigned kDepthBiasFrames = 8;
+constexpr float kDepthBiasClear = 0.5f;
+constexpr std::uint32_t kDepthBiasClearBits = 0x3f000000u; // 0.5f
+// The depths the bracket frames draw at: one the test cannot reject, and one
+// 0.0002 past the clear, which the constant factor below covers (it measured
+// 0.00049 of depth at 0.5, one unit being 2^-23) and a clamp below that gap does
+// not. The first attempt used 0.0005 and failed for the honest reason: the pull
+// is 0.00049, which does not cover it (Klog_Logs/r-depth-bias4.log).
+constexpr float kDepthBiasBracket = 0.25f;
+constexpr float kDepthBiasPast = 0.5002f;
+// The constant factor the sign frames use, and what the console measured it
+// does: 4096 units moved the written depth by 8192 ULP at 0.5, so the hardware's
+// unit is 2^-23 there (the minimum resolvable difference POLY_OFFSET's -23
+// float depth bits name) and 4096 units is 0.00098 of depth -- enough to cover
+// the 0.0002 gap above, and far too much for the clamp word to be ignored.
+constexpr float kDepthBiasConstant = 4096.0f;
+constexpr std::uint32_t kDepthBiasNearBits = 0x3effe000u; // 0.5 - 8192 ULP
+constexpr std::uint32_t kDepthBiasFarBits = 0x3f001000u;  // 0.5 + 8192 ULP
+// The clamp the capped frame uses: an order of magnitude below the gap, so a
+// clamp that applies -- in whatever unit the hardware reads the register -- can
+// only leave the fragment on the failing side of the clear.
+constexpr float kDepthBiasCap = 2e-5f;
+constexpr float kDepthBiasRampFar = 0.75f;
+// The slope factor the ramp frames use, both signs: the ramp's left edge is at
+// the clear's own depth, so a pull keeps a band of it and a push keeps none.
+constexpr float kDepthBiasSlope = 4.0f;
+// The block's six registers, in the order ps5-opengl's runtime writes them.
+constexpr std::uint16_t kDepthBiasRegisters[6] = {0x2de, 0x2df, 0x2e0, 0x2e1, 0x2e2, 0x2e3};
+
+// One rectangle whose depth runs from `near` at its left edge to `far` at its
+// right, as the four records the m4-depth vertex shader reads (x, y, z, rgba).
+void put_depth_bias_ramp(float *records, std::uint16_t *indices, float near, float far,
+                         std::uint32_t red, std::uint32_t green, std::uint32_t blue) noexcept
+{
+    const float colour[4] = {red / 255.0f, green / 255.0f, blue / 255.0f, 1.0f};
+    const float corners[4][3] = {{ndc_x(0), ndc_y(kOutputHeight), near},
+                                 {ndc_x(kOutputWidth), ndc_y(kOutputHeight), far},
+                                 {ndc_x(kOutputWidth), ndc_y(0), far},
+                                 {ndc_x(0), ndc_y(0), near}};
+    for (unsigned corner = 0; corner < 4; corner++)
+    {
+        float *const record = records + corner * 7;
+        std::memcpy(record, corners[corner], sizeof(corners[corner]));
+        std::memcpy(record + 3, colour, sizeof(colour));
+    }
+    const std::uint16_t quad[6] = {0, 1, 2, 2, 3, 0};
+    std::memcpy(indices, quad, sizeof(quad));
+}
+
+// One rectangle at a single depth, in the same layout: the frames the constant
+// factor moves.
+void put_depth_bias_flat(float *records, std::uint16_t *indices, float depth, std::uint32_t red,
+                         std::uint32_t green, std::uint32_t blue) noexcept
+{
+    put_depth_bias_ramp(records, indices, depth, depth, red, green, blue);
+}
+
+// What the draw recorded for one register offset, or 0 when it recorded no row
+// for it: the block's own evidence, read from the table chunks the driver
+// exposes (ps5vk_debug.h), which is what a capture of the words points at.
+std::uint32_t recorded_register(const ps5vk_debug_stage *chunks, std::uint32_t count,
+                                std::uint16_t offset) noexcept
+{
+    for (std::uint32_t chunk = 0; chunk < count; chunk++)
+    {
+        const auto *const words = static_cast<const std::uint32_t *>(chunks[chunk].address);
+        const std::size_t records = chunks[chunk].bytes / (2 * sizeof(std::uint32_t));
+        for (std::size_t record = 0; record < records; record++)
+            if ((words[2 * record] & 0xffffu) == offset)
+                return words[2 * record + 1];
+    }
+    return 0;
+}
+
+void run_vulkan_depth_bias_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    struct Frame
+    {
+        const char *name;
+        float depth;
+        bool enable;
+        float constant;
+        float slope;
+        float clamp;
+        VkCompareOp compare;
+        bool ramp;
+    };
+    static constexpr Frame kFrames[kDepthBiasFrames] = {
+        {"flat at 0.25, no bias", kDepthBiasBracket, false, 0.0f, 0.0f, 0.0f, VK_COMPARE_OP_LESS,
+         false},
+        {"flat at the clear, no bias", kDepthBiasClear, false, 0.0f, 0.0f, 0.0f, VK_COMPARE_OP_LESS,
+         false},
+        {"constant -4096, LESS", kDepthBiasClear, true, -kDepthBiasConstant, 0.0f, 0.0f,
+         VK_COMPARE_OP_LESS, false},
+        {"constant +4096, GREATER", kDepthBiasClear, true, kDepthBiasConstant, 0.0f, 0.0f,
+         VK_COMPARE_OP_GREATER, false},
+        {"0.0002 past the clear, no clamp", kDepthBiasPast, true, -kDepthBiasConstant, 0.0f, 0.0f,
+         VK_COMPARE_OP_LESS, false},
+        {"0.0002 past the clear, clamped", kDepthBiasPast, true, -kDepthBiasConstant, 0.0f,
+         kDepthBiasCap, VK_COMPARE_OP_LESS, false},
+        {"slope -4 on the ramp", kDepthBiasClear, true, 0.0f, -kDepthBiasSlope, 0.0f,
+         VK_COMPARE_OP_LESS, true},
+        {"slope +4 on the ramp", kDepthBiasClear, true, 0.0f, kDepthBiasSlope, 0.0f,
+         VK_COMPARE_OP_LESS, true},
+    };
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12},
+    };
+    // The colour the frame's pass loads with, as the readback's word: the same
+    // canary clear v0-cull measured, so a frame that kept no pixel holds it.
+    const std::uint32_t clear_word = 0xffff8040u;
+    const std::size_t depth_texels = static_cast<std::size_t>(kOutputWidth) * kOutputHeight;
+    unsigned drawn[kDepthBiasFrames] = {0};
+    unsigned biased_texels[kDepthBiasFrames] = {0};
+    unsigned sampled = 0;
+    for (unsigned index = 0; index < kDepthBiasFrames; index++)
+    {
+        const Frame &frame = kFrames[index];
+        log.event("agc_depth_bias_frame", "INFO", 0, frame.name);
+        std::array<float, 4 * 7> vertices{};
+        std::array<std::uint16_t, 6> indices{};
+        if (frame.ramp)
+            put_depth_bias_ramp(vertices.data(), indices.data(), frame.depth, kDepthBiasRampFar,
+                                255, 128, 0);
+        else
+            put_depth_bias_flat(vertices.data(), indices.data(), frame.depth, 0, 255, 255);
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = vertices.data();
+        input.vertex_count = 4;
+        input.vertex_stride = kDriverDepthVertexStride;
+        input.index_data = indices.data();
+        input.index_count = 6;
+        input.attribute_count = 2;
+        input.attributes[0] = attributes[0];
+        input.attributes[1] = attributes[1];
+        input.depth = true;
+        input.depth_test = true;
+        input.depth_write = true;
+        input.depth_compare_op = frame.compare;
+        input.depth_load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.depth_clear_value = kDepthBiasClear;
+        input.depth_bias_enable = frame.enable;
+        input.depth_bias_constant = frame.constant;
+        input.depth_bias_slope = frame.slope;
+        input.depth_bias_clamp = frame.clamp;
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+            return;
+        ps5vk_triangle triangle{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (test.capture && status == PS5VK_TRIANGLE_OK)
+        {
+            log_driver_submission(triangle.device, frame.name, log);
+            log_driver_stages(triangle.device, log);
+        }
+        bool checked = false;
+        if (status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes)
+        {
+            flush_gpu_data(const_cast<void *>(triangle.target), kFramebufferBytes);
+            const auto *const words = static_cast<const std::uint32_t *>(triangle.target);
+            const FramebufferView view{words, kTiledRgba8Layout};
+            sampled = 0;
+            drawn[index] = 0;
+            // Three rows across the target, every fourth column: the flat frames
+            // answer all or nothing, and the ramp frames' band is measured where
+            // it starts.
+            for (std::uint32_t row = kOutputHeight / 4; row < kOutputHeight;
+                 row += kOutputHeight / 4)
+                for (std::uint32_t column = 0; column < kOutputWidth; column += 4)
+                {
+                    ++sampled;
+                    drawn[index] += view.word(column, row) != clear_word ? 1u : 0u;
+                }
+            log.number("agc_depth_bias_frame", "drawn", drawn[index]);
+            log.number("agc_depth_bias_frame", "of", sampled);
+            log.hex("agc_depth_bias_frame", "centre_word",
+                    view.word(kOutputWidth / 2, kOutputHeight / 2));
+            log.hex("agc_depth_bias_frame", "clear_word", clear_word);
+            // The depth plane: what the frame's own fragments wrote, walked with
+            // the tiled depth map the c5-depth check uses. A frame whose test
+            // rejected every fragment holds the clear's bits everywhere; a
+            // biased one holds the biased depth, which is the case's own
+            // measurement of the hardware's bias unit.
+            if (triangle.depth_target != nullptr &&
+                triangle.depth_target_bytes >= depth_texels * 4u)
+            {
+                flush_gpu_data(const_cast<void *>(triangle.depth_target), depth_texels * 4u);
+                const auto *const depth = static_cast<const std::uint8_t *>(triangle.depth_target);
+                unsigned cleared = 0;
+                unsigned biased = 0;
+                unsigned depth_sampled = 0;
+                const std::uint32_t expected = index == 3 ? kDepthBiasFarBits : kDepthBiasNearBits;
+                for (std::uint32_t row = 0; row < kOutputHeight; row += kOutputHeight / 8)
+                    for (std::uint32_t column = 0; column < kOutputWidth;
+                         column += kOutputWidth / 8)
+                    {
+                        std::uint32_t word = 0;
+                        std::memcpy(&word, depth + tiled_depth_offset(column, row), sizeof(word));
+                        ++depth_sampled;
+                        cleared += word == kDepthBiasClearBits ? 1u : 0u;
+                        biased += word == expected ? 1u : 0u;
+                    }
+                std::uint32_t centre = 0;
+                std::memcpy(&centre,
+                            depth + tiled_depth_offset(kOutputWidth / 2, kOutputHeight / 2),
+                            sizeof(centre));
+                log.number("agc_depth_bias_frame", "depth_clear_texels", cleared);
+                log.number("agc_depth_bias_frame", "depth_sampled", depth_sampled);
+                log.hex("agc_depth_bias_frame", "depth_centre_bits", centre);
+                log.number("agc_depth_bias_frame", "depth_biased_texels", biased);
+                biased_texels[index] = biased;
+            }
+            // And what the driver itself recorded for the block's six registers:
+            // the draw's table chunks are the rows a capture of the words points
+            // at, so this is the frame's own statement of what it programmed.
+            ps5vk_debug_stage chunks[8] = {{nullptr, 0}};
+            const std::uint32_t chunk_count = ps5vk_debug_table_chunks(triangle.device, chunks, 8);
+            for (std::uint32_t at = 0; at < 6; at++)
+            {
+                char field[32]{};
+                std::snprintf(field, sizeof(field), "register_%u", at);
+                log.hex("agc_depth_bias_frame", field,
+                        recorded_register(chunks, chunk_count, kDepthBiasRegisters[at]));
+            }
+            log.event("agc_depth_bias_frame", "PASS", 0,
+                      "the frame recorded and its pixels were read");
+            checked = true;
+        }
+        else
+        {
+            log.event("agc_depth_bias_frame", "FAIL", -1,
+                      "the frame could not be recorded or submitted");
+        }
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            log.event("agc_depth_bias", "FAIL", -1,
+                      "a submission did not complete; the program's objects stay allocated");
+            return;
+        }
+        ps5vk_triangle_finish(&triangle);
+        if (!checked)
+        {
+            outcome.command_built = false;
+            log.event("agc_depth_bias", "FAIL", -1, "a frame could not be recorded or submitted");
+            return;
+        }
+    }
+    // What the eight frames have to show: the bracket frame draws everywhere and
+    // the unbiased frame at the clear draws nowhere; each sign of the constant
+    // factor draws everywhere *and* leaves the biased depth in the plane (the
+    // measurement the hardware's unit comes from); the frame 0.0002 past the
+    // clear draws only without the clamp; the ramp keeps a band under a pull and
+    // none under a push.
+    const bool passed = drawn[0] == sampled && drawn[1] == 0 && drawn[2] == sampled &&
+                        drawn[3] == sampled && biased_texels[2] > 0 && biased_texels[3] > 0 &&
+                        drawn[4] == sampled && drawn[5] == 0 && drawn[6] > 0 && drawn[7] == 0;
+    log.number("agc_depth_bias", "bracket_drawn", drawn[0]);
+    log.number("agc_depth_bias", "no_bias_drawn", drawn[1]);
+    log.number("agc_depth_bias", "near_drawn", drawn[2]);
+    log.number("agc_depth_bias", "far_drawn", drawn[3]);
+    log.number("agc_depth_bias", "past_unclamped_drawn", drawn[4]);
+    log.number("agc_depth_bias", "past_clamped_drawn", drawn[5]);
+    log.number("agc_depth_bias", "slope_pull_drawn", drawn[6]);
+    log.number("agc_depth_bias", "slope_push_drawn", drawn[7]);
+    log.number("agc_depth_bias", "biased_texels", biased_texels[2]);
+    log.number("agc_depth_bias", "sampled", sampled);
+    log.hex("agc_depth_bias", "near_bits", kDepthBiasNearBits);
+    log.hex("agc_depth_bias", "far_bits", kDepthBiasFarBits);
+    char detail[200]{};
+    std::snprintf(detail, sizeof(detail),
+                  "the bracket frame kept %u of %u samples, no bias %u, the constant factor %u and "
+                  "%u, past the clear %u unclamped and %u clamped, the ramp %u under a pull and %u "
+                  "under a push",
+                  drawn[0], sampled, drawn[1], drawn[2], drawn[3], drawn[4], drawn[5], drawn[6],
+                  drawn[7]);
+    outcome.command_built = true;
+    outcome.passed = passed;
+    log.event("agc_depth_bias", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
+}
+
 void run_vulkan_stencil_clear_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
     JsonLog &log = test.log;
@@ -20498,6 +20804,11 @@ constexpr RunnerTest kRunnerTests[] = {
     // R1: cull none, cull back, cull front and rasterizer discard, one frame
     // each over the same quad, read back in pixels (run_vulkan_cull_frames).
     {"v0-cull", "m3-vertex", run_vulkan_cull_frames},
+    // R1's depth bias: the quad drawn at the depth its attachment clears to with
+    // no bias, with each sign of the constant factor, and the ramp the slope
+    // factor and the clamp move, read back in pixels and in the depth plane
+    // (run_vulkan_depth_bias_frames).
+    {"v0-depth-bias", "m4-depth", run_vulkan_depth_bias_frames},
     // R3: a combined depth/stencil attachment cleared with stencil 0 and read
     // back with nothing drawn (run_vulkan_stencil_clear_frames).
     {"v0-stencil-clear", "v0-stencil-setup", run_vulkan_stencil_clear_frames},

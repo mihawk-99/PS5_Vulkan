@@ -2137,13 +2137,19 @@ create_pipeline(struct ps5vk_triangle *triangle, uint32_t index,
       .pScissors = &scissor,
    };
    /* R1: the frame's cull mode and rasterizer discard, which are core Vulkan
-    * 1.0 state and the driver programs (driver/ps5vk_pipeline.c). */
+    * 1.0 state and the driver programs (driver/ps5vk_pipeline.c), and its depth
+    * bias, whose three factors the driver keeps for the draw to program beside
+    * the depth attachment's own format word. */
    const VkPipelineRasterizationStateCreateInfo rasterization = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
       .polygonMode = VK_POLYGON_MODE_FILL,
       .cullMode = triangle->rasterization_cull_mode,
       .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
       .rasterizerDiscardEnable = triangle->rasterization_discard ? VK_TRUE : VK_FALSE,
+      .depthBiasEnable = triangle->depth_bias_enable ? VK_TRUE : VK_FALSE,
+      .depthBiasConstantFactor = triangle->depth_bias_constant,
+      .depthBiasSlopeFactor = triangle->depth_bias_slope,
+      .depthBiasClamp = triangle->depth_bias_clamp,
       .lineWidth = 1.0f,
    };
    const VkPipelineMultisampleStateCreateInfo multisample = {
@@ -2401,6 +2407,10 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
    triangle->texture_address_mode = input->texture_address_mode;
    triangle->rasterization_cull_mode = input->rasterization_cull_mode;
    triangle->rasterization_discard = input->rasterization_discard;
+   triangle->depth_bias_enable = input->depth_bias_enable;
+   triangle->depth_bias_constant = input->depth_bias_constant;
+   triangle->depth_bias_slope = input->depth_bias_slope;
+   triangle->depth_bias_clamp = input->depth_bias_clamp;
    if (display ? !create_swapchain(triangle, physical)
                : !create_image(triangle, physical, input))
       return PS5VK_TRIANGLE_FAILED;

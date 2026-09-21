@@ -65,6 +65,7 @@ tests=(
     c4_rtt
     c5_depth
     c5_stencil
+    c5_depth_bias
     c7_tiled_mip
     c7_copy
     c7_blit_formats
@@ -178,6 +179,14 @@ stencil_run="$root/golden/v0-stencil/run-1.json"
 want c5_stencil &&
     python3 "$root/tools/golden.py" replay "$stencil_run" "$work/v0-stencil.replay" \
         --test v0-stencil
+# R1's depth bias: its own case's capture, because the six PA_SU_POLY_OFFSET_*
+# words are the pipeline's and the attachment's state together and the words are
+# the gate, not a stream comparison (the case's own golden, golden/v0-depth-bias,
+# is where the console run shows the unbiased frame recording none of them).
+bias_run="$root/golden/v0-depth-bias/run-1.json"
+want c5_depth_bias &&
+    python3 "$root/tools/golden.py" replay "$bias_run" "$work/v0-depth-bias.replay" \
+        --test v0-depth-bias
 # The V0-query test too: its query counters live in memory the driver mapped
 # itself, which no runner frame's capture holds, so only a capture of the test
 # provides the addresses its replay hands out (as the C5 depth attachment is).
@@ -420,6 +429,11 @@ run_test() {
         # this program draws the first of its four frames.
         c5_stencil) replay=v0-stencil
             compare=() ;;
+        # R1's depth bias: the six PA_SU_POLY_OFFSET_* words are the gate, not a
+        # stream comparison, and the replay of the case's own capture is what
+        # gives this program the stage mapping it draws through.
+        c5_depth_bias) replay=v0-depth-bias
+            compare=() ;;
         v0_query_full) replay=v0-query-full
             compare=(compare-run "$query_run" "$dump" --test v0-query-full) ;;
         v0_texel_buffer) replay=v0-texel-buffer
@@ -437,6 +451,7 @@ run_test() {
         $test != c3_uniform &&
         $test != c3_quad && $test != c4_texture &&
         $test != c4_rtt && $test != c5_depth && $test != c5_stencil &&
+        $test != c5_depth_bias &&
         $test != v0_query_full &&
         $test != v0_timestamp && $test != v0_vertex_sint && $test != v0_vertex_uint &&
         $test != c7_mip_upload && $test != v0_array && $test != v0_cube &&

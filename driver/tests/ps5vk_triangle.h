@@ -461,6 +461,17 @@ struct ps5vk_triangle_input {
     * the end for the same reason as target_format. */
    VkCullModeFlags rasterization_cull_mode;
    bool rasterization_discard;
+   /* R1's depth bias: whether every pipeline of the frame enables one, and the
+    * three factors of VkPipelineRasterizationStateCreateInfo's own bias state,
+    * which the driver programs for a D32 float depth attachment. False is the
+    * unbiased state every earlier frame ran, and the factors are ignored while
+    * it is false (Valid Usage), so a caller that leaves them out records the
+    * stream it did before. Appended at the end for the same reason as
+    * target_format. */
+   bool depth_bias_enable;
+   float depth_bias_constant;
+   float depth_bias_slope;
+   float depth_bias_clamp;
 };
 
 /* The colour a clearing render pass clears to: red 0x40, green 0x80, blue
@@ -622,6 +633,12 @@ struct ps5vk_triangle {
     * (input->rasterization_cull_mode and input->rasterization_discard). */
    VkCullModeFlags rasterization_cull_mode;
    bool rasterization_discard;
+   /* R1's depth bias, carried from the input to the pipelines the frame creates
+    * (input->depth_bias_enable and the three factors). */
+   bool depth_bias_enable;
+   float depth_bias_constant;
+   float depth_bias_slope;
+   float depth_bias_clamp;
    VkImage texture_image;
    /* The format the image was created with: a depth format's view and upload
     * name the depth aspect, a colour format's the colour one (round 21). */
