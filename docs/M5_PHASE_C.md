@@ -6495,3 +6495,61 @@ narrower and in this repository's own hands:
 The rest of the note stands as the request put it: a runner that carries every refusal
 into its own log is what makes the next one cheap to diagnose, and this is the cheapest
 coverage item in either document.
+
+## 2026-09-20 — R9 fixed: the compiler declared no push-constant argument, and now it does
+
+The section above measured the silent zero and concluded that an application's
+`layout(push_constant)` does not reach a stage. This is the fix, and the mechanism
+turned out to be one step further down than the note above guessed.
+
+**What was actually wrong.** RADV's ABI takes push constants two ways
+(`src/amd/vulkan/radv_shader_args.c`): inlined into user SGPRs, or through a **pointer**
+in a user-data dword (`AC_UD_PUSH_CONSTANTS`). Which one is decided from
+`radv_shader_info.loads_push_constants`, which `radv_nir_shader_info_pass` gathers by
+scanning for `load_push_constant` intrinsics -- and in this standalone path that pass
+runs **before** `radv_postprocess_nir`, which is where `nir_lower_explicit_io` turns the
+push-constant *variable* into those intrinsics (`src/amd/vulkan/radv_shader.c:827`). So
+the info pass saw no push-constant use, the argument was never declared, and ACO still
+lowered the loads (postprocess did run) through an argument that did not exist: an
+unwritten SGPR, read as zero. Three edits fix it, all in
+`tooling/psbc/patch-push-constant-location.py`:
+
+  1. the push-constant lowering is hoisted above the info pass, so
+     `loads_push_constants` is true and the argument exists -- it is idempotent, so
+     postprocess's own call then finds nothing to do;
+  2. the info pass's inlining heuristic is switched off for this path
+     (`inline_push_constant_mask = 0`, `can_inline_all_push_constants = false`): the
+     pointer is the only form the driver can program, and 128 bytes of push constants
+     (32 dwords) exceed the 16 user-data dwords a stage has;
+  3. `PsbcShaderMetadata` reports where the pointer lives
+     (`push_constant_valid`, `push_constant_user_data_dword`,
+     `push_constant_dword_count`) and the driver writes the block's address into that
+     dword -- one dword in this driver's 32-bit-pointer build, the same convention the
+     vertex-buffer table's dword already uses.
+
+**The metadata version stays 14.** Bumping it to 15 made the console refuse *every*
+pipeline -- `the AGC package writer failed: -2` -- because title builds compile
+ps5-opengl's C package writer against the **SDK's** header while libpsbc comes from the
+patched work copy, so the writer valid at 14 met metadata claiming 15. The fields are
+appended, so a v14 reader keeps reading exactly what it read before, and the patch
+keeps the version. The host build never showed it: its writer is compiled against the
+patched header, so both sides agreed there.
+
+**Proved on the console, both acceptance symptoms at once** (pid 110, title digest
+`dd035edd…`, `Klog_Logs/r9-sweep.log`): `v0-push-constant` passes with the left half
+holding `0xff0000ff` (the first draw's red) and the right `0xffff0000` (the second
+draw's blue) -- 3 of 3 samples each, a driver that ignored the upload could not do that
+-- and the frame records, submits and reads back with no refusal, which is the second
+symptom the demos saw and the silent-zero mechanism alone does not explain. The same
+sweep runs the whole regression list (11 of 11 PASS: `v0-dynamic-depth-bias`,
+`v0-depth-bias`, `v0-cull`, `v0-stencil-clear`, `v0-sampler-address`, `v0-two-passes`,
+`v0-resolve-usage`, `v0-two-sets`, `c8-resolve`, `m2-solid`), and
+`tools/check-driver.sh` reports **288 run comparisons identical, no `DIFFERENT`** -- the
+lowering only touches shaders that use push constants, and no other case does, so no
+golden moved. The focused host gate is `v0_push_constant` (6 of 6 checks direct, loader
+and PS5 link PASS), which asserts the block, the descriptor and the pointer dword.
+
+**The application side is unblocked**: W4 can be reverted. The probe is the realistic
+shape the request asked for -- a per-draw 16-byte transform through
+`vkCmdPushConstants`, changed between two draws without recreating the pipeline, both
+draws read back and different.

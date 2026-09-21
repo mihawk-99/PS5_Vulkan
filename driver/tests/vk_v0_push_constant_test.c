@@ -178,8 +178,32 @@ main(void)
             memcpy(pushed, block, sizeof(pushed));
          check(block != NULL && memcmp(pushed, second, sizeof(pushed)) == 0,
                "the block holds the second draw's push-constant bytes");
+         /* R9's other half: the *pointer* the shader reads the block through.
+          * The compiler names the user-data dword (the metadata patch), and the
+          * draw must have written the block's 64-bit address there -- a driver
+          * that skipped it left the shader reading an unwritten SGPR, which is
+          * the silent zero this case exists for. */
+         uint32_t stage = 0;
+         uint32_t dword = UINT32_MAX;
+         uint32_t low = 0;
+         uint32_t high = 0;
+         ps5vk_debug_push_constant_user_data(triangle.device, &stage, &dword, &low, &high);
+         const uintptr_t block_address = (uintptr_t)block;
+         /* The ABI declares the address as one user-data dword in this driver's
+          * 32-bit-pointer build (PS5VK_ADDRESS_HIGH_WORD is the half ACO already
+          * knows) and as two when it asks for a full 64-bit one: the check takes
+          * whichever it got. */
+         const uint64_t written = (uint64_t)low | ((uint64_t)high << 32);
+         const bool address_written =
+            dword != UINT32_MAX &&
+            (written == (uint64_t)block_address ||
+             (high == 0 && low == (uint32_t)block_address));
+         check(address_written,
+               "the draw wrote the block's address into the stage's push-constant user-data dword");
+         printf("  (stage %u dword %u holds %08x %08x for block %p)\n", stage, dword, low, high,
+                block);
          printf("  (the block holds %.1f %.1f %.1f %.1f, expected %.1f %.1f %.1f %.1f; "
-                "descriptor %08x %08x %08x %08x)\n",
+                        "descriptor %08x %08x %08x %08x)\n",
                 (double)pushed[0], (double)pushed[1], (double)pushed[2], (double)pushed[3],
                 (double)second[0], (double)second[1], (double)second[2], (double)second[3],
                 descriptor != NULL ? descriptor[0] : 0, descriptor != NULL ? descriptor[1] : 0,

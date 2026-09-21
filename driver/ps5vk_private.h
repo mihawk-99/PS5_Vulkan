@@ -572,6 +572,12 @@ struct ps5vk_device {
     * draw's table -- its address, the stride word and all -- so a probe can read
     * the whole chain back (R9's answer needed exactly that). */
    const uint32_t *push_constant_descriptor;
+   /* Where the last draw programmed the push-constant pointer and what it wrote
+    * there, for the debug API: UINT32_MAX when the stage read none. */
+   uint32_t push_constant_user_data_dword;
+   uint32_t push_constant_user_data_stage;
+   uint32_t push_constant_user_data_low;
+   uint32_t push_constant_user_data_high;
    /* The pipelines whose stage mapping exists, newest first: what
     * ps5vk_debug_pipeline_stages reports to the runner's capture. */
    struct ps5vk_pipeline *stages;

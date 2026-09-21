@@ -1475,10 +1475,64 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
        * inferring them from pixels (R9). */
       device->push_constant_block = push_constant_block;
       device->push_constant_bytes = pipeline->push_constant_bytes;
+      device->push_constant_user_data_dword = UINT32_MAX;
    }
 
    const VkShaderStageFlags stage_bits[PS5VK_PIPELINE_STAGE_COUNT] = {VK_SHADER_STAGE_VERTEX_BIT,
                                                                      VK_SHADER_STAGE_FRAGMENT_BIT};
+   /* R9: an application's push constants reach the stage through a user-data
+    * dword the *compiler* names -- a pointer to the data, because the standalone
+    * path passes no inline mask (tooling/psbc/patch-push-constant-location.py).
+    * Until that field existed the driver wrote nothing there and the shader read
+    * an unwritten SGPR: the silent zero v0-push-constant measured. The words are
+    * the block built above, and the two forms that cannot be programmed are
+    * refused by name rather than left to read garbage. */
+   if (getenv("PS5VK_PUSH_TRACE") != NULL)
+      for (uint32_t s = 0; s < PS5VK_PIPELINE_STAGE_COUNT; s++)
+         fprintf(stderr,
+                 "[ps5vk] stage %u push: valid=%d dword=%u count=%u inline=%d(%u) sgprs=%u\n", s,
+                 (int)metadata[s]->push_constant_valid,
+                 metadata[s]->push_constant_user_data_dword,
+                 metadata[s]->push_constant_dword_count,
+                 (int)metadata[s]->push_constant_inline,
+                 metadata[s]->push_constant_inline_count, metadata[s]->user_sgpr_count);
+   for (uint32_t s = 0; s < PS5VK_PIPELINE_STAGE_COUNT; s++) {
+      const PsbcShaderMetadata *const stage_metadata = metadata[s];
+      if (!stage_metadata->push_constant_valid ||
+          (pipeline->push_constant_stages & stage_bits[s]) == 0)
+         continue;
+      if (stage_metadata->push_constant_inline) {
+         ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                                 "stage %u reads %u push-constant dwords the compiler inlined into "
+                                 "user SGPRs; this driver programs the pointer form only "
+                                 "(tooling/psbc/patch-push-constant-location.py, R9)",
+                                 s, stage_metadata->push_constant_inline_count);
+         return;
+      }
+      const uint32_t count = stage_metadata->push_constant_dword_count;
+      const uint32_t at = stage_metadata->push_constant_user_data_dword;
+      if (push_constant_block == NULL || (count != 1 && count != 2) ||
+          at + count > PS5VK_MAX_USER_DATA) {
+         ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                                 "stage %u reads its push constants from %u user-data dwords at "
+                                 "dword %u, and this driver writes a one- or two-dword address "
+                                 "inside the %u it programs "
+                                 "(tooling/psbc/patch-push-constant-location.py, R9)",
+                                 s, count, at, PS5VK_MAX_USER_DATA);
+         return;
+      }
+      /* The pointer, in the form the compiler declared it: one dword in the
+       * 32-bit-pointer ABI this driver compiles for (PS5VK_ADDRESS_HIGH_WORD is
+       * the half ACO already knows), two when the ABI asks for a full 64-bit
+       * address. Same convention as the vertex-buffer table's dword. */
+      user_data[s][at] = (uint32_t)(uintptr_t)push_constant_block;
+      if (count == 2)
+         user_data[s][at + 1] = (uint32_t)((uintptr_t)push_constant_block >> 32);
+      device->push_constant_user_data_dword = at;
+      device->push_constant_user_data_stage = s;
+      device->push_constant_user_data_low = user_data[s][at];
+      device->push_constant_user_data_high = count == 2 ? user_data[s][at + 1] : 0;
+   }
    /* Whether this draw samples an image the command buffer rendered into
     * earlier: the colour barrier then has to sit in the words before it
     * (HARDWARE_FINDINGS.md, event 45; ps5vk_sampled_image). */

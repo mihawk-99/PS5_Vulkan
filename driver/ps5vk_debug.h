@@ -69,6 +69,12 @@ ps5vk_debug_table_chunks(VkDevice device, ps5vk_debug_stage *chunks, uint32_t ca
 void
 ps5vk_debug_push_constants(VkDevice device, const void **block, uint32_t *bytes,
                            const uint32_t **descriptor);
+/* Where the last draw programmed the push-constant pointer: the stage, the
+ * user-data dword and the two words written there (R9). *dword is UINT32_MAX
+ * when no stage read push constants. */
+void
+ps5vk_debug_push_constant_user_data(VkDevice device, uint32_t *stage, uint32_t *dword,
+                                    uint32_t *low, uint32_t *high);
 
 /* The device's live bound buffers, newest first, up to capacity; returns how
  * many there are. A submission names their addresses -- an index buffer's

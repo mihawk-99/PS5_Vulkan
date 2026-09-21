@@ -6,9 +6,11 @@
 # with vkCmdPushConstants -- one half of the target each, without recreating the
 # pipeline. Both halves must hold the colour their own draw uploaded; a driver
 # that ignored the upload would paint the first draw's colour in both
-# (docs/M5_PHASE_C.md, R9). m3-uniform (the same shader shape through a uniform
-# buffer), v0-dynamic-depth-bias (the other per-draw state) and m2-solid are the
-# regressions behind it.
+# (docs/M5_PHASE_C.md, R9). It passed for the first time once the compiler
+# declared the push-constant argument the shader reads (the metadata patch) and
+# the draw wrote the block's address there; m3-uniform (the same shader shape
+# through a uniform buffer), v0-dynamic-depth-bias (the other per-draw state) and
+# m2-solid are the regressions behind it.
 hold 60
 capture
 v0-push-constant

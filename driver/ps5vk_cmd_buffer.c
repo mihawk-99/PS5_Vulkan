@@ -427,6 +427,22 @@ ps5vk_debug_push_constants(VkDevice _device, const void **block, uint32_t *bytes
       *descriptor = device != NULL ? device->push_constant_descriptor : NULL;
 }
 
+void
+ps5vk_debug_push_constant_user_data(VkDevice _device, uint32_t *stage, uint32_t *dword,
+                                    uint32_t *low, uint32_t *high)
+{
+   VK_FROM_HANDLE(ps5vk_device, device, _device);
+   const bool written = device != NULL && device->push_constant_user_data_dword != UINT32_MAX;
+   if (stage != NULL)
+      *stage = written ? device->push_constant_user_data_stage : 0;
+   if (dword != NULL)
+      *dword = written ? device->push_constant_user_data_dword : UINT32_MAX;
+   if (low != NULL)
+      *low = written ? device->push_constant_user_data_low : 0;
+   if (high != NULL)
+      *high = written ? device->push_constant_user_data_high : 0;
+}
+
 uint32_t
 ps5vk_debug_table_chunks(VkDevice _device, ps5vk_debug_stage *chunks, uint32_t capacity)
 {

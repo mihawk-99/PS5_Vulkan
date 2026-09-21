@@ -33,7 +33,7 @@ bash "$root/tooling/sdk/assemble-psbc-fork.sh" "$sdk" "$work"
 echo "== this project's compiler patches against the fork's tree"
 status=0
 for script in patch-fragment-inputs patch-aco-min-waves patch-descriptor-types \
-              patch-vertex-formats; do
+              patch-vertex-formats patch-push-constant-location; do
     if out=$(python3 "$root/tooling/psbc/$script.py" "$work" 2>&1); then
         printf '   %-24s holds: %s\n' "$script" "$(printf '%s' "$out" | tail -n 1)"
     else

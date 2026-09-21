@@ -125,6 +125,13 @@ python3 "$root/tooling/psbc/patch-vertex-formats.py" "$tree"
 # descriptor types).
 python3 "$root/tooling/psbc/patch-descriptor-types.py" "$tree"
 
+# Push constants: the standalone path hands the shader a pointer to the data in
+# a user-data dword, and PsbcShaderMetadata reported every user-data location
+# except that one, so an application's layout(push_constant) read an unwritten
+# SGPR -- a silent zero. The patch reports the location (and the inline form, so
+# the driver can refuse it by name); docs/M5_PHASE_C.md, R9.
+python3 "$root/tooling/psbc/patch-push-constant-location.py" "$tree"
+
 # libpsbc_support.ps5.a completes the archive for titles that link only the
 # compiler: ps5-opengl's C package writer (identical to the Python writer for
 # every probe package, A2), S3TC (ps5-opengl leaves it out because its Mesa

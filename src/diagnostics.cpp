@@ -16966,19 +16966,19 @@ void run_vulkan_push_constant_frames(const TestContext &test, TestOutcome &outco
     }
     // Both halves have to hold the colour their own draw uploaded: a driver that
     // ignored vkCmdPushConstants would leave the first draw's colour in both.
-    // The measurement this case made first (pid 372-374) is that the *driver's*
-    // half is right -- the block the debug API hands back holds the second
-    // draw's bytes, and the descriptor and the pixel user data name it -- while
-    // the fragment stage exports zero, which is what an inlined push constant
-    // the compile path never provides looks like. R9's answer is that mechanism,
-    // not a green frame (docs/M5_PHASE_C.md, R9).
+    // Both acceptance symptoms at once: the *value* arrives (each half holds its
+    // own draw's colour, which a driver that ignored the upload could not do) and
+    // the command buffer *submits*. Before the fix this frame measured the first
+    // symptom only -- the driver's block held the right bytes and the pixels were
+    // black, because the compiler declared no push-constant argument and the
+    // shader read an unwritten SGPR (docs/M5_PHASE_C.md, R9).
     const bool passed =
         status == PS5VK_TRIANGLE_OK && sampled > 0 && left_red == sampled && right_blue == sampled;
     char detail[240]{};
     std::snprintf(detail, sizeof(detail),
                   "the first draw's push constant reached %u of %u left samples and the second's "
-                  "%u of %u right ones; the block the driver filled held the second draw's bytes, "
-                  "so the upload arrives and the stage's read does not",
+                  "%u of %u right ones, with the command buffer submitted and no refusal: the "
+                  "value arrived and the frame ran",
                   left_red, sampled, right_blue, sampled);
     outcome.command_built = true;
     outcome.passed = passed;
