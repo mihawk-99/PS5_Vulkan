@@ -6461,3 +6461,37 @@ four*, for three reasons:
 
 Until then the application side should keep its layouts at four or fewer and expect
 this refusal above that, and the driver will keep refusing by name.
+
+## 2026-09-20 — R4's coverage note, corrected: the runner does install a messenger
+
+The second request document repeats a claim this repository made in its R5 answer: that
+the runner installs no debug messenger, so a refusal's sentence never reaches the klog.
+**That claim was wrong**, and the correction matters because every item in both
+documents was found through one.
+
+What is actually there: `driver/tests/ps5vk_triangle.c` enables `VK_EXT_debug_utils` on
+the instance when the driver exposes it and installs a messenger whose callback
+(`forward_message`) hands every warning and error to the *report* the caller passed --
+as a step named `vk_message`, with the driver's sentence as its detail. Mesa reports a
+driver error's reason as a warning, which is why severities are filtered rather than
+taken as errors.
+
+So the sentence reaches the klog whenever a case passes a report, and the gap was
+narrower and in this repository's own hands:
+
+  * A frame whose case *expects* to be refused passed `report = NULL` (this
+    repository's `v0-resolve-usage` did), which throws the sentence away with the
+    report. `log_expected_refusal` is the fix: the frames a probe expects to fail get a
+    report of their own whose records are INFO, so the sentence lands without a
+    spurious failure. Measured on the console: the same run now carries all three of
+    this batch's refusal sentences -- the resolve's usage-bit sentence (R5), the
+    descriptor-set sentence (R7) and the clamp sentence -- and the ten cases of the
+    regression sweep still pass (`Klog_Logs/r-coverage.log`, title digest `c9c57b40…`).
+  * A driver that does *not* expose `VK_EXT_debug_utils` would leave the harness without
+    a messenger, and nothing in this tree measures that case; the extension is
+    exercised by every case that runs, and `vk_message` records are what the two
+    refusal probes above read.
+
+The rest of the note stands as the request put it: a runner that carries every refusal
+into its own log is what makes the next one cheap to diagnose, and this is the cheapest
+coverage item in either document.

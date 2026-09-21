@@ -16487,10 +16487,28 @@ void run_vulkan_depth_bias_frames(const TestContext &test, TestOutcome &outcome)
 // COLOR_ATTACHMENT added, which is the workaround the requesting project carries
 // as W5. The pair is the request's own probe, and the refusal's sentence in the
 // run's klog is what the reworded message is for.
+// The report a frame the case *expects* to be refused is given. The harness
+// installs a VK_EXT_debug_utils messenger and forwards every warning and error
+// the driver logs through the report (driver/tests/ps5vk_triangle.c,
+// forward_message), which is how a refusal's sentence reaches a run's klog --
+// every item in both request documents was found that way. A refused frame whose
+// report is NULL loses the sentence, so the frames a probe expects to fail get
+// this one: it logs the driver's message at INFO, because the refusal is the
+// measurement and not a failure of the frame.
+void log_expected_refusal(void *context, const char *name, bool passed, int result,
+                          const char *detail) noexcept
+{
+    (void)passed;
+    char probe[64]{};
+    std::snprintf(probe, sizeof(probe), "agc_expected_%s", name);
+    static_cast<JsonLog *>(context)->event(probe, "INFO", result, detail);
+}
+
 void run_vulkan_resolve_usage_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
     JsonLog &log = test.log;
     const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const ps5vk_triangle_report refused_report{&log, log_expected_refusal};
     const VkVertexInputAttributeDescription attributes[2] = {
         {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
         {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8},
@@ -16515,9 +16533,10 @@ void run_vulkan_resolve_usage_frames(const TestContext &test, TestOutcome &outco
         input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
         input.pipeline_count = 1;
         input.load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        // The refused frame's steps are not logged as failures: its refusal is
-        // what the frame is for, and the case's own record below is the verdict.
-        input.report = frame.transfer_only ? nullptr : &report;
+        // The refused frame's steps are logged at INFO rather than as failures
+        // (its refusal is what the frame is for), but it keeps a report, so the
+        // driver's own sentence reaches this log through the harness's messenger.
+        input.report = frame.transfer_only ? &refused_report : &report;
         input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
         input.vertex_data = kResolveVertices;
         input.vertex_count = kSquareVertexCount;
