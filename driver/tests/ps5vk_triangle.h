@@ -472,6 +472,15 @@ struct ps5vk_triangle_input {
    float depth_bias_constant;
    float depth_bias_slope;
    float depth_bias_clamp;
+   /* R5: whether the frame's resolve destination -- the program's own one-sample
+    * image -- declares the usage the specification asks for, TRANSFER_DST and
+    * SAMPLED with no colour-attachment bit, instead of the colour-attachment
+    * usage every earlier frame's target has. This driver stores such an image in
+    * rows and refuses to resolve into it, which is what the request's probe
+    * shows; the flag means nothing without resolve_output, where the four-sample
+    * image is what the framebuffers name. Appended at the end for the same
+    * reason as target_format. */
+   bool resolve_destination_transfer_only;
 };
 
 /* The colour a clearing render pass clears to: red 0x40, green 0x80, blue
@@ -622,6 +631,9 @@ struct ps5vk_triangle {
    VkDeviceMemory resolve_memory;
    VkImageView resolve_view;
    bool resolve_output;
+   /* R5: the usage the resolve destination declares, from
+    * input->resolve_destination_transfer_only. */
+   bool resolve_destination_transfer_only;
    /* R6: whether the frame records a second render pass in the same command
     * buffer (input->two_passes). */
    bool two_passes;

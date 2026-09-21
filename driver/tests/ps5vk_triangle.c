@@ -271,8 +271,14 @@ create_image(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
       .samples = samples,
       .tiling = VK_IMAGE_TILING_OPTIMAL,
       /* A colour attachment and nothing else: a case that wants the frame's
-       * bytes reads the mapped storage, which is what the target image is for. */
-      .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+       * bytes reads the mapped storage, which is what the target image is for.
+       * R5's frame asks for the resolve destination's specification usage
+       * instead -- TRANSFER_DST and SAMPLED, no colour attachment -- which this
+       * driver stores in rows and refuses to resolve into (a resolve only walks
+       * tiles, ps5vk_image.c). */
+      .usage = triangle->resolve_destination_transfer_only
+                  ? (VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
+                  : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
       .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
       .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
    };
@@ -2402,6 +2408,7 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
     * before the four-sample source is: the flag has to be set here, not in
     * create_resolve_target (Phase C8). */
    triangle->resolve_output = input->resolve_output;
+   triangle->resolve_destination_transfer_only = input->resolve_destination_transfer_only;
    triangle->two_passes = input->two_passes;
    triangle->texture_address_mode_set = input->texture_address_mode_set;
    triangle->texture_address_mode = input->texture_address_mode;

@@ -11,9 +11,9 @@ been closed by the migration.
 | --- | --- | --- | --- | --- |
 | R6 split submissions corrupt the heap | **closed** | `v0-two-passes` | `golden/v0-two-passes`, `jobs/v0-two-passes/queue.txt` | guard fired before the fix (pid 308), three of three shapes after it (pid 310, 313) |
 | R2 `vkCreateSampler` takes one configuration | **closed** for the address modes | `v0-sampler-address` | `golden/v0-sampler-address`, `jobs/v0-sampler-address/queue.txt` | pid 315 |
-| R1 rasterization state refuses three core things | **closed**, one named gap | `v0-cull`, `v0-depth-bias` | `golden/v0-cull`, `golden/v0-depth-bias`, `jobs/*/queue.txt` | pid 323 (cull), pid 367 (depth bias); host gate `c5_depth_bias` |
+| R1 rasterization state refuses three core things | **closed**, one named gap | `v0-cull`, `v0-depth-bias` | `golden/v0-cull`, `golden/v0-depth-bias`, `jobs/*/queue.txt` | pid 323 (cull), pid 367 (depth bias, re-run in the pid 369 sweep); host gate `c5_depth_bias` |
 | R3 stencil clear takes the depth value | **closed** at the driver's boundary | `v0-stencil-clear` | `golden/v0-stencil-clear`, `jobs/v0-stencil-clear/queue.txt` | pid 327 (before), 329 (after) |
-| R5 resolve destination must be a colour attachment | **reworded**, not tiled | the refusal itself | -- | -- |
+| R5 resolve destination must be a colour attachment | **reworded**, not tiled; both halves of the probe proved | `v0-resolve-usage` | `jobs/v0-resolve-usage/queue.txt` | pid 369 |
 | R4 three blind spots | **answered**: the audits now say what they cannot see | -- | -- | -- |
 
 ## R6 -- closed, with a sharper dose-response than the request guessed
@@ -82,13 +82,25 @@ the member `vk_meta` reads, with the upstream line that retires it in the commen
 It is deliberately not a patch to Mesa: the driver links a prebuilt runtime whose
 sources this repository does not own, and the defect is upstream's.
 
-## R5 -- reworded, not tiled, and that choice is the request's to reverse
+## R5 -- reworded, not tiled, with the request's own probe run
 
 The refusal now names the usage bit, the storage rule and the workaround in one
 sentence ("... this driver makes an image tiled from the COLOR_ATTACHMENT or
 DEPTH_STENCIL_ATTACHMENT usage bit ... declare COLOR_ATTACHMENT on it to make it
-tiled"). The request's other option, tiling every transfer destination, was not
-taken because tiling is chosen from the usage bits and a texture upload declares
+tiled"). The probe the request described has been run on the console
+(`v0-resolve-usage`, pid 369): the same four-sample resolve recorded twice, once
+into a destination declared TRANSFER_DST and SAMPLED, which is refused (the
+recording ends, which is what the case reads), and once into the same frame with
+COLOR_ATTACHMENT added -- the workaround the requesting project carries as W5 --
+which submits. `c8-resolve` is the regression behind the second half.
+
+One thing the probe cannot show: the runner installs no Vulkan debug messenger, so
+the sentence itself does not appear in the klog, only the refusal does. The
+sentence is what an application's own messenger receives, which is how this
+project found R1, R2 and R3 in the first place.
+
+The request's other option, tiling every transfer destination, was not taken
+because tiling is chosen from the usage bits and a texture upload declares
 TRANSFER_DST too: it would move every sampled image's descriptor and every golden
 that samples a texture -- a repository-wide re-capture for the same behaviour.
 
@@ -122,5 +134,5 @@ committed tree, and the console batteries named above each regress `v0-cull`,
 `v0-stencil` and `m2-solid` as their own controls. The linked runtime was four
 days older than the compiler migration and has been rebuilt; every console run
 quoted here is tied to the artifact digest printed in its own section of
-`docs/M5_PHASE_C.md` (the R round's runs to `b33b813c...`, the depth-bias run to
-`356754d6...`).
+`docs/M5_PHASE_C.md` (the R round's runs to `b33b813c...`, the depth-bias and
+resolve-usage sweep to `998037c4...`).

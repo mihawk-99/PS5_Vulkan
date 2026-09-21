@@ -6262,10 +6262,12 @@ slope half -- whose `m` is the polygon's own depth gradient, which no pipeline s
 has. That limit is named in ps5vk_pipeline.c and here. Capping is what the clamped
 frame measures: 0.0002 past the clear keeps 2880 of 2880 samples unclamped and none
 clamped, with 0xc327c5ac (167.77 units, the capped factor) in the recorded table
-(pid 365, `Klog_Logs/r-depth-bias6.log`; pid 367 is the committed build's run).
+(pid 365, `Klog_Logs/r-depth-bias6.log`; the committed build's own sweep is pid 369,
+`Klog_Logs/r-verify3.log`, title digest `998037c4…`, where that case and `c8-resolve`,
+`v0-cull` and `m2-solid` pass together).
 
 **The probe and its table.** `v0-depth-bias` (`jobs/v0-depth-bias/queue.txt`,
-`golden/v0-depth-bias`, run pid 367, title digest 356754d6bb194001) clears a
+`golden/v0-depth-bias`, run pid 369, title digest 998037c4768a430b) clears a
 D32_SFLOAT attachment to 0.5 and draws quads at a depth the test can decide, eight
 frames, each read back in pixels, in the written depth and in the driver's own
 recorded registers:
@@ -6291,3 +6293,23 @@ clamp, the scales, and the *capped* offset -- 12 of 12 checks in the direct buil
 of 4 through the loader and the PS5 link arm. `tools/check-driver.sh` gains the test,
 with the case's own capture as its replay. `make lint` (195 files) and `make test`
 (30) are green, and the whole driver gate runs with no `DIFFERENT` comparison.
+
+## 2026-09-20 — R5's refusal, proved with the request's own probe
+
+The round above closed R5 with the sentence -- the request's own second option -- and
+left the probe it described unrun. `v0-resolve-usage` is that probe
+(`jobs/v0-resolve-usage/queue.txt`): the same four-sample resolve recorded twice, once
+into a destination declared the way the specification asks (TRANSFER_DST and SAMPLED,
+no colour-attachment bit) and once into the same frame with COLOR_ATTACHMENT added,
+which is the workaround the requesting project carries as W5. On the console (pid 368,
+`Klog_Logs/r-resolve-usage.log`, title digest `998037c4…`) the first is refused -- the
+recording ends, which is what the case reads, and the frame with the bit submits --
+with `c8-resolve` and `m2-solid` regressing behind it, three of three tests PASS and
+no FAIL record.
+
+Two honest limits. The runner installs no Vulkan debug messenger, so the refusal's
+*sentence* is not in the klog: the probe proves the refusal and the workaround, and the
+wording is what an application's own messenger receives. And the case is console
+evidence only -- no golden and no host gate -- because nothing about the driver's
+stream changed: the same resolve with the colour-attachment bit is the stream
+`golden/c8-resolve` already holds, and the second frame is byte for byte that frame.

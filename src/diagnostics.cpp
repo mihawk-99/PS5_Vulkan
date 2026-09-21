@@ -16453,6 +16453,106 @@ void run_vulkan_depth_bias_frames(const TestContext &test, TestOutcome &outcome)
     log.event("agc_depth_bias", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
 }
 
+// R5 (PS5_VULKAN_REQUESTS.md): the resolve destination's usage. This driver
+// stores an image in tiles when it declares COLOR_ATTACHMENT or
+// DEPTH_STENCIL_ATTACHMENT and in rows otherwise, and its resolve only walks
+// tiled images -- so a destination declared the way the specification asks,
+// TRANSFER_DST and SAMPLED with no colour-attachment bit, is refused. The first
+// frame is that destination and the second is the same frame with
+// COLOR_ATTACHMENT added, which is the workaround the requesting project carries
+// as W5. The pair is the request's own probe, and the refusal's sentence in the
+// run's klog is what the reworded message is for.
+void run_vulkan_resolve_usage_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8},
+    };
+    struct Frame
+    {
+        const char *name;
+        bool transfer_only;
+    };
+    // The specification's destination first, then the workaround: the same frame
+    // with the colour-attachment bit the driver's tiling rule reads.
+    static constexpr Frame kFrames[2] = {
+        {"destination TRANSFER_DST and SAMPLED", true},
+        {"destination with COLOR_ATTACHMENT (the workaround)", false},
+    };
+    bool refused = false;
+    bool worked = false;
+    for (const Frame &frame : kFrames)
+    {
+        log.event("agc_resolve_usage_frame", "INFO", 0, frame.name);
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        // The refused frame's steps are not logged as failures: its refusal is
+        // what the frame is for, and the case's own record below is the verdict.
+        input.report = frame.transfer_only ? nullptr : &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = kResolveVertices;
+        input.vertex_count = kSquareVertexCount;
+        input.vertex_stride = kVertexStride;
+        input.index_data = kIndices;
+        input.index_count = kIndexCount;
+        input.attribute_count = 2;
+        input.attributes[0] = attributes[0];
+        input.attributes[1] = attributes[1];
+        input.samples = VK_SAMPLE_COUNT_4_BIT;
+        input.resolve_output = true;
+        input.resolve_destination_transfer_only = frame.transfer_only;
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+            return;
+        ps5vk_triangle triangle{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (test.capture && status == PS5VK_TRIANGLE_OK)
+        {
+            log_driver_submission(triangle.device, frame.name, log);
+            log_driver_stages(triangle.device, log);
+        }
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            log.event("agc_resolve_usage", "FAIL", -1,
+                      "a submission did not complete; the program's objects stay allocated");
+            return;
+        }
+        if (frame.transfer_only)
+        {
+            refused = status != PS5VK_TRIANGLE_OK;
+            log.event("agc_resolve_usage_frame", refused ? "INFO" : "FAIL", (long long)status,
+                      refused ? "the resolve was refused, as the usage bit requires"
+                              : "the resolve into a rows-stored destination was not refused");
+        }
+        else
+        {
+            worked = status == PS5VK_TRIANGLE_OK;
+            log.event("agc_resolve_usage_frame", worked ? "PASS" : "FAIL", (long long)status,
+                      worked ? "the same resolve submitted with the colour-attachment bit"
+                             : "the workaround frame could not be recorded or submitted");
+        }
+        ps5vk_triangle_finish(&triangle);
+    }
+    // The request's two halves: refused without the bit, submitted with it.
+    const bool passed = refused && worked;
+    log.number("agc_resolve_usage", "refused", refused ? 1u : 0u);
+    log.number("agc_resolve_usage", "submitted", worked ? 1u : 0u);
+    char detail[176]{};
+    std::snprintf(detail, sizeof(detail),
+                  "the TRANSFER_DST and SAMPLED destination was %s and the "
+                  "COLOR_ATTACHMENT one %s",
+                  refused ? "refused" : "accepted", worked ? "submitted" : "refused");
+    outcome.command_built = true;
+    outcome.passed = passed;
+    log.event("agc_resolve_usage", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
+}
+
 void run_vulkan_stencil_clear_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
     JsonLog &log = test.log;
@@ -20804,6 +20904,11 @@ constexpr RunnerTest kRunnerTests[] = {
     // R1: cull none, cull back, cull front and rasterizer discard, one frame
     // each over the same quad, read back in pixels (run_vulkan_cull_frames).
     {"v0-cull", "m3-vertex", run_vulkan_cull_frames},
+    // R5: the same four-sample resolve twice, once into a destination declared
+    // TRANSFER_DST and SAMPLED (refused, by name) and once into the same frame
+    // with COLOR_ATTACHMENT added, which is the workaround
+    // (run_vulkan_resolve_usage_frames).
+    {"v0-resolve-usage", "m3-vertex", run_vulkan_resolve_usage_frames},
     // R1's depth bias: the quad drawn at the depth its attachment clears to with
     // no bias, with each sign of the constant factor, and the ramp the slope
     // factor and the clamp move, read back in pixels and in the depth plane

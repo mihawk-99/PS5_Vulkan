@@ -1,0 +1,19 @@
+# PS5 Vulkan test runner job queue (PPSA99988): R5's resolve destination.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-resolve-usage/queue.txt
+#
+# v0-resolve-usage records the same four-sample resolve twice: once into a
+# destination declared the way the specification asks -- TRANSFER_DST and
+# SAMPLED, no colour-attachment bit -- which this driver stores in rows and
+# refuses to resolve into, and once into the same frame with COLOR_ATTACHMENT
+# added, which is the workaround the requesting project carries as W5. The pair
+# is the request's own probe: the first must be refused (the refusal ends the
+# recording, which is what the case reads), the second must submit. The runner
+# installs no debug messenger, so the refusal's sentence itself is not in this
+# klog; an application's own messenger is where it appears
+# (docs/M5_PHASE_C.md, R5). m2-solid and c8-resolve are the regressions behind
+# it.
+hold 60
+v0-resolve-usage
+c8-resolve
+m2-solid
+exit
