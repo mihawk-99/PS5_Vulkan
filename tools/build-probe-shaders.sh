@@ -549,7 +549,11 @@ probe="$root/build/host/opengnm-psbc-probe"
     { echo "missing glslang: $glslang" >&2; exit 2; }
 
 work="$root/build/shaders/$set_name"
-mkdir -p "$work" "$root/$output"
+# Where the packages, SPIR-V and records go. tools/check-probe-packages.sh sets
+# this to a scratch root so it can rebuild every set and compare the result with
+# the committed packages without writing into the tree.
+out_root=${PS5VK_PROBE_OUTPUT_ROOT:-$root}
+mkdir -p "$work" "$out_root/$output"
 
 # A failed compile must stop the build: glslang reports its errors and leaves
 # the output file alone, so a stale SPIR-V from an earlier build would be
@@ -588,11 +592,11 @@ compile_spirv frag "$root/$pixel_source" "$work/pixel.spv"
 # below: the runner compiles this set's shipped SPIR-V with the shipped options
 # and must reproduce both packages byte for byte.
 "$probe" -g -s vertex --ngg "${vertex_flags[@]}" -f "$work/vertex.spv" \
-    -o "$root/$output/vertex.bin" --agc-package "$root/$output/vertex.bin"
+    -o "$out_root/$output/vertex.bin" --agc-package "$out_root/$output/vertex.bin"
 "$probe" -g -s fragment --raw "${pixel_flags[@]}" -f "$work/pixel.spv" \
-    -o "$root/$output/pixel.bin" --agc-package "$root/$output/pixel.bin"
+    -o "$out_root/$output/pixel.bin" --agc-package "$out_root/$output/pixel.bin"
 for stage in vertex pixel; do
-    [[ -s $root/$output/$stage.bin ]] || {
+    [[ -s $out_root/$output/$stage.bin ]] || {
         echo "$set_name: the C package writer wrote no $stage package" >&2
         exit 1
     }
@@ -601,18 +605,18 @@ done
 # The runner's "compile" mode (docs/M5_PHASE_A.md, A3) compiles the same SPIR-V
 # on the console and must reproduce both packages. Ship the SPIR-V and the
 # exact compiler options, in the CLI's own syntax.
-cp "$work/vertex.spv" "$work/pixel.spv" "$root/$output/"
+cp "$work/vertex.spv" "$work/pixel.spv" "$out_root/$output/"
 {
     echo "# Compiler options of tools/build-probe-shaders.sh $set_name, in opengnm-psbc CLI syntax."
     echo "# The runner's compile mode compiles <stage>.spv with them and packages the result"
     echo "# with ps5-opengl's C writer (ESGS ring item size 1)."
     echo "vertex -g -s vertex --ngg${vertex_flags[*]:+ ${vertex_flags[*]}}"
     echo "pixel -g -s fragment --raw${pixel_flags[*]:+ ${pixel_flags[*]}}"
-} > "$root/$output/compile.txt"
+} > "$out_root/$output/compile.txt"
 
 python3 - "$set_name" "$root" "$output" "$work" "$glslang" "$compiler" \
     "$vertex_source" "$pixel_source" "${vertex_flags[*]:-}" "${pixel_flags[*]:-}" \
-    "$pixel_compiler" "$expected_col_format" <<'PY'
+    "$pixel_compiler" "$expected_col_format" "$out_root" <<'PY'
 import hashlib
 import json
 import pathlib
@@ -621,7 +625,7 @@ import sys
 
 set_name = sys.argv[1]
 root = pathlib.Path(sys.argv[2])
-output = root / sys.argv[3]
+output = pathlib.Path(sys.argv[13]) / sys.argv[3]
 work, glslang, compiler = map(pathlib.Path, sys.argv[4:7])
 vertex_source, pixel_source = root / sys.argv[7], root / sys.argv[8]
 vertex_flags, pixel_flags = sys.argv[9], sys.argv[10]
@@ -923,5 +927,5 @@ lines += [f"{sha256(path)}  {path.relative_to(root)}" for path in inputs]
 (output / "PROVENANCE.txt").write_bytes(("\n".join(lines) + "\n").encode("ascii"))
 PY
 
-(cd "$root/$output" && sha256sum --check --quiet SHA256SUMS)
-echo "$set_name shader packages: $root/$output"
+(cd "$out_root/$output" && sha256sum --check --quiet SHA256SUMS)
+echo "$set_name shader packages: $out_root/$output"

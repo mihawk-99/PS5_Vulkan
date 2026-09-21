@@ -137,6 +137,11 @@ mkdir -p "$work"
 # host half of the ACO round; docs/M5_PHASE_C.md, blocker round 8).
 bash "$root/tools/check-fragment-inputs.sh"
 bash "$root/tools/check-aco-state.sh"
+# And the same archive's committed output: every probe package still compiles to
+# itself. This is the only check that catches a package drifting from the
+# compiler -- the runner's compile keyword covers 40 of the 43 committed sets and
+# appears in one queue out of 93 (tools/check-probe-packages.sh).
+bash "$root/tools/check-probe-packages.sh"
 # The B6 test compiles the probe sets' SPIR-V and compares their packages.
 export PS5VK_PROBES="$root/probes"
 draw_golden="$root/golden/b5/b4-headless-1.json"

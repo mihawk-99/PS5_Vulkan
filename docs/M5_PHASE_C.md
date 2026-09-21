@@ -6676,3 +6676,55 @@ left-red/right-blue readback still holds through the rebuilt compiler), `c8-reso
 `m2-solid` -- with 1645 PASS records and the only FAIL records being the deliberate
 non-zero `depthBiasClamp` refusal the driver raises by name. Multi-set itself is not
 reachable from a queue yet: the driver still refuses a draw past set 0, which is Round 2.
+
+## 2026-09-21 — the probe packages get a gate, because the console's compile check does not cover them
+
+Round 1's byte-identical sweep found `probes/v0-push` carrying a package built before the
+R9 compiler fix, and the reason it had gone unnoticed is structural: the runner's
+`compile` keyword -- the only thing that recompiles a committed package on the console --
+appears in **one** of the 93 queues under `jobs/`, and that one (`jobs/compile`, which
+queues `all`) covers the 40 sets a test loads, leaving `c7-diag`, `c8-sampleid` and
+`v0-multiset` out. So the drift check is on the host now:
+**`tools/check-probe-packages.sh`**, run by `build/gates.sh` (11 gates).
+
+It rebuilds every set `tools/build-probe-shaders.sh` can build into a scratch root and
+compares the result with the committed files byte for byte. The build script gained
+`PS5VK_PROBE_OUTPUT_ROOT` for that, so a check never writes into the tree.
+
+Measured on the tree that carries the change: **43 committed package sets, 41 rebuilt and
+byte-identical**, and two named as not rebuildable here -- `probes/shaders` (imported Split
+AGC assets, no builder in this repository) and `c8-sampleid` (committed packages whose label
+exits 2 on purpose, because the SPIR-V front end rejects
+`SpvCapabilitySampleRateShading`). `v0-robust`'s label fails in the AGC writer and commits
+nothing, so there is nothing there to drift.
+
+The arithmetic is asserted every run rather than reported: a committed set that is neither
+rebuilt nor one of the two exceptions fails the check, so a new set cannot join `probes/`
+without a builder. Both failure modes were tested: one appended byte in
+`probes/m2/pixel.bin` gives `DIFFERS from the committed package` and exit 1, and a
+committed set with no builder gives `committed but neither rebuilt nor excepted` and exit
+1. `PROVENANCE.txt` differences are separated out, because that file records the probe
+compiler's hash and moves whenever the CLI is rebuilt; they are printed and do not fail.
+
+**The two numbers in the compiler patch now say where they come from.** `8` in
+`PSBC_MAX_DESCRIPTOR_SETS` is the layout blob's size and is explicitly *not* a measurement;
+the bound that is real is the ABI's user data, one dword per set pointer out of the 32 user
+SGPRs a non-compute stage has (16 for compute), and `psbc_multiset` measures it rather than
+asserting it: a third declared set takes the fragment stage from 4 to **5 user SGPRs, so 1
+per set pointer**, 12 of 12 checks direct. The comment also records what happens above that
+budget -- RADV silently switches to its indirect descriptor form
+(`remaining_sgprs < num_desc_set`, `src/amd/vulkan/radv_shader_args.c:1013`), no per-set
+pointer is declared, and the driver can therefore refuse that form by name instead of
+binding a set nowhere. The 128-slot budget is named as what it is: the caller's own
+`descriptor_bindings[]` length in `PsbcCompileOptions`, the old single-set cap, now spent
+across sets -- tighter than a per-set cap for a caller that spreads bindings widely, with
+the current consumer's use (about eight slots across three sets) on the record beside it.
+
+**And the AGC package writer's one-pointer limitation moved into the named-gaps list**
+(`docs/REQUESTS_RESPONSE.md`, "What is still open, stated plainly"): the writer emits
+`descriptor_set0_*` only (`src/platform/ps5_agc_package.c:200`), so a *packaged* multi-set
+shader would reach an AGC-native consumer with set 0 bound and the rest nowhere. Blast
+radius: no such consumer exists -- the driver compiles the application's SPIR-V and this
+driver's own path never reads those packages, and ps5-opengl's Gallium path is single-set by
+construction. Retirement trigger: the writer learns the per-set array at the same time as
+the first AGC-native consumer that binds more than set 0.
