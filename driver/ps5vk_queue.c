@@ -1016,9 +1016,16 @@ ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, in
                                buffer_index);
    const uint32_t word_count = (uint32_t)(command.up - command.bottom);
    /* A flip is a stream of its own in the same buffer: the capture reads this
-    * count with the words (ps5vk_debug_last_submission). */
+    * count with the words (ps5vk_debug_last_submission) -- and it is the
+    * submission the step list has to report, or a capture of a flip logs the
+    * previous draw's step: the draw's length over the flip's words, which is
+    * 104 words over 64 for c1-triangle and 40 words of the draw's own buffer
+    * behind them (2026-09-20). */
    queue->last_words = word_count;
    queue->last_stream = stream;
+   queue->step_count = 1;
+   queue->steps[0].stream = stream;
+   queue->steps[0].words = word_count;
    ps5vk_flush_cpu_cache(stream, word_count * sizeof(uint32_t));
 
    struct ps5vk_agc_submit_description description = {

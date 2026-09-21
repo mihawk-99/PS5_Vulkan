@@ -92,15 +92,26 @@ fi
 cmp -s "$work/u_cpu_detect.patched.c" "$tree/$cpu_detect" ||
     cp "$work/u_cpu_detect.patched.c" "$tree/$cpu_detect"
 
-# Compute metadata: the pinned compiler keeps ACO's rsrc1/rsrc2/rsrc3, VGPR and
-# SGPR counts and LDS size to itself, and a compute dispatch has to program
-# COMPUTE_PGM_RSRC1/2 itself. The patch exports them for compute stages; it
-# fails loudly if the anchors it replaces are not exactly where it expects
-# them, so an SDK update cannot silently drop the export.
-python3 "$root/tooling/psbc/patch-compute-metadata.py" "$tree"
+# Compute metadata: the pinned 0.2.0-era compiler kept ACO's rsrc1/rsrc2/rsrc3,
+# VGPR and SGPR counts and LDS size to itself and had to be patched to export
+# them. The 0.3.0 fork carries those fields itself -- PsbcShaderMetadata version
+# 14 has user_sgpr_count, the ngg_lds_layout trio and the compute_* group, and
+# the compiler programs COMPUTE_PGM_RSRC1/2 -- so the patch that added them,
+# tooling/psbc/patch-compute-metadata.py, was dropped rather than moved when this
+# repository migrated to the fork (docs/BLOCKERS.md, the SDK section). The field
+# is named compute_lds_bytes there, not compute_lds_size, and nothing in this
+# repository ever read the old name.
 
 # Match RADV before shader info: distinct fragment varyings need distinct slots.
 python3 "$root/tooling/psbc/patch-fragment-inputs.py" "$tree"
+
+# The wave arithmetic: the standalone path can leave workgroup_size 0, which
+# calc_min_waves turns into 0 waves and get_addr_regs_from_waves divides by.
+# The patch restores the field's documented "unknown is UINT_MAX" invariant and
+# guards the divide with a witness line. It is not the console's SIGFPE -- that
+# fault is the test runner's own zero divisor (docs/HARDWARE_FINDINGS.md,
+# 2026-09-20) -- but the divide is real and unguarded upstream.
+python3 "$root/tooling/psbc/patch-aco-min-waves.py" "$tree"
 
 # The eight-bit vertex layouts: Vulkan requires VERTEX_BUFFER for every format
 # the hardware can fetch, and the compiler's enum named none of them. The patch

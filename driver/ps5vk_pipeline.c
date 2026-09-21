@@ -38,11 +38,14 @@
 #include "ps5vk_debug.h"
 
 #include <assert.h>
+#include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "ps5_agc_package.h"
 #include "util/detect_os.h"
+#include "util/log.h"
 #include "vk_alloc.h"
 #include "vk_render_pass.h"
 #include "vk_util.h"
@@ -492,6 +495,97 @@ ps5vk_spirv_has_entry_point(const struct ps5vk_shader_module *module, uint32_t m
    return found;
 }
 
+/* The compiler recurses deeply -- NIR passes over big shaders, then ACO's
+ * optimizer, register allocation and scheduler -- and an application's own
+ * thread may carry a stack too small for it. The stack is allocated here and
+ * handed to the thread with pthread_attr_setstack rather than requested with
+ * setstacksize: a runtime that caps the size a thread asks for would leave the
+ * recursion as unbounded as it was, while a stack this repository owns cannot
+ * be capped.
+ *
+ * This is robustness rather than a repair. The console fault this wrapper was
+ * written for -- SIGFPE, "integer divide fault", after the V0-formats sampled
+ * unsigned case -- is not the compiler's and not a stack: it is the test
+ * runner dividing the packed texel buffer's size by a value-initialized row's
+ * zero texel size (src/diagnostics.cpp, docs/HARDWARE_FINDINGS.md,
+ * 2026-09-20). */
+#define PS5VK_COMPILE_STACK_BYTES (32u * 1024u * 1024u)
+
+struct ps5vk_compile_call
+{
+   struct nir_shader *nir; /* one of the two inputs */
+   const uint32_t *words;
+   size_t size;
+   const PsbcCompileOptions *options;
+   PsbcShaderOutput *output;
+   PsbcResult result;
+};
+
+static void *
+ps5vk_compile_worker(void *argument)
+{
+   struct ps5vk_compile_call *const call = argument;
+   /* One line per compile while the fault is open: it says whether a crash in
+    * the compiler happened on this thread (with PS5VK_COMPILE_STACK_BYTES under
+    * it) or before the compile started at all. Mesa's log reaches the console's
+    * klog; the title's own stderr goes to its trace file instead. */
+   printf("[ps5vk] compile start: nir=%p words=%p\n", (void *)call->nir,
+          (const void *)call->words);
+   fflush(stdout);
+   call->result = call->nir ? psbc_compile_nir(call->nir, call->options, call->output)
+                            : psbc_compile_shader(call->words, call->size, call->options,
+                                                  call->output);
+   printf("[ps5vk] compile done: result=%d\n", (int)call->result);
+   fflush(stdout);
+   return NULL;
+}
+
+/* Runs one compile on a thread with the stack above and returns the compiler's
+ * result. Every step falls back to the next: our own stack, then the size the
+ * attributes ask for, then the caller's stack, which is what every compile did
+ * before this existed -- so a platform that refuses one of them keeps working
+ * and the fault stays a possibility rather than becoming a new failure. */
+PsbcResult
+ps5vk_compile_shader_deep(struct nir_shader *nir, const uint32_t *words, size_t size,
+                          const PsbcCompileOptions *options, PsbcShaderOutput *output)
+{
+   struct ps5vk_compile_call call = {.nir = nir,
+                                     .words = words,
+                                     .size = size,
+                                     .options = options,
+                                     .output = output,
+                                     .result = PSBC_RESULT_INTERNAL_ERROR};
+   pthread_attr_t attributes;
+   pthread_t thread;
+   char *const stack = malloc(PS5VK_COMPILE_STACK_BYTES);
+   if (pthread_attr_init(&attributes) != 0)
+   {
+      free(stack);
+      return ps5vk_compile_worker(&call), call.result;
+   }
+   int created = -1;
+   if (stack)
+      created = pthread_attr_setstack(&attributes, stack, PS5VK_COMPILE_STACK_BYTES);
+   if (created != 0)
+      created = pthread_attr_setstacksize(&attributes, PS5VK_COMPILE_STACK_BYTES);
+   if (created == 0)
+      created = pthread_create(&thread, &attributes, ps5vk_compile_worker, &call);
+   pthread_attr_destroy(&attributes);
+   if (created == 0)
+   {
+      pthread_join(thread, NULL);
+      free(stack);
+      return call.result;
+   }
+   /* The console's pthreads refused both forms: say so once for the log, then
+    * compile on this thread. */
+   fprintf(stderr, "[ps5vk] compile thread refused (%d); compiling on the caller's stack\n",
+           created);
+   free(stack);
+   ps5vk_compile_worker(&call);
+   return call.result;
+}
+
 /* A stage's shader, as SPIR-V from a shader module or as the NIR Mesa's meta
  * operations hand the driver directly
  * (VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_NIR_CREATE_INFO_MESA). */
@@ -528,9 +622,14 @@ ps5vk_compile_stage(struct ps5vk_device *device, const VkPipelineShaderStageCrea
    mtx_lock(&ps5vk_compile_mutex);
    PsbcShaderOutput output;
    memset(&output, 0, sizeof(output));
-   const PsbcResult result = nir ? psbc_compile_nir(nir, options, &output)
-                                 : psbc_compile_shader(module->words, module->size, options,
-                                                       &output);
+   /* A stage Mesa's meta operations hand the driver is NIR and no module, so
+    * the words are the module's only when there is one. Evaluating them
+    * eagerly here dereferences a null module for every meta clear, blit and
+    * resolve (the host's loader tests caught it as a SIGSEGV in this function,
+    * 2026-09-20). */
+   const uint32_t *const words = module ? module->words : NULL;
+   const size_t size = module ? module->size : 0;
+   const PsbcResult result = ps5vk_compile_shader_deep(nir, words, size, options, &output);
    const int written = result == PSBC_RESULT_OK
                           ? ps5_agc_package_build(&output, PS5VK_ESGS_RING_ITEM_SIZE,
                                                   &package->data, &package->size)

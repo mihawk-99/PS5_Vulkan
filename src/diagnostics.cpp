@@ -18,6 +18,7 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <pthread.h>
 #include <cmath>
 #include <cstring>
 #include <initializer_list>
@@ -68,6 +69,68 @@ namespace
 {
 constexpr std::size_t kProbeBytes = 0x10000;
 constexpr std::size_t kCommandWords = 256;
+
+#ifdef AGC_SHADER_COMPILER
+/* The compiler recurses deeply -- NIR passes over big shaders, then ACO's
+ * optimizer, register allocation and scheduler -- and a title thread's stack is
+ * small. Every console compile therefore runs on a thread whose 32 MiB stack
+ * this file allocates: a runtime that caps a requested stack size cannot cap
+ * one we own. The driver does the same for its own compiles
+ * (driver/ps5vk_pipeline.c). It is robustness, not a repair for a measured
+ * fault: the runner used to divide a row's packed buffer by its texel size and
+ * a declared-but-unfilled row gave that divisor the value zero
+ * (docs/HARDWARE_FINDINGS.md, 2026-09-20). */
+struct CompileCall
+{
+    const std::uint32_t *words;
+    std::size_t size;
+    const PsbcCompileOptions *options;
+    PsbcShaderOutput *output;
+    PsbcResult result;
+};
+
+void *compile_worker(void *argument)
+{
+    auto *const call = static_cast<CompileCall *>(argument);
+    call->result = psbc_compile_shader(call->words, call->size, call->options, call->output);
+    return nullptr;
+}
+
+PsbcResult compile_deep(const std::uint32_t *words, std::size_t size,
+                        const PsbcCompileOptions *options, PsbcShaderOutput *output)
+{
+    CompileCall call{words, size, options, output, PSBC_RESULT_INTERNAL_ERROR};
+    constexpr std::size_t kStackBytes = 32u * 1024u * 1024u;
+    pthread_attr_t attributes;
+    pthread_t thread;
+    char *const stack = static_cast<char *>(std::malloc(kStackBytes));
+    if (pthread_attr_init(&attributes) != 0)
+    {
+        std::free(stack);
+        compile_worker(&call);
+        return call.result;
+    }
+    int created = -1;
+    if (stack)
+        created = pthread_attr_setstack(&attributes, stack, kStackBytes);
+    if (created != 0)
+        created = pthread_attr_setstacksize(&attributes, kStackBytes);
+    if (created == 0)
+        created = pthread_create(&thread, &attributes, compile_worker, &call);
+    pthread_attr_destroy(&attributes);
+    if (created == 0)
+    {
+        pthread_join(thread, nullptr);
+        std::free(stack);
+        return call.result;
+    }
+    /* The console's pthreads refused both forms: compile here and say so. */
+    fprintf(stderr, "[PS5VK] compile thread refused (%d); using the caller's stack\n", created);
+    std::free(stack);
+    compile_worker(&call);
+    return call.result;
+}
+#endif /* AGC_SHADER_COMPILER */
 constexpr int kDirectMemoryType = 12;
 constexpr int kMapProtection = 0x33;
 constexpr int kNetCtlInfoIpAddress = 0;
@@ -1454,6 +1517,10 @@ bool open_video_target(LiveFrameMemory &memory, std::int64_t direct_size, JsonLo
         !map_live_allocation(direct_size, kFramebufferBytes * 2, "agc_live_framebuffer", log,
                              memory.framebuffer_start, memory.framebuffer))
         return false;
+    log.hex("agc_live_framebuffer", "address",
+            static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(memory.framebuffer)));
+    log.event("agc_live_framebuffer", "INFO", static_cast<std::int64_t>(kFramebufferBytes * 2),
+              "bytes to be cleared");
     std::memset(memory.framebuffer, 0, kFramebufferBytes * 2);
     flush_gpu_data(memory.framebuffer, kFramebufferBytes * 2);
     VideoBuffer buffers[2] = {{memory.framebuffer, nullptr, nullptr, nullptr},
@@ -7714,8 +7781,8 @@ void run_compute_dispatch(const TestContext &test, TestOutcome &outcome) noexcep
         PsbcDescriptorBinding{0, 0, PSBC_DESCRIPTOR_STORAGE_BUFFER, 1, 0, kStorageBufferStride};
     options.descriptor_binding_count = 1;
     PsbcShaderOutput output{};
-    const PsbcResult result = psbc_compile_shader(
-        reinterpret_cast<const std::uint32_t *>(g_spirv.data()), spirv_size, &options, &output);
+    const PsbcResult result = compile_deep(reinterpret_cast<const std::uint32_t *>(g_spirv.data()),
+                                           spirv_size, &options, &output);
     const PsbcShaderMetadata metadata = output.metadata;
     const bool compiled = result == PSBC_RESULT_OK && output.machine_code != nullptr &&
                           output.machine_code_size != 0 &&
@@ -9104,6 +9171,23 @@ struct SampledFormat
 constexpr std::uint32_t kSampledTextureWidth = 256;
 constexpr std::uint32_t kSampledTextureHeight = 4;
 
+// A sampled table's declared size is one edit away from its rows: too *many*
+// initializers the compiler rejects, but a declared size larger than the rows
+// leaves value-initialized ones behind, whose zero texel_bytes is the divisor
+// the frame loop divides the packed texel buffer's size by. That is the
+// console's SIGFPE of 2026-09-20 -- `div %r13d` in run_sampled_format_frames,
+// at the 8th row of a 10-element table that has 7 (Klog_Logs/aco-min-deep2.log,
+// docs/HARDWARE_FINDINGS.md) -- so every sampled table states the invariant
+// here, where the compiler can check it.
+template <std::size_t N>
+constexpr bool sampled_formats_filled(const std::array<SampledFormat, N> &table) noexcept
+{
+    for (const SampledFormat &row : table)
+        if (row.texel_bytes == 0)
+            return false;
+    return true;
+}
+
 // V0-formats' unsigned integer families: the same struct, with the texel an
 // integer whose value the frame carries as an 8-bit level. 0x40 and 0x80 are
 // exact over 255, so the expectation is the value itself.
@@ -9114,15 +9198,19 @@ constexpr std::uint32_t kSampledTextureHeight = 4;
 // an RGBA8 target, so the readback is 0x80 in red with nothing in green or blue
 // (the R001 selectors' single channel). Two rows a table, because a family with
 // its own case is a battery of its own (docs/M5_PHASE_C.md, round 13's budget).
-std::array<SampledFormat, 2> sampled_depth_formats() noexcept
+constexpr std::array<SampledFormat, 2> sampled_depth_formats() noexcept
 {
     return {{
         {VK_FORMAT_D16_UNORM, 2, {0x00, 0x80}, {0x80, 0x00, 0x00}},
         {VK_FORMAT_D32_SFLOAT, 4, {0x00, 0x00, 0x00, 0x3f}, {0x80, 0x00, 0x00}},
     }};
 }
+static_assert(sampled_formats_filled(sampled_depth_formats()),
+              "sampled_depth_formats: a declared row is not filled in");
 
-std::array<SampledFormat, 10> sampled_unsigned_formats() noexcept
+// Seven rows, and the declared size is theirs: the count the case runs is the
+// table's, so a size that outruns the rows runs a row that holds nothing.
+constexpr std::array<SampledFormat, 7> sampled_unsigned_formats() noexcept
 {
     return {{
         // The wider widths hold the same values: the shader writes the fetch
@@ -9149,6 +9237,8 @@ std::array<SampledFormat, 10> sampled_unsigned_formats() noexcept
          {0x40, 0x80, 0xc0}},
     }};
 }
+static_assert(sampled_formats_filled(sampled_unsigned_formats()),
+              "sampled_unsigned_formats: a declared row is not filled in");
 
 // V0-formats' signed integer family, fitted a word at a time. The two-channel
 // pair came first: the register database's 8_8_SINT 19 with the unsigned pair's
@@ -9162,7 +9252,10 @@ std::array<SampledFormat, 10> sampled_unsigned_formats() noexcept
 // values a byte can carry, and the pair's second frame holds the negative
 // second byte, which an RGBA8 target keeps as 0 -- a word that presents 0x80 as
 // +128 fails that frame.
-std::array<SampledFormat, 11> sampled_signed_formats() noexcept
+//
+// Seven rows, and the declared size is theirs: the fault the unsigned table
+// took was this table's too, one case later in the same battery.
+constexpr std::array<SampledFormat, 7> sampled_signed_formats() noexcept
 {
     return {{
         {VK_FORMAT_R8G8_SINT, 2, {0x40, 0x80}, {0x40, 0x00, 0x00}},
@@ -9184,8 +9277,10 @@ std::array<SampledFormat, 11> sampled_signed_formats() noexcept
          {0x20, 0x40, 0x60}},
     }};
 }
+static_assert(sampled_formats_filled(sampled_signed_formats()),
+              "sampled_signed_formats: a declared row is not filled in");
 
-std::array<SampledFormat, 55> sampled_formats() noexcept
+constexpr std::array<SampledFormat, 55> sampled_formats() noexcept
 {
     return {{
         // The 4-byte layout, which the M3 texture canary and C4 proved already.
@@ -9518,14 +9613,14 @@ void run_vulkan_format_sample_frames(const TestContext &test, TestOutcome &outco
 
 void run_vulkan_unsigned_sample_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
-    const std::array<SampledFormat, 10> formats = sampled_unsigned_formats();
+    const auto formats = sampled_unsigned_formats();
     run_sampled_format_frames(test, outcome, "agc_v0_formats_sampled_uint", formats.data(),
                               formats.size());
 }
 
 void run_vulkan_signed_sample_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
-    const std::array<SampledFormat, 11> formats = sampled_signed_formats();
+    const auto formats = sampled_signed_formats();
     run_sampled_format_frames(test, outcome, "agc_v0_formats_sampled_sint", formats.data(),
                               formats.size());
 }
@@ -16310,8 +16405,8 @@ bool compile_shader_package(const PackagePaths &packages, const char *stage,
     timespec started{};
     clock_gettime(CLOCK_MONOTONIC, &started);
     PsbcShaderOutput output{};
-    const PsbcResult result = psbc_compile_shader(
-        reinterpret_cast<const std::uint32_t *>(g_spirv.data()), spirv_size, &options, &output);
+    const PsbcResult result = compile_deep(reinterpret_cast<const std::uint32_t *>(g_spirv.data()),
+                                           spirv_size, &options, &output);
     std::uint8_t *compiled = nullptr;
     std::size_t compiled_size = 0;
     const int writer_result = result == PSBC_RESULT_OK
@@ -20019,7 +20114,12 @@ bool load_runner_queue(RunnerQueue &queue, JsonLog &log) noexcept
 // keeps its memory and stops the queue.
 bool run_test_queue(std::int64_t direct_size, bool agc_ready, JsonLog &log) noexcept
 {
-    RunnerQueue queue{};
+    /* The queue lives in static storage, not on this frame: the console's
+     * title threads carry a small stack, and this function's other locals
+     * (the loader's 4 KiB text buffer, LinkedShaders, PackagePaths) already
+     * put it near the edge -- measured as a SIGSEGV writing below the stack
+     * (Klog_Logs/smoke-fb.log). One runner, one queue, so static is enough. */
+    static RunnerQueue queue;
     if (!load_runner_queue(queue, log))
     {
         log.event("runner_summary", "FAIL", -1, "job queue rejected; no test ran");

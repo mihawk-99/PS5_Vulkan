@@ -1,16 +1,16 @@
 PS5 Vulkan m4-depth shader packages, built by tools/build-probe-shaders.sh m4-depth.
 pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
 glslang: Glslang Version: 11:16.4.0
-opengnm-psbc sha256: 197c7fedfe8a25d29b03f8a0835bd166592938276036a9f199fbc6781faa4cdf
+opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
 vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32b32_float:0:0:28:4 --vertex-attribute 1:r32g32b32a32_float:0:12:28:4; writer --esgs-ring-itemsize 1 --allow-unresolved
 pixel: -g -s fragment --raw --address32-hi 2; writer --allow-unresolved
 vertex attributes: location 0 r32g32b32_float offset 0, location 1 r32g32b32a32_float offset 12, stride 28, binding 0
 program-checksum registers are unresolved, as in ps5-opengl's runtime packages
-8fb6e32c3d11a8c558959d30a3b6db8a54a5dafce9334befbc9f0645b405ede7  shaders/m4/depth_colour.vert
-0c3d885ecb73d4a2d53e083b7ea8a8cbddd5635415795957123aa7d282474a5d  shaders/m3/vertex_colour.frag
+c94013aa299e84aef828f075b991f46e863d8b626818dfab999b4404e71a2a2e  shaders/m4/depth_colour.vert
+89726db6c5e32027c4fe1fc386fabb48f3be0616b9296eab7c28a83e807488ba  shaders/m3/vertex_colour.frag
 020c1ba1e23ad81341c5950b379976887a3f71142536219f075d9dc71b0e3771  build/shaders/m4-depth/vertex.spv
 b57f4b8de678250582aa36b47cfb8e22e99eb47511ce911e6bca90f3d46fcfcd  build/shaders/m4-depth/pixel.spv
 05130f4e7818f0d6a912dd279dac55b883f2f3c5260b21fed9e9a696989c6320  build/shaders/m4-depth/vertex.ngg.bin
-5ff050b6b182c94d6af7c2e0f887227c7086c9c9b618b44084d4128be88cb474  build/shaders/m4-depth/vertex.hw.json
+ebc25671f9dd0d6f555a98d59e5c5f8b0c80a51ab56a0d207d03d4fe2bca65a5  build/shaders/m4-depth/vertex.hw.json
 585664b0b5c47f9d10aad61f184a59b9b7f4cf4484b79c538077c8d8d39eb99c  build/shaders/m4-depth/pixel.raw.bin
-e247d16f0984054a1172f9212fe52eebaa89527a54d0f8aec047a16536ee4d4a  build/shaders/m4-depth/pixel.hw.json
+0561f6b0c6477a8f8a2bfca904b185c2b5a0853921fe0b0764229b6811492b80  build/shaders/m4-depth/pixel.hw.json

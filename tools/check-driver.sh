@@ -181,7 +181,11 @@ want c5_stencil &&
 # The V0-query test too: its query counters live in memory the driver mapped
 # itself, which no runner frame's capture holds, so only a capture of the test
 # provides the addresses its replay hands out (as the C5 depth attachment is).
-query_run="$root/golden/v0-query-driver/run-1.json"
+# The case's own golden directory since the compiler migration re-captured it:
+# the v0-query-driver capture beside it is a pre-migration run, and the driver
+# now writes one more user-data word than that run recorded
+# (docs/M5_PHASE_C.md, 2026-09-20).
+query_run="$root/golden/v0-query-full/run-1.json"
 want v0_query_full &&
     python3 "$root/tools/golden.py" replay "$query_run" "$work/v0-query-full.replay" \
         --test v0-query-full

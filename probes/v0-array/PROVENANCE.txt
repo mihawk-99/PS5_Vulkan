@@ -1,15 +1,15 @@
 PS5 Vulkan v0-array shader packages, built by tools/build-probe-shaders.sh v0-array.
 pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
 glslang: Glslang Version: 11:16.4.0
-opengnm-psbc sha256: 197c7fedfe8a25d29b03f8a0835bd166592938276036a9f199fbc6781faa4cdf
+opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
 vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32_float:0:0:20:4 --vertex-attribute 1:r32g32b32_float:0:8:20:4; writer --esgs-ring-itemsize 1 --allow-unresolved
 pixel: -g -s fragment --raw --address32-hi 2 --descriptor-binding 0:0:combined_image_sampler:1:0:48; writer --allow-unresolved
 program-checksum registers are unresolved, as in ps5-opengl's runtime packages
-9a494361ab758e0102eb2d32690ebe3df804822e8b2e5ad83cabd8d0c0362562  shaders/v0/array.vert
-7552d06f41bb1c644ffe438b31c5bc696e7c565671e64458d69142b49b6fa470  shaders/v0/array.frag
+bda3a0946e4fb4df73f012994fa3014165f75ec0e923d2ad16e3e8792307904a  shaders/v0/array.vert
+6f577051410b1d36f77a5ad08531baad1f1df487a1415a4bceb5fcb6b3fa2ef6  shaders/v0/array.frag
 060a8d6021572b2003ca4702f46ca7ad5d96ed5479e2be8c26e5d29489385264  build/shaders/v0-array/vertex.spv
 4bdcaa4fb25b41b73b61bb0102881a31acef84cd76b4470ffcc108bfe83d2f4a  build/shaders/v0-array/pixel.spv
 df76871c28f97b7812acbcd1f1157eb2c30c41cd6046da8d1b7d8dd8fd0fe4fe  build/shaders/v0-array/vertex.ngg.bin
-4526c61cd26f3f61884a14b70aae1b250114ef32c81e33f1bb1a63f5b7a87609  build/shaders/v0-array/vertex.hw.json
+3320d64db5928a25f95054c6b20783783db59c46d267767a0ab44b3f7b479fcb  build/shaders/v0-array/vertex.hw.json
 914aa661b31cc01e84c3b15cdd5f300d0acb5d9f7230b0c4508721f424256221  build/shaders/v0-array/pixel.raw.bin
-d61f437ef6c32ea531255f7b1440358a02a776b75a4bdab78910229e1524b5e2  build/shaders/v0-array/pixel.hw.json
+13ca66c1658d88f4eb1ffb8b99685c398539e1f075bf639a55a1ce5886a3ee91  build/shaders/v0-array/pixel.hw.json

@@ -1,9 +1,9 @@
 address32_hi 2
-vertex_user_sgpr_count 4
+vertex_user_sgpr_count 5
 vertex_buffer_table_dword 0
 vertex_base_vertex_dword 1
-vertex_ngg_lds_dword 3
+vertex_ngg_lds_dword 4
 vertex_ngg_lds_layout 512
-vertex_descriptor_set0_dword 2
+vertex_descriptor_set0_dword 3
 vertex_set0_binding0_offset 0
 vertex_set0_binding0_stride 16

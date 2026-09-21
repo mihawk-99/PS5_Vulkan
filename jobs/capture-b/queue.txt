@@ -1,0 +1,31 @@
+# PS5 Vulkan test runner job queue (PPSA99988): golden capture, second batch.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/capture-b/queue.txt
+#
+# "capture" makes every frame log its AGC helper calls, its whole command
+# stream and its stage workspace image. Turn the klog into golden files with:
+#   python3 tools/golden.py extract <klog> <directory>
+#
+# The queue names its cases instead of saying "all": the runner refuses more
+# than 32 queued tests, and the case list outgrew that. These are the cases whose
+# goldens the 0.3.0 compiler migration moved -- each differed from its golden by
+# one shader-program register, the compiler's own change -- with m2-solid first
+# and last.
+#
+# m2-solid runs again last: its second capture must equal its first except
+# where the VideoOut handle appears, which shows a capture does not depend on
+# the tests before it, and every case's capture records the same run's m2-solid
+# as its register defaults.
+capture
+hold 60
+m2-solid
+d1-dynamic-ubo
+v0-array-layers
+v0-cube-faces
+v0-formats-sampled
+v0-query-full
+v0-robust
+v0-timestamp-driver
+v0-vertex-sint
+v0-vertex-uint
+m2-solid
+exit

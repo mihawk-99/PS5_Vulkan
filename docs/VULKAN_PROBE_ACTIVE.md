@@ -9,44 +9,26 @@ _Updated: 2026-09-20_
 
 ## Now
 
-**The objective's four items are answered and the follow-up work is the SDK fork
-migration.** Rounds 11 to 17 closed the format audit and explained the ACO
-fault:
+**The SDK fork migration is landed and the console fault is closed.** Two
+workstreams finished in this session and are one commit:
 
-- **The audit has no gaps (round 17).** 179 formats are required, **58 reported,
-  0 missing a required feature**, 55 conditional, 0 `must:` clauses unmet, split
-  **0 / 0 / 0 / 0 / 0**, so `python3 tools/format_audit.py --check` exits 0. The
-  descriptor types (rounds 4-9) and vertex formats (rounds 1-3) are closed, the
-  depth/stencil clause R1's report disclosed is satisfied by the stencil path
-  (rounds 11-12), and `B8G8R8A8_SRGB` is proved through fetch, blits, transfers
-  and its attachment pair (rounds 13-14). The packed
-  `A8B8G8R8_SRGB_PACK32`, round 16's measured hardware limit, closed the way its
-  twin's mechanism allows (round 17, evidence below).
-- **The ACO fault is a genuine compiler bug with a named fix**: one case alone
-  reproduces it (SIGFPE with a zero divisor, `jobs/aco-min`, pid 211), the pinned
-  compiler's `update_vgpr_sgpr_demand` can leave `program->num_waves = 0` and
-  `get_addr_regs_from_waves` divides by it, and ps5-opengl 0.3.0's patch guards
-  exactly that point (round 15).
-- **The migration's work list is measured** (round 16):
-  `tools/check-sdk-fork-migration.sh` assembles the fork's compiler from the
-  SDK's pins, verifies it is the SDK's own tree (`a27cbecc`), and finds one moved
-  anchor (`patch-fragment-inputs.py`), one dropped patch
-  (`patch-compute-metadata.py`, obsolete at metadata v14), two carrying over
-  unchanged and the version 8 to 14 bump that rebuilds every package and re-runs
-  every battery. That migration is the follow-up; nothing in the objective waits
-  on it.
+- **The compiler migration.** The driver links ps5-opengl 0.3.0's own
+  `opengnm-psbc` tree (metadata 14, this repository's patches re-applied), and
+  the work copy is the fork's own tree, which
+  `tools/check-sdk-fork-migration.sh` assembles and verifies against the
+  release's `patched_tree` (`a27cbecc`).
+- **The SIGFPE was the runner's zero divisor, not ACO.** `jobs/aco-min` dies at
+  the sampled-format loop's `div` because `sampled_unsigned_formats()` declared
+  ten rows and initialized seven: the eighth row's texel size is 0 and the loop
+  divides the packed buffer's length by it. The "ACO frames" every earlier round
+  read were console addresses symbolized without the eboot's `0x400000` load
+  base. Both sampled tables now declare their rows and carry a
+  `static_assert` that rejects a declared-but-unfilled one.
 
-**Round 17's evidence.** All six of the packed sRGB row's features are proved
-(pid 235, `Klog_Logs/v0-srgb-packed-run1.log`: seven of seven cases, 0 FAIL). The
-mechanism is `ps5vk_format.storage_reversed`: the console's curve reaches the
-first three *fetched* components and the format's Vulkan layout puts red last, so
-the driver stores texels in the R, G, B, A order its `R8G8B8A8_SRGB` twin has and
-swaps the bytes at every application boundary -- uploads, readbacks, both blit
-directions. docs/HARDWARE_FINDINGS.md records the fetch order that forces it.
-
-**What is left in the objective.** Nothing: every clause has implementation, a
-host gate, a console probe, an audit move and committed evidence. The follow-up
-is the SDK fork migration, on its own terms and with its own re-proof cost.
+**What is left in the objective.** Nothing from the mission: the migration is
+committed, the fault is fixed and proved on the console, and every gate is
+green. Rung 1.0's requirements were already met; the next gate is the CTS
+subset (`docs/CTS.md`).
 
 **Rules this workstream keeps.** One mechanism a round; the encoding comes from a
 public codebase or the register database before anything is written; the compiler
@@ -55,7 +37,7 @@ run, a focused host gate and the audit move in the same commit; a mechanism that
 fails its battery reverts its claim and is quoted against what failed; every
 battery regresses `v0-formats` (the audit mirror) and `m2-solid`.
 
-## Rung 1.0's remainder, after the audit's correction
+## Rung 1.0's remainder
 
 Every feature a per-row `{sym1}` cell requires is proved by a console run and
 reported by the driver; the rows left are the hardware's and one footnote clause's:
@@ -66,31 +48,19 @@ reported by the driver; the rows left are the hardware's and one footnote clause
 | limits audit | 106 members, 97 compared, 0 missing |
 | format audit | 179 required, 58 reported, 0 missing a required feature, 55 conditional, 0 `must:` clauses unmet |
 | the split | 0 / 0 / 0 / 0 / 0 |
-| the blockers left | closed: the descriptor and vertex enums, the depth/stencil clause and the sRGB rows. The ACO fault is fixed in the 0.3.0 fork; the migration is the follow-up |
+| the blockers left | none: the descriptor and vertex enums, the depth/stencil clause, the sRGB rows and the console fault are all closed |
 
 ## Last verified
 
 | Check | Result |
 | --- | --- |
-| blocker round 16: the SDK fork migration's work list (`build/sdk-fork`) | The SDK's compiler patch applies to its pinned base (`a92a1228`) and the assembled tree's hash is the SDK's own `patched_tree` (`a27cbecc`); `patch-vertex-formats.py` and `patch-descriptor-types.py` hold against it, `patch-fragment-inputs.py` needs its anchor moved and `patch-compute-metadata.py` is obsolete at `PSBC_SHADER_METADATA_VERSION 14u`. No repository input moved |
-| blocker round 15: the ACO fault reduced and explained (pid 211; `jobs/aco-min`) | `v0-formats-sampled-uint` alone reproduces it: every row passes, the device idles, then SIGFPE, "integer divide fault", `rax = rcx = rdx = 0`. The pinned compiler's `update_vgpr_sgpr_demand` can leave `program->num_waves = 0` and `get_addr_regs_from_waves` divides by it; the fork's patch guards that point and the pinned tree has no such guard |
-| blocker round 14: `B8G8R8A8_SRGB`'s attachment pair (pid 195; `jobs/v0-srgb-target`) | `v0-targets` holds the row's solid frame `0xff89bce1` and its additively blended frame `0xffbcbce1`, `v0-formats` 57 of 57, `m2-solid`; 3 of 3 tests, no FAIL. The audit's missing list falls to one row |
+| the console fault, on the committed build (`jobs/aco-min`, pid 299) | Seven of seven tests PASS, each `v0-formats-sampled-uint` "7 of 7 sampled formats fetched the colour their texel holds", 1581 PASS records, **no `signal:` record** (`Klog_Logs/aco-min-final.log`). The sampler's own case and `m2-solid`/`v0-formats` regress |
+| the compile-stage fix, on the console (pid 294) | `c7-clear`, `v0-formats-sampled-uint`, `c5-depth`, `m2-solid` PASS, 528 PASS records, no signal (`Klog_Logs/verify-compile-stage.log`): the meta-clear path whose host tests faulted |
+| the goldens and the replay model | `tools/check-driver.sh` PASS: the whole loader/direct/PS5-link table, no `DIFFERENT` comparison and no fault, from 148 failing comparisons and 8 host-test segfaults. `tools/check-runner-cases.sh` PASS (7 cases, 204 PASS records) |
+| the host gates | `make lint` (194 files), `make test` (30 tests), the three audits (`--check`, counts unchanged), `check-sdk-fork-migration.sh`, `check-mip-layout.sh`, `check-psbc-link.sh`, `check-vulkan-runtime.sh`, `check-runner-cases.sh`, `check-driver.sh` |
 
 ## Open findings
 
-- **An unsupported image used to assert** (2026-09-20): `vkCreateImage` aborted
-  the title on a format/usage combination the format's entry does not claim, and
-  the abort's stale backtrace was read as an ACO fault in rounds 4, 13 and 16.
-  It refuses by name now, so the next such case shows up in the log.
-- **One compiler fault stands, and it is the console build's** (2026-09-20):
-  the compile-order fault reproduces -- a SIGFPE after the unsigned texture
-  case's last row with another case queued (pid 171), a SIGSEGV in the same
-  case's setup alone (pid 181) -- while the host compiles the same 105 shaders in
-  one process cleanly (`tools/check-aco-state.sh`), so it is the console
-  compiler build's rather than driver state. It blocks no row: the case's frames
-  all complete before it, which is why the case keeps the last place in its
-  battery. The depth-descriptor shape is measured clean (round 21) and so is the
-  signed shader's second compile (round 18). Next: the 0.3.0 fork's compiler.
 - **A title cannot load a graphics library at run time** (2026-09-18): every `.so`
   this project builds is refused with ENOEXEC, so the delivery is the linked
   archive `build/driver/ps5/libps5vk.ps5.a`.

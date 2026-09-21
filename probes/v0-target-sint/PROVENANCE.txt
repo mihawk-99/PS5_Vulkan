@@ -1,17 +1,17 @@
 PS5 Vulkan v0-target-sint shader packages, built by tools/build-probe-shaders.sh v0-target-sint.
 pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
 glslang: Glslang Version: 11:16.4.0
-opengnm-psbc sha256: 197c7fedfe8a25d29b03f8a0835bd166592938276036a9f199fbc6781faa4cdf
-pixel compiler (tools/build-psbc-cli.sh) sha256: cbe62a3f0b6a04e9fbd7cfb9cc1ca69f1340bd81f5ae7fdfe7a47ad00c21b987
+opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
+pixel compiler (tools/build-psbc-cli.sh) sha256: 4d53a41ef9c8aea7645e8642ef020d65eb39c4840ae7b26f115766f68d61fa20
 vertex: -g -s vertex --ngg --address32-hi 2; writer --esgs-ring-itemsize 1 --allow-unresolved
 pixel: -g -s fragment --raw --address32-hi 2 --color-format 0x99999998; writer --allow-unresolved
 pixel SPI_SHADER_COL_FORMAT: 8
 program-checksum registers are unresolved, as in ps5-opengl's runtime packages
-3fb53b25664f05eb8068f8e6e418915889b1f8c56bc88c6de600d26f2eb9131f  shaders/m2/fullscreen.vert
-b1f71234b39f9f50be09c83623d39e290e1a5b5fabbe8d99061b048ec83df539  shaders/v0/target_sint.frag
+6e3b120d5bfe1909da2ddeb8913be373d7e9cf290a62c4c3e3b4f4ac5432289a  shaders/m2/fullscreen.vert
+1c2dab26a3c38a431f561468ad3729fa1d34d96ae262686a5c4fb5781e2af0fb  shaders/v0/target_sint.frag
 ebc5c12b4c55b322bc1a61165e108bd3feb7b09d72f4d9a22b6f9d2a9c3143c9  build/shaders/v0-target-sint/vertex.spv
 4bb70d73cb5fabc62147b3cbf983a5a87e69ff323308e473c875dc789c66c5ff  build/shaders/v0-target-sint/pixel.spv
 229cfec58ba3b610e6e46f57865637408ccc075b5815e31e543240452b39e3f9  build/shaders/v0-target-sint/vertex.ngg.bin
-3eb7eb67a69613a55aabe7781667eac5a519bb16afb7f34ed8bcffb59a011f08  build/shaders/v0-target-sint/vertex.hw.json
+5e47d958e25f3241b7648d63d252bcefbea61d47a1fbfe3b9f3e4c7193795c28  build/shaders/v0-target-sint/vertex.hw.json
 a4d732ed4211758e79e914b6d324cdead80f37fd6e21429e72f9c57f9c9ef584  build/shaders/v0-target-sint/pixel.raw.bin
-c6a30c3c8fa68be970bd8820ca9270e83d64e354854a1cbbd7615eebf8c434d7  build/shaders/v0-target-sint/pixel.hw.json
+07a3e43255560d6b964f40398ba71377630ba59b61624dc185dba80fb82b8774  build/shaders/v0-target-sint/pixel.hw.json

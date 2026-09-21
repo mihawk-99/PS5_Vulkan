@@ -89,7 +89,35 @@ int main(int argc, char **argv)
     memset(&output, 0, sizeof(output));
     const PsbcResult result =
         psbc_compile_shader((const uint32_t *)spirv, size, &options, &output);
-    if (result != PSBC_RESULT_OK || !output.metadata.compute_config_valid ||
+    /* The fork reports the dispatch's resource words in the shader register table,
+     * as dword offsets from SI_SH_REG_OFFSET (0xb000) rather than as the raw
+     * addresses a dispatch programs: COMPUTE_PGM_RSRC1 is 0xb848 and offset
+     * 0x212, RSRC2 0xb84c and 0x213, RSRC3 0xb8a0 and 0x228. The 0.2.0-era
+     * compiler exported them as metadata fields instead
+     * (tooling/psbc/patch-compute-metadata.py, dropped when this repository
+     * migrated to the fork), which is why this recorder reads the table. */
+    uint32_t rsrc[3] = {0, 0, 0};
+    bool have[3] = {false, false, false};
+    for (uint32_t i = 0; i < output.metadata.shader_register_count; ++i)
+    {
+        const PsbcRegisterWrite *const write = &output.metadata.shader_registers[i];
+        if (write->offset == 0x212)
+        {
+            rsrc[0] = write->value;
+            have[0] = true;
+        }
+        else if (write->offset == 0x213)
+        {
+            rsrc[1] = write->value;
+            have[1] = true;
+        }
+        else if (write->offset == 0x228)
+        {
+            rsrc[2] = write->value;
+            have[2] = true;
+        }
+    }
+    if (result != PSBC_RESULT_OK || !have[0] || !have[1] || !have[2] ||
         output.machine_code_size == 0)
     {
         fprintf(stderr, "%s: compile failed: %s\n", argv[1], psbc_result_string(result));
@@ -99,10 +127,13 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    printf("rsrc1 0x%08x\n", output.metadata.compute_rsrc1);
-    printf("rsrc2 0x%08x\n", output.metadata.compute_rsrc2);
-    printf("rsrc3 0x%08x\n", output.metadata.compute_rsrc3);
-    printf("vgprs %u\n", output.metadata.compute_num_vgprs);
+    printf("rsrc1 0x%08x\n", rsrc[0]);
+    printf("rsrc2 0x%08x\n", rsrc[1]);
+    printf("rsrc3 0x%08x\n", rsrc[2]);
+    printf("wave_size %u\n", output.metadata.compute_wave_size);
+    printf("workgroup %u %u %u\n", output.metadata.compute_workgroup_size[0],
+           output.metadata.compute_workgroup_size[1],
+           output.metadata.compute_workgroup_size[2]);
 
     psbc_free_output(&output);
     psbc_shutdown();

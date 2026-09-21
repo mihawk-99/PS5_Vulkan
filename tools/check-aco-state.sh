@@ -1,28 +1,24 @@
 #!/usr/bin/env bash
-# PS5 Vulkan - the ACO compile-order state probe's offline half.
+# PS5 Vulkan - the shader compiler's offline sequence probe.
 # Copyright (C) 2026 Mihawk-99
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# The console compiler has faulted on the *next* compile after the unsigned
-# texture case's frames, twice and differently: a SIGFPE (integer divide) after
-# the case's last row when another case was queued, and a SIGSEGV (a write to an
-# unmapped stack page) in the same case's setup when it ran alone
-# (Klog_Logs/aco-state-run1.log, Klog_Logs/aco-state-unsigned-alone.log,
-# docs/HARDWARE_FINDINGS.md). Both are in the compiler, not the driver, and both
-# are the console build's: this script compiles the same shaders, with the same
-# options and the same library the driver links, on the host, in one process.
-#
-# It builds tooling/psbc/compile-sequence.c against the work copy's host archive
+# This script compiles the probe sets' shaders on the host, with the same
+# options and the same library the driver links, in one process. It builds
+# tooling/psbc/compile-sequence.c against the work copy's host archive
 # (libpsbc.pic.a, the one tools/build-driver.sh builds) and runs two sequences:
 #
 #   recorded  the unsigned texture case's pixel stage, then the probe sets the
 #             batteries compiled after it, one line a compile
 #   stress    every probe set's pixel stage three times over
 #
-# Both must finish without a fault for the console's fault to stay the console
-# build's; a fault here names the pair of compiles that triggers it on the host
-# and is the minimal reproducer the ACO round needs. The script exits 0 either
-# way -- a fault that stops happening is good news -- and prints what it saw.
+# Both must finish without a fault. The console SIGFPE this probe was written
+# for turned out not to be the compiler's at all: it is the test runner dividing
+# a sampled table row's buffer by a zero texel size (src/diagnostics.cpp,
+# docs/HARDWARE_FINDINGS.md, 2026-09-20). What the probe still answers is
+# whether the compiler itself walks these sequences cleanly on the host, which
+# is what a compiler change has to keep true. The script exits 0 either way -- a
+# fault that stops happening is good news -- and prints what it saw.
 #
 # Run from the repository root:  bash tools/check-aco-state.sh
 set -euo pipefail

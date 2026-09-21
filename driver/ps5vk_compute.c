@@ -33,6 +33,14 @@
 #define PS5VK_COMPUTE_REG_THREADS 0xb81c         /* COMPUTE_NUM_THREAD_X/Y/Z */
 #define PS5VK_COMPUTE_REG_PROGRAM 0xb830         /* COMPUTE_PGM_LO/HI */
 #define PS5VK_COMPUTE_REG_RESOURCES 0xb848       /* COMPUTE_PGM_RSRC1/2 */
+/* The compiler reports shader registers as dword offsets from SI_SH_REG_OFFSET
+ * (0xb000), not as the raw addresses the dispatch programs: PGM_LO is 0x20c,
+ * RSRC1 0x212, RSRC2 0x213, RSRC3 0x228, NUM_THREAD_X 0x207. 0.3.0's AGC package
+ * writer reads the same table (src/platform/ps5_agc_package.c,
+ * compute_metadata_valid), so both consumers agree by construction. */
+#define PS5VK_COMPUTE_META_RSRC1 0x212           /* COMPUTE_PGM_RSRC1 */
+#define PS5VK_COMPUTE_META_RSRC2 0x213           /* COMPUTE_PGM_RSRC2 */
+#define PS5VK_COMPUTE_META_RSRC3 0x228           /* COMPUTE_PGM_RSRC3 */
 #define PS5VK_COMPUTE_REG_LIMITS 0xb854          /* COMPUTE_RESOURCE_LIMITS */
 #define PS5VK_COMPUTE_REG_RESOURCE3 0xb8a0       /* COMPUTE_PGM_RSRC3 */
 #define PS5VK_COMPUTE_REG_USER_DATA 0xb900       /* COMPUTE_USER_DATA_0.. */
@@ -140,8 +148,8 @@ static VkResult ps5vk_compute_pipeline_compile(struct ps5vk_device *device,
    mtx_lock(&ps5vk_compile_mutex);
    PsbcShaderOutput output;
    memset(&output, 0, sizeof(output));
-   const PsbcResult compiled =
-      psbc_compile_shader((const uint32_t *)module->words, module->size, &options, &output);
+   const PsbcResult compiled = ps5vk_compile_shader_deep(
+      NULL, (const uint32_t *)module->words, module->size, &options, &output);
    mtx_unlock(&ps5vk_compile_mutex);
    const PsbcShaderMetadata metadata = output.metadata;
    const bool produced =
@@ -153,7 +161,40 @@ static VkResult ps5vk_compute_pipeline_compile(struct ps5vk_device *device,
                          "the compute shader did not compile: %s (result %d)",
                          psbc_result_string(compiled), (int)compiled);
    }
-   if (!metadata.compute_config_valid)
+   /* The 0.3.0 fork reports the dispatch's resource words in the shader register
+    * table -- R_00B848_COMPUTE_PGM_RSRC1, R_00B84C_COMPUTE_PGM_RSRC2 and
+    * R_00B8A0_COMPUTE_PGM_RSRC3, the offsets the dispatch programs -- where the
+    * 0.2.0-era compiler exported them as named metadata fields. Either way they
+    * are the compiler's own statement about this shader, so the dispatch programs
+    * exactly what it wrote (docs/BLOCKERS.md, the SDK fork migration). */
+   uint32_t rsrc1 = 0;
+   uint32_t rsrc2 = 0;
+   uint32_t rsrc3 = 0;
+   bool have_rsrc1 = false;
+   bool have_rsrc2 = false;
+   bool have_rsrc3 = false;
+   for (uint32_t i = 0; i < metadata.shader_register_count; ++i)
+   {
+      const PsbcRegisterWrite *const write = &metadata.shader_registers[i];
+      switch (write->offset)
+      {
+      case PS5VK_COMPUTE_META_RSRC1:
+         rsrc1 = write->value;
+         have_rsrc1 = true;
+         break;
+      case PS5VK_COMPUTE_META_RSRC2:
+         rsrc2 = write->value;
+         have_rsrc2 = true;
+         break;
+      case PS5VK_COMPUTE_META_RSRC3:
+         rsrc3 = write->value;
+         have_rsrc3 = true;
+         break;
+      default:
+         break;
+      }
+   }
+   if (!have_rsrc1 || !have_rsrc2 || !have_rsrc3)
    {
       psbc_free_output(&output);
       return vk_errorf(device, VK_ERROR_UNKNOWN,
@@ -205,21 +246,20 @@ static VkResult ps5vk_compute_pipeline_compile(struct ps5vk_device *device,
    memcpy(pipeline->compute.code.address, output.machine_code, code_bytes);
    ps5vk_flush_cpu_cache(pipeline->compute.code.address, code_bytes);
 
-   /* COMPUTE_PGM_RSRC1's VGPR granule is 8 registers for a wave32 dispatch and 4
-     * for a wave64 one, so the compiler's own word says which wave size it
-     * compiled for and the dispatch's CS_W32_EN bit has to agree. */
-   const uint32_t granule = metadata.compute_rsrc1 & 0x3fu;
-   const uint32_t vgprs = metadata.compute_num_vgprs;
-   const bool wave32 = vgprs != 0 && granule == (vgprs - 1) / 8;
-   const bool wave64 = vgprs != 0 && granule == (vgprs - 1) / 4;
-   if (wave32 == wave64)
+   /* The fork reports the wave size ACO compiled for, so DISPATCH_DIRECT's
+     * CS_W32_EN is the compiler's own answer instead of an inference from RSRC1's
+     * VGPR granule: the 0.2.0-era compiler reported the granule and the VGPR count
+     * and left that step here. */
+   const uint32_t wave_size = metadata.compute_wave_size;
+   if (wave_size != 32 && wave_size != 64)
    {
       ps5vk_direct_mapping_destroy(&pipeline->compute.code);
       psbc_free_output(&output);
       return vk_errorf(device, VK_ERROR_UNKNOWN,
-                         "COMPUTE_PGM_RSRC1's VGPR granule 0x%x names no wave size for %u VGPRs",
-                         (unsigned)granule, (unsigned)vgprs);
+                         "the compiler reported wave size %u, which is neither 32 nor 64",
+                         (unsigned)wave_size);
    }
+   const bool wave32 = wave_size == 32;
 
    uint32_t local_size[3] = {0, 0, 0};
    if (!ps5vk_spirv_local_size(module, local_size) || local_size[0] == 0 || local_size[1] == 0 ||
@@ -231,6 +271,24 @@ static VkResult ps5vk_compute_pipeline_compile(struct ps5vk_device *device,
                          "the compute shader declares no local size, which a dispatch programs");
    }
 
+   /* The compiler reports the workgroup shape it compiled for; the module's own
+    * local size is what the dispatch programs. Two statements about one dispatch,
+    * and the agreement the granule-and-VGPR pair used to establish. */
+   if (metadata.compute_workgroup_size[0] != local_size[0] ||
+      metadata.compute_workgroup_size[1] != local_size[1] ||
+      metadata.compute_workgroup_size[2] != local_size[2])
+   {
+      ps5vk_direct_mapping_destroy(&pipeline->compute.code);
+      psbc_free_output(&output);
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                         "the compiler's workgroup shape %ux%ux%u differs from the module's local "
+                         "size %ux%ux%u",
+                         (unsigned)metadata.compute_workgroup_size[0],
+                         (unsigned)metadata.compute_workgroup_size[1],
+                         (unsigned)metadata.compute_workgroup_size[2], (unsigned)local_size[0],
+                         (unsigned)local_size[1], (unsigned)local_size[2]);
+   }
+
    pipeline->bind_point = VK_PIPELINE_BIND_POINT_COMPUTE;
    pipeline->compute.metadata = metadata;
    memcpy(pipeline->compute.local_size, local_size, sizeof(local_size));
@@ -240,9 +298,9 @@ static VkResult ps5vk_compute_pipeline_compile(struct ps5vk_device *device,
    device->stages = pipeline;
    pipeline->stage_registered = true;
    pipeline->compute.code_bytes = (uint32_t)code_bytes;
-   pipeline->compute.rsrc1 = metadata.compute_rsrc1;
-   pipeline->compute.rsrc2 = metadata.compute_rsrc2;
-   pipeline->compute.rsrc3 = metadata.compute_rsrc3;
+   pipeline->compute.rsrc1 = rsrc1;
+   pipeline->compute.rsrc2 = rsrc2;
+   pipeline->compute.rsrc3 = rsrc3;
    pipeline->compute.wave32 = wave32;
    psbc_free_output(&output);
    return VK_SUCCESS;

@@ -1,15 +1,15 @@
 PS5 Vulkan v0-vertex-bytes-uint shader packages, built by tools/build-probe-shaders.sh v0-vertex-bytes-uint.
 pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
 glslang: Glslang Version: 11:16.4.0
-opengnm-psbc sha256: 197c7fedfe8a25d29b03f8a0835bd166592938276036a9f199fbc6781faa4cdf
+opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
 vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32b32a32_uint:0:0:16:4; writer --esgs-ring-itemsize 1 --allow-unresolved
 pixel: -g -s fragment --raw --address32-hi 2; writer --allow-unresolved
 program-checksum registers are unresolved, as in ps5-opengl's runtime packages
-e10e58e438ab9e545dd55acbbf82d8a1e50dadd52a3b8f3cf5725eacd4f4cbb5  shaders/v0/vertex_bytes_uint.vert
-0c3d885ecb73d4a2d53e083b7ea8a8cbddd5635415795957123aa7d282474a5d  shaders/m3/vertex_colour.frag
+0b5cb368a092579c6422505276c9226440b6e4a714139a987f1345b23334f9b4  shaders/v0/vertex_bytes_uint.vert
+89726db6c5e32027c4fe1fc386fabb48f3be0616b9296eab7c28a83e807488ba  shaders/m3/vertex_colour.frag
 97904e2aafb31af02efb6d8039afdd0288b59dc8378a34623eb9c1f1e0de3f2f  build/shaders/v0-vertex-bytes-uint/vertex.spv
 b57f4b8de678250582aa36b47cfb8e22e99eb47511ce911e6bca90f3d46fcfcd  build/shaders/v0-vertex-bytes-uint/pixel.spv
 8765cab48c2a527ccd3833d03b3d0c8eb44c23c4b3403a3e6414876f8f815251  build/shaders/v0-vertex-bytes-uint/vertex.ngg.bin
-29394fd1bd818396f9f2565dfbedd3ed734fcb0b19d9293c5ed22960518e8acc  build/shaders/v0-vertex-bytes-uint/vertex.hw.json
+ad2f46f789577f0d04aa77cd9560950af0be2e4f9165db6de60d9987b7cd2e33  build/shaders/v0-vertex-bytes-uint/vertex.hw.json
 585664b0b5c47f9d10aad61f184a59b9b7f4cf4484b79c538077c8d8d39eb99c  build/shaders/v0-vertex-bytes-uint/pixel.raw.bin
-e247d16f0984054a1172f9212fe52eebaa89527a54d0f8aec047a16536ee4d4a  build/shaders/v0-vertex-bytes-uint/pixel.hw.json
+0561f6b0c6477a8f8a2bfca904b185c2b5a0853921fe0b0764229b6811492b80  build/shaders/v0-vertex-bytes-uint/pixel.hw.json

@@ -422,14 +422,37 @@ def driver_run_document(run, streams, log_name):
     regions = {}
     submissions = []
     video = None
+    videos = {}
     for stream in streams:
         for stage in stream["stages"]:
             stages.append(stage_document(stage, stream["test"]))
         for name, (address, bytes) in sorted(stream["regions"].items()):
             if address is not None:
-                regions[name] = {"address": f"{address:#x}", "bytes": bytes}
+                # A region's name is its kind, and two tests of one run can
+                # each record one of the same kind -- c1-triangle's swapchain
+                # and m2-solid's live framebuffer are both "framebuffer". The
+                # key carries the test for that reason, and the region carries
+                # it too: the tests allocate, and free, their own memory, so a
+                # region one test recorded was often free again when the next
+                # test allocated at that address -- the console reused
+                # c1-triangle's 0x200400000 for c2-indexed's own target, and a
+                # replay that kept c1-triangle's region reserved put the target
+                # one 64 MiB block higher, which is the one record every
+                # affected test differed by (tools/golden.py,
+                # driver_replay_text; docs/M5_PHASE_C.md, 2026-09-20).
+                regions[f"{name}-{stream['test']}"] = {"address": f"{address:#x}",
+                                                       "bytes": bytes,
+                                                       "test": stream["test"]}
         if stream["video_handle"] is not None:
             video = stream["video_handle"]
+            # A run holds every test's VideoOut handle, and a test that
+            # presents through none records -1; the last one is a headless
+            # test's, which is what made the run document's single `video` -1
+            # for a run whose first test presented (2026-09-20: the C1 present
+            # test's replay opened no VideoOut, so its swapchain could not be
+            # created). The map keeps each test's own, and `video` stays the
+            # last for a reader that has no test to ask about.
+            videos[stream["test"]] = stream["video_handle"]
         for index, submission in enumerate(stream["submissions"], 1):
             for region in submission["regions"]:
                 regions.setdefault(f"tables-{stream['test']}-{region['address']:#x}",
@@ -439,7 +462,8 @@ def driver_run_document(run, streams, log_name):
                                 "file": f"{stream['test']}-{index}.json"})
     return {"schema": GOLDEN_SCHEMA, "kind": "driver-run",
             "source": {"klog": log_name, "pid": run["pid"]},
-            "video": video, "stages": stages, "regions": regions, "submissions": submissions}
+            "video": video, "videos": videos, "stages": stages, "regions": regions,
+            "submissions": submissions}
 
 
 def region_document(region):
@@ -531,8 +555,15 @@ def driver_replay_text(document, defaults, test=None):
     lines = [f"# PS5 Vulkan host replay from {document['source']['klog']} "
              f"pid {document['source']['pid']}, written by tools/golden.py replay",
              "frame 1", "flips 0"]
-    if document.get("video") is not None:
-        lines.append(f"video {document['video']:x}")
+    # The VideoOut handle the replayed test presented through, which a test
+    # that presents through none records as -1: a run holds every test's, so
+    # the map decides when the document has one and `video` (the last stream's)
+    # is the fallback for a test the map does not name.
+    handle = document.get("video")
+    if test is not None and document.get("videos"):
+        handle = document["videos"].get(test, handle)
+    if handle is not None:
+        lines.append(f"video {handle:x}")
     # The pipelines come first: the model hands a region to the first
     # allocation of its size, so the driver's stage allocations take their own
     # captured regions before the swapchain allocation takes its.
@@ -906,8 +937,17 @@ def compare_run(args):
     for entry, line in zip(wanted, lines):
         document = json.loads((directory / entry["file"]).read_text(encoding="utf-8"))
         # The run's pipelines hold the linked context and uniforms a
-        # submission's tables load, so the comparison reads them from there.
-        document = dict(document, stages=run.get("stages", []))
+        # submission's tables load, so the comparison reads them from there --
+        # but only this submission's own pipelines. A run holds every test's
+        # stages, each test allocates its own 64 KiB mapping, and a table
+        # address can lie inside several of them at once: c2-staging's uconfig
+        # table at 0x200042000 lies in c2-staging's stage, c4-texture's and a
+        # third, and taking the first match read a shader header out of the
+        # wrong image (2026-09-20; the replay's own stage list has filtered by
+        # test for as long as it has had one, driver_replay_text).
+        stages = [stage for stage in run.get("stages", [])
+                  if args.test is None or stage.get("test") == args.test]
+        document = dict(document, stages=stages)
         words = [int(word, 16) for word in document["words"]]
         console = [(document, packet) for _, packet in stream_packets(words)]
         problems, _, _, packets, tables = compare_stream(console, json.loads(line), {})

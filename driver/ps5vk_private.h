@@ -664,6 +664,12 @@ extern mtx_t ps5vk_compile_mutex;
 void
 ps5vk_compile_mutex_init(void);
 
+/* One compile, run on a thread of this repository's own with a stack the
+ * application's thread size cannot shrink (ps5vk_pipeline.c). */
+PsbcResult
+ps5vk_compile_shader_deep(struct nir_shader *nir, const uint32_t *words, size_t size,
+                          const PsbcCompileOptions *options, PsbcShaderOutput *output);
+
 /* A pipeline's descriptor bindings of set 0 for one stage bit, into the
  * compiler options (ps5vk_pipeline.c); a compute pipeline calls it with
  * VK_SHADER_STAGE_COMPUTE_BIT. */
@@ -1052,8 +1058,9 @@ struct ps5vk_pipeline {
       /* The shader's local size, from its SPIR-V: the dispatch programs it as
        * COMPUTE_NUM_THREAD_X/Y/Z, which is the workgroup's shape. */
       uint32_t local_size[3];
-      /* COMPUTE_PGM_RSRC1's VGPR granule names the wave size the compiler
-       * allocated for, and DISPATCH_DIRECT's CS_W32_EN has to agree. */
+      /* The wave size the compiler reports, which DISPATCH_DIRECT's CS_W32_EN has
+       * to agree with (the 0.2.0-era compiler reported a VGPR granule instead, and
+       * the driver inferred the size from that). */
       bool wave32;
    } compute;
    /* The device's list of pipelines whose stage mapping exists, in creation

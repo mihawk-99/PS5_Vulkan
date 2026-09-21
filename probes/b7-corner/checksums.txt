@@ -1,2 +1,2 @@
-vertex ab7c286af112a42b
+vertex 0c2169190ff5f3e9
 pixel d78c3f4744339a5a

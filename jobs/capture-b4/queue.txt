@@ -1,0 +1,24 @@
+# PS5 Vulkan test runner job queue (PPSA99988): golden capture, c1-triangle alone.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/capture-b4/queue.txt
+#
+# "capture" makes every frame log its AGC helper calls, its whole command
+# stream and its stage workspace image. Turn the klog into golden files with:
+#   python3 tools/golden.py extract <klog> <directory>
+#
+# The batch A capture (jobs/capture/queue.txt, Klog_Logs/capture-migrated.log)
+# logged each frame's flip with the *draw's* step length: ps5vk_queue_flip
+# updated the last-submission count but not the step list, so a flip's capture
+# was 104 words where the flip is 64 and the 40 behind them were the draw
+# buffer's. The driver resets the step list in that path now.
+#
+# c1-triangle runs *first*: its frames name the VideoOut flip marker the driver
+# counts from the swapchain's first present, and a run whose queue had already
+# presented (m2-solid, the battery's first case) recorded markers one higher
+# than a PC process's. m2-solid still runs, after it, because the register
+# defaults every case's capture needs are the run's own m2-solid frame
+# (tools/golden.py, sibling_defaults -- it reads the same run, not an order).
+capture
+hold 60
+c1-triangle
+m2-solid
+exit

@@ -73,7 +73,6 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source "$root/tools/sdk-root.sh"
 sdk=$(cd -- "$(ps5vk_opengl_sdk "$root")" && pwd)
 compiler="$sdk/third_party/opengnm-psbc/opengnm-psbc"
-writer="$sdk/tools/agc_shader_package_writer.py"
 # GLSLANG overrides the PATH lookup, which is where CachyOS's glslang package
 # is found. The retired Windows drop held only glslang.exe, so it never served
 # this branch.
@@ -216,8 +215,6 @@ v0-image-atomic)
     vertex_flags=(--address32-hi 2)
     pixel_flags=(--address32-hi 2 --descriptor-binding 0:0:storage_image:1:0:32)
     pixel_compiler="$root/build/host/opengnm-psbc-probe"
-    # The SDK's Python writer reads a newer metadata schema (see the packaging step).
-    c_writer=1
     ;;
 v0-image-atomic-sint)
     vertex_source=shaders/m2/fullscreen.vert
@@ -241,8 +238,6 @@ v0-stencil-setup)
         --vertex-attribute 0:r32g32b32_float:0:0:28:4
         --vertex-attribute 1:r32g32b32a32_float:0:12:28:4)
     pixel_flags=(--address32-hi 2)
-    # The SDK's Python writer reads a newer metadata schema (see the packaging step).
-    c_writer=1
     ;;
 v0-stencil-test)
     # Round 12's stencil path: the pass that tests the plane the setup pass
@@ -254,8 +249,6 @@ v0-stencil-test)
         --vertex-attribute 0:r32g32b32_float:0:0:28:4
         --vertex-attribute 1:r32g32b32a32_float:0:12:28:4)
     pixel_flags=(--address32-hi 2)
-    # The SDK's Python writer reads a newer metadata schema (see the packaging step).
-    c_writer=1
     ;;
 v0-stencil-deep)
     # Round 12's depth control for the stencil frames: the test pass's shader
@@ -268,8 +261,6 @@ v0-stencil-deep)
         --vertex-attribute 0:r32g32b32_float:0:0:28:4
         --vertex-attribute 1:r32g32b32a32_float:0:12:28:4)
     pixel_flags=(--address32-hi 2)
-    # The SDK's Python writer reads a newer metadata schema (see the packaging step).
-    c_writer=1
     ;;
 v0-image-store)
     # V0-formats' storage images: the full-target triangle storing into a
@@ -279,8 +270,6 @@ v0-image-store)
     vertex_source=shaders/m2/fullscreen.vert
     pixel_source=shaders/v0/image_store.frag
     output=probes/v0-image-store
-    # The SDK's Python writer reads a newer metadata schema (see the packaging step).
-    c_writer=1
     vertex_flags=(--address32-hi 2)
     pixel_flags=(--address32-hi 2 --descriptor-binding 0:0:storage_image:1:0:32)
     pixel_compiler="$root/build/host/opengnm-psbc-probe"
@@ -289,8 +278,6 @@ v0-image-store-uint)
     vertex_source=shaders/m2/fullscreen.vert
     pixel_source=shaders/v0/image_store_uint.frag
     output=probes/v0-image-store-uint
-    # The SDK's Python writer reads a newer metadata schema (see the packaging step).
-    c_writer=1
     vertex_flags=(--address32-hi 2)
     pixel_flags=(--address32-hi 2 --descriptor-binding 0:0:storage_image:1:0:32)
     pixel_compiler="$root/build/host/opengnm-psbc-probe"
@@ -299,8 +286,6 @@ v0-image-store-sint)
     vertex_source=shaders/m2/fullscreen.vert
     pixel_source=shaders/v0/image_store_sint.frag
     output=probes/v0-image-store-sint
-    # The SDK's Python writer reads a newer metadata schema (see the packaging step).
-    c_writer=1
     vertex_flags=(--address32-hi 2)
     pixel_flags=(--address32-hi 2 --descriptor-binding 0:0:storage_image:1:0:32)
     pixel_compiler="$root/build/host/opengnm-psbc-probe"
@@ -522,7 +507,6 @@ esac
 [[ -x $compiler ]] || { echo "missing opengnm-psbc: $compiler" >&2; exit 2; }
 [[ -x $pixel_compiler ]] ||
     { echo "missing pixel compiler: $pixel_compiler (run tools/build-psbc-cli.sh)" >&2; exit 2; }
-[[ -f $writer ]] || { echo "missing AGC package writer: $writer" >&2; exit 2; }
 probe="$root/build/host/opengnm-psbc-probe"
 [[ -x $probe ]] ||
     { echo "missing probe compiler: $probe (run tools/build-psbc-cli.sh)" >&2; exit 2; }
@@ -558,38 +542,23 @@ compile_spirv frag "$root/$pixel_source" "$work/pixel.spv"
 "$pixel_compiler" -g -s fragment --raw "${pixel_flags[@]}" \
     -f "$work/pixel.spv" -o "$work/pixel.raw.bin" --metadata "$work/pixel.hw.json"
 
-# The SDK's Python writer reads the metadata schema ps5-opengl 0.3.0's compiler
-# CLI emits (its "version" is that schema's, and the fork's own C struct version
-# is a different number), so it refuses this repository's compiler, which emits
-# the pinned three-field schema the 0.2.0 SDK's writer read. A set that asks for
-# the C writer (c_writer=1) is packaged by ps5-opengl's C writer instead
-# (src/platform/ps5_agc_package.c, gcc-compiled into the probe CLI): it is the
-# writer the titles link, and every set whose package the Python writer made also
-# carries the C writer's bytes -- the check below compares them -- so the two are
-# one writer's output. Sets that do not ask keep the Python path, and the check
-# still compares the two where both exist.
-if [[ -n ${c_writer:-} ]]; then
-    "$probe" -g -s vertex --ngg "${vertex_flags[@]}" -f "$work/vertex.spv" \
-        -o "$root/$output/vertex.bin" --agc-package "$root/$output/vertex.bin"
-    "$probe" -g -s fragment --raw "${pixel_flags[@]}" -f "$work/pixel.spv" \
-        -o "$root/$output/pixel.bin" --agc-package "$root/$output/pixel.bin"
-else
-    python3 "$writer" "$work/vertex.ngg.bin" "$work/vertex.hw.json" \
-        -o "$root/$output/vertex.bin" --esgs-ring-itemsize 1 --allow-unresolved
-    python3 "$writer" "$work/pixel.raw.bin" "$work/pixel.hw.json" \
-        -o "$root/$output/pixel.bin" --allow-unresolved
-fi
-
-# The console-side compiler of Milestone 5 Phase A packages shaders with
-# ps5-opengl's C writer (src/platform/ps5_agc_package.c). It must reproduce
-# every package the Python writer made, byte for byte.
+# ps5-opengl's C writer (src/platform/ps5_agc_package.c, gcc-compiled into the
+# probe CLI) is the writer this repository uses: it is the writer the titles
+# link, it validates the metadata version against the compiler's own header, and
+# 0.3.0 packages through it too. The SDK's Python writer is not used any more:
+# it requires its own metadata schema version in the CLI's JSON, and neither the
+# pinned compiler nor the 0.3.0 fork the migration moved to emits that
+# (tools/adapt-opengl-sdk.sh; docs/BLOCKERS.md, the SDK section). What used to be
+# a Python-against-C byte comparison is now the console's own compile-mode check
+# below: the runner compiles this set's shipped SPIR-V with the shipped options
+# and must reproduce both packages byte for byte.
 "$probe" -g -s vertex --ngg "${vertex_flags[@]}" -f "$work/vertex.spv" \
-    -o "$work/vertex.c-writer.ngg.bin" --agc-package "$work/vertex.c-writer.bin"
+    -o "$root/$output/vertex.bin" --agc-package "$root/$output/vertex.bin"
 "$probe" -g -s fragment --raw "${pixel_flags[@]}" -f "$work/pixel.spv" \
-    -o "$work/pixel.c-writer.raw.bin" --agc-package "$work/pixel.c-writer.bin"
+    -o "$root/$output/pixel.bin" --agc-package "$root/$output/pixel.bin"
 for stage in vertex pixel; do
-    cmp -s "$work/$stage.c-writer.bin" "$root/$output/$stage.bin" || {
-        echo "$set_name: the C package writer's $stage package differs from the shipped one" >&2
+    [[ -s $root/$output/$stage.bin ]] || {
+        echo "$set_name: the C package writer wrote no $stage package" >&2
         exit 1
     }
 done

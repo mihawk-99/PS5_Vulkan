@@ -5801,3 +5801,193 @@ console's, the build host's and a neighbouring device's with its MAC -- are
 replaced by placeholders (`<console-lan-ip>`, `<host-lan-ip>`, `<lan>`,
 `<neighbour-lan-ip>`) when the repository was published under its new home. The
 runs themselves are unchanged; only those values are.
+
+## 2026-09-20: the compiler migration to the SDK's 0.3.0 fork
+
+The driver now links ps5-opengl 0.3.0's own compiler instead of the frozen
+0.2.0-era work copy. `tools/adapt-opengl-sdk.sh` assembles the tree through
+`tooling/sdk/assemble-psbc-fork.sh`, which applies the release's
+`toolchain/opengnm-psbc-ps5.patch` to the revision `dependencies.json` pins
+(a92a1228), checks the result against the `psbc_patch.patched_tree` the manifest
+records (a27cbecc), materializes the generated Mesa sources the standalone
+Makefile omits, and writes the view; the AGC package writer comes from the
+release with it, because 0.3.0's copy validates the version-14 schema the fork
+reports. The host compiler, the PS5 compiler, the driver archives, the 55 titles
+and all 39 probe sets plus the compute probe were rebuilt; `make test`,
+`make lint`, the three requirement audits, `check-mip-layout.sh`,
+`check-psbc-link.sh`, `check-vulkan-runtime.sh` and `check-runner-cases.sh` are
+green.
+
+**The compiler patches.** `patch-fragment-inputs.py`'s anchor moved to the fork's
+call signature (`radv_nir_shader_info_pass` now takes a `radv_shader_stage *` and
+picks the pipeline kind from the Mesa stage); `patch-compute-metadata.py` was
+dropped rather than moved, because the fork's `PsbcShaderMetadata` version 14
+carries every field it added (`user_sgpr_count`, the `ngg_lds_layout` trio, the
+`compute_*` group, with `compute_lds_bytes` in place of `compute_lds_size`) and
+the compiler programs COMPUTE_PGM_RSRC1/2 itself; `patch-vertex-formats.py`'s
+anchor was not merely moved but fixed -- it was an eight-space `default:`, a
+*substring* of a deeper switch's `                default:` in the fork, so it had
+inserted the 26 cases into `psbc_tess_input_supported`, where no `format`
+variable exists, instead of the fork's `psbc_vertex_pipe_format` function;
+`patch-aco-min-waves.py` is new (below). `tools/check-sdk-fork-migration.sh` is
+green for all four.
+
+**What the driver had to change.** The fork removed the fields the old patch
+added, so `driver/ps5vk_compute.c` reads the dispatch's words where the fork
+reports them -- the shader register table at the relative offsets 0x212, 0x213
+and 0x228 (`(register - 0xb000) / 4`, the table 0.3.0's writer reads too) -- takes
+the wave size from `compute_wave_size` instead of inferring it from RSRC1's VGPR
+granule, and keeps a cross-check by requiring the compiler's reported workgroup
+shape to equal the module's own local size. The compute probe records the same
+words the old compiler did (`rsrc1 0x602c0001`, `rsrc2 6`) and now also
+`wave_size 32`, `workgroup 1 1 1` (probes/c0/resources.txt).
+
+**The console.** The migrated build was deployed as `PPSA99988` and every case of
+the golden re-capture battery passed (the packages carry one more shader-program
+register, which the console reproduced exactly): `m2-solid`, `c1-triangle`,
+`c2-indexed`, `c2-instancing`, `c2-staging`, `c3-quad`, `c3-uniform`, `c4-rtt`,
+`c4-texture`, `c5-depth`, `c7-blit-formats`, `c7-copy`, `c7-mip-tiled`,
+`c7-mip-upload`, `c8-msaa`, `c8-resolve` in `Klog_Logs/capture-migrated.log`, and
+the second batch in `Klog_Logs/capture-migrated-b2.log`.
+
+**The compile-order fault is not fixed by the fork.** `jobs/aco-min` run pid 261
+(`Klog_Logs/aco-min-fixed.log`) faults exactly as before: `signal: 8 (SIGFPE)`,
+`integer divide fault`, `rax = rcx = rdx = 0`, `rip = 0x430a14`. The round's
+instrumentation is what makes that a finding rather than a repeat: the patch put
+a witness on `get_addr_regs_from_waves`'s divide (and restored
+`program->workgroup_size`'s "unknown is UINT_MAX" invariant before
+`calc_min_waves`), and the witness never fired, so rounds 15-16's attribution does
+not hold for this tree. The host cannot reproduce the fault in any configuration
+built here, including the console's own defines (docs/HARDWARE_FINDINGS.md,
+2026-09-20), so the next step is console-side instrumentation of the ACO path.
+
+## 2026-09-20 — the ACO round's fault was the runner's zero divisor, and the migration's goldens are re-captured
+
+The instrumentation round never ran, because the fault had no ACO in it. Reading
+the crash report's own load base (`# /app0/eboot.bin`, `#  xotext:
+0000000000400000:...`) puts the three "ACO frames" of every previous round in
+`run_linked_agc_canary`, `main` and `_start`, and puts `rip 0x430b34` on
+`div %r13d` in `run_sampled_format_frames` -- the test runner's own division of
+a sampled row's packed buffer by that row's texel size. `sampled_unsigned_formats()`
+declared ten rows and initialized seven, so the eighth ran `0 / 0`; the signed
+table (declared eleven, seven rows) was the same fault one case later
+(docs/HARDWARE_FINDINGS.md has the mechanism, the register dump that matches it,
+and the retired attributions).
+
+**The repair.** Both tables declare their seven rows, every `sampled_*` table
+carries a `static_assert(sampled_formats_filled(...))` that makes a
+declared-but-unfilled row a build error -- the only direction the compiler
+cannot catch, since too many initializers are already an error -- and the two
+cases take the table's own `size()` through `auto` instead of repeating the
+count. The driver's and the runner's 32 MiB compile stacks stay as robustness;
+their comments no longer claim this fault.
+
+**Console proof.** `jobs/aco-min` (four unsigned-sample runs plus `m2-solid` and
+`v0-formats` regressions) on the migrated, repaired build: pid 287,
+`Klog_Logs/aco-min-tablefix.log`, seven of seven tests PASS, each
+`v0-formats-sampled-uint` reporting **"7 of 7 sampled formats fetched the colour
+their texel holds"**, 1581 PASS records, and the klog holds **no `signal:`
+record at all**. The same case through the driver-enabled host runner
+(`build/host/runner_host_driver --cases driver`) no longer takes a signal
+either, which is where the reproduction was hiding: the host had only ever been
+asked to compile, never to run the case.
+
+**Batch B's goldens.** The nine cases whose goldens the migration moved and
+which Batch A did not cover were captured with `jobs/capture-b/queue.txt`
+(`Klog_Logs/capture-migrated-b3.log`, pid 289: `m2-solid`, `d1-dynamic-ubo`,
+`v0-array-layers`, `v0-cube-faces`, `v0-formats-sampled`, `v0-query-full`,
+`v0-robust`, `v0-timestamp-driver`, `v0-vertex-sint`), and distributed into
+`golden/`. Two of the migrated goldens turned out to be *incomplete*, and were
+re-captured alone: `v0-vertex-uint`, which the capture tool's own stream cut off
+inside while the run itself finished (`runner_summary` "11 of 11" and `run_end`
+are in the klog; `jobs/capture-b2/queue.txt`, `Klog_Logs/capture-vertex-uint.log`,
+pid 290), and `c8-resolve`, whose batch A capture holds three of its four frames
+and no `runner_test` record (`jobs/capture-b3/queue.txt`,
+`Klog_Logs/capture-c8-resolve.log`, pid 295: four submissions, both cases PASS).
+Batch A's fifteen goldens were re-extracted from `Klog_Logs/capture-migrated.log`
+with the same code, so every batch carries the replay fixes below.
+
+**A NIR stage has no module, and the driver dereferenced it.** The deep-stack
+wrapper this session added replaced `nir ? psbc_compile_nir(nir, ...) :
+psbc_compile_shader(module->words, ...)` with an eager
+`ps5vk_compile_shader_deep(nir, module->words, module->size, ...)`, and the
+ternary had been what kept `module->words` from being read for the NIR stages
+Mesa's meta operations hand the driver. Every meta clear, blit and resolve
+faulted in `ps5vk_compile_stage` -- eight of `tools/check-driver.sh`'s host
+tests died with SIGSEGV there, and the console's own capture batteries predate
+the wrapper, so no console run had reached it. `driver/ps5vk_pipeline.c` now
+passes the words only when there is a module. Verified on the console with the
+meta-clear path in the queue: `c7-clear`, `v0-formats-sampled-uint`, `c5-depth`
+and `m2-solid` all PASS, 528 PASS records and no `signal:`
+(`Klog_Logs/verify-compile-stage.log`, pid 294).
+
+**The host model's one-record difference, fixed rather than declared.** After
+the migration, `tools/check-driver.sh` failed on exactly one record per affected
+test: register `0x318` (`CB_COLOR0_BASE`) read one 64 MiB block higher on the PC
+than on the console (`0x02044000` against `0x02004000`; c4-rtt's
+render-to-texture step `0x02064000` against `0x02024000`). It was not a driver
+difference. A driver-run document merged the run's regions by name, so
+`framebuffer` -- c1-triangle's 64 MiB swapchain allocation at `0x200400000` --
+was pinned for *every* test's replay, while the console had freed it long before
+c2-indexed allocated its own target at that same address. Dropping the region
+from c2-indexed's replay makes its PC submission byte-identical to the console's
+(11 packets, 3 register tables), so `driver_run_document` now keys an allocation
+region by the test that recorded it (`framebuffer-c1-triangle`) and
+`driver_replay_text`'s existing test filter drops it for the others. No
+`--expect-record` was needed and none was added.
+
+**The same scope error, twice more.** A run document is process-wide and three
+of its lists were being read as if they were the replayed test's:
+
+- the *stages*: `compare_run` handed `golden_table` every test's pipeline
+  mapping, and a table address can lie in several of them -- c2-staging's uconfig
+  table at `0x200042000` lies in c2-staging's stage, c4-texture's and a third,
+  and the first match read a shader header out of the wrong image. The
+  comparison now selects the submission's own test's stages, as the replay
+  always has.
+- the *VideoOut handle*: `driver_run_document` kept the last stream's handle, so
+  a run whose first test presented recorded `video: -1` from the last headless
+  one, and the C1 present test's replay opened no VideoOut at all
+  (`sceVideoOutOpen failed: 0xffffffff`). The document now carries a per-test
+  handle map and the replay takes the replayed test's own.
+
+With those, `tools/check-driver.sh`'s comparisons are clean: no `DIFFERENT`
+record anywhere and no segfault, where the working tree began at 148 failing
+comparisons and 8 host-test faults. The gate's `query_run` also moved from
+`golden/v0-query-driver/run-1.json` -- a pre-migration capture whose submission
+has one user-data word fewer -- to the case's own re-captured
+`golden/v0-query-full/run-1.json`.
+
+**A captured flip carried the draw's length.** `ps5vk_queue_flip` updated
+`ps5vk_debug_last_submission`'s count but not the step list
+`ps5vk_debug_submission_steps` reads, so the runner's capture of a flip logged
+the *previous draw's* 104 words over the flip's 64 -- the last 40 being the
+draw's buffer behind them, which no packet parser can walk
+(`ValueError: word 64 (0x80000000) does not start a complete type-3 packet`).
+The flip is a submission of its own and the driver now records it as one; the
+re-capture shows 104-word draws and 64-word flips, matching the PC's dumps word
+for word (`Klog_Logs/capture-c1-triangle3.log`, pid 298). That capture is also
+where the golden's flip marker had to come from: the marker the wait and flip
+packets name is the swapchain's own present counter, and a run whose queue had
+already presented -- Batch A ran `m2-solid` first -- recorded markers one higher
+than a PC process's, so `jobs/capture-b4/queue.txt` runs c1-triangle first and
+m2-solid after it, which is enough because the register defaults a capture needs
+are the same run's m2-solid frame, not an earlier one.
+`tools/check-driver.sh` is green with all of it: the whole table of loader,
+direct and PS5-link checks PASS, no `DIFFERENT` comparison and no fault.
+
+**Console proof of the final artifact.** The `jobs/aco-min` queue ran once more
+on the build this commit lands (pid 299, `Klog_Logs/aco-min-final.log`): seven of
+seven tests PASS, 1581 PASS records, no `signal:` record. The compile-stage fix
+is proved by the same artifact in `Klog_Logs/verify-compile-stage.log` (pid 294),
+whose queue is the meta-clear path that faulted on the host: `c7-clear`
+PASS.
+
+**One more host limit.** `tools/check-runner-cases.sh` was red before any of
+this: the re-captured goldens' replays carry one `stage` line per pipeline per
+frame, and `golden/v0-formats-sampled`'s runs to 142 region lines against the
+host's `kMaxRegions = 64`, so `parse_replay` rejected a valid replay and five
+cases reported NO RECORD. The cap is 256 now, sized from the measured largest
+capture rather than the previous one, and the gate's seven cases pass again.
+`make lint` had four clang-format violations at the two `compile_deep` call
+sites, which `tools/run_clang_format.sh` fixed.

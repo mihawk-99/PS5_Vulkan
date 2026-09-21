@@ -69,13 +69,15 @@ toolchain.
   (`D24_UNORM_S8_UINT`, `D32_SFLOAT_S8_UINT`), and both byte-reversed sRGB
   formats ([`docs/V0_FORMATS_AUDIT.md`](docs/V0_FORMATS_AUDIT.md),
   [`docs/BLOCKERS.md`](docs/BLOCKERS.md)).
-- ✅ **The console's ACO fault is identified, not just reproduced.** The
-  compile-order SIGFPE is reduced to one case (`jobs/aco-min/queue.txt`) and
-  traced to the pinned compiler's `update_vgpr_sgpr_demand` leaving
-  `num_waves = 0` for `get_addr_regs_from_waves` to divide by; ps5-opengl
-  0.3.0's fork adds the missing guard at that exact point, and
-  [`tools/check-sdk-fork-migration.sh`](tools/check-sdk-fork-migration.sh)
-  measures what the move costs
+- ✅ **The console's SIGFPE was the runner's own divisor, and it is fixed.** The
+  fault (`jobs/aco-min/queue.txt`) was a division by zero in the sampled-format
+  loop: a table declared ten rows and initialized seven, so the eighth row's
+  texel size was zero. The addresses that had been read as ACO frames were
+  console `rip`s left unrebased by the eboot's `0x400000` load address, which
+  the crash report's own `xotext:` line gives. The tables now declare their
+  rows, `static_assert`s make a declared-but-unfilled row a build error, and
+  the console run is `jobs/aco-min` pid 287: seven of seven tests, each uint case
+  "7 of 7", no `signal:` record
   ([`docs/HARDWARE_FINDINGS.md`](docs/HARDWARE_FINDINGS.md)).
 - ✅ **Offline oracles exist.** The console's tile maps are derived from AMD's
   own AddrLib in the console's exact configuration and checked against the
@@ -93,11 +95,12 @@ toolchain.
   the next gate rather than a blocker behind one.
 - ❌ **Rungs 1.1 → 1.4.** The goal is a Vulkan 1.4 device; each rung is its own
   commit, gated by a CTS subset for that version.
-- ❌ **The ACO fix is not in the tree yet.** The console's compile-order fault is
-  identified and its fix exists in ps5-opengl 0.3.0's compiler fork, but moving
-  to that compiler changes every shader package: the migration's work list is
-  measured ([`tools/check-sdk-fork-migration.sh`](tools/check-sdk-fork-migration.sh))
-  and its re-proof cost is real, so it is a piece of work rather than a flag.
+- ✅ **The SDK fork's compiler is migrated.** The driver links ps5-opengl
+  0.3.0's own `opengnm-psbc` tree (metadata version 14, this repository's
+  patches re-applied on top), assembled and verified against the release's own
+  `patched_tree` by
+  [`tools/check-sdk-fork-migration.sh`](tools/check-sdk-fork-migration.sh)
+  ([`docs/M5_PHASE_C.md`](docs/M5_PHASE_C.md)).
 - ❌ **Some transfer shapes still refuse by name.** A tiled copy or readback of a
   mip chain, a multi-sample colour copy or blit (the resolve owns that), a
   subset of array layers, a scaled blit whose format has no recorded decode, a
@@ -123,7 +126,8 @@ toolchain.
 | M5 B–C | The Vulkan driver and the tutorial ladder | ✅ |
 | M5 D | Breadth: dynamic state, compute, more formats | ✅ |
 | **Rung 1.0** | Every capability the device reports, proven on the console | ✅ closed: commands 90/47/0/0, limits 0 missing, formats 0 missing |
-| — | The compiler fix the console's ACO fault needs (SDK fork migration) | ❌ work list measured |
+| M5 E | The SDK fork's compiler (metadata 14) migrated and re-proven | ✅ migrated and re-proven |
+| — | The console SIGFPE at `jobs/aco-min` | ✅ fixed: the runner's sampled-format table ran a row it never filled in |
 | Rung 1.1–1.4 | One commit a rung, each gated by a CTS subset | ❌ |
 | Phase E1 | CTS-style semantic validation against the advertised set | ❌ recipe written |
 | Real applications | RetroArch ✅ · emulators and other frontends ❌ | ❌ in progress |

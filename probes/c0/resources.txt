@@ -1,8 +1,11 @@
 # PS5 Vulkan c0 compute dispatch probe: the words a compute dispatch
-# programs, which ps5-opengl's own libpsbc cannot report. Written by
-# tools/build-compute-probe.sh with the patched compiler
-# (tooling/psbc/patch-compute-metadata.py), for the runner's PC builds.
+# programs, read from the compiler's own register table (the 0.3.0 fork
+# reports R_00B848/COMPUTE_PGM_RSRC1, R_00B84C/RSRC2 and R_00B8A0/RSRC3
+# there, with the wave size and workgroup shape it compiled for). Written
+# by tools/build-compute-probe.sh, whose recorder links the host archive
+# tools/build-driver.sh builds, for the runner's PC builds.
 rsrc1 0x602c0001
 rsrc2 0x00000006
 rsrc3 0x00000000
-vgprs 16
+wave_size 32
+workgroup 1 1 1

@@ -1,15 +1,15 @@
 PS5 Vulkan v0-stencil-test shader packages, built by tools/build-probe-shaders.sh v0-stencil-test.
 pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
 glslang: Glslang Version: 11:16.4.0
-opengnm-psbc sha256: 1669156833f467a2352538c3421a51c7f09df0b814d04898589673099e8fc3fc
+opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
 vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32b32_float:0:0:28:4 --vertex-attribute 1:r32g32b32a32_float:0:12:28:4; writer --esgs-ring-itemsize 1 --allow-unresolved
 pixel: -g -s fragment --raw --address32-hi 2; writer --allow-unresolved
 program-checksum registers are unresolved, as in ps5-opengl's runtime packages
-8fb6e32c3d11a8c558959d30a3b6db8a54a5dafce9334befbc9f0645b405ede7  shaders/m4/depth_colour.vert
-ff69a321e5165729eba59b4693506980c2c2ed527d4f3929c1c638a8dcdb772f  shaders/v0/stencil_test.frag
+c94013aa299e84aef828f075b991f46e863d8b626818dfab999b4404e71a2a2e  shaders/m4/depth_colour.vert
+a5f5f243fdd7e66581dbe38f811ef0f2550014c00c9e6ef3068f481dc431cff4  shaders/v0/stencil_test.frag
 020c1ba1e23ad81341c5950b379976887a3f71142536219f075d9dc71b0e3771  build/shaders/v0-stencil-test/vertex.spv
 7b0dd8a01293a52f9e08fb5c830b3f475df1a3980269e0b090dd9766f9a8be85  build/shaders/v0-stencil-test/pixel.spv
 05130f4e7818f0d6a912dd279dac55b883f2f3c5260b21fed9e9a696989c6320  build/shaders/v0-stencil-test/vertex.ngg.bin
-5ff050b6b182c94d6af7c2e0f887227c7086c9c9b618b44084d4128be88cb474  build/shaders/v0-stencil-test/vertex.hw.json
+ebc25671f9dd0d6f555a98d59e5c5f8b0c80a51ab56a0d207d03d4fe2bca65a5  build/shaders/v0-stencil-test/vertex.hw.json
 e61f1f4f7df413a27e8df1a2ecf81f353e77d929e32023ca0426a2f97e0af75f  build/shaders/v0-stencil-test/pixel.raw.bin
-be53718f33765947fd92db66161e79a167dee4e3a9d80fdfb1614c9be05162d7  build/shaders/v0-stencil-test/pixel.hw.json
+181a3409333ead606d505bf45f28a351e07d845943af8a3302207ce23cc67640  build/shaders/v0-stencil-test/pixel.hw.json

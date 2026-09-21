@@ -38,11 +38,12 @@ print(len(data) // 4)
 PY
 )
 
-# The words a dispatch programs that the archive this repository's PC builds
-# link cannot report: ps5-opengl's own libpsbc has no field for them. They are
-# recorded beside the payload so the PC runner compiles the same shader and
-# programs the same registers (probes/c0/resources.txt). The recorder has to be
-# the patched compiler, which is the host copy tools/build-driver.sh builds.
+# The words a dispatch programs, recorded beside the payload so the PC runner
+# compiles the same shader and programs the same registers
+# (probes/c0/resources.txt). The recorder links the host archive
+# tools/build-driver.sh builds -- the 0.3.0 fork's compiler plus this
+# repository's patches -- and reads the words where that compiler reports them,
+# in the shader register table.
 psbc_archive="$root/build/driver/host/libpsbc_driver.pic.a"
 psbc_include="$root/.deps/native/psbc/include"
 [[ -f $psbc_archive && -f $psbc_include/psbc_compile.h ]] ||
@@ -53,9 +54,11 @@ g++ "$work/compute-resources.o" "$psbc_archive" -pthread -lm -o "$work/compute-r
 "$work/compute-resources" "$output/dispatch.spv" > "$work/resources.txt"
 {
     echo "# PS5 Vulkan c0 compute dispatch probe: the words a compute dispatch"
-    echo "# programs, which ps5-opengl's own libpsbc cannot report. Written by"
-    echo "# tools/build-compute-probe.sh with the patched compiler"
-    echo "# (tooling/psbc/patch-compute-metadata.py), for the runner's PC builds."
+    echo "# programs, read from the compiler's own register table (the 0.3.0 fork"
+    echo "# reports R_00B848/COMPUTE_PGM_RSRC1, R_00B84C/RSRC2 and R_00B8A0/RSRC3"
+    echo "# there, with the wave size and workgroup shape it compiled for). Written"
+    echo "# by tools/build-compute-probe.sh, whose recorder links the host archive"
+    echo "# tools/build-driver.sh builds, for the runner's PC builds."
     cat "$work/resources.txt"
 } > "$output/resources.txt"
 

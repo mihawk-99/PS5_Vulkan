@@ -1,0 +1,17 @@
+# PS5 Vulkan test runner job queue (PPSA99988): golden capture, batch B's last case.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/capture-b2/queue.txt
+#
+# "capture" makes every frame log its AGC helper calls, its whole command
+# stream and its stage workspace image. Turn the klog into golden files with:
+#   python3 tools/golden.py extract <klog> <directory>
+#
+# Batch B (jobs/capture-b/queue.txt) covered its nine cases, but the capture
+# tool's own timeout cut the live stream off inside v0-vertex-uint -- the run
+# itself finished (runner_summary "11 of 11" and run_end are in the klog) and
+# only that one case's records were lost, so this queue captures just it. Its
+# register defaults are the run's m2-solid, which is why m2-solid runs first.
+capture
+hold 60
+m2-solid
+v0-vertex-uint
+exit

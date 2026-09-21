@@ -1,16 +1,16 @@
 PS5 Vulkan v0-image-store-uint shader packages, built by tools/build-probe-shaders.sh v0-image-store-uint.
 pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
 glslang: Glslang Version: 11:16.4.0
-opengnm-psbc sha256: 1669156833f467a2352538c3421a51c7f09df0b814d04898589673099e8fc3fc
-pixel compiler (tools/build-psbc-cli.sh) sha256: 3a8d7a3681898cf8374f961a138a6bb7ad0bfe51dd9aacd6dc2cb825c436d849
+opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
+pixel compiler (tools/build-psbc-cli.sh) sha256: 4d53a41ef9c8aea7645e8642ef020d65eb39c4840ae7b26f115766f68d61fa20
 vertex: -g -s vertex --ngg --address32-hi 2; writer --esgs-ring-itemsize 1 --allow-unresolved
 pixel: -g -s fragment --raw --address32-hi 2 --descriptor-binding 0:0:storage_image:1:0:32; writer --allow-unresolved
 program-checksum registers are unresolved, as in ps5-opengl's runtime packages
-3fb53b25664f05eb8068f8e6e418915889b1f8c56bc88c6de600d26f2eb9131f  shaders/m2/fullscreen.vert
-dea122b6c8536cf74127ffbe35e4f4c596462cf9d7a7ebf4026fc8b202f6499a  shaders/v0/image_store_uint.frag
+6e3b120d5bfe1909da2ddeb8913be373d7e9cf290a62c4c3e3b4f4ac5432289a  shaders/m2/fullscreen.vert
+cedd4a7d7789cb8bd3ff4eea5fe68617602cf06cd4c3665893c639c2ce7f94d1  shaders/v0/image_store_uint.frag
 ebc5c12b4c55b322bc1a61165e108bd3feb7b09d72f4d9a22b6f9d2a9c3143c9  build/shaders/v0-image-store-uint/vertex.spv
 b67017f6d97f3c6aa4aaf02fef3430220d681973c35a030feb41df4530ba4de0  build/shaders/v0-image-store-uint/pixel.spv
 229cfec58ba3b610e6e46f57865637408ccc075b5815e31e543240452b39e3f9  build/shaders/v0-image-store-uint/vertex.ngg.bin
-3eb7eb67a69613a55aabe7781667eac5a519bb16afb7f34ed8bcffb59a011f08  build/shaders/v0-image-store-uint/vertex.hw.json
+5e47d958e25f3241b7648d63d252bcefbea61d47a1fbfe3b9f3e4c7193795c28  build/shaders/v0-image-store-uint/vertex.hw.json
 de83b0970bdfb42fd547faffb9a222ff52dcc5ccea848925665db29442abe482  build/shaders/v0-image-store-uint/pixel.raw.bin
-5844cbb2b95abe4c08e7e63a3e724ff9b6ad7754bdc3a03aea904e03b1b18bc1  build/shaders/v0-image-store-uint/pixel.hw.json
+081af0c3fd24932dc3306fcadb5d0b1803e99f483e2783364de67cd57deb1224  build/shaders/v0-image-store-uint/pixel.hw.json

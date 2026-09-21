@@ -49,8 +49,17 @@ constexpr int kErrorNoMemory = static_cast<int>(0x8002000cu);
  * allocations its submissions name and the runner's own workspace. One a
  * pipeline, and V0-formats' sampled test now builds twenty-two of them (one
  * a packed format), so the cap has to sit above the largest capture rather
- * than at the previous one. */
-constexpr std::size_t kMaxRegions = 64;
+ * than at the previous one.
+ *
+ * A capture run's replay lists every test's pipelines, not one test's, because
+ * the runner runs a queue in one process and takes one replay for all of it
+ * (tools/golden.py, driver_replay_text, whose `test` argument is what narrows
+ * it). The re-capture of 2026-09-20 covered fifteen cases in one run, so
+ * golden/c7-mip-tiled's replay carries 77 stage lines and 50 regions, and
+ * golden/v0-formats-sampled's 130 and 12: 142 of the 64 the previous cap
+ * allowed, which made parse_replay reject a valid replay and every case that
+ * needed it report NO RECORD. */
+constexpr std::size_t kMaxRegions = 256;
 constexpr std::size_t kMaxDefaults = 64;
 // The runner's stage workspace, one 64 KiB half per linked package set
 // (src/diagnostics.cpp kStageBytes and kMaxLinkedSets).

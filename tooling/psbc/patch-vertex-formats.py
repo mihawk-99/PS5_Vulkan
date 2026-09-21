@@ -61,11 +61,20 @@ FORMATS = [
 ]
 
 ENUM_CLOSE = "} PsbcVertexFormat;"
-SWITCH_DEFAULT = "        default:\n"
+# The 0.3.0 fork maps the enum in a function of its own,
+# `static enum pipe_format psbc_vertex_pipe_format(PsbcVertexFormat format)`,
+# whose cases return their pipe format and whose default is this line. Anchor on
+# the whole line, including the newline that bounds it: the 0.2.0-era anchor was
+# eight spaces and `default:`, which is a *substring* of a deeper switch's
+# `                default:` -- in the fork that is the NIR intrinsic switch
+# inside psbc_tess_input_supported, so the cases landed where no `format`
+# variable exists and the build failed with "use of undeclared identifier
+# 'format'". A line-exact anchor cannot repeat that.
+SWITCH_DEFAULT = "\n    default: return PIPE_FORMAT_NONE;\n"
 NOTE = (
-    "        /* PS5 Vulkan: the vertex formats the enum could not express, added by\n"
-    "         * tooling/psbc/patch-vertex-formats.py; the descriptor word comes from\n"
-    "         * Mesa's vertex-element table. */\n"
+    "    /* PS5 Vulkan: the vertex formats the enum could not express, added by\n"
+    "     * tooling/psbc/patch-vertex-formats.py; the descriptor word comes from\n"
+    "     * Mesa's vertex-element table. */\n"
 )
 
 
@@ -88,15 +97,15 @@ def patch_source(path):
     text = path.read_text()
     added = 0
     for name, pipe in FORMATS:
-        if f"        case {name}:\n" in text:
+        if f"\n    case {name}:" in text:
             continue
         if text.count(SWITCH_DEFAULT) != 1:
             raise SystemExit(f"{path}: expected one vertex-format switch default")
         block = NOTE if added == 0 else ""
         text = text.replace(
             SWITCH_DEFAULT,
-            f"{block}        case {name}:\n            format = {pipe};\n            break;\n"
-            f"{SWITCH_DEFAULT}",
+            f"\n{block}    case {name}: return {pipe};\n"
+            "    default: return PIPE_FORMAT_NONE;\n",
         )
         added += 1
     if added:

@@ -3,4 +3,4 @@ source: shaders/c0/dispatch.comp
 pipeline: GLSL -> SPIR-V (glslang, vulkan1.0), compiled on the console by libpsbc
 glslang: Glslang Version: 11:16.4.0
 dispatch.spv: 144 words, sha256 5b20936b88c9cc39dc1695c50884522d39a3698279e085b36472087eada5bb7f
-resources.txt: sha256 e2af7ada65e616a9ab23110606cc1f683f6c36f191f99d730f3186e7976bcc70
+resources.txt: sha256 6ea9192da12da779edda43e6cc6aaf331eea2642b1fbb89724c91e0bed95de8d

@@ -1,16 +1,16 @@
 PS5 Vulkan v0-image-atomic-sint shader packages, built by tools/build-probe-shaders.sh v0-image-atomic-sint.
 pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
 glslang: Glslang Version: 11:16.4.0
-opengnm-psbc sha256: 1669156833f467a2352538c3421a51c7f09df0b814d04898589673099e8fc3fc
-pixel compiler (tools/build-psbc-cli.sh) sha256: 3a8d7a3681898cf8374f961a138a6bb7ad0bfe51dd9aacd6dc2cb825c436d849
+opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
+pixel compiler (tools/build-psbc-cli.sh) sha256: 4d53a41ef9c8aea7645e8642ef020d65eb39c4840ae7b26f115766f68d61fa20
 vertex: -g -s vertex --ngg --address32-hi 2; writer --esgs-ring-itemsize 1 --allow-unresolved
 pixel: -g -s fragment --raw --address32-hi 2 --descriptor-binding 0:0:storage_image:1:0:32; writer --allow-unresolved
 program-checksum registers are unresolved, as in ps5-opengl's runtime packages
-3fb53b25664f05eb8068f8e6e418915889b1f8c56bc88c6de600d26f2eb9131f  shaders/m2/fullscreen.vert
-b9fb74ff75dd1d5e3d361ce3b1a05c78c75b977a01b1ed3ccfdce29d1f2e989b  shaders/v0/image_atomic_sint.frag
+6e3b120d5bfe1909da2ddeb8913be373d7e9cf290a62c4c3e3b4f4ac5432289a  shaders/m2/fullscreen.vert
+5f4d6fbb88e226a97287da5ea3eed850e92a27affd9b946d52636175b2eab0f0  shaders/v0/image_atomic_sint.frag
 ebc5c12b4c55b322bc1a61165e108bd3feb7b09d72f4d9a22b6f9d2a9c3143c9  build/shaders/v0-image-atomic-sint/vertex.spv
 db9d24fb62d86177d3e566d4133817b5c1af3baaca839c038305e6a7ce659f2c  build/shaders/v0-image-atomic-sint/pixel.spv
 229cfec58ba3b610e6e46f57865637408ccc075b5815e31e543240452b39e3f9  build/shaders/v0-image-atomic-sint/vertex.ngg.bin
-3eb7eb67a69613a55aabe7781667eac5a519bb16afb7f34ed8bcffb59a011f08  build/shaders/v0-image-atomic-sint/vertex.hw.json
+5e47d958e25f3241b7648d63d252bcefbea61d47a1fbfe3b9f3e4c7193795c28  build/shaders/v0-image-atomic-sint/vertex.hw.json
 235a8b1a8bf45596a49dbb4c9d625a822383b3bcb875c00145cee2e6b93435a5  build/shaders/v0-image-atomic-sint/pixel.raw.bin
-7b1c74c2e6eafec9a9ea9a6aa2dc3231822acbdd274c26a0e80de9e0b022b47c  build/shaders/v0-image-atomic-sint/pixel.hw.json
+7f9a5f27dd6322c401e4938829c81b2ccb86c33935c310358e4e0058fc42db5f  build/shaders/v0-image-atomic-sint/pixel.hw.json

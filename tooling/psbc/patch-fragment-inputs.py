@@ -6,8 +6,15 @@
 import sys
 from pathlib import Path
 
+# The fork's standalone path takes the pointers it already holds (`compiler_info`,
+# `layout`, `gfx_state`), a `stage` pointer, and picks the pipeline kind from the
+# Mesa stage, so the call reads differently from the 0.2.0-era tree the anchor was
+# first written against. The anchor is the call's opening lines, which are unique
+# in the file; the fork's own fragment-stage lowering (`radv_nir_lower_opt_fs_frag_pos`)
+# sits just above it, so inserting here keeps RADV's order -- lower fragment
+# coordinates, assign input slots, then gather shader info.
 ANCHOR = """    radv_nir_shader_info_pass(
-        &compiler_info, nir, &layout, &stage.key, &gfx_state,
+        compiler_info, nir, layout, &stage->key, gfx_state,
 """
 REPLACEMENT = """    /* PS5 Vulkan: standalone compilation needs RADV's fragment input mapping.
      * Without it every lowered input retains base 0: a second varying aliases

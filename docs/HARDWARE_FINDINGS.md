@@ -2848,3 +2848,117 @@ additive blend's as `0xffe1bcbc`); `v0-formats` 58 of 58 rows and `m2-solid`; 7 
 missing a required feature**, 55 conditional, 0 `must:` clauses unmet, and the
 split 0 / 0 / 0 / 0 / 0 -- every format a Vulkan 1.0 device must support carries
 every feature the specification requires of it.
+
+## 2026-09-20: the SDK fork does not fix the compile-order fault
+
+The compiler migration moved the driver to ps5-opengl 0.3.0's own fork (upstream
+`opengnm-psbc` a92a1228 + the release's `toolchain/opengnm-psbc-ps5.patch`, tree
+a27cbecc, metadata version 14) with this repository's compiler patches on top. The
+compile-order fault was expected to close with it (rounds 15-16). It does not.
+
+**The console measurement.** `jobs/aco-min` run pid 261 on the migrated build
+(`Klog_Logs/aco-min-fixed.log`) faults exactly as before: `signal: 8 (SIGFPE)`,
+`integer divide fault`, `rax = rcx = rdx = 0`, `rip = 0x430a14` -- the same
+signature and the same address as pid 260 on the same build before the wave
+patch, and as round 15's pid 211 on the old compiler. The dividers the fault was
+attributed to are not it: `get_addr_regs_from_waves` divides by its `waves`
+argument, so the round's patch put a witness on that divide (and restored
+`workgroup_size`'s documented "unknown is UINT_MAX" invariant before
+`calc_min_waves`), and the witness **never fired** in either run. The function
+that would have printed is in the deployed `eboot.bin` (the string is present).
+
+**The backtrace is not trustworthy.** Symbolizing against `build/llvm-pie.elf`
+puts the three recorded frames in `aco::register_allocation`,
+`aco::label_instruction` and `std::vector<aco::Temp>::__assign_with_size`, but the
+instruction at the reported `rip` is a `movq`, and the second frame's address
+lands mid-straight-line code: the console's three-frame walk names a region, not
+a statement.
+
+**The host cannot reproduce it.** `tools/psbc/compile-sequence.c` linked against
+the work copy's compiler archive, in the recorded shape (the unsigned texture
+case's pixel stage twice, then `m3-texture`) and in the stress shape (every probe
+set's pixel stage three times, 120 compiles in one process), is clean under:
+gcc and clang 22 archives instrumented with `-fsanitize=integer-divide-by-zero`;
+the same two built with the PS5 build's own defines (`-DOPENGNM_PSBC_ORBIS=1`,
+`-DNDEBUG`, which the host configuration does not carry and the PS5
+configuration does); and stacks limited to 256 KB. No divide by zero is reported
+and no fault occurs, so the fault lives in the console compiler build or the
+console runtime around it, not in a source path the host walks.
+
+## 2026-09-20: the "compile-order SIGFPE" was the runner's own divisor, not ACO
+
+Every attribution above this entry -- `aco::schedule_program`, then
+`aco::optimize` / `aco::register_allocation` / `aco::label_instruction`, then
+the pinned compiler's `get_addr_regs_from_waves` divide and the fork's missing
+`num_waves` guard -- came from the same mistake, and the fault was in this
+repository the whole time. It is a **division by zero in the test runner's
+sampled-format loop**, and it is fixed.
+
+**The addresses had a load base.** The console's crash report prints absolute
+addresses, and the same report names the image they are in:
+`# /app0/eboot.bin`, `#  xotext: 0000000000400000:00000000009f0000 nsegs: 4` --
+every one of the runs above carries that line (Klog_Logs/aco-min-fixed.log,
+aco-min-stdout.log, aco-min-deep2.log, wedge.log). `build/llvm-pie.elf` is a
+position-independent executable whose first `PT_LOAD` is vaddr 0, so the eboot
+is loaded at **0x400000** and every address in the report has to be rebased
+before symbolizing. Symbolized without the rebase, the three frames of the
+`jobs/aco-min` crash land in ACO's optimizer; rebased, they are
+
+    0x404599 -> run_linked_agc_canary      0x43a4a6 -> main      0x40016b -> _start
+
+which is the runner's own call chain, with no compiler frame in it at all. The
+`rip` rebases the same way: `0x430b34 - 0x400000 = 0x30b34`, the address of
+`div %r13d` in `run_sampled_format_frames` (build/llvm-pie.elf of the same
+build). The instruction is `mov %ecx,%eax; xor %edx,%edx; div %r13d`, and the
+register dump of the fault reads `rax = rcx = rdx = 0` with
+`r13 = 0` -- the dividend, the zeroed high half, and the divisor, exactly.
+
+**The divisor is a texel size of a row that was never filled in.**
+`run_sampled_format_frames` sizes each row's packed buffer by
+
+    std::vector<std::uint8_t> texels(kSampledTextureWidth * kSampledTextureHeight
+                                     * format.texel_bytes);
+    for (std::size_t texel = 0; texel < texels.size() / format.texel_bytes; ++texel)
+
+and the case passes `formats.size()`. `sampled_unsigned_formats()` is declared
+`std::array<SampledFormat, 10>` and initializes **seven** rows; the remaining
+three are value-initialized, so `format.texel_bytes == 0` and the loop's
+condition is `0 / 0`. The seven real rows are the seven the console's klog
+shows fetched, and the crash is at the eighth: the run's last records are
+`agc_format_sample PASS "format 107 fetched as 40 80 c0"` and
+`b7_device_wait_idle PASS`, and the case's next statement is that division
+(Klog_Logs/aco-min-deep2.log, pid 283). `sampled_signed_formats()` had the same
+shape -- declared 11, seven rows -- so the signed case was the same fault one
+case later.
+
+**The host was never asked the question.** What the host ran was the *compiler*
+(`tools/check-aco-state.sh`, the UBSan archives of `libpsbc`), and it compiled
+every shader cleanly, which said nothing about a loop in the runner. Run the
+case through the driver-enabled host runner
+(`build/host/runner_host_driver --cases driver`) and the host dies the same
+way: `SIGFPE`, exit 136, the same divide. The fault was never the console
+build's, never the compiler's, and never ACO's.
+
+**The fix, and what proves it.** The two tables declare the seven rows they
+initialize; the cases take the table's own size instead of repeating it; and
+`static_assert(sampled_formats_filled(...))` after each `sampled_*` table makes
+a declared-but-unfilled row -- the only direction the compiler cannot catch --
+a build error, checked by both compilers. On the console (`jobs/aco-min`,
+pid 299, Klog_Logs/aco-min-final.log) all seven tests pass, each
+`v0-formats-sampled-uint` reports its rows as **"7 of 7 sampled formats fetched
+the colour their texel holds"**, `m2-solid` and `v0-formats` regress, and the
+klog contains **no `signal:` record at all**. The same case on the host no
+longer takes a signal either.
+
+**Retired by this.** `get_addr_regs_from_waves` and the fork's `num_waves`
+guard are not this fault's mechanism (the witness on that divide never fired
+because it was never reached); the "console-build-specific" framing, and the
+stack-exhaustion reading of it, go with them. The 32 MiB compile stacks the
+driver and the runner allocate stay as robustness -- they answer a real
+recursion, not this fault.
+
+**The rule this leaves.** A console `rip` and backtrace are absolute addresses
+in an image the loader placed; rebase them by the base the crash report's own
+`xotext:` line gives before symbolizing anything. Matching the build is not
+enough when the build is a PIE: `build/llvm-pie.elf`'s vaddrs start at zero and
+the console's do not.

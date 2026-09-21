@@ -1,0 +1,17 @@
+# PS5 Vulkan test runner job queue (PPSA99988): golden capture, c8-resolve alone.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/capture-b3/queue.txt
+#
+# "capture" makes every frame log its AGC helper calls, its whole command
+# stream and its stage workspace image. Turn the klog into golden files with:
+#   python3 tools/golden.py extract <klog> <directory>
+#
+# The batch A capture (jobs/capture/queue.txt, Klog_Logs/capture-migrated.log)
+# stopped inside c8-resolve: the klog holds its first three frames and no
+# runner_test record, so its golden was three submissions where the case and
+# the PC's own test record four. This queue captures the case alone, with the
+# run's m2-solid first as its register defaults.
+capture
+hold 60
+m2-solid
+c8-resolve
+exit
