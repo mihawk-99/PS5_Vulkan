@@ -13019,6 +13019,169 @@ void run_vulkan_sampler_address_frames(const TestContext &test, TestOutcome &out
               detail);
 }
 
+// R1: the rasterization state the specification requires and the driver used to
+// refuse -- cullMode and rasterizerDiscardEnable.
+//
+// A pipeline that sets cullMode = BACK is created successfully and refused much
+// later, at its first draw, so nothing in the command audit could see it: the
+// draw looked like a draw with no culling at all (PS5_VULKAN_REQUESTS.md, R1).
+// The state is one register word the *draw* records (PA_SU_SC_MODE_CNTL 0x205
+// and PA_CL_CLIP_CNTL 0x204), so the case varies it across frames that share
+// geometry and reads the pixels back:
+//
+//   cull none     both triangles of the full-target quad        every pixel drawn
+//   cull back     the specification's back faces gone           about half drawn
+//   cull front    the other half gone                           the complement
+//   discard       no rasterized primitive at all                nothing drawn
+//
+// Cull back and cull front must be complements of each other: the same two
+// triangles, one kept by each, is what tells a driver that programmed the
+// *wrong* face (or the wrong FACE winding bit) from one that programmed none.
+constexpr unsigned kCullFrames = 4;
+// The quad's two triangles with *opposite* windings: (0,1,2) is the lower-right
+// half and (0,3,2) the upper-left one, wound the other way. A quad wound one way
+// is culled whole or not at all -- both its triangles face the same way -- and
+// what a cull probe needs is one triangle each way, so that cull back and cull
+// front remove different halves (PS5_VULKAN_REQUESTS.md, R1).
+constexpr std::uint16_t kCullIndices[kIndexCount] = {0, 1, 2, 0, 3, 2};
+
+void run_vulkan_cull_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8},
+    };
+    struct Frame
+    {
+        const char *name;
+        VkCullModeFlags cull;
+        bool discard;
+    };
+    static constexpr Frame kFrames[kCullFrames] = {
+        {"cull none", VK_CULL_MODE_NONE, false},
+        {"cull back", VK_CULL_MODE_BACK_BIT, false},
+        {"cull front", VK_CULL_MODE_FRONT_BIT, false},
+        {"discard", VK_CULL_MODE_NONE, true},
+    };
+    // The pixels the frame's own readback is measured on: a strip down the
+    // middle of the target, where the two triangles of a full-target quad meet,
+    // and two columns well inside each half.
+    static constexpr std::uint32_t kColumns[] = {kOutputWidth / 4, kOutputWidth / 2,
+                                                 kOutputWidth * 3 / 4};
+    // The clear colour the frame's pass loads with, as the readback's word: the
+    // canary's clear {0x40, 0x80, 0xff, 0xff} with red in the target word's low
+    // byte. Measured, not derived -- the discard frame holds exactly this word
+    // in every pixel, and the frame logs it beside the pixels it counted.
+    const std::uint32_t clear_word = 0xffff8040u;
+    unsigned drawn[kCullFrames] = {0};
+    unsigned sampled = 0;
+    for (unsigned index = 0; index < kCullFrames; index++)
+    {
+        const Frame &frame = kFrames[index];
+        log.event("agc_cull_frame", "INFO", 0, frame.name);
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = kResolveVertices;
+        input.vertex_count = kSquareVertexCount;
+        input.vertex_stride = kVertexStride;
+        input.index_data = kCullIndices;
+        input.index_count = kIndexCount;
+        input.attribute_count = 2;
+        input.attributes[0] = attributes[0];
+        input.attributes[1] = attributes[1];
+        input.rasterization_cull_mode = frame.cull;
+        input.rasterization_discard = frame.discard;
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+            return;
+        ps5vk_triangle triangle{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (test.capture && status == PS5VK_TRIANGLE_OK)
+        {
+            log_driver_submission(triangle.device, frame.name, log);
+            log_driver_stages(triangle.device, log);
+        }
+        bool checked = false;
+        if (status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes)
+        {
+            flush_gpu_data(const_cast<void *>(triangle.target), kFramebufferBytes);
+            const auto *const words = static_cast<const std::uint32_t *>(triangle.target);
+            const FramebufferView view{words, kTiledRgba8Layout};
+            sampled = 0;
+            drawn[index] = 0;
+            for (std::uint32_t row = kOutputHeight / 8; row < kOutputHeight * 7 / 8; row += 37)
+                for (std::uint32_t column : kColumns)
+                {
+                    ++sampled;
+                    // A pixel the frame drew holds the quad's gradient, which is
+                    // never the clear word (the shader's red is kSquareRed over
+                    // a different green and blue).
+                    drawn[index] += view.word(column, row) != clear_word ? 1u : 0u;
+                }
+            log.number("agc_cull_frame", "drawn", drawn[index]);
+            log.number("agc_cull_frame", "of", sampled);
+            /* What the frame's own pixels hold, one word a column: a cleared
+             * frame holds the clear word, a drawn one the quad's gradient, and a
+             * frame that neither cleared nor drew holds whatever the fresh
+             * image's memory holds -- which is what tells those three apart. */
+            for (unsigned column_index = 0; column_index < std::size(kColumns); column_index++)
+            {
+                char field[48]{};
+                std::snprintf(field, sizeof(field), "word_%u", column_index);
+                log.hex("agc_cull_frame", field,
+                        view.word(kColumns[column_index], kOutputHeight / 2));
+            }
+            log.hex("agc_cull_frame", "clear_word", clear_word);
+            log.event("agc_cull_frame", "PASS", 0, "the frame recorded and its pixels were read");
+            checked = true;
+        }
+        else
+        {
+            log.event("agc_cull_frame", "FAIL", -1, "the frame could not be recorded or submitted");
+        }
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            log.event("agc_cull", "FAIL", -1,
+                      "a submission did not complete; the program's objects stay allocated");
+            return;
+        }
+        ps5vk_triangle_finish(&triangle);
+        if (!checked)
+        {
+            outcome.command_built = false;
+            log.event("agc_cull", "FAIL", -1, "a frame could not be recorded or submitted");
+            return;
+        }
+    }
+    // What the four frames have to show: everything, about half, about half, and
+    // nothing; and the two halves are complements of each other, which is what
+    // says the right faces went and the winding bit is right.
+    const bool all_drawn = drawn[0] == sampled;
+    const bool none_drawn = drawn[3] == 0;
+    const bool halves = drawn[1] + drawn[2] == sampled && drawn[1] > 0 && drawn[2] > 0;
+    const bool passed = all_drawn && none_drawn && halves;
+    log.number("agc_cull", "cull_none_drawn", drawn[0]);
+    log.number("agc_cull", "cull_back_drawn", drawn[1]);
+    log.number("agc_cull", "cull_front_drawn", drawn[2]);
+    log.number("agc_cull", "discard_drawn", drawn[3]);
+    log.number("agc_cull", "sampled", sampled);
+    char detail[176]{};
+    std::snprintf(detail, sizeof(detail),
+                  "cull none drew %u of %u samples, cull back %u, cull front %u and discard %u",
+                  drawn[0], sampled, drawn[1], drawn[2], drawn[3]);
+    outcome.command_built = true;
+    outcome.passed = passed;
+    log.event("agc_cull", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
+}
+
 // Phase D1's dynamic uniform buffer: one buffer holding two 16-byte colours,
 // one descriptor whose range is the shader's 16 bytes, and an offset the
 // application moves between the frames (VkDescriptorSetLayoutBinding's
@@ -20213,6 +20376,9 @@ constexpr RunnerTest kRunnerTests[] = {
     // with u running 0 to 4 and read back in pixels
     // (run_vulkan_sampler_address_frames).
     {"v0-sampler-address", "m3-texture", run_vulkan_sampler_address_frames},
+    // R1: cull none, cull back, cull front and rasterizer discard, one frame
+    // each over the same quad, read back in pixels (run_vulkan_cull_frames).
+    {"v0-cull", "m3-vertex", run_vulkan_cull_frames},
     // Phase D2: a compute dispatch through the driver, its storage buffer and
     // its own pipeline (probes/c0/dispatch.spv, which the case reads itself:
     // the m2 set is only what the runner stages for every test).

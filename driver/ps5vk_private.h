@@ -476,6 +476,7 @@ struct ps5vk_cmd_buffer {
    /* The rendering's depth attachment, when it has one: the DB registers every
     * draw's table then carries, after the colour target's (Phase C5). */
    bool depth_bound;
+
    /* Whether that attachment carries a stencil plane. Vulkan ignores the
     * stencil test when the rendering has no stencil attachment, so a draw
     * programs the stencil state words and DB_DEPTH_CONTROL's stencil bits only
@@ -1032,6 +1033,16 @@ struct ps5vk_pipeline {
    bool blend_uses_constants;
    /* The four blend constants as the registers hold them, the float's bits. */
    uint32_t blend_constants[4];
+   /* R1: the pipeline's PA_SU_SC_MODE_CNTL word (0x205), from cullMode and
+    * frontFace, or 0 for a pipeline that culls nothing -- which is the state
+    * every draw before R1 ran with, so a draw that does not cull records no
+    * rasterizer word at all (ps5vk_draw.c). */
+   uint32_t rasterizer_word;
+   /* R1: whether the pipeline discards every rasterized primitive
+    * (rasterizerDiscardEnable): the draw records PA_CL_CLIP_CNTL (0x204) with
+    * DX_RASTERIZATION_KILL set. */
+   bool discard_rasterizer;
+
    /* Why command buffers cannot draw with the pipeline yet, or NULL. */
    const char *draw_refusal;
    /* What vkCmdBindPipeline puts into the command buffer's dynamic state:

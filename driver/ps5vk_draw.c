@@ -102,6 +102,14 @@
  * pipeline whose blend state reads the blend constants records, with the
  * constants' bits. A pipeline that does not leaves them at AGC's defaults. */
 #define PS5VK_BLEND_CONSTANT_REGISTER 0x105
+/* R1's rasterization registers, in the context table's own numbering (the
+ * register database's MMIO address over four, minus 0xA000, which is what every
+ * offset here is): PA_CL_CLIP_CNTL at 0x204, PA_SU_SC_MODE_CNTL at 0x205 and
+ * polygon offset's block at 0x2de, which a later round programs when its probe
+ * exists (PS5_VULKAN_REQUESTS.md, R1). */
+#define PS5VK_CLIP_CONTROL_REGISTER 0x204
+#define PS5VK_RASTERIZER_REGISTER 0x205
+#define PS5VK_CLIP_CONTROL_DISCARD (UINT32_C(1) << 22)
 #define PS5VK_BLEND_CONSTANT_COUNT 4
 #define PS5VK_COLOR_CONTROL_REGISTER 0x202
 #define PS5VK_COLOR_CONTROL_WORD 0x00cc0011u
@@ -1639,10 +1647,15 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
       pipeline->blend_uses_constants ? PS5VK_BLEND_CONSTANT_COUNT : 0u;
    const uint32_t blend_count = (pipeline->blend_control != 0 ? PS5VK_BLEND_REGISTER_COUNT : 0u) +
                                 blend_constant_count;
+   /* R1's rasterization words go behind everything else, and only the state a
+    * pipeline asks for: a draw that culls nothing, discards nothing and biases
+    * nothing records exactly the words it recorded before R1. */
+   const uint32_t raster_count = (pipeline->rasterizer_word != 0 ? 1u : 0u) +
+                                 (pipeline->discard_rasterizer ? 1u : 0u);
    const uint32_t fixed = PS5VK_TARGET_REGISTER_COUNT + msaa_count + depth_count +
                           stencil_count + PS5VK_VIEWPORT_REGISTER_COUNT;
    const uint32_t cx_count = fixed + PS5VK_STAGE_CONTEXT_RECORDS + vertex->cx_count +
-                             pixel->cx_count + mask_count + blend_count;
+                             pixel->cx_count + mask_count + blend_count + raster_count;
    const uint32_t sh_count = vertex->sh_count + pixel->sh_count;
    struct ps5vk_agc_register *const cx =
       ps5vk_cmd_buffer_table(cmd_buffer, cx_count * sizeof(*cx), 8);
@@ -1693,6 +1706,17 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
          blend[PS5VK_BLEND_REGISTER_COUNT + index] =
             (struct ps5vk_agc_register){.offset = (uint16_t)(PS5VK_BLEND_CONSTANT_REGISTER + index),
                                         .value = pipeline->blend_constants[index]};
+   }
+   if (raster_count != 0) {
+      struct ps5vk_agc_register *raster =
+         cx + fixed + PS5VK_STAGE_CONTEXT_RECORDS + vertex->cx_count + pixel->cx_count +
+         mask_count + blend_count;
+      if (pipeline->rasterizer_word != 0)
+         *raster++ = (struct ps5vk_agc_register){.offset = PS5VK_RASTERIZER_REGISTER,
+                                                 .value = pipeline->rasterizer_word};
+      if (pipeline->discard_rasterizer)
+         *raster++ = (struct ps5vk_agc_register){.offset = PS5VK_CLIP_CONTROL_REGISTER,
+                                                 .value = PS5VK_CLIP_CONTROL_DISCARD};
    }
    memcpy(sh, vertex->sh, vertex->sh_count * sizeof(*sh));
    memcpy(sh + vertex->sh_count, pixel->sh, pixel->sh_count * sizeof(*sh));

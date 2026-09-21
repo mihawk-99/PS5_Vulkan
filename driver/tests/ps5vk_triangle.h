@@ -454,6 +454,13 @@ struct ps5vk_triangle_input {
     * as target_format. */
    bool texture_address_mode_set;
    VkSamplerAddressMode texture_address_mode;
+   /* R1: the rasterization state every pipeline of the frame is created with --
+    * cullMode and rasterizerDiscardEnable, which are core Vulkan 1.0. The zero
+    * values are the unculled, undiscarded state every earlier frame ran, so a
+    * caller that leaves them out records the stream it did before. Appended at
+    * the end for the same reason as target_format. */
+   VkCullModeFlags rasterization_cull_mode;
+   bool rasterization_discard;
 };
 
 /* The colour a clearing render pass clears to: red 0x40, green 0x80, blue
@@ -611,6 +618,10 @@ struct ps5vk_triangle {
     * (input->texture_address_mode_set and input->texture_address_mode). */
    bool texture_address_mode_set;
    VkSamplerAddressMode texture_address_mode;
+   /* R1: the rasterization state every pipeline of the frame is created with
+    * (input->rasterization_cull_mode and input->rasterization_discard). */
+   VkCullModeFlags rasterization_cull_mode;
+   bool rasterization_discard;
    VkImage texture_image;
    /* The format the image was created with: a depth format's view and upload
     * name the depth aspect, a colour format's the colour one (round 21). */

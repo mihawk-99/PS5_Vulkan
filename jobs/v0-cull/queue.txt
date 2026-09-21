@@ -1,0 +1,12 @@
+# PS5 Vulkan test runner job queue (PPSA99988): R1's rasterization state.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-cull/queue.txt
+#
+# v0-cull draws the same quad four times -- cull none, cull back, cull front and
+# rasterizer discard -- with the two triangles wound opposite ways, and reads
+# the pixels back: cull back and cull front must remove complementary halves and
+# discard must draw nothing (docs/M5_PHASE_C.md, R1). m2-solid is the
+# regression behind it.
+hold 60
+v0-cull
+m2-solid
+exit

@@ -6032,3 +6032,50 @@ that filed R2 asks for anisotropy in the same block it asks for repeat, which
 its own report already notes is the application's call to make (a device
 reporting `maxSamplerAnisotropy` 1.0 makes the flag a semantic no-op, and the
 report names asking only above 1.0 as the correct application-side fix).
+
+## 2026-09-20 — R1: culling and rasterizer discard, and depth bias left named
+
+`ps5vk_draw_refusal` refused five pieces of `VkPipelineRasterizationStateCreateInfo`
+in one condition, and three of them are core Vulkan 1.0 with no feature bit to
+gate them: `cullMode`, `rasterizerDiscardEnable` and `depthBiasEnable`
+(PS5_VULKAN_REQUESTS.md, R1). The other two -- `polygonMode` beyond FILL and
+`depthClampEnable` -- are gated by `fillModeNonSolid` and `depthClamp`, which
+this device reports false, so refusing them is the specification's own answer and
+they keep their refusal (reworded to name the feature bit). A pipeline that culls
+is created successfully and refused later, at its first draw, which is why
+nothing in the command audit could see it.
+
+Two of the three are closed, and the registers are the register database's own
+(Mesa's `gfx10.json`; ps5-opengl's runtime programs the same bits):
+`PA_SU_SC_MODE_CNTL` (context 0x205) carries `CULL_FRONT` bit 0, `CULL_BACK`
+bit 1 and `FACE` bit 2, and `PA_CL_CLIP_CNTL` (0x204) carries
+`DX_RASTERIZATION_KILL` bit 22. `v0-cull` proves both in pixels: the same quad
+four times, its two triangles wound opposite ways -- a quad wound one way is
+culled whole or not at all, which would prove nothing about the *face* -- with
+each frame's pixels read back. On the console
+(`Klog_Logs/r1-cull-run4.log`, pid 323):
+
+| frame | samples drawn (of 132) |
+| --- | --- |
+| cull none | 132 |
+| cull back | 65 |
+| cull front | 67 |
+| rasterizer discard | 0 |
+
+`65 + 67 = 132`: the two cull modes remove complementary halves, which is what
+tells a driver that programmed the wrong `FACE` winding bit from one that
+programmed no culling at all. And which half goes is the specification's: with
+`frontFace = COUNTER_CLOCKWISE` and this driver's viewport carrying Vulkan's
+orientation, the `(0,1,2)` triangle of the quad is clockwise in framebuffer
+coordinates, so it is the back face Vulkan names and `cull back` removes it
+(that triangle's columns read clear in the cull-back frame).
+
+**Depth bias is the third state and stays refused, by name.** The offset words
+are known (`PA_SU_POLY_OFFSET_DB_FMT_CNTL` at 0x2de through
+`PA_SU_POLY_OFFSET_BACK_OFFSET` at 0x2e3, the six-word block ps5-opengl's
+runtime writes, with the scale as the slope factor times sixteen and
+`DB_FMT_CNTL`'s 0x1e9 the 32-bit float depth format's own), but a bias is
+observable only in a depth readback, and no probe has read a biased depth back:
+the refusal names that probe rather than accepting the state on a reading. The
+case's golden is `golden/v0-cull` with `jobs/v0-cull/queue.txt`, and `m2-solid`
+regresses.

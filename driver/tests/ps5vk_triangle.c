@@ -2136,11 +2136,14 @@ create_pipeline(struct ps5vk_triangle *triangle, uint32_t index,
       .scissorCount = 1,
       .pScissors = &scissor,
    };
+   /* R1: the frame's cull mode and rasterizer discard, which are core Vulkan
+    * 1.0 state and the driver programs (driver/ps5vk_pipeline.c). */
    const VkPipelineRasterizationStateCreateInfo rasterization = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
       .polygonMode = VK_POLYGON_MODE_FILL,
-      .cullMode = VK_CULL_MODE_NONE,
+      .cullMode = triangle->rasterization_cull_mode,
       .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+      .rasterizerDiscardEnable = triangle->rasterization_discard ? VK_TRUE : VK_FALSE,
       .lineWidth = 1.0f,
    };
    const VkPipelineMultisampleStateCreateInfo multisample = {
@@ -2396,6 +2399,8 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
    triangle->two_passes = input->two_passes;
    triangle->texture_address_mode_set = input->texture_address_mode_set;
    triangle->texture_address_mode = input->texture_address_mode;
+   triangle->rasterization_cull_mode = input->rasterization_cull_mode;
+   triangle->rasterization_discard = input->rasterization_discard;
    if (display ? !create_swapchain(triangle, physical)
                : !create_image(triangle, physical, input))
       return PS5VK_TRIANGLE_FAILED;

@@ -960,10 +960,26 @@ ps5vk_draw_refusal(const VkGraphicsPipelineCreateInfo *info,
          return "drawing with dynamic state other than the viewport, scissor, depth and stencil "
                 "state is not supported yet";
    }
-   /* Valid usage: rasterization state is always present. */
-   if (raster->rasterizerDiscardEnable || raster->depthClampEnable || raster->depthBiasEnable ||
-       raster->polygonMode != VK_POLYGON_MODE_FILL || raster->cullMode != VK_CULL_MODE_NONE)
-      return "drawing other than filled, unculled polygons is not supported yet";
+   /* Valid usage: rasterization state is always present. The two states left
+    * are the ones a feature bit gates -- polygonMode by fillModeNonSolid and
+    * depthClampEnable by depthClamp, both reported false -- so refusing them is
+    * the specification's own answer. cullMode, rasterizerDiscardEnable and
+    * depthBiasEnable are core Vulkan 1.0 with no feature bit at all, and R1
+    * programs them where the pipeline is built (ps5vk_graphics_pipeline_create,
+    * PS5_VULKAN_REQUESTS.md R1): PA_SU_SC_MODE_CNTL's CULL_FRONT, CULL_BACK and
+    * FACE, PA_CL_CLIP_CNTL's DX_RASTERIZATION_KILL, and the
+    * PA_SU_POLY_OFFSET_* block. */
+   if (raster->depthClampEnable || raster->polygonMode != VK_POLYGON_MODE_FILL)
+      return "drawing other than filled polygons, or with depth clamping, is not supported yet: "
+             "both are gated by a feature this device reports false (fillModeNonSolid, "
+             "depthClamp)";
+   /* Depth bias is the third state R1 names and the one it does not close: the
+    * offset words are ps5-opengl's own (PA_SU_POLY_OFFSET_*), and no console run
+    * has read a biased depth back, so the state is refused by name rather than
+    * accepted on a reading (PS5_VULKAN_REQUESTS.md, R1). */
+   if (raster->depthBiasEnable)
+      return "drawing with a depth bias needs a runner probe: the PA_SU_POLY_OFFSET_* words are "
+             "known from ps5-opengl and no probe has read a biased depth back";
    /* Depth test, write and compare are Phase C5 and the stencil test is round
     * 12: a pipeline that enables it records the three stencil state words from
     * the dynamic state beside its depth ones (ps5vk_stencil_registers), and a
@@ -1236,7 +1252,43 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
       blend_uses_constants =
          blend_control != 0 && ps5vk_blend_uses_constants(&info->pColorBlendState->pAttachments[0]);
    }
-   pipeline->blend_control = blend_control;
+   /* R1's rasterization state, into the words the draw records. Each is
+    * recorded only when the pipeline asks for something the hardware's defaults
+    * do not already do, so every earlier draw's register table is unchanged.
+    * The state's standing is the request's own point: cullMode,
+    * rasterizerDiscardEnable and depthBiasEnable are core Vulkan 1.0, with no
+    * feature bit to gate them, and ps5vk_draw_refusal no longer refuses them
+    * (PS5_VULKAN_REQUESTS.md, R1). */
+   const VkPipelineRasterizationStateCreateInfo *const raster = info->pRasterizationState;
+   uint32_t rasterizer_word = 0;
+   switch (raster->cullMode) {
+   case VK_CULL_MODE_NONE:
+      break;
+   case VK_CULL_MODE_FRONT_BIT:
+      rasterizer_word |= UINT32_C(1) << 0; /* CULL_FRONT */
+      break;
+   case VK_CULL_MODE_BACK_BIT:
+      rasterizer_word |= UINT32_C(1) << 1; /* CULL_BACK */
+      break;
+   case VK_CULL_MODE_FRONT_AND_BACK:
+      rasterizer_word |= UINT32_C(3) << 0;
+      break;
+   default:
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "cull mode %d is not a Vulkan cull mode", (int)raster->cullMode);
+   }
+   /* FACE: 0 is the hardware's counter-clockwise front face, 1 clockwise. The
+    * viewport carries Vulkan's orientation (a negative y scale), and the
+    * console measured what that does to culling: v0-cull's cull-back frame
+    * keeps the triangle the specification says it should with this mapping, so
+    * Vulkan's front face is the hardware's own here (docs/M5_PHASE_C.md, R1). */
+   if (raster->frontFace == VK_FRONT_FACE_CLOCKWISE)
+      rasterizer_word |= UINT32_C(1) << 2;
+   else if (raster->frontFace != VK_FRONT_FACE_COUNTER_CLOCKWISE)
+      return vk_errorf(device, VK_ERROR_UNKNOWN, "front face %d is not a Vulkan front face",
+                       (int)raster->frontFace);
+   pipeline->rasterizer_word = rasterizer_word;
+   pipeline->discard_rasterizer = raster->rasterizerDiscardEnable;
    pipeline->blend_uses_constants = blend_uses_constants;
    for (unsigned index = 0; index < 4; index++) {
       const float value = blend_uses_constants ? info->pColorBlendState->blendConstants[index] : 0.0f;
