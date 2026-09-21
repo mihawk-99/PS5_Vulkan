@@ -125,6 +125,18 @@ with nothing drawn over it exists for the stencil plane, not for a colour target
   and border colours stay single-configuration refusals.
 - `v0-depth-bias` runs forty frames a shape in `v0-two-passes`, not a hundred in
   one shape; `kTwoPassFrames` is the one constant to raise.
+- **The AGC package writer emits one descriptor-set pointer, set 0's**
+  (`src/platform/ps5_agc_package.c:200`, `descriptor_set0_valid` /
+  `descriptor_set0_user_data_dword`). A *packaged* multi-set shader would
+  therefore reach an AGC-native consumer with set 0 bound and the rest nowhere.
+  Nothing depends on it today: the driver compiles the application's SPIR-V and
+  never reads those packages, so R7's multi-set work does not go through it, and
+  the probe CLI's packages are only compared byte for byte by the runner's
+  compile keyword. Blast radius: an AGC-native consumer of a multi-set shader --
+  ps5-opengl's Gallium path is single-set by construction and this driver's path
+  does not use packages, so no such consumer exists yet. Retirement trigger: the
+  writer learns `descriptor_sets_valid[]` / `descriptor_sets_user_data_dword[]`
+  at the same time as the first AGC-native consumer that binds more than set 0.
 
 ## The verification this status rests on
 
@@ -459,3 +471,80 @@ is the standing nine-case list. Run pid 114, title digest `9adf1241…`,
 are the named non-zero `depthBiasClamp` refusal. R9's readback is unchanged through the
 rebuilt compiler, which is what "the single-set output is byte-identical" has to mean on
 the console.
+
+# R7, Round 1 follow-up: the drift is a standing check, and the two numbers are explained
+
+**1. Which packages the console's compile keyword actually covers.** The keyword appears
+in exactly one of the 93 queues under `jobs/` (`jobs/compile`, which queues `all`); the
+other 92 -- every per-case and per-round battery, including this round's -- recompile
+nothing. Even that one run covers only the sets a *test* loads: **40 of the 43 committed
+sets** are named in `src/diagnostics.cpp`, and three are named nowhere, so no queue
+compiles them: `c7-diag`, `c8-sampleid` and `v0-multiset` (the new one, which Round 3
+gives a case). So the answer to "are there other committed packages whose queue carries no
+compile keyword" is: during 92 of 93 queues, **all of them**, and the compile run itself
+leaves three out. The console cannot be the drift gate.
+
+**2. How the 43 sets divide, and whether the ones that do not build matter.** The build
+script has 43 case labels; **41 build** and **43 committed package sets** exist. The
+difference is that two sets are produced by something else, and two labels are recorded in
+the script as not building:
+
+| | |
+| --- | --- |
+| rebuilt by `tools/build-probe-shaders.sh` and compared | 41 |
+| `probes/shaders` | imported Split AGC assets ("headers and text copied byte-for-byte"), no builder in this repository |
+| `c8-sampleid` | committed packages, and its label exits 2 on purpose: the SPIR-V front end rejects `SpvCapabilitySampleRateShading` |
+| `v0-robust` | its label fails in the AGC writer (a uniform block over 16 bytes) and **nothing is committed** for it, so there is nothing to drift |
+
+`c8-sampleid` does matter, in exactly this sense: it is a committed package that nothing
+here can reproduce, and nothing consumes it either (no test names it, no queue runs it).
+So it is *named* rather than skipped, and `probes/shaders` with it.
+
+**The standing check is `tools/check-probe-packages.sh`**, and it is now in
+`build/gates.sh` (11 gates). It rebuilds every set the build script can build into a
+scratch root -- the build script gained `PS5VK_PROBE_OUTPUT_ROOT` so a check never writes
+into the tree -- and compares the result with the committed files byte for byte. It prints
+its coverage every run and **fails** if a committed set is neither rebuilt nor one of the
+two named exceptions, so a new set cannot join `probes/` without a builder. Measured:
+43 committed sets, **41 rebuilt and byte-identical**, the two named above, `probe packages:
+PASS`. Both ways of failing were tested: appending a byte to `probes/m2/pixel.bin` gives
+`DIFFERS from the committed package` and exit 1, and a *committed* set with no builder
+gives `committed but neither rebuilt nor excepted` and exit 1. `PROVENANCE.txt` differences
+are reported separately (they move whenever the probe CLI is rebuilt) and do not fail the
+check.
+
+**3. `PSBC_MAX_DESCRIPTOR_SETS = 8` is not a measurement, and the comment now says so.**
+It is the size of a fixed blob, chosen small; the constant that *does* bound sets is the
+ABI's user data, one dword per set pointer out of the 32 user SGPRs a non-compute stage has
+(16 for compute), shared with every other argument. The host test now measures it rather
+than asserting it: declaring a third set takes the fragment stage from 4 to **5 user
+SGPRs, so 1 per set pointer** (`psbc_multiset` direct, 12 of 12 checks). The comment also
+names the failure mode above the cap: RADV does not fail when the pointers stop fitting, it
+switches the whole ABI to the *indirect* descriptor form
+(`remaining_sgprs < num_desc_set`, `src/amd/vulkan/radv_shader_args.c:1013`), which this
+driver does not implement -- and in that form no per-set pointer is declared, so the
+metadata reports none and Round 2's driver refuses it by name rather than binding a set
+nowhere.
+
+**4. The 129-slot refusal's provenance, stated where a reader meets it.** The number is
+`PSBC_MAX_DESCRIPTOR_BINDINGS` = 128: the length of the caller's own `descriptor_bindings[]`
+array in `PsbcCompileOptions`, and the old *single-set* cap, now spent **across** sets --
+each set's table runs to its own highest binding number, so the sum is what the layout blob
+holds. That does mean a caller spreading many bindings over several sets can reach the
+budget sooner than a per-set cap would allow; the header comment beside the constant says
+so, and names the current consumer's use (about eight slots across three sets) so the
+margin is on the record rather than implied. The refusal is stated in the validation
+comment too, where the check itself is read.
+
+**5. The AGC package writer's single pointer is now in the named-gaps list** ("What is
+still open, stated plainly"), with its blast radius (a packaged multi-set shader reaching
+an AGC-native consumer) and its retirement trigger (the writer learning the per-set array
+at the same time as the first such consumer), rather than only in a source comment.
+
+**Round 2's test shape is the application's**, recorded before any of it is written:
+set 0 with **three** COMBINED_IMAGE_SAMPLER bindings (what "size each set's table from its
+own binding count" has to mean -- a one-binding-per-set assumption passes a two-set probe
+and fails this), set 1 with one buffer-type binding, and **no input attachment anywhere**:
+vkQuake's real set 3 is three INPUT_ATTACHMENT bindings from its MBOIT pass, which is a
+separate family with MRT and subpasses going into the next request batch. The refusal keeps
+naming the advertised limit ("more than the four advertised"), not the current constant.

@@ -107,8 +107,10 @@ main(void)
    memset(&output, 0, sizeof(output));
    PsbcResult result = compile_pixel(pixel, pixel_bytes, bindings, 2, &output);
    check(result == PSBC_RESULT_OK, "a fragment stage that reads two sets compiles");
+   uint32_t two_set_sgprs = 0;
    if (result == PSBC_RESULT_OK) {
       const PsbcShaderMetadata *const metadata = &output.metadata;
+      two_set_sgprs = metadata->user_sgpr_count;
       const bool both =
          metadata->descriptor_sets_valid[0] && metadata->descriptor_sets_valid[1];
       check(both, "the compiler reports a descriptor-set pointer for set 0 and set 1");
@@ -135,13 +137,42 @@ main(void)
       printf("  (the two-set compile returned %d)\n", (int)result);
    }
 
+   /* What the wrapper's set cap is *not*: a measurement. The real bound is the
+    * ABI's user data -- one dword per set pointer in this build's 32-bit-pointer
+    * form, out of the 32 user SGPRs a non-compute stage has -- so the third set
+    * is declared here and must cost one user-data dword, no more than two if the
+    * ABI ever asks for a 64-bit pointer. The shader reads two sets, so this is
+    * also the case of a set the caller declares and the shader never
+    * dereferences: the wrapper still names it in the mask, so it gets a pointer. */
+   PsbcDescriptorBinding third[3] = {bindings[0], bindings[1],
+                                     {.set = 2, .binding = 0,
+                                      .type = PSBC_DESCRIPTOR_UNIFORM_BUFFER,
+                                      .array_size = 1, .offset = 0, .stride = 16}};
+   memset(&output, 0, sizeof(output));
+   result = compile_pixel(pixel, pixel_bytes, third, 3, &output);
+   check(result == PSBC_RESULT_OK, "a third declared set compiles");
+   if (result == PSBC_RESULT_OK) {
+      const PsbcShaderMetadata *const metadata = &output.metadata;
+      check(metadata->descriptor_sets_valid[2],
+            "a set the caller declared and the shader does not read still gets a pointer");
+      const uint32_t per_set =
+         metadata->user_sgpr_count >= two_set_sgprs
+            ? metadata->user_sgpr_count - two_set_sgprs
+            : 0;
+      check(per_set == 1 || per_set == 2,
+            "one more set costs one user-data dword (two for a 64-bit pointer ABI)");
+      printf("  (three sets: %u user SGPRs, so %u per set pointer)\n",
+             metadata->user_sgpr_count, per_set);
+   } else {
+      printf("  (the three-set compile returned %d)\n", (int)result);
+   }
+
    /* The other half of the rule the compiler now enforces: a set index past the
     * wrapper's own cap is refused, and so is a pair of sets whose tables need
     * more binding slots than the layout blob holds (set 0's highest binding is
     * 64 -- 65 slots -- and set 1's is 63 -- 64 -- 129 together). Both are
     * refusals before any lowering, which the standalone path reports as an
-    * internal error: the caller passed options it cannot honour. */
-   PsbcDescriptorBinding past_cap[1] = {bindings[0]};
+    * internal error: the caller passed options it cannot honour. */   PsbcDescriptorBinding past_cap[1] = {bindings[0]};
    past_cap[0].set = PSBC_MAX_DESCRIPTOR_SETS;
    memset(&output, 0, sizeof(output));
    result = compile_pixel(pixel, pixel_bytes, past_cap, 1, &output);

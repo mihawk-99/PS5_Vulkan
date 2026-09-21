@@ -2,7 +2,7 @@ PS5 Vulkan v0-target-uint shader packages, built by tools/build-probe-shaders.sh
 pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
 glslang: Glslang Version: 11:16.4.0
 opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
-pixel compiler (tools/build-psbc-cli.sh) sha256: 4aed15832de45888b8ecc93a57348219958a9cde83edca7b886b04eb7ab9dffa
+pixel compiler (tools/build-psbc-cli.sh) sha256: e99fb42fc699b1ff72deb95150203ca55d271d6d403988dd96e08bb43bd942e9
 vertex: -g -s vertex --ngg --address32-hi 2; writer --esgs-ring-itemsize 1 --allow-unresolved
 pixel: -g -s fragment --raw --address32-hi 2 --color-format 0x99999997; writer --allow-unresolved
 pixel SPI_SHADER_COL_FORMAT: 7

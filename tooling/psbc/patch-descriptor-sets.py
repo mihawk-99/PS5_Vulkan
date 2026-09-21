@@ -58,12 +58,32 @@ from pathlib import Path
 SETS_ANCHOR = """#define PSBC_MAX_DESCRIPTOR_BINDINGS 128
 """
 SETS_PATCHED = """#define PSBC_MAX_DESCRIPTOR_BINDINGS 128
-/* PS5 Vulkan: how many descriptor sets this wrapper compiles for. The core
- * allows 32 (MAX_SETS, src/amd/vulkan/radv_constants.h) and the driver that
- * consumes this advertises four (VkPhysicalDeviceLimits.maxBoundDescriptorSets);
- * the wrapper takes neither number, because it is a general facility whose
- * layout blob is a fixed-size array -- see
- * tooling/psbc/patch-descriptor-sets.py, docs/M5_PHASE_C.md, R7. */
+/* PS5 Vulkan: how many descriptor sets this wrapper compiles for, and how many
+ * binding slots it will hold across all of them. Both numbers are the wrapper's
+ * own; neither is a hardware or API limit.
+ *
+ * The core allows 32 sets (MAX_SETS, src/amd/vulkan/radv_constants.h) and the
+ * driver that consumes this advertises four
+ * (VkPhysicalDeviceLimits.maxBoundDescriptorSets). This cap is neither: it is
+ * the size of a fixed blob (PSBC_DESCRIPTOR_LAYOUT_STORAGE_BYTES below), chosen
+ * so the blob stays small. **It is not a measurement.** The measurement that
+ * does bound sets is the ABI's user data: RADV declares one user-data dword per
+ * set (add_descriptor_set, src/amd/vulkan/radv_shader_args.c) out of the 32
+ * user SGPRs a non-compute stage has -- 16 for compute -- shared with every
+ * other argument the stage takes, and `driver/tests/vk_psbc_multiset_test.c`
+ * measures the per-set cost on the host. When the pointers stop fitting, RADV
+ * does not fail: `remaining_sgprs < num_desc_set` switches the whole ABI to its
+ * *indirect* descriptor form (radv_shader_args.c:1013), which this driver does
+ * not implement -- and no per-set pointer is declared, so the metadata reports
+ * none and the driver refuses it by name rather than binding a set nowhere.
+ *
+ * The slot budget is the caller's own `descriptor_bindings[]` array length
+ * (PsbcCompileOptions), a single-set cap before this patch and now a total
+ * across sets: each set's table runs to its own highest binding number, so the
+ * sum is what the blob holds. A caller that spreads many bindings over several
+ * sets can reach 128 sooner than a per-set cap would allow; the consumer this
+ * driver has uses about eight slots across three sets, so it is not close.
+ * See tooling/psbc/patch-descriptor-sets.py, docs/M5_PHASE_C.md, R7. */
 #define PSBC_MAX_DESCRIPTOR_SETS 8
 """
 
@@ -151,8 +171,10 @@ VALIDATE_PATCHED = """static bool psbc_descriptor_options_valid(const PsbcCompil
     /* The binding budget is a total across sets, not a per-set cap: each set's
      * table is sized by its own highest binding number, so a caller may name
      * binding 127 in two sets from two array entries. What has to fit is the sum
-     * of those tables, because it is what the layout blob holds
-     * (tooling/psbc/patch-descriptor-sets.py, docs/M5_PHASE_C.md, R7). */
+     * of those tables, because it is what the layout blob holds. The number is
+     * PSBC_MAX_DESCRIPTOR_BINDINGS -- the caller's own array length, and the old
+     * single-set cap, now spent across sets -- so 128 slots is a total where it
+     * used to be a per-set limit (tooling/psbc/patch-descriptor-sets.py, R7). */
     uint32_t table_slots = 0;
     for (uint32_t set = 0; set < PSBC_MAX_DESCRIPTOR_SETS; ++set) {
         uint32_t highest_slot = 0;

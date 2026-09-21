@@ -2,7 +2,7 @@ PS5 Vulkan v0-multiset shader packages, built by tools/build-probe-shaders.sh v0
 pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
 glslang: Glslang Version: 11:16.4.0
 opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
-pixel compiler (tools/build-psbc-cli.sh) sha256: 4aed15832de45888b8ecc93a57348219958a9cde83edca7b886b04eb7ab9dffa
+pixel compiler (tools/build-psbc-cli.sh) sha256: e99fb42fc699b1ff72deb95150203ca55d271d6d403988dd96e08bb43bd942e9
 vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32_float:0:0:16:4 --vertex-attribute 1:r32g32_float:0:8:16:4; writer --esgs-ring-itemsize 1 --allow-unresolved
 pixel: -g -s fragment --raw --address32-hi 2 --descriptor-binding 0:0:uniform_buffer:1:0:16 --descriptor-binding 1:0:combined_image_sampler:1:0:48; writer --allow-unresolved
 pixel binding metadata: {"array_size": 1, "binding": 0, "offset": 0, "set": 0, "stride": 16, "type": 1}
