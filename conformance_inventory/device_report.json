@@ -1436,6 +1436,7 @@
     "format_unsupported_count": 126,
     "image_combo_count": 12,
     "image_combo_supported_count": 307,
+    "instance_api_version": 4194304,
     "instance_extension_count": 5,
     "limit_count": 97,
     "memory_heap_count": 1,

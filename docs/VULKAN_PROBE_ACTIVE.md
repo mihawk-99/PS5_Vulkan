@@ -105,8 +105,13 @@ through the loader: `dEQP-VK.info.*` is 16 pass / **0 fail**, `dEQP-VK.api.info.
 pass / **5 fail** / 1342 not supported, and all five failures are reporting -- two missing
 `STORAGE_TEXEL_BUFFER_ATOMIC_BIT` claims, a missing `COLOR_ATTACHMENT_BIT` for R32_SFLOAT,
 an illegal compressed-format feature combination, and `VK_KHR_surface`'s version word
-(`conformance_inventory/cts_host_baseline.json`). Each is its own round, regression test
-first; the console payload is still to come.
+(`conformance_inventory/cts_host_baseline.json`). The first is taken: the instance was
+claiming Vulkan 1.3 while the driver implements 1.0, a regression test in the runner's
+`device-report` case now fails if the two disagree, and the claim is gone. **Its CTS case
+still fails** -- the driver's own answer is 1.0 and the loader's version is not the cause,
+so the next round follows CTS's `getUsedApiVersion()` to where it is set
+(`docs/M5_PHASE_C.md`, round 6). The other four, and the console payload, are still to
+come.
 
 **An upstream AGC source was checked against this driver** (2026-09-21). The
 static-recompilation project's published tile-equation table agrees, texel for texel, with

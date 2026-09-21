@@ -21608,6 +21608,22 @@ void run_vulkan_device_report(const TestContext &test, TestOutcome &outcome) noe
         return;
     }
 
+    // The instance version and the device's apiVersion have to be the same story.
+    // vkEnumerateInstanceVersion is a 1.1 entry point, so a 1.0 implementation
+    // answers 1.0 by its absence: what must never happen is the instance
+    // claiming a version whose features the device does not report, because
+    // every consistency check an application makes (and the CTS's
+    // dEQP-VK.api.info.extension_core_versions among them) reads the two
+    // together.
+    const auto enumerate_instance_version = reinterpret_cast<PFN_vkEnumerateInstanceVersion>(
+        vk_icdGetInstanceProcAddr(nullptr, "vkEnumerateInstanceVersion"));
+    std::uint32_t instance_api_version = VK_API_VERSION_1_0;
+    if (enumerate_instance_version != nullptr &&
+        enumerate_instance_version(&instance_api_version) != VK_SUCCESS)
+        instance_api_version = VK_API_VERSION_1_0;
+    log.number("device_report", "instance_api_version",
+               static_cast<long long>(instance_api_version));
+
     std::uint32_t instance_extension_count = 0;
     if (enumerate_instance_extensions(nullptr, &instance_extension_count, nullptr) == VK_SUCCESS &&
         instance_extension_count <= 64)
@@ -21639,6 +21655,16 @@ void run_vulkan_device_report(const TestContext &test, TestOutcome &outcome) noe
 
     VkPhysicalDeviceProperties properties{};
     get_properties(physical, &properties);
+    if (instance_api_version != properties.apiVersion)
+    {
+        char detail[192]{};
+        std::snprintf(detail, sizeof(detail),
+                      "the instance reports 0x%08x and the device 0x%08x: the instance claims a "
+                      "version whose features the device does not report",
+                      instance_api_version, properties.apiVersion);
+        log.event("device_report", "FAIL", -1, detail);
+        return;
+    }
     log.number("device_report", "api_version", static_cast<long long>(properties.apiVersion));
     log.number("device_report", "driver_version", static_cast<long long>(properties.driverVersion));
     log.number("device_report", "vendor_id", static_cast<long long>(properties.vendorID));

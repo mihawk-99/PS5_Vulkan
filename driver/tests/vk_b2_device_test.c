@@ -18,11 +18,27 @@ check_instance_level(void)
    uint32_t version = 0;
    const __typeof__(&vkEnumerateInstanceVersion) enumerate_version =
       VK_FUNCTION(VK_NULL_HANDLE, EnumerateInstanceVersion);
+   /* Vulkan 1.0, not the 1.3 this test used to require. The driver implements
+    * 1.0's commands, features and formats, so an instance claiming more would
+    * hand an application entry points whose objects it cannot honour -- and the
+    * CTS reads the two versions together: dEQP-VK.api.info.extension_core_versions
+    * failed while the instance claimed 1.3 and the device reported 1.0, because
+    * its version graph does not treat a later version as supporting an earlier
+    * one (docs/M5_PHASE_C.md, round 6). The loader is unaffected: every loader
+    * test in this file still passes, and the ICD interface version it negotiates
+    * is a separate number (driver/ps5vk_instance.c). */
    check(enumerate_version && enumerate_version(&version) == VK_SUCCESS &&
-            version >= VK_API_VERSION_1_1,
-         "instance version is at least 1.1");
+            version >= VK_API_VERSION_1_0,
+         "the instance version is at least the 1.0 this driver implements");
 #ifdef PS5VK_TEST_DIRECT
-   check(version == VK_API_VERSION_1_3, "the driver reports instance version 1.3");
+   /* Directly, this query is the driver's own answer and must be exactly what
+    * the driver implements. Through the loader it is the *loader's* answer --
+    * the loader reports its own version, which is why this check is direct-only
+    * and why the loader's number says nothing about the driver. That distinction
+    * matters to the CTS: its api.info.extension_core_versions case asks the
+    * instance's version, so what it reads here is what it judges
+    * (docs/M5_PHASE_C.md, round 6). */
+   check(version == VK_API_VERSION_1_0, "the driver reports instance version 1.0");
 #endif
 
    const __typeof__(&vkEnumerateInstanceExtensionProperties) enumerate_extensions =

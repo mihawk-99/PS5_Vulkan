@@ -6908,3 +6908,48 @@ Each becomes its own round, with the regression test landed before the fix: thre
 are required-feature gaps the specification does not let a 1.0 device decline, one is a
 feature-bit combination CTS rejects outright, and one is a version word in the instance
 extension list -- the last is the smallest and the one to take first.
+
+## 2026-09-21 — round 6: the first CTS failure, a version the driver was claiming but not honouring
+
+The first of the five failures to be taken is the smallest to state and the widest in
+reach: `dEQP-VK.api.info.extension_core_versions` failed with "Required core version for
+VK_KHR_surface not met (1.0)".
+
+**The regression test came first**, as the triage rule requires: the runner's
+`device-report` case now reads `vkEnumerateInstanceVersion` and asserts that the instance's
+version is the same story as the device's `apiVersion`. Run before the fix, it failed with
+its own words:
+
+```
+detail: the instance reports 0x00403000 and the device 0x00400000: the instance claims a
+version whose features the device does not report
+```
+
+**The fix is one line**: `PS5VK_INSTANCE_API_VERSION` was `VK_API_VERSION_1_3`, while this
+driver implements 1.0's commands, features and formats -- the device has always reported
+1.0. The comment above it claimed the loader's interface version 5 and later require at
+least 1.1; that is a different number (`vk_icdNegotiateLoaderICDInterfaceVersion`, and the
+loader interface version is negotiated separately), so the instance now reports
+`VK_API_VERSION_1_0` and the comment says why. The B2 device test's two assertions that
+encoded the old claim became the invariant instead: at least 1.0 in every build, exactly
+1.0 directly -- because **through the loader `vkEnumerateInstanceVersion` is the loader's
+own answer**, which is why the old "at least 1.1" check passed there without the driver
+being 1.1. `tools/check-driver.sh` is PASS afterwards: 288 run comparisons identical, no
+`DIFFERENT`, every test green, loader path included.
+
+The inventory gained `instance_api_version`, and the gate's drift check caught exactly that
+(`instance_api_version: 4194304` added) -- which is the check doing its job: what the
+device reports cannot change without the record changing with it.
+
+**The CTS case still fails, and that is recorded rather than papered over.** What is now
+ruled out: the driver's own answer is 1.0 (`vk_icdGetInstanceProcAddr(NULL,
+"vkEnumerateInstanceVersion")` on the built `libvulkan_ps5vk.so` answers `0x400000`,
+checked directly), and the loader's answer is not the cause either -- CTS's version graph
+does reach 1.0 from 1.3 (`1.3 <- 1.2 <- 1.1 <- 1.0` in
+`external/vulkancts/framework/vulkan/vkApiVersion.cpp`), so a used version of 1.3 would
+satisfy the check. What remains is where CTS's `getUsedApiVersion()` is *set*: the accessor
+is generated and its storage is in the framework's device interface, so the next round
+reads the headless platform's device creation and follows the version from there. The
+repair was worth landing on its own account -- a driver that advertises 1.3 while
+implementing 1.0 hands an application entry points it cannot honour -- but it does not
+close that case yet, and the round says so.

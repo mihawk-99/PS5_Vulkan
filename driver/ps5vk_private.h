@@ -45,10 +45,19 @@
 extern "C" {
 #endif
 
-/* The instance level implements Vulkan 1.3 through Mesa's runtime (loader
- * interface 5 and later require at least 1.1). The physical device reports
- * Vulkan 1.0 until the features and formats of later versions exist. */
-#define PS5VK_INSTANCE_API_VERSION VK_API_VERSION_1_3
+/* Vulkan 1.0, at both levels, because that is what this driver implements:
+ * the commands, features and formats of 1.1 and later are not here, so an
+ * instance that claimed them would hand an application entry points whose
+ * objects it cannot honour. The two versions must agree -- the CTS's
+ * dEQP-VK.api.info.extension_core_versions reads them together and failed
+ * while the instance claimed 1.3, because its version graph does not treat a
+ * later version as supporting an earlier one -- and the runner's device-report
+ * case asserts the agreement on every gate (docs/M5_PHASE_C.md, round 6).
+ *
+ * This is separate from the *ICD interface* version, which is what the loader
+ * negotiates with vk_icdNegotiateLoaderICDInterfaceVersion
+ * (driver/ps5vk_instance.c) and which is unaffected by this. */
+#define PS5VK_INSTANCE_API_VERSION VK_API_VERSION_1_0
 #define PS5VK_DEVICE_API_VERSION VK_API_VERSION_1_0
 #define PS5VK_DRIVER_VERSION VK_MAKE_VERSION(0, 2, 0)
 
