@@ -1,0 +1,21 @@
+# PS5 Vulkan test runner job queue (PPSA99988): R7 round 1, the compiler.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/r7-round1/queue.txt
+#
+# Round 1 changed the compiler wrapper (one descriptor set layout per set) and
+# nothing in the driver, so this is the standing regression list unchanged: the
+# console has to show that the rebuilt compiler still produces the frames it
+# produced before. The multi-set path itself is not reachable from a queue yet
+# (the driver refuses a draw past set 0 until round 2), which is why this round's
+# own case is a host gate (psbc_multiset) and round 3's is the console one.
+hold 60
+capture
+v0-cull
+v0-depth-bias
+v0-stencil-clear
+v0-sampler-address
+v0-two-passes
+v0-resolve-usage
+v0-push-constant
+c8-resolve
+m2-solid
+exit

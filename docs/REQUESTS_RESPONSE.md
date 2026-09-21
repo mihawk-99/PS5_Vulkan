@@ -449,3 +449,13 @@ One gap named here rather than later: the AGC package writer emits only set 0's 
 (`src/platform/ps5_agc_package.c:200`), so a *packaged* multi-set shader would carry one
 pointer; the driver compiles the application's SPIR-V and never reads those packages, so
 nothing in R7 depends on it.
+
+**On the console** the round is a regression, not a new case: the driver is unchanged and
+the multi-set path is unreachable from a queue until Round 2, so `jobs/r7-round1/queue.txt`
+is the standing nine-case list. Run pid 114, title digest `9adf1241…`,
+`Klog_Logs/r7-round1.log`: **9 of 9 PASS** (`v0-cull`, `v0-depth-bias`,
+`v0-stencil-clear`, `v0-sampler-address`, `v0-two-passes`, `v0-resolve-usage`,
+`v0-push-constant`, `c8-resolve`, `m2-solid`), 1645 PASS records, and the only FAIL records
+are the named non-zero `depthBiasClamp` refusal. R9's readback is unchanged through the
+rebuilt compiler, which is what "the single-set output is byte-identical" has to mean on
+the console.

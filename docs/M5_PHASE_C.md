@@ -6666,3 +6666,13 @@ arriving from set 1. One gap worth naming now: the AGC package writer writes **o
 descriptor-set pointer, set 0's, so a *packaged* multi-set shader would carry one pointer;
 the driver's path does not go through packages (it compiles the application's SPIR-V), so
 nothing in R7 depends on it, but a future AGC-native multi-set consumer would.
+
+**Round 1 on the console** (pid 114, title digest `9adf1241…`, `Klog_Logs/r7-round1.log`,
+queue `jobs/r7-round1/queue.txt`). The round changed the compiler and no driver code, so
+what the console had to show is that the rebuilt compiler still produces the frames it
+produced before: **9 of 9 PASS** -- `v0-cull`, `v0-depth-bias`, `v0-stencil-clear`,
+`v0-sampler-address`, `v0-two-passes`, `v0-resolve-usage`, `v0-push-constant` (R9's
+left-red/right-blue readback still holds through the rebuilt compiler), `c8-resolve` and
+`m2-solid` -- with 1645 PASS records and the only FAIL records being the deliberate
+non-zero `depthBiasClamp` refusal the driver raises by name. Multi-set itself is not
+reachable from a queue yet: the driver still refuses a draw past set 0, which is Round 2.
