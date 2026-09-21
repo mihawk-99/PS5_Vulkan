@@ -66,6 +66,7 @@ tests=(
     c5_depth
     c5_stencil
     c5_depth_bias
+    v0_push_constant
     c7_tiled_mip
     c7_copy
     c7_blit_formats
@@ -187,6 +188,14 @@ bias_run="$root/golden/v0-depth-bias/run-1.json"
 want c5_depth_bias &&
     python3 "$root/tools/golden.py" replay "$bias_run" "$work/v0-depth-bias.replay" \
         --test v0-depth-bias
+# R9's push constants: the case's own capture, because the words this test reads
+# are the descriptor chain the draw recorded -- the pixel stage's user data, the
+# table it names and the 16 bytes the reserved binding points at -- and not a
+# stream comparison.
+push_run="$root/golden/v0-push-constant/run-1.json"
+want v0_push_constant &&
+    python3 "$root/tools/golden.py" replay "$push_run" "$work/v0-push-constant.replay" \
+        --test v0-push-constant
 # The V0-query test too: its query counters live in memory the driver mapped
 # itself, which no runner frame's capture holds, so only a capture of the test
 # provides the addresses its replay hands out (as the C5 depth attachment is).
@@ -434,6 +443,8 @@ run_test() {
         # gives this program the stage mapping it draws through.
         c5_depth_bias) replay=v0-depth-bias
             compare=() ;;
+        v0_push_constant) replay=v0-push-constant
+            compare=() ;;
         v0_query_full) replay=v0-query-full
             compare=(compare-run "$query_run" "$dump" --test v0-query-full) ;;
         v0_texel_buffer) replay=v0-texel-buffer
@@ -451,7 +462,7 @@ run_test() {
         $test != c3_uniform &&
         $test != c3_quad && $test != c4_texture &&
         $test != c4_rtt && $test != c5_depth && $test != c5_stencil &&
-        $test != c5_depth_bias &&
+        $test != c5_depth_bias && $test != v0_push_constant &&
         $test != v0_query_full &&
         $test != v0_timestamp && $test != v0_vertex_sint && $test != v0_vertex_uint &&
         $test != c7_mip_upload && $test != v0_array && $test != v0_cube &&

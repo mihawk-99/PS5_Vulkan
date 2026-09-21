@@ -16793,6 +16793,175 @@ void run_vulkan_dynamic_depth_bias_frames(const TestContext &test, TestOutcome &
     log.event("agc_dynamic_bias", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
 }
 
+// R9 (PS5_VULKAN_REQUESTSv2.md): push constants. Every vkQuake pipeline layout
+// carries a VkPushConstantRange, so the port's per-draw transforms travel through
+// this path -- and no probe or test of this driver had ever used one, while the
+// only attempt anyone made refused its command buffer for a reason that was lost.
+// The probe is the request's own: a draw whose fragment output depends on a push
+// constant, with the value changed between two draws *without* recreating the
+// pipeline, read back. The layout declares a 16-byte push-constant range for the
+// fragment stage and no descriptor set at all; the fragment shader's
+// layout(push_constant) block reaches the driver as the reserved set-0 binding it
+// fills from vkCmdPushConstants (PS5VK_PUSH_CONSTANT_BINDING), and each draw
+// covers one half of the target, so a driver that ignored the upload would paint
+// the second half with the first draw's colour.
+constexpr float kPushRed[4] = {1.0f, 0.0f, 0.0f, 1.0f};
+constexpr float kPushBlue[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+// What those two colours are as the RGBA8 target's word: red in its low byte,
+// blue in its high one (the packing the M4 canaries' colour words already use).
+constexpr std::uint32_t kPushRedWord = 0xff0000ffu;
+constexpr std::uint32_t kPushBlueWord = 0xffff0000u;
+
+void run_vulkan_push_constant_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8},
+    };
+    // The m3-vertex layout: 24-byte records of a vec2 position and a vec4
+    // colour (probes/v0-push's vertex stage), one rectangle per half of the
+    // target so the frame's two draws can be told apart by what they cover. The
+    // colour here is the vertex stage's and is ignored by the fragment stage,
+    // whose output is the push constant.
+    std::array<float, 8 * 6> vertices{};
+    std::array<std::uint16_t, 12> indices{};
+    const auto put_half =
+        [&vertices, &indices](unsigned at, std::uint32_t left, std::uint32_t right)
+    {
+        const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+        const float corners[4][2] = {{ndc_x(left), ndc_y(kOutputHeight)},
+                                     {ndc_x(right), ndc_y(kOutputHeight)},
+                                     {ndc_x(right), ndc_y(0)},
+                                     {ndc_x(left), ndc_y(0)}};
+        for (unsigned corner = 0; corner < 4; corner++)
+        {
+            float *const record = vertices.data() + (at + corner) * 6;
+            std::memcpy(record, corners[corner], sizeof(corners[corner]));
+            std::memcpy(record + 2, white, sizeof(white));
+        }
+        const std::uint16_t quad[6] = {(std::uint16_t)at,       (std::uint16_t)(at + 1),
+                                       (std::uint16_t)(at + 2), (std::uint16_t)(at + 2),
+                                       (std::uint16_t)(at + 3), (std::uint16_t)at};
+        std::memcpy(indices.data() + (at / 4) * 6, quad, sizeof(quad));
+    };
+    put_half(0, 0, kOutputWidth / 2);
+    put_half(4, kOutputWidth / 2, kOutputWidth);
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    input.vertex_data = vertices.data();
+    input.vertex_count = 8;
+    input.vertex_stride = kVertexStride;
+    input.index_data = indices.data();
+    input.index_count = 12;
+    input.attribute_count = 2;
+    input.attributes[0] = attributes[0];
+    input.attributes[1] = attributes[1];
+    // The push-constant range, for the fragment stage the shader reads it in, and
+    // the two draws' values: the first six indices are the left half's, the rest
+    // the right half's.
+    input.push_constant_bytes = sizeof(kPushRed);
+    input.push_constant_stages = VK_SHADER_STAGE_FRAGMENT_BIT;
+    std::memcpy(input.push_constant_first, kPushRed, sizeof(kPushRed));
+    std::memcpy(input.push_constant_second, kPushBlue, sizeof(kPushBlue));
+    input.first_draw_indices = 6;
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    ps5vk_triangle triangle{};
+    ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+    if (status == PS5VK_TRIANGLE_OK)
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_COMMAND_BUFFER);
+    if (test.capture && status == PS5VK_TRIANGLE_OK)
+    {
+        log_driver_submission(triangle.device, "two draws, one upload each", log);
+        log_driver_stages(triangle.device, log);
+    }
+    // R9's mechanism, read back out of the driver: the block the last draw
+    // copied its push constants into, and the 16-byte descriptor the stage's
+    // reserved set-0 binding got (ps5vk_debug.h). A readback alone cannot say
+    // which half of that chain broke, and this is the half a PC model cannot
+    // execute.
+    {
+        const void *block = nullptr;
+        std::uint32_t block_bytes = 0;
+        const std::uint32_t *descriptor = nullptr;
+        ps5vk_debug_push_constants(triangle.device, &block, &block_bytes, &descriptor);
+        log.number("agc_push_constant_frame", "block_bytes", block_bytes);
+        for (unsigned at = 0; at < 4; at++)
+        {
+            std::uint32_t word = 0;
+            if (block != nullptr && block_bytes >= 4u * (at + 1u))
+                std::memcpy(&word, static_cast<const std::uint8_t *>(block) + 4u * at,
+                            sizeof(word));
+            char field[32]{};
+            std::snprintf(field, sizeof(field), "block_%u", at);
+            log.hex("agc_push_constant_frame", field, word);
+            char name[32]{};
+            std::snprintf(name, sizeof(name), "descriptor_%u", at);
+            log.hex("agc_push_constant_frame", name, descriptor != nullptr ? descriptor[at] : 0);
+        }
+    }
+    const std::uint32_t left_column = kOutputWidth / 4;
+    const std::uint32_t right_column = kOutputWidth * 3 / 4;
+    unsigned left_red = 0;
+    unsigned right_blue = 0;
+    unsigned sampled = 0;
+    if (status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes)
+    {
+        flush_gpu_data(const_cast<void *>(triangle.target), kFramebufferBytes);
+        const auto *const words = static_cast<const std::uint32_t *>(triangle.target);
+        const FramebufferView view{words, kTiledRgba8Layout};
+        for (std::uint32_t row = kOutputHeight / 4; row < kOutputHeight; row += kOutputHeight / 4)
+        {
+            ++sampled;
+            left_red += view.word(left_column, row) == kPushRedWord ? 1u : 0u;
+            right_blue += view.word(right_column, row) == kPushBlueWord ? 1u : 0u;
+        }
+        log.hex("agc_push_constant_frame", "left_word", view.word(left_column, kOutputHeight / 2));
+        log.hex("agc_push_constant_frame", "right_word",
+                view.word(right_column, kOutputHeight / 2));
+        log.hex("agc_push_constant_frame", "first_expected", kPushRedWord);
+        log.hex("agc_push_constant_frame", "second_expected", kPushBlueWord);
+        log.number("agc_push_constant_frame", "left_red", left_red);
+        log.number("agc_push_constant_frame", "right_blue", right_blue);
+        log.number("agc_push_constant_frame", "of", sampled);
+        log.event("agc_push_constant_frame", "PASS", 0,
+                  "the frame recorded and its pixels were read");
+    }
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        outcome.stage_in_use = true;
+        log.event("agc_push_constant", "FAIL", -1,
+                  "a submission did not complete; the program's objects stay allocated");
+        return;
+    }
+    // Both halves have to hold the colour their own draw uploaded: a driver that
+    // ignored vkCmdPushConstants would leave the first draw's colour in both.
+    // The measurement this case made first (pid 372-374) is that the *driver's*
+    // half is right -- the block the debug API hands back holds the second
+    // draw's bytes, and the descriptor and the pixel user data name it -- while
+    // the fragment stage exports zero, which is what an inlined push constant
+    // the compile path never provides looks like. R9's answer is that mechanism,
+    // not a green frame (docs/M5_PHASE_C.md, R9).
+    const bool passed =
+        status == PS5VK_TRIANGLE_OK && sampled > 0 && left_red == sampled && right_blue == sampled;
+    char detail[240]{};
+    std::snprintf(detail, sizeof(detail),
+                  "the first draw's push constant reached %u of %u left samples and the second's "
+                  "%u of %u right ones; the block the driver filled held the second draw's bytes, "
+                  "so the upload arrives and the stage's read does not",
+                  left_red, sampled, right_blue, sampled);
+    outcome.command_built = true;
+    outcome.passed = passed;
+    log.event("agc_push_constant", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
+    ps5vk_triangle_finish(&triangle);
+}
+
 void run_vulkan_stencil_clear_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
     JsonLog &log = test.log;
@@ -21149,6 +21318,10 @@ constexpr RunnerTest kRunnerTests[] = {
     // with COLOR_ATTACHMENT added, which is the workaround
     // (run_vulkan_resolve_usage_frames).
     {"v0-resolve-usage", "m3-vertex", run_vulkan_resolve_usage_frames},
+    // R9: push constants, the path every vkQuake pipeline layout depends on: two
+    // draws whose fragment output comes from vkCmdPushConstants, one value each,
+    // read back (run_vulkan_push_constant_frames).
+    {"v0-push-constant", "v0-push", run_vulkan_push_constant_frames},
     // R8: the depth bias through VK_DYNAMIC_STATE_DEPTH_BIAS, one pipeline and
     // two draws whose bias vkCmdSetDepthBias changes between them
     // (run_vulkan_dynamic_depth_bias_frames).

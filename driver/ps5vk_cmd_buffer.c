@@ -414,6 +414,19 @@ ps5vk_CmdUpdateBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer, VkDevic
    };
 }
 
+void
+ps5vk_debug_push_constants(VkDevice _device, const void **block, uint32_t *bytes,
+                           const uint32_t **descriptor)
+{
+   VK_FROM_HANDLE(ps5vk_device, device, _device);
+   if (block != NULL)
+      *block = device != NULL ? device->push_constant_block : NULL;
+   if (bytes != NULL)
+      *bytes = device != NULL ? device->push_constant_bytes : 0;
+   if (descriptor != NULL)
+      *descriptor = device != NULL ? device->push_constant_descriptor : NULL;
+}
+
 uint32_t
 ps5vk_debug_table_chunks(VkDevice _device, ps5vk_debug_stage *chunks, uint32_t capacity)
 {

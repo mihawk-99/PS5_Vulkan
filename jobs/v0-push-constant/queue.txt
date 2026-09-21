@@ -1,0 +1,18 @@
+# PS5 Vulkan test runner job queue (PPSA99988): R9's push constants.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-push-constant/queue.txt
+#
+# v0-push-constant records one pipeline whose fragment shader exports the colour
+# in its layout(push_constant) block, and two draws that upload different values
+# with vkCmdPushConstants -- one half of the target each, without recreating the
+# pipeline. Both halves must hold the colour their own draw uploaded; a driver
+# that ignored the upload would paint the first draw's colour in both
+# (docs/M5_PHASE_C.md, R9). m3-uniform (the same shader shape through a uniform
+# buffer), v0-dynamic-depth-bias (the other per-draw state) and m2-solid are the
+# regressions behind it.
+hold 60
+capture
+v0-push-constant
+m3-uniform
+v0-dynamic-depth-bias
+m2-solid
+exit

@@ -6369,3 +6369,49 @@ API hands back must hold the *second* draw's words (offset 0x45000000 for 2048, 
 produce. 12 of 12 checks in the direct build, 4 of 4 through the loader and the PS5
 link arm pass. `golden/v0-depth-bias` is re-extracted from the same run, since its
 clamp frame no longer records a submission.
+
+## 2026-09-20 — R9: push constants do not reach a shader from an application's SPIR-V
+
+R9 was a prediction with one failed use behind it and no successful one. The probe is
+the request's own: one pipeline whose fragment shader exports the colour in its
+`layout(push_constant)` block, two draws that upload different values with
+`vkCmdPushConstants` without recreating the pipeline, and the readback of both halves
+(`v0-push-constant`, `jobs/v0-push-constant/queue.txt`, `golden/v0-push-constant`, run
+pid 377, title digest `6306b4aa…`). The answer is that the path does not work, and
+the probe says exactly where it breaks -- which a readback alone cannot.
+
+| what was measured | how | result |
+| --- | --- | --- |
+| the driver copies the upload | `ps5vk_debug_push_constants`, the block the last draw filled | holds the *second* draw's bytes (0,0,1,1), not the first's (1,0,0,1) |
+| the descriptor names it | the same call, the reserved binding's 16-byte entry | address = the block, stride 16, one entry, the uniform-buffer flags |
+| the stage is told where the table is | the captured stream's pixel user-data write | SH 0x0c+2 = the table's address (`0x34f00` in the run) |
+| the shader reads it | the two halves' pixels | **both `0x00000000`**: the fragment stage exported (0,0,0,0) |
+
+So the driver's half is right and the *compile path* is what fails: the standalone
+compiler lowers an application's `layout(push_constant)` to a user-data location its
+metadata does not report, and the driver -- which cannot see that location -- writes
+only the reserved binding instead. The driver's own NIR path documents exactly this
+(`driver/ps5vk_nir.c`: "PsbcShaderMetadata reports every user-data location the
+compiler assigns except the push-constant one ... an unmapped pointer, and a GPU
+fault"), and that is why the driver rewrites the NIR of the stages it builds itself --
+Mesa's `vk_meta` clears and triangles read their push constants happily, which is what
+every clear case in this tree runs on. An application's SPIR-V never passes through
+that rewrite, so an application cannot use the feature.
+
+**What this means for the port.** Push constants are not a mechanism the port can
+build on: its per-draw transforms have to stay in a uniform buffer, which is what the
+application's `WORKAROUNDS.md` W4 already records. Two ways out are now named rather
+than guessed at: the driver could run the application's SPIR-V through Mesa's
+`spirv_to_nir` and its own rewrite before handing the NIR to `psbc_compile_nir` (the
+path the meta stages already take, and the runtime the driver links has the SPIR-V
+front end), or the SDK compiler could report the push-constant user-data location the
+way it reports every other one. Neither is this round's: the probe was asked for first,
+and it is what says the round is needed.
+
+**The gates.** `driver/tests/vk_v0_push_constant_test.c` is the focused host half: it
+draws the same frame and asserts what the driver controls -- the 16-byte block holds
+the second draw's bytes, with the descriptor's address, stride, count and flags
+printed beside it -- 5 of 5 checks in the direct build, 3 of 3 through the loader and
+the PS5 link arm. The console case itself stays red on purpose: it is the measurement,
+not a claim, and its message says which half arrived. The new debug getter
+(`ps5vk_debug_push_constants`) is what makes that possible without pixels.

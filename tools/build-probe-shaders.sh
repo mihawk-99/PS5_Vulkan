@@ -65,7 +65,7 @@
 # bindings.txt layout the title needs when the shaders read resources,
 # SHA256SUMS and PROVENANCE.txt, after checking the compiler metadata.
 #
-# Run from the repository root:  bash tools/build-probe-shaders.sh m2|m3-uniform|v0-robust|m3-vertex|m3-texture|m4-depth|m4-blend|b7-corner|b8-corner|c1-clear|c3-quad|c7-mip|c7-mip-linear|c7-diag|c2-instance|c8-sampleid|v0-vertex-sint|v0-vertex-uint|v0-vertex-bytes-float|v0-vertex-bytes-uint|v0-vertex-bytes-sint|v0-array|v0-cube|v0-texture-uint|v0-texture-sint|v0-target-uint|v0-target-sint
+# Run from the repository root:  bash tools/build-probe-shaders.sh m2|m3-uniform|v0-robust|m3-vertex|m3-texture|m4-depth|m4-blend|b7-corner|b8-corner|c1-clear|c3-quad|c7-mip|c7-mip-linear|c7-diag|c2-instance|c8-sampleid|v0-vertex-sint|v0-vertex-uint|v0-vertex-bytes-float|v0-vertex-bytes-uint|v0-vertex-bytes-sint|v0-array|v0-cube|v0-push|v0-texture-uint|v0-texture-sint|v0-target-uint|v0-target-sint
 set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -224,6 +224,21 @@ v0-image-atomic-sint)
     pixel_flags=(--address32-hi 2 --descriptor-binding 0:0:storage_image:1:0:32)
     pixel_compiler="$root/build/host/opengnm-psbc-probe"
     c_writer=1
+    ;;
+v0-push)
+    # R9's push constants: the m3 vertex layout (so one vertex buffer serves the
+    # two draws) and a fragment stage that exports the colour in its uniform
+    # block at set 0, binding 32 -- the reserved binding the driver's push
+    # constants reach a stage through (PS5VK_PUSH_CONSTANT_BINDING). The pipeline
+    # layout's push-constant range is what makes the driver fill that descriptor
+    # from vkCmdPushConstants, so two draws with different uploads must differ.
+    vertex_source=shaders/m3/vertex_colour.vert
+    pixel_source=shaders/v0/push_colour.frag
+    output=probes/v0-push
+    vertex_flags=(--address32-hi 2
+        --vertex-attribute 0:r32g32_float:0:0:24:4
+        --vertex-attribute 1:r32g32b32a32_float:0:8:24:4)
+    pixel_flags=(--address32-hi 2 --descriptor-binding 0:32:uniform_buffer:1:0:16)
     ;;
 v0-stencil-setup)
     # Round 12's stencil path: the pass that writes the stencil plane. The
@@ -747,6 +762,27 @@ elif set_name == "v0-robust":
     if vertex.get("descriptor_bindings"):
         fail("vertex stage unexpectedly declares descriptor bindings")
     bindings = [("address32_hi", expected_hi), *pixel_descriptor(32)]
+elif set_name == "v0-push":
+    # R9: the pixel stage's push-constant block, which the compiler places at the
+    # reserved binding the driver feeds from vkCmdPushConstants (set 0, binding
+    # 32 at table offset 0 -- PS5VK_PUSH_CONSTANT_BINDING, libpsbc's gallium UBO
+    # slot 0). The vertex stage fetches attributes like m3-vertex's, so one
+    # vertex buffer serves the frame's two draws.
+    declared = pixel.get("descriptor_bindings") or []
+    if len(declared) != 1 or (declared[0].get("set"), declared[0].get("binding"),
+                              declared[0].get("offset"), declared[0].get("stride")) !=             (0, 32, 0, 16):
+        fail(f"the push-constant block is not at set 0 binding 32: {declared!r}")
+    if vertex.get("descriptor_bindings"):
+        fail("vertex stage unexpectedly declares descriptor bindings")
+    notes.append(f"pixel push-constant binding metadata: {json.dumps(declared[0], sort_keys=True)}")
+    bindings = [("address32_hi", expected_hi),
+                *vertex_input("vertex attributes: location 0 r32g32_float offset 0, "
+                              "location 1 r32g32b32a32_float offset 8, stride 24, binding 0"),
+                ("pixel_user_sgpr_count", pixel["user_sgpr_count"]),
+                ("pixel_descriptor_set0_dword",
+                 dword(pixel, "descriptor_set0_user_data_dword", "pixel")),
+                ("pixel_set0_binding32_offset", declared[0]["offset"]),
+                ("pixel_set0_binding32_stride", declared[0]["stride"])]
 elif set_name == "m3-vertex":
     if pixel.get("descriptor_bindings"):
         fail("pixel stage unexpectedly declares descriptor bindings")

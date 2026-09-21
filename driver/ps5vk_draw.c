@@ -1470,6 +1470,11 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
          return;
       memcpy(push_constant_block, cmd_buffer->push_constants, pipeline->push_constant_bytes);
       ps5vk_flush_cpu_cache(push_constant_block, push_constant_bytes);
+      /* What the debug API hands a probe (ps5vk_debug.h): the last draw's
+       * upload, so a test can assert the bytes a stage reads instead of
+       * inferring them from pixels (R9). */
+      device->push_constant_block = push_constant_block;
+      device->push_constant_bytes = pipeline->push_constant_bytes;
    }
 
    const VkShaderStageFlags stage_bits[PS5VK_PIPELINE_STAGE_COUNT] = {VK_SHADER_STAGE_VERTEX_BIT,
@@ -1646,6 +1651,7 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
                             (PS5VK_UNIFORM_BUFFER_DESCRIPTOR_BYTES << 16);
             descriptor[2] = push_constant_bytes / PS5VK_UNIFORM_BUFFER_DESCRIPTOR_BYTES;
             descriptor[3] = PS5VK_UNIFORM_BUFFER_FLAGS;
+            device->push_constant_descriptor = descriptor;
             continue;
          }
          /* The application's binding: a combined image sampler's 48 bytes, or

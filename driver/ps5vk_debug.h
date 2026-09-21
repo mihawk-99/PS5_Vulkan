@@ -62,6 +62,14 @@ ps5vk_debug_pipeline_stages(VkDevice device, ps5vk_debug_stage *stages, uint32_t
 uint32_t
 ps5vk_debug_table_chunks(VkDevice device, ps5vk_debug_stage *chunks, uint32_t capacity);
 
+/* The 16 bytes the last draw's push constants were copied into, and how many of
+ * them the draw's pipeline reads (R9): the block a stage's reserved set-0
+ * binding points at, so a probe can assert the upload itself rather than infer
+ * it from pixels. *block is NULL and *bytes zero before the first draw. */
+void
+ps5vk_debug_push_constants(VkDevice device, const void **block, uint32_t *bytes,
+                           const uint32_t **descriptor);
+
 /* The device's live bound buffers, newest first, up to capacity; returns how
  * many there are. A submission names their addresses -- an index buffer's
  * INDEX_BASE, a vertex-buffer table's first record -- so a capture that

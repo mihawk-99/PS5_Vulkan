@@ -562,6 +562,16 @@ struct ps5vk_device {
     * (ps5vk_draw.c); initialised with the device. */
    struct vk_meta_device meta;
    bool meta_initialized;
+   /* The 16-byte block the last draw's push constants were copied into, and its
+    * size in bytes: what vkCmdPushConstants reaches a stage through, kept for
+    * the debug API so a probe can assert the upload rather than infer it from
+    * pixels (R9, ps5vk_debug.h). Zero before the first draw. */
+   void *push_constant_block;
+   uint32_t push_constant_bytes;
+   /* The 16-byte descriptor entry the reserved set-0 binding got in the last
+    * draw's table -- its address, the stride word and all -- so a probe can read
+    * the whole chain back (R9's answer needed exactly that). */
+   const uint32_t *push_constant_descriptor;
    /* The pipelines whose stage mapping exists, newest first: what
     * ps5vk_debug_pipeline_stages reports to the runner's capture. */
    struct ps5vk_pipeline *stages;
