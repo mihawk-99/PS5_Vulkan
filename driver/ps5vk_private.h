@@ -643,6 +643,11 @@ struct ps5vk_sampler {
     * keeps the canary's own word (ps5vk_draw.c, ps5vk_write_image_descriptor);
     * a view with more than one level writes this one. */
    uint32_t lod_word;
+   /* Word 8: the three 3-bit address modes, U in bits 0-2, V in 3-5 and W in
+    * 6-8, which vkCreateSampler encodes from addressModeU/V/W (R2,
+    * ps5vk_image.c). The value the M3 texture canary's descriptor carried is
+    * clamp-to-edge on all three axes. */
+   uint32_t address_word;
 };
 
 /* SPIR-V's header, OpEntryPoint, OpExecutionMode and the execution models,

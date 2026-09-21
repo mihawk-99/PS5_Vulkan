@@ -1196,13 +1196,48 @@ ps5vk_CreateSampler(VkDevice _device, const VkSamplerCreateInfo *pCreateInfo,
                        "a sampler creation structure in pNext is not the bare VkSamplerCreateInfo "
                        "the texture canary ran; a runner probe settles it "
                        "(docs/M5_REFERENCE.md, C4)");
-   if (info->addressModeU != VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE ||
-       info->addressModeV != VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE ||
-       info->addressModeW != VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
-      return vk_errorf(device, VK_ERROR_UNKNOWN,
-                       "sampler address modes %d, %d and %d are not the clamp-to-edge the texture "
-                       "canary ran; other modes need a runner probe (docs/M5_REFERENCE.md, C4)",
-                       (int)info->addressModeU, (int)info->addressModeV, (int)info->addressModeW);
+   /* The address modes are per-sampler state in Vulkan but three 3-bit fields of
+    * the *descriptor* this driver writes, word 8: U in bits 0-2, V in 3-5 and W
+    * in 6-8 (ps5vk_draw.c, ps5vk_write_image_descriptor). The encoding is
+    * ps5-opengl's own: its ps5_texture_descriptor_wrap maps PIPE_TEX_WRAP_REPEAT
+    * to 0, MIRROR_REPEAT to 1 and CLAMP_TO_EDGE to 2, and 2 is what the M3
+    * texture canary's descriptor has always carried. Repeat is the mode a zeroed
+    * VkSamplerCreateInfo holds, so refusing it refused the default. */
+   uint32_t address_word = 0;
+   const VkSamplerAddressMode modes[3] = {info->addressModeU, info->addressModeV,
+                                          info->addressModeW};
+   for (unsigned axis = 0; axis < 3; axis++) {
+      uint32_t clamp = 0;
+      switch (modes[axis]) {
+      case VK_SAMPLER_ADDRESS_MODE_REPEAT:
+         clamp = 0;
+         break;
+      case VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT:
+         clamp = 1;
+         break;
+      case VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE:
+         clamp = 2;
+         break;
+      case VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER:
+         return vk_errorf(device, VK_ERROR_UNKNOWN,
+                          "sampler axis %u clamps to a border colour, and word 11 of the "
+                          "descriptor is the transparent black no probe has varied; a border "
+                          "mode needs a runner probe (docs/M5_REFERENCE.md, C4)",
+                          axis);
+      case VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE:
+         return vk_errorf(device, VK_ERROR_UNKNOWN,
+                          "sampler axis %u asks mirror-clamp-to-edge, which is "
+                          "VK_KHR_sampler_mirror_clamp_to_edge and not core Vulkan 1.0; an "
+                          "extension needs its own probe (docs/M5_REFERENCE.md, C4)",
+                          axis);
+      default:
+         return vk_errorf(device, VK_ERROR_UNKNOWN,
+                          "sampler axis %u has address mode %d, which is not a Vulkan address "
+                          "mode",
+                          axis, (int)modes[axis]);
+      }
+      address_word |= clamp << (3u * axis);
+   }
    /* The mip filter, bits 26-27 of word 10: ps5-opengl's own encoding of
     * PIPE_TEX_MIPFILTER_NEAREST (1) and LINEAR (2), and the bits the canary's
     * two words already carry (2, from a runtime that ran a single level, where
@@ -1279,6 +1314,7 @@ ps5vk_CreateSampler(VkDevice _device, const VkSamplerCreateInfo *pCreateInfo,
                                        : word;
    sampler->lod_word = ps5vk_sampler_unsigned_lod(info->minLod) |
                        (ps5vk_sampler_unsigned_lod(info->maxLod) << 12);
+   sampler->address_word = address_word;
 
    *pSampler = ps5vk_sampler_to_handle(sampler);
    return VK_SUCCESS;

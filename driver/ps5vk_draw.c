@@ -975,6 +975,9 @@ struct ps5vk_sampled_image {
     * (ps5vk_private.h, PS5VK_FORMAT_SWIZZLE_R001). */
    uint32_t dst_sel;
    uint32_t sampler_word;
+   /* Word 8 of the combined image-sampler descriptor: the sampler's three
+    * address modes (R2, ps5vk_image.c). */
+   uint32_t address_word;
    /* The levels the view names (Phase C7): the first and the last, which the
     * descriptor carries so the hardware reads a mip chain. A single-level view
     * is 0 and 0, the words every earlier descriptor held. */
@@ -1151,6 +1154,7 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t binding,
     * 32 bytes leave them out (ps5vk_write_image_descriptor). */
    sampled->sampler_word = needs_sampler ? sampler->word : 0;
    sampled->lod_word = needs_sampler ? sampler->lod_word : 0;
+   sampled->address_word = needs_sampler ? sampler->address_word : PS5VK_TEXTURE_CLAMP_TO_EDGE;
    sampled->base_layer = view->base_array_layer;
    sampled->layer_count = view->layer_count;
    sampled->array = view->layer_count > 1;
@@ -1201,7 +1205,7 @@ ps5vk_write_image_descriptor(uint32_t *descriptor, const struct ps5vk_sampled_im
    descriptor[4] = (sampled->layer_count > 0 ? (sampled->layer_count - 1u) & 0x1fffu : 0u) |
                    ((sampled->base_layer & 0x1fffu) << 16);
    descriptor[5] = PS5VK_TEXTURE_SINGLE_LEVEL | (sampled->image_last_mip_level << 4);
-   descriptor[8] = PS5VK_TEXTURE_CLAMP_TO_EDGE;
+   descriptor[8] = sampled->address_word;
    descriptor[9] = sampled->image_last_mip_level == 0 ? PS5VK_TEXTURE_LOD_RANGE : sampled->lod_word;
    descriptor[10] = sampled->sampler_word;
 }

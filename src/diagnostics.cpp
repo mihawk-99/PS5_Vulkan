@@ -12800,6 +12800,225 @@ void run_vulkan_two_pass_frames(const TestContext &test, TestOutcome &outcome) n
     log.event("agc_two_passes", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1, detail);
 }
 
+// R2: the three core Vulkan 1.0 address modes, and what each one fetches.
+//
+// vkCreateSampler accepted clamp-to-edge alone -- which is *not* what a zeroed
+// VkSamplerCreateInfo holds, so it refused the default and the first sampler an
+// application creates (PS5_VULKAN_REQUESTS.md, R2). The address mode is
+// per-sampler state in Vulkan but three 3-bit fields of the *descriptor* this
+// driver writes, so the case varies it across frames that share one pipeline,
+// which is what tells a descriptor field from a pipeline word.
+//
+// Each frame samples a 256-texel-wide image whose four 64-texel groups are red,
+// green, blue and white, with u running 0 to 4 across the whole target and
+// nearest filtering, so no interpolation blurs a group boundary. A pixel's
+// sample lands at texel 1024 * (x + 0.5) / width, and the case reads two pixels
+// whose texel falls in the image's *odd* 256-texel period -- where the three
+// modes answer differently:
+//
+//   repeat           green            the texel repeats every 256
+//   mirrored repeat  blue             the odd period is folded back
+//   clamp to edge    white            the last texel smears out
+//
+// A driver that ignored the state, and drew the clamp-to-edge frame for every
+// mode, fails two of the three.
+constexpr std::uint32_t kAddressTextureWidth = 256;
+constexpr std::uint32_t kAddressTextureGroup = kAddressTextureWidth / 4;
+// Four rows of four groups, so the image has a height the descriptor's
+// arithmetic is happy with and every row is the same pattern.
+std::array<std::uint8_t, kAddressTextureWidth * 4 * 4> address_texture_texels() noexcept
+{
+    static constexpr std::uint8_t kGroups[4][3] = {
+        {0xff, 0x00, 0x00}, {0x00, 0xff, 0x00}, {0x00, 0x00, 0xff}, {0xff, 0xff, 0xff}};
+    std::array<std::uint8_t, kAddressTextureWidth * 4 * 4> texels{};
+    for (std::uint32_t row = 0; row < 4; row++)
+        for (std::uint32_t column = 0; column < kAddressTextureWidth; column++)
+        {
+            const std::uint8_t *const group = kGroups[column / kAddressTextureGroup];
+            std::uint8_t *const texel = &texels[(row * kAddressTextureWidth + column) * 4];
+            texel[0] = group[0];
+            texel[1] = group[1];
+            texel[2] = group[2];
+            texel[3] = 0xff;
+        }
+    return texels;
+}
+// A quad over the whole target with u running 0 to 4 and v 0 to 1: the target's
+// own pixel grid is then the sample grid, so a pixel's texel needs no viewport
+// arithmetic.
+constexpr float kAddressVertices[kSquareVertexCount * 4] = {
+    -1.0f, -1.0f, 0.0f, 1.0f, // 0 bottom left
+    1.0f,  -1.0f, 4.0f, 1.0f, // 1 bottom right
+    1.0f,  1.0f,  4.0f, 0.0f, // 2 top right
+    -1.0f, 1.0f,  0.0f, 0.0f, // 3 top left
+};
+
+// The group a sample at `texel` fetches, per address mode: repeat wraps every
+// 256 texels, mirrored repeat folds every other period back, clamp to edge holds
+// the first and last texel.
+std::uint32_t address_texture_group(std::int64_t texel, VkSamplerAddressMode mode) noexcept
+{
+    const std::int64_t width = (std::int64_t)kAddressTextureWidth;
+    if (mode == VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+    {
+        if (texel < 0)
+            texel = 0;
+        if (texel >= width)
+            texel = width - 1;
+    }
+    else if (mode == VK_SAMPLER_ADDRESS_MODE_REPEAT)
+    {
+        texel %= width;
+        if (texel < 0)
+            texel += width;
+    }
+    else
+    {
+        texel %= 2 * width;
+        if (texel < 0)
+            texel += 2 * width;
+        if (texel >= width)
+            texel = 2 * width - texel - 1;
+    }
+    return (std::uint32_t)(texel / (std::int64_t)kAddressTextureGroup);
+}
+
+void run_vulkan_sampler_address_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32_SFLOAT, 8},
+    };
+    struct Mode
+    {
+        VkSamplerAddressMode mode;
+        const char *name;
+    };
+    // The three modes core Vulkan 1.0 requires. Clamp-to-border and
+    // mirror-clamp-to-edge have their own refusals in ps5vk_CreateSampler, so a
+    // frame for them would report the driver's message rather than a fetch.
+    static constexpr Mode kModes[] = {
+        {VK_SAMPLER_ADDRESS_MODE_REPEAT, "repeat"},
+        {VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT, "mirrored repeat"},
+        {VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, "clamp to edge"},
+    };
+    // The texture's own groups, which the shader passes through.
+    static constexpr std::uint8_t kGroups[4][3] = {
+        {0xff, 0x00, 0x00}, {0x00, 0xff, 0x00}, {0x00, 0x00, 0xff}, {0xff, 0xff, 0xff}};
+    static const std::array<std::uint8_t, kAddressTextureWidth * 4 * 4> texels =
+        address_texture_texels();
+    // Two pixels of the target whose sample lands in the image's odd 256-texel
+    // period: u = 4 * (x + 0.5) / width, so the texel is
+    // 1024 * (x + 0.5) / width, which is 320 and 832 at five and thirteen
+    // sixteenths of the target.
+    const std::uint32_t samples[2] = {kOutputWidth * 5u / 16u, kOutputWidth * 13u / 16u};
+    unsigned passed = 0;
+    for (const Mode &entry : kModes)
+    {
+        log.event("agc_sampler_address", "INFO", 0, entry.name);
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = kAddressVertices;
+        input.vertex_count = kSquareVertexCount;
+        input.vertex_stride = kTextureVertexStride;
+        input.index_data = kIndices;
+        input.index_count = kIndexCount;
+        input.attribute_count = 2;
+        input.attributes[0] = attributes[0];
+        input.attributes[1] = attributes[1];
+        input.texture_data = texels.data();
+        input.texture_width = kAddressTextureWidth;
+        input.texture_height = 4;
+        input.texture_format = VK_FORMAT_R8G8B8A8_UNORM;
+        // Nearest: the sample positions above are exact texel columns, and a
+        // linear filter would blur the boundary a wrong mode is meant to show.
+        input.texture_bilinear = false;
+        input.texture_address_mode_set = true;
+        input.texture_address_mode = entry.mode;
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+            return;
+        ps5vk_triangle triangle{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (test.capture && status == PS5VK_TRIANGLE_OK)
+        {
+            // One capture a mode: the frame a PC rebuild replays, and the mode
+            // it replayed is the label (tools/golden.py, capture_problems).
+            log_driver_submission(triangle.device, entry.name, log);
+            log_driver_stages(triangle.device, log);
+        }
+        bool matched = false;
+        if (status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes)
+        {
+            flush_gpu_data(const_cast<void *>(triangle.target), kFramebufferBytes);
+            const auto *const words = static_cast<const std::uint32_t *>(triangle.target);
+            const FramebufferView view{words, kTiledRgba8Layout};
+            matched = true;
+            for (unsigned index = 0; index < std::size(samples); index++)
+            {
+                const std::uint32_t column = samples[index];
+                // The sample position in texels, truncated: nearest filtering
+                // fetches the texel it falls in.
+                const std::int64_t texel =
+                    (std::int64_t)(1024.0 * ((double)column + 0.5) / (double)kOutputWidth);
+                const std::uint32_t want = address_texture_group(texel, entry.mode);
+                const std::uint32_t pixel = view.word(column, kOutputHeight / 2);
+                const std::uint8_t red = (std::uint8_t)(pixel & 0xffu);
+                const std::uint8_t green = (std::uint8_t)((pixel >> 8) & 0xffu);
+                const std::uint8_t blue = (std::uint8_t)((pixel >> 16) & 0xffu);
+                const auto close = [](std::uint8_t got, std::uint8_t expected)
+                { return got + 2 >= expected && expected + 2 >= got; };
+                const bool pixel_matches = close(red, kGroups[want][0]) &&
+                                           close(green, kGroups[want][1]) &&
+                                           close(blue, kGroups[want][2]);
+                char field[64]{};
+                std::snprintf(field, sizeof(field), "group_at_%u", index);
+                log.number("agc_sampler_address", field, want);
+                std::snprintf(field, sizeof(field), "red_at_%u", index);
+                log.number("agc_sampler_address", field, red);
+                std::snprintf(field, sizeof(field), "green_at_%u", index);
+                log.number("agc_sampler_address", field, green);
+                std::snprintf(field, sizeof(field), "blue_at_%u", index);
+                log.number("agc_sampler_address", field, blue);
+                matched = matched && pixel_matches;
+            }
+            log.event("agc_sampler_address", matched ? "PASS" : "FAIL", matched ? 0 : -1,
+                      matched ? "both sample columns fetched the texel the mode names"
+                              : "a sample column fetched another texel than the mode names");
+        }
+        else
+        {
+            log.event("agc_sampler_address", "FAIL", -1,
+                      "the frame could not be recorded or submitted");
+        }
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            log.event("agc_sampler_addresses", "FAIL", -1,
+                      "a submission did not complete; the program's objects stay allocated");
+            return;
+        }
+        ps5vk_triangle_finish(&triangle);
+        if (matched)
+            ++passed;
+    }
+    outcome.command_built = true;
+    outcome.passed = passed == std::size(kModes);
+    char detail[160]{};
+    std::snprintf(detail, sizeof(detail),
+                  "%u of %zu address modes fetched the texel their mode names", passed,
+                  std::size(kModes));
+    log.event("agc_sampler_addresses", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1,
+              detail);
+}
+
 // Phase D1's dynamic uniform buffer: one buffer holding two 16-byte colours,
 // one descriptor whose range is the shader's 16 bytes, and an offset the
 // application moves between the frames (VkDescriptorSetLayoutBinding's
@@ -19990,6 +20209,10 @@ constexpr RunnerTest kRunnerTests[] = {
     // them, each forty frames into one command buffer a frame
     // (run_vulkan_two_pass_frames).
     {"v0-two-passes", "m3-vertex", run_vulkan_two_pass_frames},
+    // R2: repeat, mirrored repeat and clamp to edge, one frame each, sampled
+    // with u running 0 to 4 and read back in pixels
+    // (run_vulkan_sampler_address_frames).
+    {"v0-sampler-address", "m3-texture", run_vulkan_sampler_address_frames},
     // Phase D2: a compute dispatch through the driver, its storage buffer and
     // its own pipeline (probes/c0/dispatch.spv, which the case reads itself:
     // the m2 set is only what the runner stages for every test).

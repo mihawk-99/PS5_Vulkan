@@ -651,15 +651,20 @@ create_texture_samplers(struct ps5vk_triangle *triangle)
     * filter and its levels; every earlier frame keeps the single-level samplers
     * and their recorded words. */
    const bool mips = triangle->texture_levels > 1;
+   /* R2: the address mode a caller asked for, or the clamp-to-edge the M3
+    * texture canary ran. */
+   const VkSamplerAddressMode address = triangle->texture_address_mode_set
+                                           ? triangle->texture_address_mode
+                                           : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
    const VkSamplerCreateInfo nearest = {
       .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
       .magFilter = VK_FILTER_NEAREST,
       .minFilter = VK_FILTER_NEAREST,
       .mipmapMode = mips && triangle->texture_mip_linear ? VK_SAMPLER_MIPMAP_MODE_LINEAR
                                                          : VK_SAMPLER_MIPMAP_MODE_NEAREST,
-      .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-      .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-      .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+      .addressModeU = address,
+      .addressModeV = address,
+      .addressModeW = address,
       .maxLod = mips ? triangle->texture_max_lod : 0.0f,
    };
    for (unsigned index = 0; index < PS5VK_TRIANGLE_TEXTURE_SAMPLERS; index++) {
@@ -668,9 +673,9 @@ create_texture_samplers(struct ps5vk_triangle *triangle)
          info.magFilter = VK_FILTER_LINEAR;
          info.minFilter = VK_FILTER_LINEAR;
       }
-      char detail[64];
-      snprintf(detail, sizeof(detail), "%s, clamp to edge, %s",
-               index == PS5VK_TRIANGLE_SAMPLER_LINEAR ? "linear" : "nearest",
+      char detail[96];
+      snprintf(detail, sizeof(detail), "%s, address mode %d, %s",
+               index == PS5VK_TRIANGLE_SAMPLER_LINEAR ? "linear" : "nearest", (int)address,
                mips ? (triangle->texture_mip_linear ? "a linear mip chain" : "a nearest mip chain")
                     : "one level");
       if (!step(triangle, "create_sampler",
@@ -2389,6 +2394,8 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
     * create_resolve_target (Phase C8). */
    triangle->resolve_output = input->resolve_output;
    triangle->two_passes = input->two_passes;
+   triangle->texture_address_mode_set = input->texture_address_mode_set;
+   triangle->texture_address_mode = input->texture_address_mode;
    if (display ? !create_swapchain(triangle, physical)
                : !create_image(triangle, physical, input))
       return PS5VK_TRIANGLE_FAILED;

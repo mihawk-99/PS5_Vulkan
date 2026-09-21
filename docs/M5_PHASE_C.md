@@ -5991,3 +5991,44 @@ cases reported NO RECORD. The cap is 256 now, sized from the measured largest
 capture rather than the previous one, and the gate's seven cases pass again.
 `make lint` had four clang-format violations at the two `compile_deep` call
 sites, which `tools/run_clang_format.sh` fixed.
+
+## 2026-09-20 — R2: the sampler's address modes, and the default one
+
+`vkCreateSampler` accepted exactly one configuration: clamp-to-edge on all three
+axes, the state the M3 texture canary ran. `VK_SAMPLER_ADDRESS_MODE_REPEAT` is
+what a zeroed `VkSamplerCreateInfo` holds, so the driver refused the *default*
+sampler and the first `vkCreateSampler` an application makes
+(PS5_VULKAN_REQUESTS.md, R2).
+
+The mode is per-sampler state in Vulkan but three 3-bit fields of word 8 of the
+combined image-sampler descriptor this driver writes, and the encoding comes
+from ps5-opengl's own `ps5_texture_descriptor_wrap`: `PIPE_TEX_WRAP_REPEAT` 0,
+`MIRROR_REPEAT` 1, `CLAMP_TO_EDGE` 2 -- and 2 is what the canary's descriptor has
+always carried, which is what made the change a widening rather than a
+rewrite. `v0-sampler-address` proves it in pixels: one frame per mode, each
+sampling a 256-texel-wide image whose four 64-texel groups are red, green, blue
+and white, with u running 0 to 4 across the whole target and nearest filtering,
+reading two pixels whose texel lands in the image's odd 256-texel period, where
+the modes differ. The console (`Klog_Logs/r2-sampler-address2.log`, pid 315):
+
+| mode | group fetched | pixel |
+| --- | --- | --- |
+| repeat | 1 | green |
+| mirrored repeat | 2 | blue |
+| clamp to edge | 3 | white |
+
+Three modes, three different fetches at the same pixel: a driver that ignored
+the state would draw the clamp frame for all three, which is exactly what the
+case fails on. `m3-texture` and `m2-solid` regress, and the case's golden is
+`golden/v0-sampler-address` with `jobs/v0-sampler-address/queue.txt`.
+
+Two modes core Vulkan 1.0 requires are still refused, and each names its own
+gap rather than sharing the address-mode message: `CLAMP_TO_BORDER` needs the
+border colour word (word 11) no probe has varied, and `MIRROR_CLAMP_TO_EDGE` is
+`VK_KHR_sampler_mirror_clamp_to_edge` rather than core 1.0. The rest of the
+sampler state -- mixed filter pairs, anisotropy, comparison sampling, LOD bias
+-- stays refused: the request says each is its own probe, and the application
+that filed R2 asks for anisotropy in the same block it asks for repeat, which
+its own report already notes is the application's call to make (a device
+reporting `maxSamplerAnisotropy` 1.0 makes the flag a semantic no-op, and the
+report names asking only above 1.0 as the correct application-side fix).

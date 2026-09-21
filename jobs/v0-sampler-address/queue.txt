@@ -1,0 +1,14 @@
+# PS5 Vulkan test runner job queue (PPSA99988): R2's sampler address modes.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-sampler-address/queue.txt
+#
+# v0-sampler-address creates one sampler per core Vulkan 1.0 address mode and
+# draws a frame with each, sampling a four-group texture with u running 0 to 4
+# and reading two pixels whose texel falls where repeat, mirrored repeat and
+# clamp to edge answer differently (docs/M5_PHASE_C.md, R2). m3-texture is the
+# canary whose clamp-to-edge sampler every earlier frame ran, and m2-solid the
+# regression behind both.
+hold 60
+v0-sampler-address
+m3-texture
+m2-solid
+exit

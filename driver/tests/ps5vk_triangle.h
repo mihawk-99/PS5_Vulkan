@@ -447,6 +447,13 @@ struct ps5vk_triangle_input {
     * the one pass every earlier frame recorded, and the field is appended at
     * the end for the same reason as target_format. */
    bool two_passes;
+   /* R2: whether the frame's two samplers are created with
+    * `texture_address_mode` (the next field) instead of the clamp-to-edge every
+    * earlier frame ran, and which mode that is -- one mode on all three axes,
+    * which is the shape a probe varies. Appended at the end for the same reason
+    * as target_format. */
+   bool texture_address_mode_set;
+   VkSamplerAddressMode texture_address_mode;
 };
 
 /* The colour a clearing render pass clears to: red 0x40, green 0x80, blue
@@ -600,6 +607,10 @@ struct ps5vk_triangle {
    /* R6: whether the frame records a second render pass in the same command
     * buffer (input->two_passes). */
    bool two_passes;
+   /* R2: the address mode the frame's samplers are created with
+    * (input->texture_address_mode_set and input->texture_address_mode). */
+   bool texture_address_mode_set;
+   VkSamplerAddressMode texture_address_mode;
    VkImage texture_image;
    /* The format the image was created with: a depth format's view and upload
     * name the depth aspect, a colour format's the colour one (round 21). */
