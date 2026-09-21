@@ -6136,6 +6136,7 @@ destination would move every sampled image's descriptor (the tiled kind bit) and
 with it every golden that samples a texture. The sentence is one line; the tiling
 is a repository-wide re-capture for the same behaviour. Both are the request's
 own two options, and it makes no recommendation between them.
+
 **R4, the audits' blind spots, stated.** The three audits now print what they
 cannot see beside the case that covers it, which is the request's own point --
 a command list says nothing about pipeline state (R1 lived there), a limit is
@@ -6154,3 +6155,70 @@ and a golden under `golden/`, not a one-off test: `v0-two-passes` (R6),
 by the rounds above, each with the console run that proves it recorded in its own
 section. The audits' `--check` modes exit 0 unchanged: the statements are
 printed, not counted.
+
+## 2026-09-20 — the stale runtime the R round ran against, the one stream it moved, and the waves guard's remaining route
+
+**The linked runtime was four days older than the migration.** Every console run
+above went to a title whose `.deps/native/vulkan-runtime/lib/libvk_runtime.ps5.a`
+predated the compiler fork: the stamp of the run that built it
+(`.deps/work/vulkan-runtime-a/source-stamp`) records SDK tree
+`a92a1228ea3a64e4be9f0e61c2a65a5aa7ffed92` and build script
+`cf4765ca1bbbcbad188ac040cea34c83eaed8f0fb6efc46c0a643e3d348d50b4`, where the
+migrated tree is `0a7c23a510d38ee8a7928018119b14b0b2eafecd` (ps5-opengl 0.3.0) and
+the committed script hashes to `26f7f7fca76f9d58…`, and its archive was dated
+Sep 16 against the Sep 20 migration. So it was stale, not deliberate. Rebuilt
+(`tools/build-vulkan-runtime.sh`), all 60 archive members differ, and diffing the
+two runs' trees separates the two reasons: three of the runtime's own sources
+changed -- the window-system stubs alone (`src/vulkan/wsi/vk_wsi_stubs.c`,
+`wsi_common.h`, `wsi_common_private.h`) -- and every object's debug info names
+the work directory it was compiled in, which changed with the run
+(`DW_AT_name`, `…/vulkan-runtime-a/src/…` against `…/vulkan-runtime/src/…`). The
+Mesa release (`efd4bb08…`), the include trees and the compile flags are identical
+in both, and the installed archives are stripped of debug information, so what
+reaches the title is the stub change. The title digest moved with it,
+`c3a99b98…` -> `b33b813c…` (`build/PPSA99988.build.log`), so the console evidence
+is re-tied to the rebuilt artifact: pid 331 ran the nine queued cases --
+`m2-solid`, the four R-round cases, `v0-stencil`, `c8-resolve`, `m3-texture` and
+`m2-solid` again -- 9 of 9 tests PASS, 1509 PASS records and no `signal:`
+(`Klog_Logs/r-verify-runtime.log`), with the host gates green on the rebuilt
+archive (`build/gates-runtime.log`).
+
+**The one recorded stream that moved.** Re-capturing those cases (`capture` in
+the queue) and comparing the capture against the committed goldens leaves the
+four R-round goldens and every other compared case identical but for `source` and
+the run's address fields; `golden/v0-stencil`'s first submission is the
+exception, 117 words against 120. The three extra words are one more register
+write in each of three packets (header `0xc0037600` -> `0xc0047600`, the added
+write `0x00000200`), and every other difference is an allocation address moved by
+`0x4000`: the migration's own extra user-data word (the v0-query entry above)
+plus the rebuilt runtime's heap layout. Nothing weakens, because
+`tools/check-driver.sh` uses that golden as a replay *input* rather than a
+comparison target -- `c5_stencil) replay=v0-stencil; compare=()` -- and the whole
+gate passes on the rebuilt build: 288 run comparisons identical, no `DIFFERENT`
+record and no fault (`build/check-driver-final.log`). It stays as it is rather
+than being re-captured: its stage mapping and allocations are the ones its own
+replay hands out, and the round-12 section above is written against that capture.
+
+**The waves guard's remaining route, audited.** The question R4 leaves behind is
+whether an unknown `workgroup_size` can still reach `get_addr_regs_from_waves`'s
+division by another path, or whether the guard hides the next instance
+(`tooling/psbc/patch-aco-min-waves.py`). It cannot. `program->info.workgroup_size`
+is read in exactly one place in the compiler (`aco_isel_setup.cpp:783`, the
+patched assignment); every writer of `Program::workgroup_size` writes a non-zero
+value (that assignment, `UINT_MAX` after the patch; `64` in the vs-prolog
+builder, `aco_select_vs_prolog.cpp:382`; `1` in the trap handler,
+`aco_select_trap_handler.cpp:304`); and its only readers are inside
+`calc_waves_per_workgroup`, whose callers -- `calc_min_waves` at
+`aco_isel_setup.cpp:797` and `aco_select_vs_prolog.cpp:383`, and
+`max_suitable_waves` -- all run after a writer. What the guard does cover is a
+different zero: `min_waves` and `num_waves` are both `0` by default
+(`aco_ir.h:2358`) and are written only by `calc_min_waves` and the occupancy
+paths (`aco_live_var_analysis.cpp:686`, `:692-701`), while `increase_register_file`
+calls `decrease_num_waves` without checking the minimum
+(`aco_register_allocation.cpp:1530`, `:1532`) and `decrease_num_waves`'s
+`assert(num_waves > min_waves)` (`:1518`) is compiled out in this build
+(`-DNDEBUG` in the work copy's own makefile) -- so a `0` can reach the division
+from a program whose `min_waves` was never computed. Every program that reaches
+register allocation here computes it first, so that route is latent rather than
+live; what matters is that the guard names it on stderr instead of hiding it, and
+the witness has not appeared in any build or console log.

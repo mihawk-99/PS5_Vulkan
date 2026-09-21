@@ -9,26 +9,44 @@ _Updated: 2026-09-20_
 
 ## Now
 
-**The SDK fork migration is landed and the console fault is closed.** Two
-workstreams finished in this session and are one commit:
+**The six requests in `PS5_VULKAN_REQUESTS.md` are answered, and the runtime the
+earlier rounds measured against was stale.** One commit each, in the order they
+were worked:
 
-- **The compiler migration.** The driver links ps5-opengl 0.3.0's own
-  `opengnm-psbc` tree (metadata 14, this repository's patches re-applied), and
-  the work copy is the fork's own tree, which
-  `tools/check-sdk-fork-migration.sh` assembles and verifies against the
-  release's `patched_tree` (`a27cbecc`).
-- **The SIGFPE was the runner's zero divisor, not ACO.** `jobs/aco-min` dies at
-  the sampled-format loop's `div` because `sampled_unsigned_formats()` declared
-  ten rows and initialized seven: the eighth row's texel size is 0 and the loop
-  divides the packed buffer's length by it. The "ACO frames" every earlier round
-  read were console addresses symbolized without the eboot's `0x400000` load
-  base. Both sampled tables now declare their rows and carry a
-  `static_assert` that rejects a declared-but-unfilled one.
+- **R6**: a split submission's step capture was sized for `split_count` steps
+  where a recording can run `split_count + 1`, so the last step's words landed up
+  to 64 bytes past the heap allocation. Sized for every step, and refused by name
+  with the two numbers if it ever cannot fit.
+- **R2**: the sampler's `addressModeU/V/W` are ps5-opengl's own encoding --
+  REPEAT 0, MIRROR_REPEAT 1, CLAMP_TO_EDGE 2 -- so the default a zeroed
+  `VkSamplerCreateInfo` holds is no longer refused; the two modes that are not
+  core Vulkan 1.0 are refused by name.
+- **R1**: `cullMode` and `rasterizerDiscardEnable` are programmed
+  (PA_SU_SC_MODE_CNTL's CULL_FRONT/CULL_BACK/FACE, PA_CL_CLIP_CNTL's
+  DX_RASTERIZATION_KILL); `depthBiasEnable` stays refused with its own named
+  probe, and `polygonMode`/`depthClampEnable` stay refused by their feature bits.
+- **R3**: `vk_meta` unwraps a stencil clear from the depth member, so the driver
+  hands it a copy whose stencil attachment carries the stencil value
+  (`WORKAROUND(R3)`, retirement in the comment).
+- **R5**: the resolve refusal now names the usage bit that chose the storage, the
+  rule and the workaround in one sentence.
+- **R4**: each audit prints what it cannot see beside the case that covers it.
 
-**What is left in the objective.** Nothing from the mission: the migration is
-committed, the fault is fixed and proved on the console, and every gate is
-green. Rung 1.0's requirements were already met; the next gate is the CTS
-subset (`docs/CTS.md`).
+Four console-proved cases carry them -- `v0-two-passes`, `v0-sampler-address`,
+`v0-cull`, `v0-stencil-clear` -- each with a queue under `jobs/` and a golden
+under `golden/`.
+
+**The linked runtime was four days older than the migration.** The stale
+`libvk_runtime.ps5.a` (its stamp named the pre-fork tree and an older build
+script) is rebuilt, the title digest moved with it (`c3a99b98…` ->
+`b33b813c…`), and the nine-case battery was re-run against the rebuilt artifact.
+The one recorded stream that moved is `golden/v0-stencil`'s first submission,
+which the migration's extra user-data word explains and which
+`tools/check-driver.sh` uses as a replay input rather than a comparison target
+(`docs/M5_PHASE_C.md`, 2026-09-20).
+
+**What is left in the objective.** Nothing from either mission: the next gate is
+the CTS subset (`docs/CTS.md`).
 
 **Rules this workstream keeps.** One mechanism a round; the encoding comes from a
 public codebase or the register database before anything is written; the compiler
@@ -54,10 +72,13 @@ reported by the driver; the rows left are the hardware's and one footnote clause
 
 | Check | Result |
 | --- | --- |
+| the R round on the rebuilt runtime (`jobs/verify`, pid 331) | Nine of nine tests PASS, 1509 PASS records, **no `signal:`**: the four new cases, `v0-stencil`, `c8-resolve`, `m3-texture` and `m2-solid` twice (`Klog_Logs/r-verify-runtime.log`). Title digest `b33b813c…` |
+| the six requests' probes | R6's guard proved the overflow on the console before the fix and is silent after; R1's four frames read back 132 / 65 / 67 / 0 drawn pixels (no cull, back, front, discard); R2's probe samples a four-group texture across u 0 -> 4 and reads each group back; R3's stencil plane reads 65536 zero bytes at both clear depths (`Klog_Logs/r2-final.log`, `r1-cull-run4.log`, `r3-stencil-clear-{before,after}.log`) |
+| the linked runtime | rebuilt: the Sep 16 archive predated the fork (stamp tree `a92a1228…`, script `cf4765ca…`); the rebuild changes the stubs and moves the title digest. All 60 objects differ, three of them by source |
 | the console fault, on the committed build (`jobs/aco-min`, pid 299) | Seven of seven tests PASS, each `v0-formats-sampled-uint` "7 of 7 sampled formats fetched the colour their texel holds", 1581 PASS records, **no `signal:` record** (`Klog_Logs/aco-min-final.log`). The sampler's own case and `m2-solid`/`v0-formats` regress |
 | the compile-stage fix, on the console (pid 294) | `c7-clear`, `v0-formats-sampled-uint`, `c5-depth`, `m2-solid` PASS, 528 PASS records, no signal (`Klog_Logs/verify-compile-stage.log`): the meta-clear path whose host tests faulted |
-| the goldens and the replay model | `tools/check-driver.sh` PASS: the whole loader/direct/PS5-link table, no `DIFFERENT` comparison and no fault, from 148 failing comparisons and 8 host-test segfaults. `tools/check-runner-cases.sh` PASS (7 cases, 204 PASS records) |
-| the host gates | `make lint` (194 files), `make test` (30 tests), the three audits (`--check`, counts unchanged), `check-sdk-fork-migration.sh`, `check-mip-layout.sh`, `check-psbc-link.sh`, `check-vulkan-runtime.sh`, `check-runner-cases.sh`, `check-driver.sh` |
+| the goldens and the replay model | `tools/check-driver.sh` PASS again on the rebuilt build: 288 run comparisons identical, no `DIFFERENT` record, no fault (`build/check-driver-final.log`); the first clean run closed 148 failing comparisons and 8 host-test segfaults. `tools/check-runner-cases.sh` PASS (7 cases, 204 PASS records) |
+| the host gates | `make lint` (194 files), `make test` (30 tests), the three audits (`--check`, counts unchanged), `check-sdk-fork-migration.sh`, `check-mip-layout.sh`, `check-psbc-link.sh`, `check-vulkan-runtime.sh`, `check-runner-cases.sh`, `check-driver.sh` (`build/gates-runtime.log`) |
 
 ## Open findings
 
