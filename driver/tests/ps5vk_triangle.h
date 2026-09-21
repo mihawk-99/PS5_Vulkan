@@ -512,6 +512,13 @@ struct ps5vk_triangle_input {
     * gives both draws the whole index buffer, which is what the two-draw
     * groupings did before. Appended at the end for the same reason. */
    uint32_t first_draw_indices;
+   /* R7: the pipeline layout declares two descriptor set layouts -- both empty,
+    * so no binding reaches the shaders and the frame is a valid pipeline whose
+    * *set count* is the thing under test. This driver's stages read one set-0
+    * table, so a layout that declares more is refused at the draw by name. False
+    * is the one-set (or no-set) layout every earlier frame ran. Appended at the
+    * end for the same reason as target_format. */
+   bool two_descriptor_sets;
 };
 
 
@@ -680,6 +687,10 @@ struct ps5vk_triangle {
    uint8_t push_constant_second[PS5VK_TRIANGLE_MAX_PUSH_CONSTANTS];
    uint32_t first_draw_indices;
    uint32_t draws_recorded;
+   /* R7: the second empty set layout the pipeline layout declares, from
+    * input->two_descriptor_sets. */
+   VkDescriptorSetLayout second_set_layout;
+   bool two_descriptor_sets;
    /* R6: whether the frame records a second render pass in the same command
     * buffer (input->two_passes). */
    bool two_passes;

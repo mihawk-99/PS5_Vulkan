@@ -16962,6 +16962,65 @@ void run_vulkan_push_constant_frames(const TestContext &test, TestOutcome &outco
     ps5vk_triangle_finish(&triangle);
 }
 
+// R7 (PS5_VULKAN_REQUESTSv2.md): the descriptor-set count. vkQuake's world and
+// md5 pipeline layouts declare five set layouts and this driver's stages read one
+// set-0 table, so ps5vk_draw_refusal refuses a layout that declares more. The
+// probe is the request's own and shares R8's shape: a pipeline layout with two set
+// layouts (both empty, so no binding reaches the shaders and the *count* is the
+// only thing under test) and a graphics pipeline against it. The pipeline is
+// created; the *draw* is refused, by name, and the harness's debug messenger
+// carries the sentence into this log -- which is what R4's coverage note asked for
+// and what the round that closed that item could not yet show.
+void run_vulkan_two_sets_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    // The m2 set draws its full-target triangle with no geometry and no
+    // descriptors, so the only unusual state in this frame is the set count.
+    input.vertex_count = 0;
+    input.index_count = 0;
+    input.two_descriptor_sets = true;
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    ps5vk_triangle triangle{};
+    ps5vk_triangle_status created = ps5vk_triangle_create(&triangle, &input);
+    log.event("agc_two_sets", created == PS5VK_TRIANGLE_OK ? "INFO" : "FAIL", (long long)created,
+              created == PS5VK_TRIANGLE_OK
+                  ? "the two-set pipeline layout and pipeline were created"
+                  : "the two-set pipeline layout or pipeline could not be created");
+    ps5vk_triangle_status drawn = created;
+    if (created == PS5VK_TRIANGLE_OK)
+        drawn = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+    if (drawn == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        outcome.stage_in_use = true;
+        log.event("agc_two_sets", "FAIL", -1,
+                  "a submission did not complete; the program's objects stay allocated");
+        return;
+    }
+    // What the request expects: creation succeeds (the refusal is the draw's) and
+    // the draw is refused, which is the state the request predicted.
+    const bool passed = created == PS5VK_TRIANGLE_OK && drawn != PS5VK_TRIANGLE_OK;
+    log.number("agc_two_sets", "created", created == PS5VK_TRIANGLE_OK ? 1u : 0u);
+    log.number("agc_two_sets", "drawn", drawn == PS5VK_TRIANGLE_OK ? 1u : 0u);
+    char detail[176]{};
+    std::snprintf(detail, sizeof(detail),
+                  "the two-set layout was %s and its draw was %s, which is the refusal the "
+                  "request predicted",
+                  created == PS5VK_TRIANGLE_OK ? "created" : "refused at creation",
+                  drawn == PS5VK_TRIANGLE_OK ? "accepted" : "refused");
+    outcome.command_built = true;
+    outcome.passed = passed;
+    log.event("agc_two_sets", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
+    ps5vk_triangle_finish(&triangle);
+}
+
 void run_vulkan_stencil_clear_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
     JsonLog &log = test.log;
@@ -21318,6 +21377,9 @@ constexpr RunnerTest kRunnerTests[] = {
     // with COLOR_ATTACHMENT added, which is the workaround
     // (run_vulkan_resolve_usage_frames).
     {"v0-resolve-usage", "m3-vertex", run_vulkan_resolve_usage_frames},
+    // R7: a pipeline layout with two descriptor set layouts, whose draw this
+    // driver refuses by name (run_vulkan_two_sets_frames).
+    {"v0-two-sets", "m2", run_vulkan_two_sets_frames},
     // R9: push constants, the path every vkQuake pipeline layout depends on: two
     // draws whose fragment output comes from vkCmdPushConstants, one value each,
     // read back (run_vulkan_push_constant_frames).

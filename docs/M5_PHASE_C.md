@@ -6415,3 +6415,49 @@ printed beside it -- 5 of 5 checks in the direct build, 3 of 3 through the loade
 the PS5 link arm. The console case itself stays red on purpose: it is the measurement,
 not a claim, and its message says which half arrived. The new debug getter
 (`ps5vk_debug_push_constants`) is what makes that possible without pixels.
+
+## 2026-09-20 — R7: the two-set refusal is confirmed, and the route this driver favours
+
+R7 was a prediction read from vkQuake's source: its world and md5 pipeline layouts
+declare five descriptor set layouts and this driver's stages read one set-0 table.
+The confirmation is the request's own probe (`v0-two-sets`,
+`jobs/v0-two-sets/queue.txt`, `golden/v0-two-sets`, run pid 378, title digest
+`084a7c84…`): a pipeline layout with two set layouts -- both *empty*, so no binding
+reaches the shaders and the set count is the only thing under test -- and a graphics
+pipeline against it. Measured: creation succeeds, the *draw* is refused, and the
+sentence reaches the klog through the harness's debug messenger:
+
+    descriptor set 1 is beyond the 1 this driver binds; sets past 0 are D1 (docs/M5_REFERENCE.md)
+
+One detail of the prediction was wrong and is worth correcting: the request expected
+the refusal at pipeline creation. This driver refuses the draw instead -- creation
+succeeds so that every package can be checked, which is the shape ps5vk_draw_refusal
+has always had -- and the sentence is the draw path's, not the one the request quoted.
+`v0-dynamic-depth-bias` (the same refusal function's other entry), `v0-cull` and
+`m2-solid` regress: four of four tests PASS.
+
+**The route this driver favours: (b).** The request offers three and asks for a choice
+before anything is implemented. This driver's answer is *implement multi-set binding
+within the advertised limit of four, and have vkQuake merge its five layouts into
+four*, for three reasons:
+
+  * Five sets exceed what the device advertises (`maxBoundDescriptorSets` = 4), and
+    that limit is not a driver preference: Vulkan requires **at least** four
+    (`VkPhysicalDeviceLimits`), so the driver must go on advertising four -- which
+    makes the *current* one-set behaviour a conformance gap of the same kind R1's
+    cullMode was, and makes "keep the limit and merge to one set" (route c) the only
+    option that leaves the report honest while the gap stays open.
+  * The cost of multi-set is the same for routes (a) and (b), and it is not the
+    driver's alone: `PsbcShaderMetadata` names **one** descriptor set per stage
+    (`descriptor_set0_valid`, `descriptor_set0_user_data_dword`) and a stage's table
+    travels in a single user-data dword, so a second set needs the compiler fork to
+    report and emit a second pointer and a second table -- a patch this repository
+    already carries in that style (tooling/psbc). Route (a) pays that and *additionally*
+    promises five, a limit nothing has been measured against.
+  * Route (c) is a smaller driver and a much larger application: five engine layouts
+    merged into one means every per-frame and per-draw binding collapses into a single
+    set. Route (b) asks the application for one merge (5 -> 4) and leaves the engine's
+    interface intact otherwise.
+
+Until then the application side should keep its layouts at four or fewer and expect
+this refusal above that, and the driver will keep refusing by name.

@@ -2430,6 +2430,7 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
    memcpy(triangle->push_constant_second, input->push_constant_second,
           sizeof(triangle->push_constant_second));
    triangle->first_draw_indices = input->first_draw_indices;
+   triangle->two_descriptor_sets = input->two_descriptor_sets;
    triangle->two_passes = input->two_passes;
    triangle->texture_address_mode_set = input->texture_address_mode_set;
    triangle->texture_address_mode = input->texture_address_mode;
@@ -2527,7 +2528,27 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
     * supplies both is refused by the driver, whose stages read one set-0 table
     * (driver/ps5vk_draw.c): the refusal names set 1. No descriptors at all
     * leaves the layout exactly as it was before Phase C3. */
-   if (triangle->set_layout != VK_NULL_HANDLE) {
+   /* R7: two empty set layouts, so the frame's pipeline is valid and its set
+    * count is the only thing the draw can refuse. No descriptors are written and
+    * none are bound: a *pipeline* that declares more than one set is refused
+    * when it is drawn (driver/ps5vk_pipeline.c, ps5vk_draw_refusal). */
+   if (input->two_descriptor_sets) {
+      const VkDescriptorSetLayoutCreateInfo empty_set = {
+         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+         .bindingCount = 0,
+      };
+      if (!step(triangle, "create_descriptor_set_layout",
+                CALL(triangle, CreateDescriptorSetLayout)(triangle->device, &empty_set, NULL,
+                                                          &triangle->set_layout),
+                "an empty set 0") ||
+          !step(triangle, "create_descriptor_set_layout",
+                CALL(triangle, CreateDescriptorSetLayout)(triangle->device, &empty_set, NULL,
+                                                          &triangle->second_set_layout),
+                "an empty set 1"))
+         return PS5VK_TRIANGLE_FAILED;
+      triangle->set_layouts[triangle->set_count++] = triangle->set_layout;
+      triangle->set_layouts[triangle->set_count++] = triangle->second_set_layout;
+   } else if (triangle->set_layout != VK_NULL_HANDLE) {
       triangle->set_layouts[triangle->set_count] = triangle->set_layout;
       triangle->descriptor_sets[triangle->set_count] = triangle->descriptor_set;
       triangle->set_count++;
@@ -3311,6 +3332,8 @@ ps5vk_triangle_finish(struct ps5vk_triangle *triangle)
        * the C2 geometry above: no mapping, no unmapping. */
       CALL(triangle, DestroyDescriptorPool)(device, triangle->descriptor_pool, NULL);
       CALL(triangle, DestroyDescriptorSetLayout)(device, triangle->set_layout, NULL);
+      if (triangle->second_set_layout != VK_NULL_HANDLE)
+         CALL(triangle, DestroyDescriptorSetLayout)(device, triangle->second_set_layout, NULL);
       if (triangle->uniform_mapped != NULL)
          CALL(triangle, UnmapMemory)(device, triangle->uniform_memory);
       CALL(triangle, DestroyBuffer)(device, triangle->uniform_buffer, NULL);

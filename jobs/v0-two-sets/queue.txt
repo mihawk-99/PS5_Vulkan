@@ -1,0 +1,19 @@
+# PS5 Vulkan test runner job queue (PPSA99988): R7's descriptor-set count.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-two-sets/queue.txt
+#
+# v0-two-sets creates a pipeline layout with two descriptor set layouts -- both
+# empty, so no binding reaches the shaders and the *count* is the only thing
+# under test -- and a graphics pipeline against it, then draws. The request
+# predicts the refusal at pipeline creation
+# ("drawing with descriptor sets beyond set 0 is not supported yet"); this
+# driver refuses a pipeline's *draw* instead, and the harness's debug messenger
+# carries the sentence into the klog. R8's dynamic depth bias refuses in the same
+# function and is this queue's regression, with v0-cull and m2-solid
+# (docs/M5_PHASE_C.md, R7).
+hold 60
+capture
+v0-two-sets
+v0-dynamic-depth-bias
+v0-cull
+m2-solid
+exit
