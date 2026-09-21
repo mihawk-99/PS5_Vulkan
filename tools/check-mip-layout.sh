@@ -309,3 +309,9 @@ if failed:
 print(f"  driver/ps5vk_image.c: the four-sample depth map is AddrLib's over a "
       f"{tiles}x{tiles}-tile region, {checked} texels and samples")
 PY
+
+# And the same maps against the published equation table, which is the other
+# independent statement of them (SharpProspero's AgcTilingTables.cs, the same
+# address library's generated equations). That check also names the equations
+# for the modes nothing here has measured, which is what a probe would extend.
+python3 "$root/tools/check-tile-equations.py"

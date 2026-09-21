@@ -92,6 +92,16 @@ reported by the driver; the rows left are the hardware's and one footnote clause
 | the goldens and the replay model | `tools/check-driver.sh` PASS again on the rebuilt build: 288 run comparisons identical, no `DIFFERENT` record, no fault (`build/check-driver-final.log`); the first clean run closed 148 failing comparisons and 8 host-test segfaults. `tools/check-runner-cases.sh` PASS (7 cases, 204 PASS records) |
 | the host gates | `make lint` (199 files), `make test` (30 tests), the three audits (`--check`, counts unchanged), `check-sdk-fork-migration.sh`, `check-mip-layout.sh`, `check-psbc-link.sh`, `check-probe-packages.sh` (43 committed sets, 41 rebuilt byte-identically, 2 named as not rebuildable), `check-vulkan-runtime.sh`, `check-runner-cases.sh`, `check-driver.sh` |
 
+**An upstream AGC source was checked against this driver** (2026-09-21). A static
+recompilation of Mario Kart Wii renders GX through AGC without Vulkan; what transfers is
+below the API. Its published tile-equation table now agrees, texel for texel, with every
+tiled map this driver measured (`tools/check-tile-equations.py`, run by the mip-layout
+gate), and it names the equations for the modes that are still refused. The AGC shader
+handle's own resource-slot table -- the consumer's view of the user-data dwords this
+driver reconstructs from compiler metadata -- is the largest untaken item, because it
+would turn R9's silent-zero class into a named refusal. Ranked list, with what was
+corroborated and what does not transfer: `docs/AGC_UPSTREAM_NOTES.md`.
+
 ## Open findings
 
 - **A title cannot load a graphics library at run time** (2026-09-18): every `.so`
