@@ -1,0 +1,14 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the device's own reporting.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/device-report/queue.txt
+#
+# Phase E1 (docs/CTS.md, "Selection: filter, do not hope"): the CTS is judged
+# against the capability set the device reports, so every run that selects or
+# excludes a case needs a machine-readable dump of that reporting from the same
+# build. This queue is only that dump -- the walk creates an instance and a
+# physical device, no device, no queue, no draw -- and
+# tools/collect-device-report.py turns the records into
+# conformance_inventory/device_report.json, checking their completeness against
+# the Vulkan headers.
+hold 60
+device-report
+exit

@@ -102,6 +102,14 @@ that class into a named refusal, and the `small` flag would replace this driver'
 inference of descriptor width (4 dwords for buffers, 8 for textures) with what the shader
 actually declared.
 
+## Not the CTS reference
+
+For the conformance campaign this is a hardware-layer source, not a harness one: the
+reference that cross-compiles genuine upstream VK-GL-CTS into a PS5 payload is
+`mpereiraesaa/ps5-vulkan`, which `docs/CTS.md` records (same GPU, same pinned CTS
+revision, and the platform pitfalls already hit). This project's contribution to that
+campaign is the register-, descriptor- and tile-level knowledge above.
+
 ## Ranked work this opens (each with its gate)
 
 1. **Read the AGC shader handle and check it against the metadata.** Console probe first:

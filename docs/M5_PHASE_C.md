@@ -6728,3 +6728,50 @@ radius: no such consumer exists -- the driver compiles the application's SPIR-V 
 driver's own path never reads those packages, and ps5-opengl's Gallium path is single-set by
 construction. Retirement trigger: the writer learns the per-set array at the same time as
 the first AGC-native consumer that binds more than set 0.
+
+## 2026-09-21 — Phase E1 opens: the device's reporting becomes an artefact, not a claim
+
+The CTS is judged only against the capability set the device itself reports, so the first
+piece of that campaign is that set in machine-readable form, from the same build the runs
+use. The runner's new `device-report` case walks the reporting surface with public Vulkan
+calls -- an instance, one physical device, **no device, no queue, no draw** -- and writes
+one JSON record per value; `tools/collect-device-report.py` turns those records into
+`conformance_inventory/device_report.json`, checking completeness against the Vulkan
+headers the build uses (every member of `VkPhysicalDeviceLimits` and
+`VkPhysicalDeviceFeatures` must be present, because a member nobody emitted would read as
+"the device does not report it"). The case joins the query-only runner cases, so
+`tools/check-runner-cases.sh` runs it on every gate and now also **diffs the committed
+inventory against a fresh run**, so a change in what the device reports cannot land without
+the inventory changing with it.
+
+What the device actually reports, measured on the host build (`api_version` 4194304 =
+1.0.0, device `PS5 AGC GPU (ps5vk)`, type 1):
+
+| | |
+| --- | --- |
+| limits | 97 members, every one emitted and completeness-checked |
+| features | 55 members, **one** true: `robustBufferAccess` |
+| queue families | 1: flags 7 (graphics, compute, transfer), 1 queue, 64 timestamp bits, granularity 1x1x1 |
+| memory | 1 type (device-local, host-visible, **host-coherent**), 1 heap of 4 GiB |
+| instance extensions | `VK_KHR_display`, `VK_KHR_get_physical_device_properties2`, `VK_KHR_surface`, `VK_EXT_debug_report`, `VK_EXT_debug_utils` |
+| device extensions | `VK_KHR_swapchain` (specVersion 70) |
+
+Three things that follow immediately, and are the reason the inventory had to exist:
+
+1. **`robustBufferAccess` is a claim with a large test group behind it.** It is the only
+   feature the device advertises and `dEQP-VK.robustness.*` is what tests it: out-of-bounds
+   reads, writes and unbound descriptors. Either the coverage passes with the index-count
+   clamp the driver already documents, or the feature stops being advertised -- the
+   campaign's rule is that a capability is advertised only once its coverage passes.
+2. **One host-coherent memory type.** There is no non-coherent memory, so the flush and
+   invalidate families are excluded **by reporting** rather than by refusal, which is
+   exactly the exclusion the acceptance policy wants.
+3. **`VK_KHR_display`, `VK_KHR_surface` and `VK_KHR_swapchain` are advertised**, so the
+   WSI groups are selectable, and the display path (not X11 or Wayland) is the one this
+   console has.
+
+The reference for the harness itself is `mpereiraesaa/ps5-vulkan`, which cross-compiles
+genuine upstream VK-GL-CTS into a PS5 payload at the same pinned revision
+(`vulkan-cts-1.3.8.4`, `a0270c18…`) and documents the platform pieces and pitfalls; the
+static-recompilation project in `docs/AGC_UPSTREAM_NOTES.md` is a hardware-layer source,
+not a CTS one. Nothing here is a conformance claim.

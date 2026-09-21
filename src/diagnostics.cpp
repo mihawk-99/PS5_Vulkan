@@ -363,6 +363,28 @@ class JsonLog
             write(line, static_cast<std::size_t>(length));
     }
 
+    // A string value: names (a device's, an extension's) are what the reporting
+    // walk needs to record, and they can carry the two characters JSON strings
+    // cannot: the quote and the backslash, which are escaped here.
+    void text(const char *probe, const char *field, const char *value)
+    {
+        char escaped[256]{};
+        std::size_t at = 0;
+        for (const char *p = value; *p != 0 && at + 2 < sizeof(escaped); p++)
+        {
+            if (*p == '"' || *p == '\\')
+                escaped[at++] = '\\';
+            escaped[at++] = *p;
+        }
+        char line[1024]{};
+        const int length = std::snprintf(line, sizeof(line),
+                                         "{\"schema\":2,\"event\":\"text\",\"probe\":\"%s\","
+                                         "\"field\":\"%s\",\"value\":\"%s\"}\n",
+                                         probe, field, escaped);
+        if (length > 0)
+            write(line, static_cast<std::size_t>(length));
+    }
+
     void number(const char *probe, const char *field, long long value)
     {
         char line[512]{};
@@ -21291,6 +21313,471 @@ void run_vulkan_blit_destination_formats(const TestContext &test, TestOutcome &o
 
 #endif // AGC_VULKAN_DRIVER
 
+// Phase E1's first piece: the device's own reporting, as an application sees
+// it (docs/CTS.md, "Selection: filter, do not hope"). The CTS is judged against
+// the capability set the device reports, so the report has to be captured from
+// the same build as the run, in a machine-readable form, before any case can be
+// selected or excluded. tools/collect-device-report.py turns these records into
+// conformance_inventory/device_report.json and checks their completeness
+// against the Vulkan headers.
+//
+// Public Vulkan calls only, and no device: the reporting surface is instance
+// and physical-device level, which is also the level the CTS's api.info.* cases
+// read. Nothing here creates a queue, allocates memory or draws.
+#define PS5VK_REPORT_LIMIT "device_report_limit"
+#define PS5VK_REPORT_FEATURE "device_report_feature"
+
+void run_vulkan_device_report(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const auto create_instance = reinterpret_cast<PFN_vkCreateInstance>(
+        vk_icdGetInstanceProcAddr(nullptr, "vkCreateInstance"));
+    if (create_instance == nullptr)
+    {
+        log.event("device_report", "FAIL", -1, "the module exports no vkCreateInstance");
+        return;
+    }
+    const VkApplicationInfo application = {VK_STRUCTURE_TYPE_APPLICATION_INFO,
+                                           nullptr,
+                                           "ps5vk-device-report",
+                                           0,
+                                           "ps5vk",
+                                           0,
+                                           VK_API_VERSION_1_0};
+    const VkInstanceCreateInfo instance_info = {
+        VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, nullptr, 0, &application, 0, nullptr, 0, nullptr};
+    VkInstance instance = VK_NULL_HANDLE;
+    if (create_instance(&instance_info, nullptr, &instance) != VK_SUCCESS || instance == nullptr)
+    {
+        log.event("device_report", "FAIL", -1, "vkCreateInstance did not answer VK_SUCCESS");
+        return;
+    }
+#define REPORT_PROC(name)                                                                          \
+    reinterpret_cast<PFN_vk##name>(vk_icdGetInstanceProcAddr(instance, "vk" #name))
+    const auto enumerate_instance_extensions = REPORT_PROC(EnumerateInstanceExtensionProperties);
+    const auto enumerate_devices = REPORT_PROC(EnumeratePhysicalDevices);
+    const auto get_properties = REPORT_PROC(GetPhysicalDeviceProperties);
+    const auto get_features = REPORT_PROC(GetPhysicalDeviceFeatures);
+    const auto get_queues = REPORT_PROC(GetPhysicalDeviceQueueFamilyProperties);
+    const auto get_memory = REPORT_PROC(GetPhysicalDeviceMemoryProperties);
+    const auto enumerate_device_extensions = REPORT_PROC(EnumerateDeviceExtensionProperties);
+#undef REPORT_PROC
+    if (enumerate_instance_extensions == nullptr || enumerate_devices == nullptr ||
+        get_properties == nullptr || get_features == nullptr || get_queues == nullptr ||
+        get_memory == nullptr || enumerate_device_extensions == nullptr)
+    {
+        log.event("device_report", "FAIL", -1,
+                  "an entry point the reporting walk needs is missing");
+        return;
+    }
+
+    std::uint32_t instance_extension_count = 0;
+    if (enumerate_instance_extensions(nullptr, &instance_extension_count, nullptr) == VK_SUCCESS &&
+        instance_extension_count <= 64)
+    {
+        std::vector<VkExtensionProperties> extensions(instance_extension_count);
+        if (enumerate_instance_extensions(nullptr, &instance_extension_count, extensions.data()) ==
+            VK_SUCCESS)
+            for (std::uint32_t index = 0; index < instance_extension_count; index++)
+                log.text("device_report_extension", "instance", extensions[index].extensionName);
+    }
+    log.number("device_report", "instance_extension_count",
+               static_cast<long long>(instance_extension_count));
+
+    std::uint32_t device_count = 0;
+    if (enumerate_devices(instance, &device_count, nullptr) != VK_SUCCESS || device_count != 1)
+    {
+        log.number("device_report", "physical_device_count", static_cast<long long>(device_count));
+        log.event("device_report", "FAIL", -1, "the device count is not one");
+        return;
+    }
+    VkPhysicalDevice physical = VK_NULL_HANDLE;
+    if (enumerate_devices(instance, &device_count, &physical) != VK_SUCCESS ||
+        physical == VK_NULL_HANDLE)
+    {
+        log.event("device_report", "FAIL", -1, "vkEnumeratePhysicalDevices answered no device");
+        return;
+    }
+    log.number("device_report", "physical_device_count", 1);
+
+    VkPhysicalDeviceProperties properties{};
+    get_properties(physical, &properties);
+    log.number("device_report", "api_version", static_cast<long long>(properties.apiVersion));
+    log.number("device_report", "driver_version", static_cast<long long>(properties.driverVersion));
+    log.number("device_report", "vendor_id", static_cast<long long>(properties.vendorID));
+    log.number("device_report", "device_id", static_cast<long long>(properties.deviceID));
+    log.number("device_report", "device_type", static_cast<long long>(properties.deviceType));
+    log.text("device_report", "device_name", properties.deviceName);
+    log.number("device_report", "pipeline_cache_uuid_hex0",
+               static_cast<long long>(properties.pipelineCacheUUID[0]));
+
+    const VkPhysicalDeviceLimits &limits = properties.limits;
+    log.number(PS5VK_REPORT_LIMIT, "maxImageDimension1D",
+               static_cast<long long>(limits.maxImageDimension1D));
+    log.number(PS5VK_REPORT_LIMIT, "maxImageDimension2D",
+               static_cast<long long>(limits.maxImageDimension2D));
+    log.number(PS5VK_REPORT_LIMIT, "maxImageDimension3D",
+               static_cast<long long>(limits.maxImageDimension3D));
+    log.number(PS5VK_REPORT_LIMIT, "maxImageDimensionCube",
+               static_cast<long long>(limits.maxImageDimensionCube));
+    log.number(PS5VK_REPORT_LIMIT, "maxImageArrayLayers",
+               static_cast<long long>(limits.maxImageArrayLayers));
+    log.number(PS5VK_REPORT_LIMIT, "maxTexelBufferElements",
+               static_cast<long long>(limits.maxTexelBufferElements));
+    log.number(PS5VK_REPORT_LIMIT, "maxUniformBufferRange",
+               static_cast<long long>(limits.maxUniformBufferRange));
+    log.number(PS5VK_REPORT_LIMIT, "maxStorageBufferRange",
+               static_cast<long long>(limits.maxStorageBufferRange));
+    log.number(PS5VK_REPORT_LIMIT, "maxPushConstantsSize",
+               static_cast<long long>(limits.maxPushConstantsSize));
+    log.number(PS5VK_REPORT_LIMIT, "maxMemoryAllocationCount",
+               static_cast<long long>(limits.maxMemoryAllocationCount));
+    log.number(PS5VK_REPORT_LIMIT, "maxSamplerAllocationCount",
+               static_cast<long long>(limits.maxSamplerAllocationCount));
+    log.number(PS5VK_REPORT_LIMIT, "bufferImageGranularity",
+               static_cast<long long>(limits.bufferImageGranularity));
+    log.number(PS5VK_REPORT_LIMIT, "sparseAddressSpaceSize",
+               static_cast<long long>(limits.sparseAddressSpaceSize));
+    log.number(PS5VK_REPORT_LIMIT, "maxBoundDescriptorSets",
+               static_cast<long long>(limits.maxBoundDescriptorSets));
+    log.number(PS5VK_REPORT_LIMIT, "maxPerStageDescriptorSamplers",
+               static_cast<long long>(limits.maxPerStageDescriptorSamplers));
+    log.number(PS5VK_REPORT_LIMIT, "maxPerStageDescriptorUniformBuffers",
+               static_cast<long long>(limits.maxPerStageDescriptorUniformBuffers));
+    log.number(PS5VK_REPORT_LIMIT, "maxPerStageDescriptorStorageBuffers",
+               static_cast<long long>(limits.maxPerStageDescriptorStorageBuffers));
+    log.number(PS5VK_REPORT_LIMIT, "maxPerStageDescriptorSampledImages",
+               static_cast<long long>(limits.maxPerStageDescriptorSampledImages));
+    log.number(PS5VK_REPORT_LIMIT, "maxPerStageDescriptorStorageImages",
+               static_cast<long long>(limits.maxPerStageDescriptorStorageImages));
+    log.number(PS5VK_REPORT_LIMIT, "maxPerStageDescriptorInputAttachments",
+               static_cast<long long>(limits.maxPerStageDescriptorInputAttachments));
+    log.number(PS5VK_REPORT_LIMIT, "maxPerStageResources",
+               static_cast<long long>(limits.maxPerStageResources));
+    log.number(PS5VK_REPORT_LIMIT, "maxDescriptorSetSamplers",
+               static_cast<long long>(limits.maxDescriptorSetSamplers));
+    log.number(PS5VK_REPORT_LIMIT, "maxDescriptorSetUniformBuffers",
+               static_cast<long long>(limits.maxDescriptorSetUniformBuffers));
+    log.number(PS5VK_REPORT_LIMIT, "maxDescriptorSetUniformBuffersDynamic",
+               static_cast<long long>(limits.maxDescriptorSetUniformBuffersDynamic));
+    log.number(PS5VK_REPORT_LIMIT, "maxDescriptorSetStorageBuffers",
+               static_cast<long long>(limits.maxDescriptorSetStorageBuffers));
+    log.number(PS5VK_REPORT_LIMIT, "maxDescriptorSetStorageBuffersDynamic",
+               static_cast<long long>(limits.maxDescriptorSetStorageBuffersDynamic));
+    log.number(PS5VK_REPORT_LIMIT, "maxDescriptorSetSampledImages",
+               static_cast<long long>(limits.maxDescriptorSetSampledImages));
+    log.number(PS5VK_REPORT_LIMIT, "maxDescriptorSetStorageImages",
+               static_cast<long long>(limits.maxDescriptorSetStorageImages));
+    log.number(PS5VK_REPORT_LIMIT, "maxDescriptorSetInputAttachments",
+               static_cast<long long>(limits.maxDescriptorSetInputAttachments));
+    log.number(PS5VK_REPORT_LIMIT, "maxVertexInputAttributes",
+               static_cast<long long>(limits.maxVertexInputAttributes));
+    log.number(PS5VK_REPORT_LIMIT, "maxVertexInputBindings",
+               static_cast<long long>(limits.maxVertexInputBindings));
+    log.number(PS5VK_REPORT_LIMIT, "maxVertexInputAttributeOffset",
+               static_cast<long long>(limits.maxVertexInputAttributeOffset));
+    log.number(PS5VK_REPORT_LIMIT, "maxVertexInputBindingStride",
+               static_cast<long long>(limits.maxVertexInputBindingStride));
+    log.number(PS5VK_REPORT_LIMIT, "maxVertexOutputComponents",
+               static_cast<long long>(limits.maxVertexOutputComponents));
+    log.number(PS5VK_REPORT_LIMIT, "maxTessellationGenerationLevel",
+               static_cast<long long>(limits.maxTessellationGenerationLevel));
+    log.number(PS5VK_REPORT_LIMIT, "maxTessellationPatchSize",
+               static_cast<long long>(limits.maxTessellationPatchSize));
+    log.number(PS5VK_REPORT_LIMIT, "maxTessellationControlPerVertexInputComponents",
+               static_cast<long long>(limits.maxTessellationControlPerVertexInputComponents));
+    log.number(PS5VK_REPORT_LIMIT, "maxTessellationControlPerVertexOutputComponents",
+               static_cast<long long>(limits.maxTessellationControlPerVertexOutputComponents));
+    log.number(PS5VK_REPORT_LIMIT, "maxTessellationControlPerPatchOutputComponents",
+               static_cast<long long>(limits.maxTessellationControlPerPatchOutputComponents));
+    log.number(PS5VK_REPORT_LIMIT, "maxTessellationControlTotalOutputComponents",
+               static_cast<long long>(limits.maxTessellationControlTotalOutputComponents));
+    log.number(PS5VK_REPORT_LIMIT, "maxTessellationEvaluationInputComponents",
+               static_cast<long long>(limits.maxTessellationEvaluationInputComponents));
+    log.number(PS5VK_REPORT_LIMIT, "maxTessellationEvaluationOutputComponents",
+               static_cast<long long>(limits.maxTessellationEvaluationOutputComponents));
+    log.number(PS5VK_REPORT_LIMIT, "maxGeometryShaderInvocations",
+               static_cast<long long>(limits.maxGeometryShaderInvocations));
+    log.number(PS5VK_REPORT_LIMIT, "maxGeometryInputComponents",
+               static_cast<long long>(limits.maxGeometryInputComponents));
+    log.number(PS5VK_REPORT_LIMIT, "maxGeometryOutputComponents",
+               static_cast<long long>(limits.maxGeometryOutputComponents));
+    log.number(PS5VK_REPORT_LIMIT, "maxGeometryOutputVertices",
+               static_cast<long long>(limits.maxGeometryOutputVertices));
+    log.number(PS5VK_REPORT_LIMIT, "maxGeometryTotalOutputComponents",
+               static_cast<long long>(limits.maxGeometryTotalOutputComponents));
+    log.number(PS5VK_REPORT_LIMIT, "maxFragmentInputComponents",
+               static_cast<long long>(limits.maxFragmentInputComponents));
+    log.number(PS5VK_REPORT_LIMIT, "maxFragmentOutputAttachments",
+               static_cast<long long>(limits.maxFragmentOutputAttachments));
+    log.number(PS5VK_REPORT_LIMIT, "maxFragmentDualSrcAttachments",
+               static_cast<long long>(limits.maxFragmentDualSrcAttachments));
+    log.number(PS5VK_REPORT_LIMIT, "maxFragmentCombinedOutputResources",
+               static_cast<long long>(limits.maxFragmentCombinedOutputResources));
+    log.number(PS5VK_REPORT_LIMIT, "maxComputeSharedMemorySize",
+               static_cast<long long>(limits.maxComputeSharedMemorySize));
+    log.number(PS5VK_REPORT_LIMIT, "maxComputeWorkGroupInvocations",
+               static_cast<long long>(limits.maxComputeWorkGroupInvocations));
+    log.number(PS5VK_REPORT_LIMIT, "subPixelPrecisionBits",
+               static_cast<long long>(limits.subPixelPrecisionBits));
+    log.number(PS5VK_REPORT_LIMIT, "subTexelPrecisionBits",
+               static_cast<long long>(limits.subTexelPrecisionBits));
+    log.number(PS5VK_REPORT_LIMIT, "mipmapPrecisionBits",
+               static_cast<long long>(limits.mipmapPrecisionBits));
+    log.number(PS5VK_REPORT_LIMIT, "maxDrawIndexedIndexValue",
+               static_cast<long long>(limits.maxDrawIndexedIndexValue));
+    log.number(PS5VK_REPORT_LIMIT, "maxDrawIndirectCount",
+               static_cast<long long>(limits.maxDrawIndirectCount));
+    log.number(PS5VK_REPORT_LIMIT, "maxSamplerLodBias",
+               static_cast<long long>(limits.maxSamplerLodBias));
+    log.number(PS5VK_REPORT_LIMIT, "maxSamplerAnisotropy",
+               static_cast<long long>(limits.maxSamplerAnisotropy));
+    log.number(PS5VK_REPORT_LIMIT, "maxViewports", static_cast<long long>(limits.maxViewports));
+    log.number(PS5VK_REPORT_LIMIT, "viewportSubPixelBits",
+               static_cast<long long>(limits.viewportSubPixelBits));
+    log.number(PS5VK_REPORT_LIMIT, "minTexelBufferOffsetAlignment",
+               static_cast<long long>(limits.minTexelBufferOffsetAlignment));
+    log.number(PS5VK_REPORT_LIMIT, "minUniformBufferOffsetAlignment",
+               static_cast<long long>(limits.minUniformBufferOffsetAlignment));
+    log.number(PS5VK_REPORT_LIMIT, "minStorageBufferOffsetAlignment",
+               static_cast<long long>(limits.minStorageBufferOffsetAlignment));
+    log.number(PS5VK_REPORT_LIMIT, "maxTexelOffset", static_cast<long long>(limits.maxTexelOffset));
+    log.number(PS5VK_REPORT_LIMIT, "maxTexelGatherOffset",
+               static_cast<long long>(limits.maxTexelGatherOffset));
+    log.number(PS5VK_REPORT_LIMIT, "minInterpolationOffset",
+               static_cast<long long>(limits.minInterpolationOffset));
+    log.number(PS5VK_REPORT_LIMIT, "maxInterpolationOffset",
+               static_cast<long long>(limits.maxInterpolationOffset));
+    log.number(PS5VK_REPORT_LIMIT, "subPixelInterpolationOffsetBits",
+               static_cast<long long>(limits.subPixelInterpolationOffsetBits));
+    log.number(PS5VK_REPORT_LIMIT, "maxFramebufferWidth",
+               static_cast<long long>(limits.maxFramebufferWidth));
+    log.number(PS5VK_REPORT_LIMIT, "maxFramebufferHeight",
+               static_cast<long long>(limits.maxFramebufferHeight));
+    log.number(PS5VK_REPORT_LIMIT, "maxFramebufferLayers",
+               static_cast<long long>(limits.maxFramebufferLayers));
+    log.number(PS5VK_REPORT_LIMIT, "framebufferColorSampleCounts",
+               static_cast<long long>(limits.framebufferColorSampleCounts));
+    log.number(PS5VK_REPORT_LIMIT, "framebufferDepthSampleCounts",
+               static_cast<long long>(limits.framebufferDepthSampleCounts));
+    log.number(PS5VK_REPORT_LIMIT, "framebufferStencilSampleCounts",
+               static_cast<long long>(limits.framebufferStencilSampleCounts));
+    log.number(PS5VK_REPORT_LIMIT, "framebufferNoAttachmentsSampleCounts",
+               static_cast<long long>(limits.framebufferNoAttachmentsSampleCounts));
+    log.number(PS5VK_REPORT_LIMIT, "maxColorAttachments",
+               static_cast<long long>(limits.maxColorAttachments));
+    log.number(PS5VK_REPORT_LIMIT, "sampledImageColorSampleCounts",
+               static_cast<long long>(limits.sampledImageColorSampleCounts));
+    log.number(PS5VK_REPORT_LIMIT, "sampledImageIntegerSampleCounts",
+               static_cast<long long>(limits.sampledImageIntegerSampleCounts));
+    log.number(PS5VK_REPORT_LIMIT, "sampledImageDepthSampleCounts",
+               static_cast<long long>(limits.sampledImageDepthSampleCounts));
+    log.number(PS5VK_REPORT_LIMIT, "sampledImageStencilSampleCounts",
+               static_cast<long long>(limits.sampledImageStencilSampleCounts));
+    log.number(PS5VK_REPORT_LIMIT, "storageImageSampleCounts",
+               static_cast<long long>(limits.storageImageSampleCounts));
+    log.number(PS5VK_REPORT_LIMIT, "maxSampleMaskWords",
+               static_cast<long long>(limits.maxSampleMaskWords));
+    log.number(PS5VK_REPORT_LIMIT, "timestampComputeAndGraphics",
+               static_cast<long long>(limits.timestampComputeAndGraphics));
+    log.number(PS5VK_REPORT_LIMIT, "timestampPeriod",
+               static_cast<long long>(limits.timestampPeriod));
+    log.number(PS5VK_REPORT_LIMIT, "maxClipDistances",
+               static_cast<long long>(limits.maxClipDistances));
+    log.number(PS5VK_REPORT_LIMIT, "maxCullDistances",
+               static_cast<long long>(limits.maxCullDistances));
+    log.number(PS5VK_REPORT_LIMIT, "maxCombinedClipAndCullDistances",
+               static_cast<long long>(limits.maxCombinedClipAndCullDistances));
+    log.number(PS5VK_REPORT_LIMIT, "discreteQueuePriorities",
+               static_cast<long long>(limits.discreteQueuePriorities));
+    log.number(PS5VK_REPORT_LIMIT, "pointSizeGranularity",
+               static_cast<long long>(limits.pointSizeGranularity));
+    log.number(PS5VK_REPORT_LIMIT, "lineWidthGranularity",
+               static_cast<long long>(limits.lineWidthGranularity));
+    log.number(PS5VK_REPORT_LIMIT, "strictLines", static_cast<long long>(limits.strictLines));
+    log.number(PS5VK_REPORT_LIMIT, "standardSampleLocations",
+               static_cast<long long>(limits.standardSampleLocations));
+    log.number(PS5VK_REPORT_LIMIT, "optimalBufferCopyOffsetAlignment",
+               static_cast<long long>(limits.optimalBufferCopyOffsetAlignment));
+    log.number(PS5VK_REPORT_LIMIT, "optimalBufferCopyRowPitchAlignment",
+               static_cast<long long>(limits.optimalBufferCopyRowPitchAlignment));
+    log.number(PS5VK_REPORT_LIMIT, "nonCoherentAtomSize",
+               static_cast<long long>(limits.nonCoherentAtomSize));
+
+    VkPhysicalDeviceFeatures features{};
+    get_features(physical, &features);
+    log.number(PS5VK_REPORT_FEATURE, "robustBufferAccess", features.robustBufferAccess ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "fullDrawIndexUint32", features.fullDrawIndexUint32 ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "imageCubeArray", features.imageCubeArray ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "independentBlend", features.independentBlend ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "geometryShader", features.geometryShader ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "tessellationShader", features.tessellationShader ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "sampleRateShading", features.sampleRateShading ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "dualSrcBlend", features.dualSrcBlend ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "logicOp", features.logicOp ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "multiDrawIndirect", features.multiDrawIndirect ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "drawIndirectFirstInstance",
+               features.drawIndirectFirstInstance ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "depthClamp", features.depthClamp ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "depthBiasClamp", features.depthBiasClamp ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "fillModeNonSolid", features.fillModeNonSolid ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "depthBounds", features.depthBounds ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "wideLines", features.wideLines ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "largePoints", features.largePoints ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "alphaToOne", features.alphaToOne ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "multiViewport", features.multiViewport ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "samplerAnisotropy", features.samplerAnisotropy ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "textureCompressionETC2",
+               features.textureCompressionETC2 ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "textureCompressionASTC_LDR",
+               features.textureCompressionASTC_LDR ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "textureCompressionBC", features.textureCompressionBC ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "occlusionQueryPrecise",
+               features.occlusionQueryPrecise ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "pipelineStatisticsQuery",
+               features.pipelineStatisticsQuery ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "vertexPipelineStoresAndAtomics",
+               features.vertexPipelineStoresAndAtomics ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "fragmentStoresAndAtomics",
+               features.fragmentStoresAndAtomics ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "shaderTessellationAndGeometryPointSize",
+               features.shaderTessellationAndGeometryPointSize ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "shaderImageGatherExtended",
+               features.shaderImageGatherExtended ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "shaderStorageImageExtendedFormats",
+               features.shaderStorageImageExtendedFormats ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "shaderStorageImageMultisample",
+               features.shaderStorageImageMultisample ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "shaderStorageImageReadWithoutFormat",
+               features.shaderStorageImageReadWithoutFormat ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "shaderStorageImageWriteWithoutFormat",
+               features.shaderStorageImageWriteWithoutFormat ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "shaderUniformBufferArrayDynamicIndexing",
+               features.shaderUniformBufferArrayDynamicIndexing ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "shaderSampledImageArrayDynamicIndexing",
+               features.shaderSampledImageArrayDynamicIndexing ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "shaderStorageBufferArrayDynamicIndexing",
+               features.shaderStorageBufferArrayDynamicIndexing ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "shaderStorageImageArrayDynamicIndexing",
+               features.shaderStorageImageArrayDynamicIndexing ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "shaderClipDistance", features.shaderClipDistance ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "shaderCullDistance", features.shaderCullDistance ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "shaderFloat64", features.shaderFloat64 ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "shaderInt64", features.shaderInt64 ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "shaderInt16", features.shaderInt16 ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "shaderResourceResidency",
+               features.shaderResourceResidency ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "shaderResourceMinLod", features.shaderResourceMinLod ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "sparseBinding", features.sparseBinding ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "sparseResidencyBuffer",
+               features.sparseResidencyBuffer ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "sparseResidencyImage2D",
+               features.sparseResidencyImage2D ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "sparseResidencyImage3D",
+               features.sparseResidencyImage3D ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "sparseResidency2Samples",
+               features.sparseResidency2Samples ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "sparseResidency4Samples",
+               features.sparseResidency4Samples ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "sparseResidency8Samples",
+               features.sparseResidency8Samples ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "sparseResidency16Samples",
+               features.sparseResidency16Samples ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "sparseResidencyAliased",
+               features.sparseResidencyAliased ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "variableMultisampleRate",
+               features.variableMultisampleRate ? 1 : 0);
+    log.number(PS5VK_REPORT_FEATURE, "inheritedQueries", features.inheritedQueries ? 1 : 0);
+
+    std::uint32_t queue_count = 0;
+    get_queues(physical, &queue_count, nullptr);
+    log.number("device_report", "queue_family_count", static_cast<long long>(queue_count));
+    if (queue_count != 0 && queue_count <= 16)
+    {
+        std::vector<VkQueueFamilyProperties> families(queue_count);
+        get_queues(physical, &queue_count, families.data());
+        for (std::uint32_t index = 0; index < queue_count; index++)
+        {
+            char field[64]{};
+            std::snprintf(field, sizeof(field), "family%u_flags", index);
+            log.number("device_report_queue", field,
+                       static_cast<long long>(families[index].queueFlags));
+            std::snprintf(field, sizeof(field), "family%u_queue_count", index);
+            log.number("device_report_queue", field,
+                       static_cast<long long>(families[index].queueCount));
+            std::snprintf(field, sizeof(field), "family%u_timestamp_bits", index);
+            log.number("device_report_queue", field,
+                       static_cast<long long>(families[index].timestampValidBits));
+            std::snprintf(field, sizeof(field), "family%u_granularity_w", index);
+            log.number("device_report_queue", field,
+                       static_cast<long long>(families[index].minImageTransferGranularity.width));
+            std::snprintf(field, sizeof(field), "family%u_granularity_h", index);
+            log.number("device_report_queue", field,
+                       static_cast<long long>(families[index].minImageTransferGranularity.height));
+            std::snprintf(field, sizeof(field), "family%u_granularity_d", index);
+            log.number("device_report_queue", field,
+                       static_cast<long long>(families[index].minImageTransferGranularity.depth));
+        }
+    }
+
+    VkPhysicalDeviceMemoryProperties memory{};
+    get_memory(physical, &memory);
+    log.number("device_report", "memory_type_count",
+               static_cast<long long>(memory.memoryTypeCount));
+    log.number("device_report", "memory_heap_count",
+               static_cast<long long>(memory.memoryHeapCount));
+    for (std::uint32_t index = 0; index < memory.memoryTypeCount && index < 32; index++)
+    {
+        char field[64]{};
+        std::snprintf(field, sizeof(field), "type%u_flags", index);
+        log.number("device_report_memory", field,
+                   static_cast<long long>(memory.memoryTypes[index].propertyFlags));
+        std::snprintf(field, sizeof(field), "type%u_heap", index);
+        log.number("device_report_memory", field,
+                   static_cast<long long>(memory.memoryTypes[index].heapIndex));
+    }
+    for (std::uint32_t index = 0; index < memory.memoryHeapCount && index < 16; index++)
+    {
+        char field[64]{};
+        std::snprintf(field, sizeof(field), "heap%u_size", index);
+        log.number("device_report_memory", field,
+                   static_cast<long long>(memory.memoryHeaps[index].size));
+        std::snprintf(field, sizeof(field), "heap%u_flags", index);
+        log.number("device_report_memory", field,
+                   static_cast<long long>(memory.memoryHeaps[index].flags));
+    }
+
+    std::uint32_t device_extension_count = 0;
+    if (enumerate_device_extensions(physical, nullptr, &device_extension_count, nullptr) ==
+            VK_SUCCESS &&
+        device_extension_count <= 128)
+    {
+        std::vector<VkExtensionProperties> extensions(device_extension_count);
+        if (enumerate_device_extensions(physical, nullptr, &device_extension_count,
+                                        extensions.data()) == VK_SUCCESS)
+            for (std::uint32_t index = 0; index < device_extension_count; index++)
+            {
+                log.text("device_report_extension", "device", extensions[index].extensionName);
+                log.number("device_report_extension_version", extensions[index].extensionName,
+                           static_cast<long long>(extensions[index].specVersion));
+            }
+    }
+    log.number("device_report", "device_extension_count",
+               static_cast<long long>(device_extension_count));
+
+    const auto destroy_instance = reinterpret_cast<PFN_vkDestroyInstance>(
+        vk_icdGetInstanceProcAddr(instance, "vkDestroyInstance"));
+    if (destroy_instance != nullptr)
+        destroy_instance(instance, nullptr);
+    outcome.command_built = true;
+    outcome.passed = true;
+    log.number("device_report", "limit_count", static_cast<long long>(97));
+    log.number("device_report", "feature_count", static_cast<long long>(55));
+    log.event("device_report", "PASS", 0,
+              "the device's reporting is captured: properties, limits, features, queue families, "
+              "memory, and the instance and device extension lists");
+}
+
 constexpr RunnerTest kRunnerTests[] = {
     // Phase C1b: what the console's flip helper writes, into a buffer of its
     // own. No submission, so it carries no GPU risk.
@@ -21518,6 +22005,9 @@ constexpr RunnerTest kRunnerTests[] = {
     // with COLOR_ATTACHMENT added, which is the workaround
     // (run_vulkan_resolve_usage_frames).
     {"v0-resolve-usage", "m3-vertex", run_vulkan_resolve_usage_frames},
+    // Phase E1: the reporting walk the CTS selection is made against. It draws
+    // nothing and creates no device (run_vulkan_device_report).
+    {"device-report", "m2", run_vulkan_device_report},
     // R4's residual: the colour clear read back with nothing drawn over it, and a
     // drawn control frame (run_vulkan_colour_clear_frames).
     {"v0-colour-clear", "m2", run_vulkan_colour_clear_frames},

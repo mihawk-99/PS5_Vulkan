@@ -48,6 +48,7 @@ cases=(
     c7-clear
     v0-blit-dst
     b5-events
+    device-report
 )
 # The cases that draw: their frame is what the console run proves, because
 # nothing renders on the PC, so the PC run is asked for the submission they dump
@@ -125,6 +126,19 @@ for case in "${cases[@]}"; do
         status=1
     fi
 done
+# The device's reporting is an artefact the CTS selection is made from, so a run
+# that changes it has to change the committed inventory in the same commit:
+# regenerate into a scratch file and diff (docs/CTS.md, Phase E1).
+inventory="$root/conformance_inventory/device_report.json"
+if [[ -f $inventory ]]; then
+    python3 "$root/tools/collect-device-report.py" --out "$work/device-report.json" > /dev/null ||
+        { echo "the device report could not be collected"; status=1; }
+    if ! diff -q "$inventory" "$work/device-report.json" > /dev/null; then
+        echo "conformance_inventory/device_report.json is stale: the device's reporting changed"
+        diff "$inventory" "$work/device-report.json" | head -20
+        status=1
+    fi
+fi
 if (( ${#cases[@]} > 0 )) && ! grep -q '"probe":"runner_summary","status":"PASS"' "$log"; then
     echo "the runner's summary did not pass; see $log"
     grep -F '"probe":"runner_summary"' "$log" | tail -n 2 || true

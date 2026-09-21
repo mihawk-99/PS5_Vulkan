@@ -13,18 +13,10 @@ _Updated: 2026-09-21_
 per item, and its evidence was weaker on purpose -- each item was a prediction read
 from vkQuake's source, so each was re-checked at HEAD before anything was written:
 
-- **R8 is closed**: `VK_DYNAMIC_STATE_DEPTH_BIAS` is in the whitelist and the bias is
-  the command buffer's state, with the *enable* still the pipeline's.
-  `v0-dynamic-depth-bias` proves it with one pipeline and two draws.
-- **The clamp decision is taken and implemented**: a non-zero `depthBiasClamp` is
-  refused by name in both forms; the driver no longer caps anything.
-- **R9 is closed**: the compiler's shader-info pass ran before the lowering that makes a
-  push constant a load, so the ABI never declared the argument and ACO read an unwritten
-  SGPR. Both symptoms are proved, and the port can revert W4.
-- **R4's residual gap is closed**: `v0-colour-clear` reads a non-black colour clear
-  back with nothing drawn over it (36 of 36 samples), with a drawn control frame at 0
-  of 36, and the audits' sampler line now says which fields the covering case
-  exercises.
+- **R8, the clamp decision, R9 and R4's residual are closed**: dynamic depth bias from
+  the command buffer's state, a by-name refusal of a non-zero `depthBiasClamp`, push
+  constants declared through the pointer form and written by the draw, and a colour clear
+  read back with nothing over it. Details and run digests: `docs/M5_PHASE_C.md`.
 - **R7 is confirmed, the route is chosen, and Round 1 of four is done**: the two-set
   refusal happens at the *draw*, and route (b) -- multi-set within the advertised four --
   is chosen. Round 1 removed the compiler wrapper's single-set assumption (one layout per
@@ -71,13 +63,10 @@ battery regresses `v0-formats` (the audit mirror) and `m2-solid`.
 Every feature a per-row `{sym1}` cell requires is proved by a console run and
 reported by the driver; the rows left are the hardware's and one footnote clause's:
 
-| | |
-| --- | --- |
-| command audit | 137 required: 90 driver, 0 refused, 47 runtime, 0 gap |
-| limits audit | 106 members, 97 compared, 0 missing |
-| format audit | 179 required, 58 reported, 0 missing a required feature, 55 conditional, 0 `must:` clauses unmet |
-| the split | 0 / 0 / 0 / 0 / 0 |
-| the blockers left | none: the descriptor and vertex enums, the depth/stencil clause, the sRGB rows and the console fault are all closed |
+Command audit 137 required (90 driver, 0 refused, 47 runtime, 0 gap); limits audit 106
+members, 97 compared, 0 missing; format audit 179 required, 58 reported, 55 conditional
+and no `must:` clause unmet; the split 0 / 0 / 0 / 0 / 0; no blocker left from the
+enum, depth/stencil, sRGB or console-fault families.
 
 ## Last verified
 
@@ -92,15 +81,21 @@ reported by the driver; the rows left are the hardware's and one footnote clause
 | the goldens and the replay model | `tools/check-driver.sh` PASS again on the rebuilt build: 288 run comparisons identical, no `DIFFERENT` record, no fault (`build/check-driver-final.log`); the first clean run closed 148 failing comparisons and 8 host-test segfaults. `tools/check-runner-cases.sh` PASS (7 cases, 204 PASS records) |
 | the host gates | `make lint` (199 files), `make test` (30 tests), the three audits (`--check`, counts unchanged), `check-sdk-fork-migration.sh`, `check-mip-layout.sh`, `check-psbc-link.sh`, `check-probe-packages.sh` (43 committed sets, 41 rebuilt byte-identically, 2 named as not rebuildable), `check-vulkan-runtime.sh`, `check-runner-cases.sh`, `check-driver.sh` |
 
-**An upstream AGC source was checked against this driver** (2026-09-21). A static
-recompilation of Mario Kart Wii renders GX through AGC without Vulkan; what transfers is
-below the API. Its published tile-equation table now agrees, texel for texel, with every
-tiled map this driver measured (`tools/check-tile-equations.py`, run by the mip-layout
-gate), and it names the equations for the modes that are still refused. The AGC shader
-handle's own resource-slot table -- the consumer's view of the user-data dwords this
-driver reconstructs from compiler metadata -- is the largest untaken item, because it
-would turn R9's silent-zero class into a named refusal. Ranked list, with what was
-corroborated and what does not transfer: `docs/AGC_UPSTREAM_NOTES.md`.
+**Phase E1 is open: the capability set is an artefact** (2026-09-21). The runner's
+`device-report` case walks the device's own reporting and
+`tools/collect-device-report.py` collects it into
+`conformance_inventory/device_report.json`, completeness-checked against the Vulkan
+headers and diffed by `tools/check-runner-cases.sh` so it cannot drift. The device reports
+97 limits, 55 features with **one** true (`robustBufferAccess`), one queue family, one
+host-coherent memory type, and `display`/`surface`/`swapchain` among its extensions --
+which is the surface every CTS case is selected or excluded against (`docs/CTS.md`).
+
+**An upstream AGC source was checked against this driver** (2026-09-21). The
+static-recompilation project's published tile-equation table agrees, texel for texel, with
+every tiled map this driver measured (`tools/check-tile-equations.py`, run by the
+mip-layout gate), and its AGC shader-handle resource-slot table is the largest untaken
+item -- it would turn R9's silent-zero class into a named refusal. Ranked list, with what
+was corroborated and what does not transfer: `docs/AGC_UPSTREAM_NOTES.md`.
 
 ## Open findings
 

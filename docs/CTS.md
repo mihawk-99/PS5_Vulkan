@@ -33,7 +33,13 @@ and a capability is advertised only once its coverage passes.
   the exposed extensions, the queue families and their flags, the sample counts,
   and the format-feature table (`vkGetPhysicalDeviceFormatProperties`, which the
   runner's V0-formats probe already walks and
-  [V0_FORMATS_AUDIT.md](V0_FORMATS_AUDIT.md) records).
+  [V0_FORMATS_AUDIT.md](V0_FORMATS_AUDIT.md) records). **That dump exists now**:
+  the runner's `device-report` case walks it with public Vulkan calls and
+  `tools/collect-device-report.py` collects it into
+  `conformance_inventory/device_report.json`, completeness-checked against the
+  Vulkan headers, with `tools/check-runner-cases.sh` refusing an inventory that a
+  fresh run does not reproduce. The format-feature table and
+  `vkGetPhysicalDeviceImageFormatProperties` are the next section to add to it.
 - Select cases from the CTS's own case-list files and commit them as the run's
   manifest with its hash, so the selection is regenerable and reviewable.
 - A case whose requirements name an unadvertised feature, extension, limit,
