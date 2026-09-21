@@ -329,3 +329,66 @@ wrapper has to grow N set layouts before anything else can move, and that is a
 multi-session change with its own console cycles, not a field away from R9. The
 application's own half (five world layouts into four) is independent of it and can
 start whenever it likes.
+
+---
+
+# R7, Round 0: the three reconnaissance answers, before any code
+
+The plan's own "isolated wrapper" case is the one that holds, and it holds more
+cleanly than the plan assumed. All three answers come from the SDK tree this
+repository already builds (`opengnm-psbc`, the same tree ps5-opengl links), read at
+the revision the migration pinned.
+
+**1. `descriptor_set0_storage` has no siblings anywhere -- and it does not need any.**
+It is not an API parameter at all: it is the wrapper's own scratch, a stack blob in
+the linked/tess path (`libpsbc/psbc_compile.c:2893`) and a field of
+`psbc_compile_scratch` (`:3269`), both sized
+`sizeof (radv_descriptor_set_layout) + PSBC_MAX_DESCRIPTOR_BINDINGS * sizeof
+(radv_descriptor_set_binding_layout)`. The GL flow is single-set *by construction*:
+`ps5_opengl`'s `ps5_compile_options` (`src/gallium/ps5/ps5_screen.c:3270`) flattens
+everything a stage binds into one set -- a UBO *array* per stage
+(`PSBC_GALLIUM_UBO_ARRAY_BINDING`, `array_size = num_ubos`), an SSBO array, a storage
+image array, and one flat combined-image-sampler binding per texture unit
+(`PS5_TESSELLATION_TEXTURE_BINDING + stage * units + unit`) -- all with `.set`
+defaulting to 0. So the storage is singular because one set is all that path has ever
+needed, not because the core cannot hold more. **R7 therefore changes the wrapper's
+internals only: no caller-facing ownership or API change, which is one of the two
+things my plan flagged as pushing the estimate up.**
+
+**2. `desc_set_used_mask` never carries a bit above 0 in ps5-opengl's usage -- but the
+ABI already declares one pointer per set.** The wrapper itself sets it, at both sites:
+`stage->info.desc_set_used_mask |= 1u` (`psbc_compile.c:2957` for the linked path,
+`:3647` and `:3649` for a stage and its paired stage). The declaration side is
+RADV's and is already N-set: `declare_global_input_sgprs` adds "1 for each descriptor
+set" by walking that mask (`src/amd/vulkan/radv_shader_args.c:150-166`), one
+`add_descriptor_set(state, i)` per set bit. So nothing in the ABI blocks a second set;
+the mask simply has never had one.
+
+**3. The `binding->set != 0` rejection is a wrapper assertion, not a core limit.** It
+sits in the wrapper's own validation (`psbc_compile.c:2109`), beside
+`psbc_descriptor_layout` hard-coding `layout->num_sets = 1` (`:2161`) -- a wrapper that
+only ever built one set. The core is N-set throughout: `struct radv_shader_layout`
+carries `uint32_t num_sets` and `set[MAX_SETS]` with `MAX_SETS` = 32
+(`src/amd/vulkan/radv_shader.h:263-269`, `radv_constants.h:71`), and the descriptor
+lowering indexes the layout per binding's own set
+(`layout->set[desc_set].layout`, `nir/radv_nir_lower_descriptors.c:74,224,282,323`).
+
+**What that does to the plan.** The compiler work is wrapper-only, so the Round-1 risk
+of a storage/ownership refactor disappearing is real: **plan for four rounds, keep the
+fifth as contingency** rather than budgeting it. Two details Round 1 must carry that
+the plan did not name:
+  * the wrapper builds the shared layout from `options->vertex` in the linked path
+    (`:2895`); the *single-stage* path builds it from that stage's own options
+    (`:3513`), which is the path R7 uses, so per-stage set lists are already possible
+    -- but the linked/tess path would need the union if it is ever asked for one;
+  * the metadata's `descriptor_set0_valid`/`descriptor_set0_user_data_dword`
+    (`libpsbc/psbc_compile.h:211-212`) become a per-set array, which is the same struct
+    R9's `push_constant_*` fields sit in -- so Round 1's byte-identical check carries
+    **R9's pointer dword explicitly**, and `v0-push-constant` joins Round 1's host gate
+    as well as the console regression list. Metadata stays at version 14.
+
+**Folded into the plan, unchanged in shape:** per-set tables are sized per set (not one
+entry each), and the probe's two sets differ in kind -- set 0 supplies the colour the
+image needs, set 1 a scale, so a driver that reads the wrong table draws a
+recognisably wrong picture; four sets, not two; one commit per item; every round ends
+green with gates plus a console cycle.
