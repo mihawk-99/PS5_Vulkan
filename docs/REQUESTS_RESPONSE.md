@@ -251,6 +251,11 @@ stands closed with that correction, and the correction is the more useful half o
 (`c5_depth_bias` for R8's dynamic form, `v0_push_constant` for R9's driver half), and
 the console sweeps named above each regress the list the request gave: `v0-cull`,
 `v0-depth-bias`, `v0-stencil-clear`, `v0-sampler-address`, `v0-two-passes`,
-`v0-resolve-usage`, `c8-resolve` and `m2-solid`. `v0-push-constant` is the one case
+`v0-resolve-usage`, `c8-resolve` and `m2-solid`. The last of those sweeps, on the
+committed build (title digest `20d11775…`), runs all ten together: R8's
+`v0-dynamic-depth-bias` now also *asserts* the depth each draw wrote (the halves at
+`3efff000`/`3effe000` and `3f000000`/`3effe000`, the two pulls the console measured),
+R7's `v0-two-sets` and R5's `v0-resolve-usage` carry their refusal sentences into the
+log, and the Klog also shows the clamp's. `v0-push-constant` is the one case
 that stays red, on purpose: it is R9's measurement, not a claim, and its message says
 which half of the path arrived.

@@ -16672,7 +16672,8 @@ void run_vulkan_dynamic_depth_bias_frames(const TestContext &test, TestOutcome &
     unsigned drawn_left[kDynamicBiasFrames] = {0};
     unsigned drawn_right[kDynamicBiasFrames] = {0};
     unsigned sampled = 0;
-    bool depths_differ = false;
+    std::uint32_t left_bits[kDynamicBiasFrames] = {0};
+    std::uint32_t right_bits[kDynamicBiasFrames] = {0};
     for (unsigned index = 0; index < kDynamicBiasFrames; index++)
     {
         const Frame &frame = kFrames[index];
@@ -16745,8 +16746,6 @@ void run_vulkan_dynamic_depth_bias_frames(const TestContext &test, TestOutcome &
             // What each half's depth holds: the clear where the draw failed, and
             // the biased depth where it passed -- which is where the two values
             // of one frame are told apart.
-            std::uint32_t left_bits = 0;
-            std::uint32_t right_bits = 0;
             if (triangle.depth_target != nullptr &&
                 triangle.depth_target_bytes >=
                     static_cast<std::size_t>(kOutputWidth) * kOutputHeight * 4u)
@@ -16754,14 +16753,12 @@ void run_vulkan_dynamic_depth_bias_frames(const TestContext &test, TestOutcome &
                 flush_gpu_data(const_cast<void *>(triangle.depth_target),
                                static_cast<std::size_t>(kOutputWidth) * kOutputHeight * 4u);
                 const auto *const depth = static_cast<const std::uint8_t *>(triangle.depth_target);
-                std::memcpy(&left_bits, depth + tiled_depth_offset(left_column, row),
-                            sizeof(left_bits));
-                std::memcpy(&right_bits, depth + tiled_depth_offset(right_column, row),
-                            sizeof(right_bits));
-                log.hex("agc_dynamic_bias_frame", "left_bits", left_bits);
-                log.hex("agc_dynamic_bias_frame", "right_bits", right_bits);
-                if (index == kDynamicBiasFrames - 1)
-                    depths_differ = left_bits != right_bits;
+                std::memcpy(&left_bits[index], depth + tiled_depth_offset(left_column, row),
+                            sizeof(left_bits[index]));
+                std::memcpy(&right_bits[index], depth + tiled_depth_offset(right_column, row),
+                            sizeof(right_bits[index]));
+                log.hex("agc_dynamic_bias_frame", "left_bits", left_bits[index]);
+                log.hex("agc_dynamic_bias_frame", "right_bits", right_bits[index]);
             }
             log.event("agc_dynamic_bias_frame", "PASS", 0,
                       "the frame recorded and its pixels were read");
@@ -16791,9 +16788,15 @@ void run_vulkan_dynamic_depth_bias_frames(const TestContext &test, TestOutcome &
     // immediately before it (the drawn half flips between the first two frames),
     // and the frame that biased both draws kept two different biased depths in
     // one image, which one pipeline can only do through the dynamic state.
+    // The depths are the console's own measurements of the two pulls: one unit
+    // of the constant factor is 2^-23 of depth, so 4096 units is 8192 ULP at 0.5.
+    const bool depths =
+        left_bits[0] == kDynamicBiasClearBits && right_bits[0] == kDynamicBiasFullBits &&
+        left_bits[1] == kDynamicBiasFullBits && right_bits[1] == kDynamicBiasClearBits &&
+        left_bits[2] == kDynamicBiasHalfBits && right_bits[2] == kDynamicBiasFullBits;
     const bool passed = drawn_left[0] == 0 && drawn_right[0] == sampled &&
                         drawn_left[1] == sampled && drawn_right[1] == 0 &&
-                        drawn_left[2] == sampled && drawn_right[2] == sampled && depths_differ;
+                        drawn_left[2] == sampled && drawn_right[2] == sampled && depths;
     log.number("agc_dynamic_bias", "second_only_left", drawn_left[0]);
     log.number("agc_dynamic_bias", "second_only_right", drawn_right[0]);
     log.number("agc_dynamic_bias", "first_only_left", drawn_left[1]);
@@ -16804,9 +16807,11 @@ void run_vulkan_dynamic_depth_bias_frames(const TestContext &test, TestOutcome &
     char detail[200]{};
     std::snprintf(detail, sizeof(detail),
                   "biasing the second draw kept %u of %u left samples and %u right, biasing the "
-                  "first %u and %u, and biasing both %u and %u with the two halves' depths %s",
+                  "first %u and %u, and biasing both %u and %u with the halves at %08x/%08x and "
+                  "%08x/%08x",
                   drawn_left[0], sampled, drawn_right[0], drawn_left[1], drawn_right[1],
-                  drawn_left[2], drawn_right[2], depths_differ ? "different" : "equal");
+                  drawn_left[2], drawn_right[2], left_bits[2], right_bits[2], left_bits[0],
+                  right_bits[0]);
     outcome.command_built = true;
     outcome.passed = passed;
     log.event("agc_dynamic_bias", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
