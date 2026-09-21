@@ -73,6 +73,24 @@ def header_members(struct):
     raise SystemExit("no vulkan_core.h found under .deps; run make deps")
 
 
+def header_formats():
+    """Every format the 1.0 core enumeration names, by value."""
+    for pattern in HEADER_GLOBS:
+        for path in sorted(ROOT.glob(pattern)):
+            text = path.read_text()
+            start = text.find("typedef enum VkFormat {")
+            end = text.find("} VkFormat;", start)
+            if start < 0 or end < 0:
+                continue
+            by_value = {}
+            for name, value in re.findall(r"(VK_FORMAT_[A-Za-z0-9_]+)\s*=\s*(\d+)\s*,", text[start:end]):
+                number = int(value)
+                if 1 <= number <= 184:
+                    by_value.setdefault(number, name)
+            return by_value
+    raise SystemExit("no vulkan_core.h VkFormat enum found under .deps; run make deps")
+
+
 def run_host_runner():
     """The runner's `device-report` case through the driver, on this host."""
     if not (ROOT / "build/driver/host/libps5vk.a").exists():
@@ -127,6 +145,9 @@ def main():
         "features": {},
         "queue_families": {},
         "memory": {},
+        "formats": {},
+        "image_format_combos": [],
+        "image_format_properties": {},
         "instance_extensions": [],
         "device_extensions": [],
         "device_extension_versions": {},
@@ -144,6 +165,21 @@ def main():
         if probe == "device_report" and record.get("event") == "text":
             if record["field"] == "device_name":
                 inventory["properties"]["device_name"] = record["value"]
+            continue
+        if probe == "device_report_format_optimal":
+            inventory["formats"].setdefault(record["field"], {})["optimal"] = record["value"]
+            continue
+        if probe == "device_report_format_linear":
+            inventory["formats"].setdefault(record["field"], {})["linear"] = record["value"]
+            continue
+        if probe == "device_report_format_buffer":
+            inventory["formats"].setdefault(record["field"], {})["buffer"] = record["value"]
+            continue
+        if probe == "device_report_image_format":
+            inventory["image_format_properties"][record["field"]] = record["value"]
+            continue
+        if probe == "device_report_image_combo":
+            inventory["image_format_combos"].append(record["value"])
             continue
         if probe == "device_report_extension":
             inventory["instance_extensions" if record["field"] == "instance"
@@ -163,6 +199,9 @@ def main():
         for member in header_members(struct):
             if member not in inventory[section]:
                 missing.append(f"{section}.{member}")
+    for value, name in header_formats().items():
+        if name not in inventory["formats"]:
+            missing.append(f"formats.{name} (VkFormat {value})")
     if missing:
         print(f"{len(missing)} member(s) of the reported structures are not in the inventory:",
               file=sys.stderr)
@@ -185,6 +224,14 @@ def main():
           f"{inventory['properties'].get('memory_heap_count')} heaps")
     print(f"   extensions        {len(inventory['instance_extensions'])} instance, "
           f"{len(inventory['device_extensions'])} device")
+    supported = sum(1 for entry in inventory["formats"].values()
+                    if entry.get("optimal") not in (None, "0x0") or
+                    entry.get("linear") not in (None, "0x0") or
+                    entry.get("buffer") not in (None, "0x0"))
+    print(f"   formats          {len(inventory['formats'])} of {len(header_formats())} probed, "
+          f"{supported} with any feature")
+    print(f"   image combos      {len(inventory['image_format_properties'])} supported of "
+          f"{len(inventory['image_format_combos'])} probed per format")
     print(f"   written           {out}")
     return 0
 

@@ -21327,6 +21327,243 @@ void run_vulkan_blit_destination_formats(const TestContext &test, TestOutcome &o
 #define PS5VK_REPORT_LIMIT "device_report_limit"
 #define PS5VK_REPORT_FEATURE "device_report_feature"
 
+// Every format the Vulkan 1.0 core enumeration names, values 1 to 184 in order
+// (read out of the pinned header's VkFormat enum, the same way
+// tools/collect-device-report.py reads it for its completeness check). A format
+// the device does not support reports three zero feature words, which is the
+// evidence that excludes it from the CTS selection.
+struct ReportFormat
+{
+    std::uint32_t value;
+    const char *name;
+};
+
+constexpr ReportFormat kReportFormats[] = {
+    {1u, "VK_FORMAT_R4G4_UNORM_PACK8"},
+    {2u, "VK_FORMAT_R4G4B4A4_UNORM_PACK16"},
+    {3u, "VK_FORMAT_B4G4R4A4_UNORM_PACK16"},
+    {4u, "VK_FORMAT_R5G6B5_UNORM_PACK16"},
+    {5u, "VK_FORMAT_B5G6R5_UNORM_PACK16"},
+    {6u, "VK_FORMAT_R5G5B5A1_UNORM_PACK16"},
+    {7u, "VK_FORMAT_B5G5R5A1_UNORM_PACK16"},
+    {8u, "VK_FORMAT_A1R5G5B5_UNORM_PACK16"},
+    {9u, "VK_FORMAT_R8_UNORM"},
+    {10u, "VK_FORMAT_R8_SNORM"},
+    {11u, "VK_FORMAT_R8_USCALED"},
+    {12u, "VK_FORMAT_R8_SSCALED"},
+    {13u, "VK_FORMAT_R8_UINT"},
+    {14u, "VK_FORMAT_R8_SINT"},
+    {15u, "VK_FORMAT_R8_SRGB"},
+    {16u, "VK_FORMAT_R8G8_UNORM"},
+    {17u, "VK_FORMAT_R8G8_SNORM"},
+    {18u, "VK_FORMAT_R8G8_USCALED"},
+    {19u, "VK_FORMAT_R8G8_SSCALED"},
+    {20u, "VK_FORMAT_R8G8_UINT"},
+    {21u, "VK_FORMAT_R8G8_SINT"},
+    {22u, "VK_FORMAT_R8G8_SRGB"},
+    {23u, "VK_FORMAT_R8G8B8_UNORM"},
+    {24u, "VK_FORMAT_R8G8B8_SNORM"},
+    {25u, "VK_FORMAT_R8G8B8_USCALED"},
+    {26u, "VK_FORMAT_R8G8B8_SSCALED"},
+    {27u, "VK_FORMAT_R8G8B8_UINT"},
+    {28u, "VK_FORMAT_R8G8B8_SINT"},
+    {29u, "VK_FORMAT_R8G8B8_SRGB"},
+    {30u, "VK_FORMAT_B8G8R8_UNORM"},
+    {31u, "VK_FORMAT_B8G8R8_SNORM"},
+    {32u, "VK_FORMAT_B8G8R8_USCALED"},
+    {33u, "VK_FORMAT_B8G8R8_SSCALED"},
+    {34u, "VK_FORMAT_B8G8R8_UINT"},
+    {35u, "VK_FORMAT_B8G8R8_SINT"},
+    {36u, "VK_FORMAT_B8G8R8_SRGB"},
+    {37u, "VK_FORMAT_R8G8B8A8_UNORM"},
+    {38u, "VK_FORMAT_R8G8B8A8_SNORM"},
+    {39u, "VK_FORMAT_R8G8B8A8_USCALED"},
+    {40u, "VK_FORMAT_R8G8B8A8_SSCALED"},
+    {41u, "VK_FORMAT_R8G8B8A8_UINT"},
+    {42u, "VK_FORMAT_R8G8B8A8_SINT"},
+    {43u, "VK_FORMAT_R8G8B8A8_SRGB"},
+    {44u, "VK_FORMAT_B8G8R8A8_UNORM"},
+    {45u, "VK_FORMAT_B8G8R8A8_SNORM"},
+    {46u, "VK_FORMAT_B8G8R8A8_USCALED"},
+    {47u, "VK_FORMAT_B8G8R8A8_SSCALED"},
+    {48u, "VK_FORMAT_B8G8R8A8_UINT"},
+    {49u, "VK_FORMAT_B8G8R8A8_SINT"},
+    {50u, "VK_FORMAT_B8G8R8A8_SRGB"},
+    {51u, "VK_FORMAT_A8B8G8R8_UNORM_PACK32"},
+    {52u, "VK_FORMAT_A8B8G8R8_SNORM_PACK32"},
+    {53u, "VK_FORMAT_A8B8G8R8_USCALED_PACK32"},
+    {54u, "VK_FORMAT_A8B8G8R8_SSCALED_PACK32"},
+    {55u, "VK_FORMAT_A8B8G8R8_UINT_PACK32"},
+    {56u, "VK_FORMAT_A8B8G8R8_SINT_PACK32"},
+    {57u, "VK_FORMAT_A8B8G8R8_SRGB_PACK32"},
+    {58u, "VK_FORMAT_A2R10G10B10_UNORM_PACK32"},
+    {59u, "VK_FORMAT_A2R10G10B10_SNORM_PACK32"},
+    {60u, "VK_FORMAT_A2R10G10B10_USCALED_PACK32"},
+    {61u, "VK_FORMAT_A2R10G10B10_SSCALED_PACK32"},
+    {62u, "VK_FORMAT_A2R10G10B10_UINT_PACK32"},
+    {63u, "VK_FORMAT_A2R10G10B10_SINT_PACK32"},
+    {64u, "VK_FORMAT_A2B10G10R10_UNORM_PACK32"},
+    {65u, "VK_FORMAT_A2B10G10R10_SNORM_PACK32"},
+    {66u, "VK_FORMAT_A2B10G10R10_USCALED_PACK32"},
+    {67u, "VK_FORMAT_A2B10G10R10_SSCALED_PACK32"},
+    {68u, "VK_FORMAT_A2B10G10R10_UINT_PACK32"},
+    {69u, "VK_FORMAT_A2B10G10R10_SINT_PACK32"},
+    {70u, "VK_FORMAT_R16_UNORM"},
+    {71u, "VK_FORMAT_R16_SNORM"},
+    {72u, "VK_FORMAT_R16_USCALED"},
+    {73u, "VK_FORMAT_R16_SSCALED"},
+    {74u, "VK_FORMAT_R16_UINT"},
+    {75u, "VK_FORMAT_R16_SINT"},
+    {76u, "VK_FORMAT_R16_SFLOAT"},
+    {77u, "VK_FORMAT_R16G16_UNORM"},
+    {78u, "VK_FORMAT_R16G16_SNORM"},
+    {79u, "VK_FORMAT_R16G16_USCALED"},
+    {80u, "VK_FORMAT_R16G16_SSCALED"},
+    {81u, "VK_FORMAT_R16G16_UINT"},
+    {82u, "VK_FORMAT_R16G16_SINT"},
+    {83u, "VK_FORMAT_R16G16_SFLOAT"},
+    {84u, "VK_FORMAT_R16G16B16_UNORM"},
+    {85u, "VK_FORMAT_R16G16B16_SNORM"},
+    {86u, "VK_FORMAT_R16G16B16_USCALED"},
+    {87u, "VK_FORMAT_R16G16B16_SSCALED"},
+    {88u, "VK_FORMAT_R16G16B16_UINT"},
+    {89u, "VK_FORMAT_R16G16B16_SINT"},
+    {90u, "VK_FORMAT_R16G16B16_SFLOAT"},
+    {91u, "VK_FORMAT_R16G16B16A16_UNORM"},
+    {92u, "VK_FORMAT_R16G16B16A16_SNORM"},
+    {93u, "VK_FORMAT_R16G16B16A16_USCALED"},
+    {94u, "VK_FORMAT_R16G16B16A16_SSCALED"},
+    {95u, "VK_FORMAT_R16G16B16A16_UINT"},
+    {96u, "VK_FORMAT_R16G16B16A16_SINT"},
+    {97u, "VK_FORMAT_R16G16B16A16_SFLOAT"},
+    {98u, "VK_FORMAT_R32_UINT"},
+    {99u, "VK_FORMAT_R32_SINT"},
+    {100u, "VK_FORMAT_R32_SFLOAT"},
+    {101u, "VK_FORMAT_R32G32_UINT"},
+    {102u, "VK_FORMAT_R32G32_SINT"},
+    {103u, "VK_FORMAT_R32G32_SFLOAT"},
+    {104u, "VK_FORMAT_R32G32B32_UINT"},
+    {105u, "VK_FORMAT_R32G32B32_SINT"},
+    {106u, "VK_FORMAT_R32G32B32_SFLOAT"},
+    {107u, "VK_FORMAT_R32G32B32A32_UINT"},
+    {108u, "VK_FORMAT_R32G32B32A32_SINT"},
+    {109u, "VK_FORMAT_R32G32B32A32_SFLOAT"},
+    {110u, "VK_FORMAT_R64_UINT"},
+    {111u, "VK_FORMAT_R64_SINT"},
+    {112u, "VK_FORMAT_R64_SFLOAT"},
+    {113u, "VK_FORMAT_R64G64_UINT"},
+    {114u, "VK_FORMAT_R64G64_SINT"},
+    {115u, "VK_FORMAT_R64G64_SFLOAT"},
+    {116u, "VK_FORMAT_R64G64B64_UINT"},
+    {117u, "VK_FORMAT_R64G64B64_SINT"},
+    {118u, "VK_FORMAT_R64G64B64_SFLOAT"},
+    {119u, "VK_FORMAT_R64G64B64A64_UINT"},
+    {120u, "VK_FORMAT_R64G64B64A64_SINT"},
+    {121u, "VK_FORMAT_R64G64B64A64_SFLOAT"},
+    {122u, "VK_FORMAT_B10G11R11_UFLOAT_PACK32"},
+    {123u, "VK_FORMAT_E5B9G9R9_UFLOAT_PACK32"},
+    {124u, "VK_FORMAT_D16_UNORM"},
+    {125u, "VK_FORMAT_X8_D24_UNORM_PACK32"},
+    {126u, "VK_FORMAT_D32_SFLOAT"},
+    {127u, "VK_FORMAT_S8_UINT"},
+    {128u, "VK_FORMAT_D16_UNORM_S8_UINT"},
+    {129u, "VK_FORMAT_D24_UNORM_S8_UINT"},
+    {130u, "VK_FORMAT_D32_SFLOAT_S8_UINT"},
+    {131u, "VK_FORMAT_BC1_RGB_UNORM_BLOCK"},
+    {132u, "VK_FORMAT_BC1_RGB_SRGB_BLOCK"},
+    {133u, "VK_FORMAT_BC1_RGBA_UNORM_BLOCK"},
+    {134u, "VK_FORMAT_BC1_RGBA_SRGB_BLOCK"},
+    {135u, "VK_FORMAT_BC2_UNORM_BLOCK"},
+    {136u, "VK_FORMAT_BC2_SRGB_BLOCK"},
+    {137u, "VK_FORMAT_BC3_UNORM_BLOCK"},
+    {138u, "VK_FORMAT_BC3_SRGB_BLOCK"},
+    {139u, "VK_FORMAT_BC4_UNORM_BLOCK"},
+    {140u, "VK_FORMAT_BC4_SNORM_BLOCK"},
+    {141u, "VK_FORMAT_BC5_UNORM_BLOCK"},
+    {142u, "VK_FORMAT_BC5_SNORM_BLOCK"},
+    {143u, "VK_FORMAT_BC6H_UFLOAT_BLOCK"},
+    {144u, "VK_FORMAT_BC6H_SFLOAT_BLOCK"},
+    {145u, "VK_FORMAT_BC7_UNORM_BLOCK"},
+    {146u, "VK_FORMAT_BC7_SRGB_BLOCK"},
+    {147u, "VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK"},
+    {148u, "VK_FORMAT_ETC2_R8G8B8_SRGB_BLOCK"},
+    {149u, "VK_FORMAT_ETC2_R8G8B8A1_UNORM_BLOCK"},
+    {150u, "VK_FORMAT_ETC2_R8G8B8A1_SRGB_BLOCK"},
+    {151u, "VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK"},
+    {152u, "VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK"},
+    {153u, "VK_FORMAT_EAC_R11_UNORM_BLOCK"},
+    {154u, "VK_FORMAT_EAC_R11_SNORM_BLOCK"},
+    {155u, "VK_FORMAT_EAC_R11G11_UNORM_BLOCK"},
+    {156u, "VK_FORMAT_EAC_R11G11_SNORM_BLOCK"},
+    {157u, "VK_FORMAT_ASTC_4x4_UNORM_BLOCK"},
+    {158u, "VK_FORMAT_ASTC_4x4_SRGB_BLOCK"},
+    {159u, "VK_FORMAT_ASTC_5x4_UNORM_BLOCK"},
+    {160u, "VK_FORMAT_ASTC_5x4_SRGB_BLOCK"},
+    {161u, "VK_FORMAT_ASTC_5x5_UNORM_BLOCK"},
+    {162u, "VK_FORMAT_ASTC_5x5_SRGB_BLOCK"},
+    {163u, "VK_FORMAT_ASTC_6x5_UNORM_BLOCK"},
+    {164u, "VK_FORMAT_ASTC_6x5_SRGB_BLOCK"},
+    {165u, "VK_FORMAT_ASTC_6x6_UNORM_BLOCK"},
+    {166u, "VK_FORMAT_ASTC_6x6_SRGB_BLOCK"},
+    {167u, "VK_FORMAT_ASTC_8x5_UNORM_BLOCK"},
+    {168u, "VK_FORMAT_ASTC_8x5_SRGB_BLOCK"},
+    {169u, "VK_FORMAT_ASTC_8x6_UNORM_BLOCK"},
+    {170u, "VK_FORMAT_ASTC_8x6_SRGB_BLOCK"},
+    {171u, "VK_FORMAT_ASTC_8x8_UNORM_BLOCK"},
+    {172u, "VK_FORMAT_ASTC_8x8_SRGB_BLOCK"},
+    {173u, "VK_FORMAT_ASTC_10x5_UNORM_BLOCK"},
+    {174u, "VK_FORMAT_ASTC_10x5_SRGB_BLOCK"},
+    {175u, "VK_FORMAT_ASTC_10x6_UNORM_BLOCK"},
+    {176u, "VK_FORMAT_ASTC_10x6_SRGB_BLOCK"},
+    {177u, "VK_FORMAT_ASTC_10x8_UNORM_BLOCK"},
+    {178u, "VK_FORMAT_ASTC_10x8_SRGB_BLOCK"},
+    {179u, "VK_FORMAT_ASTC_10x10_UNORM_BLOCK"},
+    {180u, "VK_FORMAT_ASTC_10x10_SRGB_BLOCK"},
+    {181u, "VK_FORMAT_ASTC_12x10_UNORM_BLOCK"},
+    {182u, "VK_FORMAT_ASTC_12x10_SRGB_BLOCK"},
+    {183u, "VK_FORMAT_ASTC_12x12_UNORM_BLOCK"},
+    {184u, "VK_FORMAT_ASTC_12x12_SRGB_BLOCK"},
+};
+
+// The image-format combinations probed for every format: a fixed list, so that a
+// combination absent from the inventory means the device answered
+// VK_ERROR_FORMAT_NOT_SUPPORTED rather than that nobody asked.
+struct ReportImageCombo
+{
+    VkImageType type;
+    VkImageTiling tiling;
+    VkImageUsageFlags usage;
+    VkImageCreateFlags flags;
+    const char *label;
+};
+
+constexpr ReportImageCombo kReportImageCombos[] = {
+    {VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT, 0,
+     "2d-optimal-sampled"},
+    {VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_STORAGE_BIT, 0,
+     "2d-optimal-storage"},
+    {VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, 0,
+     "2d-optimal-colour"},
+    {VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 0,
+     "2d-optimal-depth"},
+    {VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT, 0,
+     "2d-optimal-input"},
+    {VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, 0,
+     "2d-optimal-transfer-src"},
+    {VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT, 0,
+     "2d-optimal-transfer-dst"},
+    {VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
+     VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, 0,
+     "2d-optimal-transfer-both"},
+    {VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_LINEAR, VK_IMAGE_USAGE_SAMPLED_BIT, 0, "2d-linear-sampled"},
+    {VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_LINEAR, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, 0,
+     "2d-linear-colour"},
+    {VK_IMAGE_TYPE_3D, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT, 0,
+     "3d-optimal-sampled"},
+    {VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT,
+     VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT, "cube-optimal-sampled"},
+};
+
 void run_vulkan_device_report(const TestContext &test, TestOutcome &outcome) noexcept
 {
     JsonLog &log = test.log;
@@ -21764,6 +22001,58 @@ void run_vulkan_device_report(const TestContext &test, TestOutcome &outcome) noe
     }
     log.number("device_report", "device_extension_count",
                static_cast<long long>(device_extension_count));
+
+    for (const ReportImageCombo &combo : kReportImageCombos)
+        log.text("device_report_image_combo", "probed", combo.label);
+
+    const auto get_format_properties = reinterpret_cast<PFN_vkGetPhysicalDeviceFormatProperties>(
+        vk_icdGetInstanceProcAddr(instance, "vkGetPhysicalDeviceFormatProperties"));
+    const auto get_image_format_properties =
+        reinterpret_cast<PFN_vkGetPhysicalDeviceImageFormatProperties>(
+            vk_icdGetInstanceProcAddr(instance, "vkGetPhysicalDeviceImageFormatProperties"));
+    if (get_format_properties == nullptr || get_image_format_properties == nullptr)
+    {
+        log.event("device_report", "FAIL", -1, "the format queries are missing");
+        return;
+    }
+    unsigned format_unsupported = 0;
+    unsigned image_combos_supported = 0;
+    for (const ReportFormat &format : kReportFormats)
+    {
+        VkFormatProperties properties{};
+        get_format_properties(physical, static_cast<VkFormat>(format.value), &properties);
+        log.hex("device_report_format_optimal", format.name, properties.optimalTilingFeatures);
+        log.hex("device_report_format_linear", format.name, properties.linearTilingFeatures);
+        log.hex("device_report_format_buffer", format.name, properties.bufferFeatures);
+        if (properties.optimalTilingFeatures == 0 && properties.linearTilingFeatures == 0 &&
+            properties.bufferFeatures == 0)
+            format_unsupported++;
+        for (const ReportImageCombo &combo : kReportImageCombos)
+        {
+            VkImageFormatProperties image{};
+            if (get_image_format_properties(physical, static_cast<VkFormat>(format.value),
+                                            combo.type, combo.tiling, combo.usage, combo.flags,
+                                            &image) != VK_SUCCESS)
+                continue;
+            char key[128]{};
+            std::snprintf(key, sizeof(key), "%s|%s", format.name, combo.label);
+            char value[128]{};
+            std::snprintf(value, sizeof(value), "mips %u, layers %u, samples 0x%x, size %llu",
+                          image.maxMipLevels, image.maxArrayLayers,
+                          static_cast<unsigned>(image.sampleCounts),
+                          static_cast<unsigned long long>(image.maxResourceSize));
+            log.text("device_report_image_format", key, value);
+            image_combos_supported++;
+        }
+    }
+    log.number("device_report", "format_count",
+               static_cast<long long>(sizeof(kReportFormats) / sizeof(kReportFormats[0])));
+    log.number("device_report", "format_unsupported_count",
+               static_cast<long long>(format_unsupported));
+    log.number("device_report", "image_combo_count",
+               static_cast<long long>(sizeof(kReportImageCombos) / sizeof(kReportImageCombos[0])));
+    log.number("device_report", "image_combo_supported_count",
+               static_cast<long long>(image_combos_supported));
 
     const auto destroy_instance = reinterpret_cast<PFN_vkDestroyInstance>(
         vk_icdGetInstanceProcAddr(instance, "vkDestroyInstance"));

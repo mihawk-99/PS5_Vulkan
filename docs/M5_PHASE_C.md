@@ -6775,3 +6775,40 @@ genuine upstream VK-GL-CTS into a PS5 payload at the same pinned revision
 (`vulkan-cts-1.3.8.4`, `a0270c18…`) and documents the platform pieces and pitfalls; the
 static-recompilation project in `docs/AGC_UPSTREAM_NOTES.md` is a hardware-layer source,
 not a CTS one. Nothing here is a conformance claim.
+
+## 2026-09-21 — the inventory gains the format matrix, and it already disagrees with itself
+
+The second piece of Phase E1 is the rest of the selection surface: the runner's
+`device-report` case now walks **every format the Vulkan 1.0 core enumeration names**
+(values 1 to 184, read out of the pinned header, the same way the collector reads it for
+its completeness check) and, for each, probes a fixed list of twelve image-format
+combinations -- 2D optimal with sampled, storage, colour, depth, input and the three
+transfer usages, 2D linear sampled and colour, 3D optimal sampled, and a cube-compatible
+2D image. Each format reports its three feature words; each *supported* combination
+reports its `maxMipLevels`, `maxArrayLayers`, `sampleCounts` and `maxResourceSize`, and
+the twelve probed labels are recorded once, so a combination missing from the inventory
+means the device answered `VK_ERROR_FORMAT_NOT_SUPPORTED` rather than that nobody asked.
+
+Measured (`conformance_inventory/device_report.json`, host build):
+
+| | |
+| --- | --- |
+| formats | **184 of 184 probed**, **58 with any feature** -- the same 58 the format audit counts, reached independently |
+| image-format combinations | **307 supported** of the 2208 probed, across 25 distinct formats |
+| by usage | sampled 50, transfer-both/dst/src 50 each, cube-compatible sampled 50, colour 37, storage 16, depth 4 |
+| linear tiling | **none**: no format reports a linear feature and no linear combination is accepted, which is self-consistent reporting |
+| 3D | **none**: no format reports a 3D combination |
+
+**Two inconsistencies fell out of it before any CTS case ran**, which is what the
+inventory is for:
+
+1. **`maxImageDimension3D` is 256 and no format supports a 3D image.** The required-limits
+   table is why the value cannot simply be zeroed, so the choice is to support 3D images
+   or to refuse `VK_IMAGE_TYPE_3D` by name at creation -- but a device that reports a 3D
+   dimension and then refuses every 3D image is reporting a capability it does not have,
+   and that is exactly what `dEQP-VK.api.info.image_format_properties` reads.
+2. **Four formats claim `VK_FORMAT_FEATURE_CUBE_COMPATIBLE_BIT` and only two answer a
+   cube-compatible image-format query.** The feature bit and the image-format answer have
+   to agree; CTS reads both.
+
+Both are findings, not fixes: each gets its own round, with the regression test first.

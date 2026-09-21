@@ -85,10 +85,14 @@ enum, depth/stencil, sRGB or console-fault families.
 `device-report` case walks the device's own reporting and
 `tools/collect-device-report.py` collects it into
 `conformance_inventory/device_report.json`, completeness-checked against the Vulkan
-headers and diffed by `tools/check-runner-cases.sh` so it cannot drift. The device reports
-97 limits, 55 features with **one** true (`robustBufferAccess`), one queue family, one
-host-coherent memory type, and `display`/`surface`/`swapchain` among its extensions --
-which is the surface every CTS case is selected or excluded against (`docs/CTS.md`).
+headers and diffed by `tools/check-runner-cases.sh` so it cannot drift. It carries 97
+limits, 55 features with **one** true (`robustBufferAccess`), one queue family, one
+host-coherent memory type, `display`/`surface`/`swapchain` among the extensions, and the
+format matrix: **184 of 184 core formats probed, 58 with any feature** (the format
+audit's own count), 307 image-format combinations accepted, none linear and none 3D. Two
+self-inconsistencies it exposed are the campaign's first work items:
+`maxImageDimension3D` is 256 while no 3D combination exists, and four formats claim
+cube-compatibility while two answer a cube query (`docs/M5_PHASE_C.md`).
 
 **An upstream AGC source was checked against this driver** (2026-09-21). The
 static-recompilation project's published tile-equation table agrees, texel for texel, with

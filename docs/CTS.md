@@ -38,8 +38,9 @@ and a capability is advertised only once its coverage passes.
   `tools/collect-device-report.py` collects it into
   `conformance_inventory/device_report.json`, completeness-checked against the
   Vulkan headers, with `tools/check-runner-cases.sh` refusing an inventory that a
-  fresh run does not reproduce. The format-feature table and
-  `vkGetPhysicalDeviceImageFormatProperties` are the next section to add to it.
+  fresh run does not reproduce. It now carries the format-feature table for all
+  184 core formats and the image-format answers for twelve probed combinations each,
+  which is the whole surface a case's requirements are read against.
 - Select cases from the CTS's own case-list files and commit them as the run's
   manifest with its hash, so the selection is regenerable and reviewable.
 - A case whose requirements name an unadvertised feature, extension, limit,
