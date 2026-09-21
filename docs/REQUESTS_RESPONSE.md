@@ -136,3 +136,121 @@ days older than the compiler migration and has been rebuilt; every console run
 quoted here is tied to the artifact digest printed in its own section of
 `docs/M5_PHASE_C.md` (the R round's runs to `b33b813c...`, the depth-bias and
 resolve-usage sweep to `998037c4...`).
+
+---
+
+# Answers to `PS5_VULKAN_REQUESTSv2.md` (R7-R9 and the coverage note)
+
+The second batch's evidence is of a different kind -- each item was a prediction read
+from vkQuake's source -- so each was re-checked at HEAD before anything was written,
+and one detail of one prediction turned out to be wrong (R7's refusal point, below).
+Per item: status, the probe, the run's digest, and what the application side should do.
+
+| Request | Status | The probe | Run, digest |
+| --- | --- | --- | --- |
+| R8 `VK_DYNAMIC_STATE_DEPTH_BIAS` | **closed** | `v0-dynamic-depth-bias`, plus the focused host gate `c5_depth_bias` | pid 371, `4aec17c7…` |
+| the clamp decision | **closed**: refused by name in both forms | `v0-depth-bias`'s clamp frame + `v0-two-sets`' run | pid 371, `4aec17c7…` |
+| R9 push constants | **confirmed open**: the path does not work from an application's SPIR-V | `v0-push-constant` (a measurement, red on purpose) + the host gate `v0_push_constant` | pid 377, `6306b4aa…` |
+| R7 descriptor-set count | **confirmed open**, route chosen | `v0-two-sets` | pid 378, `084a7c84…` |
+| R4's coverage note | **done**, and the claim behind it was wrong | the three refusal sentences in one run's klog | pid 380, `c9c57b40…` |
+
+## R8 -- closed, and the clamp refused with it
+
+Re-checked at HEAD first: `ps5vk_draw_refusal`'s dynamic-state walk refused
+`VK_DYNAMIC_STATE_DEPTH_BIAS`, exactly as predicted, and every pipeline in the port
+would have hit it. The bias is now the *command buffer's* state: the pipeline's three
+factors reach it through `vkCmdBindPipeline` unless the pipeline declares the dynamic
+state, and `depthBiasEnable` always comes from the pipeline, because Vulkan 1.0's
+dynamic depth bias covers the factors only. Two measurements were needed on the way
+and both are in `docs/M5_PHASE_C.md`: the enable is static (the first console run drew
+nothing), and `vkCmdSetDepthBias`'s argument order is (constant, **clamp**, slope) --
+the runtime's own prototype, which the harness had wrong.
+
+The probe is the request's: one pipeline, two draws whose bias changes between them,
+one half of the target each. Measured (pid 371): biasing the second draw kept 0 of 3
+left samples and 3 of 3 right; biasing the first kept 3 and 0 -- mirror images, which
+is what says each draw used the values set immediately before it -- and biasing both by
+different amounts left two different biased depths in one image (0x3efff000 and
+0x3effe000). `v0-depth-bias`, `v0-cull` and `m2-solid` regress.
+
+**The clamp is refused by name, as decided.** A non-zero `depthBiasClamp` is refused in
+the static form at the pipeline and in the dynamic form at the draw, with a sentence
+that names the register, the measurement and the probe that would widen it. The static
+case's clamp frame now *expects* the refusal instead of the capped draw it used to
+measure, and the driver no longer caps anything silently.
+
+## R9 -- confirmed open: push constants do not reach a shader from an application's SPIR-V
+
+The probe is the request's own, and it says *where* the path breaks rather than only
+that it does. Measured on the console (pid 377): the driver copied the second draw's
+bytes into the reserved block (the debug API reads back 0,0,1,1 where the first draw's
+were 1,0,0,1), the descriptor names that block with a 16-byte stride, the pixel user
+data names the table -- and both halves of the target read back `0x00000000`. The
+upload arrives; the stage's read does not.
+
+The mechanism is the one `driver/ps5vk_nir.c` documents: the standalone compiler lowers
+an application's `layout(push_constant)` to a user-data location `PsbcShaderMetadata`
+does not report, and the driver -- which cannot see it -- writes only the reserved
+binding instead. The driver's own NIR rewrite is what makes push constants work for the
+stages it builds itself (Mesa's `vk_meta` clears read theirs happily, which is every
+clear case in this tree), and an application's SPIR-V never passes through it.
+
+**What the port should do:** keep W4. Its per-draw transforms have to stay in a uniform
+buffer until the compile path changes. Two routes are named in `docs/M5_PHASE_C.md`:
+the driver could run the application's SPIR-V through Mesa's `spirv_to_nir` and its own
+rewrite before handing NIR to `psbc_compile_nir` (the path the meta stages already
+take), or the SDK compiler could report the push-constant user-data location the way it
+reports every other one. Neither is done; the probe was asked for first and it is what
+says the work is needed.
+
+## R7 -- confirmed, with one correction, and route (b) chosen
+
+Confirmed with the request's probe (pid 378): a pipeline layout with two set layouts,
+both empty so no binding reaches the shaders, and a graphics pipeline against it. The
+pipeline is **created**, the **draw** is refused, and the sentence is
+
+    descriptor set 1 is beyond the 1 this driver binds; sets past 0 are D1 (docs/M5_REFERENCE.md)
+
+**One detail of the prediction was wrong**: the request expected the refusal at
+pipeline creation. This driver refuses the draw instead -- creation succeeds so that
+every package can be checked, which is the shape `ps5vk_draw_refusal` has always had --
+and the sentence comes from the draw path, not the one the request quoted.
+
+**The route: (b).** Implement multi-set binding within the advertised limit of four,
+and have vkQuake merge its five layouts into four. Vulkan requires *at least* four sets,
+so the driver must go on advertising four, which makes today's one-set behaviour a
+conformance gap of R1's kind -- the report is a promise this driver does not keep yet.
+The cost of multi-set is the same for (a) and (b) and is not the driver's alone: the
+compiler metadata names one descriptor set per stage and a table travels in one
+user-data dword, so a second set needs the compiler fork to report and emit a second
+pointer and table (a patch in the style this repository already carries). Route (a)
+pays that and additionally promises five, a limit nothing here has measured; route (c)
+trades one application merge for collapsing the engine's whole binding interface.
+Until it lands, keep the port at four or fewer layouts and expect this refusal above
+that.
+
+## The coverage note, and a claim of ours that was wrong
+
+The second document repeats a claim *this* repository made in its R5 answer: that the
+runner installs no debug messenger, so a refusal's sentence never reaches the klog.
+That claim was wrong. The harness enables `VK_EXT_debug_utils` and installs a messenger
+whose callback hands every warning and error to the report a case passed -- which is how
+every item in both documents was found from the application side. The real gap was ours:
+the one frame that had produced a refusal in that round passed `report = NULL`, which
+discarded the sentence with the report.
+
+Fixed and measured: the frames a probe expects to be refused now get a report whose
+records are INFO, and one run (pid 380, `c9c57b40…`) carries all three of this batch's
+refusal sentences -- the resolve's usage bit (R5), the descriptor-set count (R7) and the
+clamp -- while the ten cases of the regression sweep pass together. The coverage item
+stands closed with that correction, and the correction is the more useful half of it.
+
+## Verification for this batch
+
+`tools/check-driver.sh` passes whole with the two new host gates
+(`c5_depth_bias` for R8's dynamic form, `v0_push_constant` for R9's driver half), and
+the console sweeps named above each regress the list the request gave: `v0-cull`,
+`v0-depth-bias`, `v0-stencil-clear`, `v0-sampler-address`, `v0-two-passes`,
+`v0-resolve-usage`, `c8-resolve` and `m2-solid`. `v0-push-constant` is the one case
+that stays red, on purpose: it is R9's measurement, not a claim, and its message says
+which half of the path arrived.
