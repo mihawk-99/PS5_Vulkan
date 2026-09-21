@@ -6117,3 +6117,22 @@ request. After the fix the same run reads 65536 zero bytes for both depths
 (`Klog_Logs/r3-stencil-clear-after.log`, pid 329), with `v0-stencil` (round 12's
 write-then-read case) and `m2-solid` regressing. The case's golden is
 `golden/v0-stencil-clear` with `jobs/v0-stencil-clear/queue.txt`.
+
+## 2026-09-20 — R5 and R4: the resolve refusal's sentence, and what the audits cannot see
+
+**R5, reworded rather than tiled.** `vkCmdResolveImage` refuses unless both
+images are tiled, and `ps5vk_image_storage` chooses tiled storage from the usage
+bits -- `COLOR_ATTACHMENT` or `DEPTH_STENCIL_ATTACHMENT`. An application that
+follows the specification asks for a destination with `TRANSFER_DST` (and
+`SAMPLED`), which is stored in rows, so it is refused by a sentence about tiling
+with no path from the sentence to the usage bit that decided it
+(PS5_VULKAN_REQUESTS.md, R5). The refusal now names the bit, the storage rule and
+the workaround in one sentence.
+
+The request offers tiling a transfer destination as the alternative, and this
+round took the sentence deliberately: tiling is chosen from the usage bits, and
+a texture upload declares `TRANSFER_DST` too, so tiling every transfer
+destination would move every sampled image's descriptor (the tiled kind bit) and
+with it every golden that samples a texture. The sentence is one line; the tiling
+is a repository-wide re-capture for the same behaviour. Both are the request's
+own two options, and it makes no recommendation between them.
