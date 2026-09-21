@@ -5,6 +5,15 @@
     "tag": "vulkan-cts-1.3.8.4",
     "verified_head": "a0270c1897597e6c77679870e10415398a13001c"
   },
+  "external_checked_out": {
+    "amber": "8e90b2d2f532bcd4a80069e3f37a9698209a21bc",
+    "glslang": "bada5c87ec6db4441db129d8506742c4a72bd610",
+    "jsoncpp": "9059f5cad030ba11d37818847443a53918c327b1",
+    "nvidia-video-samples": "6821adf11eb4f84a2168264b954c170d03237699",
+    "spirv-headers": "d3c2a6fa95ad463ca8044d7fc45557db381a6a64",
+    "spirv-tools": "f9184c6501f7e349e0664d281ac93b1db9c1e5ad",
+    "vulkan-docs": "d99193d3fcc4b2a0dacc0a9d7e4951ea611a3e96"
+  },
   "external_declared": {
     "files": {
       "renderdoc": [
@@ -46,5 +55,5 @@
       }
     }
   },
-  "note": "Phase E1 pin (docs/CTS.md). The CTS revision is verified from the checkout; the external revisions are what the CTS's external/fetch_sources.py declares, not necessarily what a build compiles."
+  "note": "Phase E1 pin (docs/CTS.md). Three different things, kept apart on purpose: the CTS revision, verified from the checkout; the external revisions the CTS's own external/fetch_sources.py declares; and the revisions actually checked out under external/. None of them is what a build compiles -- that belongs in the build's manifest."
 }

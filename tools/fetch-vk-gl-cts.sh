@@ -59,20 +59,49 @@ for url, revision, directory in re.findall(
 for url, name, digest, directory in re.findall(
         r'SourceFile\(\s*"([^"]+)",\s*"([^"]+)",\s*"([0-9a-f]{64})",\s*"([^"]+)"', text):
     file_pins.setdefault(directory, []).append({"url": url, "file": name, "sha256": digest})
+# What is actually checked out under external/, which the CTS's fetch script
+# puts at <baseDir>/<extractDir> (extractDir defaults to "src"). Declared and
+# checked out can differ; a build can differ from both, which is why the
+# compiled revisions belong in the build's own manifest.
+checked_out = {}
+for directory in git_pins:
+    for candidate in (work / "external" / directory / "src", work / "external" / directory):
+        if (candidate / ".git").exists():
+            revision = subprocess.run(["git", "-C", str(candidate), "rev-parse", "HEAD"],
+                                      capture_output=True, text=True).stdout.strip()
+            checked_out[directory] = revision
+            break
+
 record.parent.mkdir(parents=True, exist_ok=True)
 record.write_text(json.dumps({
-    "note": "Phase E1 pin (docs/CTS.md). The CTS revision is verified from the checkout; "
-            "the external revisions are what the CTS's external/fetch_sources.py declares, "
-            "not necessarily what a build compiles.",
+    "note": "Phase E1 pin (docs/CTS.md). Three different things, kept apart on purpose: the "
+            "CTS revision, verified from the checkout; the external revisions the CTS's own "
+            "external/fetch_sources.py declares; and the revisions actually checked out under "
+            "external/. None of them is what a build compiles -- that belongs in the build's "
+            "manifest.",
     "cts": {"repo": repo, "tag": tag, "commit": commit, "verified_head": head},
     "external_declared": {"git": git_pins, "files": file_pins},
+    "external_checked_out": checked_out,
 }, indent=2, sort_keys=True) + "\n")
+diverged = sorted(d for d, revision in checked_out.items()
+                  if git_pins.get(d, {}).get("revision") != revision)
+if diverged:
+    print(f"   diverged          {len(diverged)} checked out revision(s) differ from the "
+          f"declared pin: {' '.join(diverged)}")
 print(f"   record            {record}")
 print(f"   cts               {tag} {commit[:12]}")
 print(f"   external declared {len(git_pins)} git repos, "
       f"{sum(len(v) for v in file_pins.values())} files")
 PY
 }
+
+if [[ ${1:-} == --externals ]]; then
+    [[ -d $work/.git ]] || { echo "run tools/fetch-vk-gl-cts.sh first" >&2; exit 2; }
+    echo "== the CTS's own external dependencies (external/fetch_sources.py)"
+    ( cd "$work" && python3 external/fetch_sources.py )
+    write_record
+    exit 0
+fi
 
 if [[ ${1:-} == --check ]]; then
     [[ -f $record ]] || { echo "missing $record; run tools/fetch-vk-gl-cts.sh" >&2; exit 2; }
@@ -90,8 +119,14 @@ docs = (record.parent.parent / "docs" / "CTS.md").read_text()
 missing = [name for name in (tag, commit) if name not in docs]
 if missing:
     raise SystemExit(f"docs/CTS.md does not name {', '.join(missing)}")
+checked = data.get("external_checked_out", {})
+declared = data["external_declared"]["git"]
+for directory, revision in checked.items():
+    if directory in declared and declared[directory]["revision"] != revision:
+        raise SystemExit(f"{record}: {directory} is recorded as checked out at {revision} "
+                         f"but declared at {declared[directory]['revision']}")
 print(f"   {record.name} and docs/CTS.md agree on {tag} {commit[:12]}, "
-      f"{len(data['external_declared']['git'])} declared external repos")
+      f"{len(declared)} declared external repos, {len(checked)} checked out")
 PY
     echo "cts pin: PASS"
     exit 0

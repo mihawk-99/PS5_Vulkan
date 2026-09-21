@@ -159,7 +159,11 @@ amber, jsoncpp, Vulkan-Docs and the NVIDIA video samples. Declared is not
 compiled: the reference project's manifest records different commits for four of
 those than the script declares. The record gains the compiled revisions when the
 payload build can report them, and `make lint` checks it against this file's pin
-so the two cannot drift.
+so the two cannot drift. `tools/fetch-vk-gl-cts.sh --externals` then runs the CTS's
+own `external/fetch_sources.py` inside the checkout -- glslang, SPIRV-Tools,
+SPIRV-Headers, Vulkan-Docs, amber, jsoncpp and the NVIDIA video samples, 988 MB --
+and adds the revisions actually checked out, which on this host equal the declared
+ones for all seven.
 
 ## Why this is not a small task
 

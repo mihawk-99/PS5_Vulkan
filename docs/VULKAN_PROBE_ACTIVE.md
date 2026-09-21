@@ -93,10 +93,11 @@ audit's own count), 307 image-format combinations accepted, none linear and none
 self-inconsistencies it exposed are the campaign's first work items:
 `maxImageDimension3D` is 256 while no 3D combination exists, and four formats claim
 cube-compatibility while two answer a cube query (`docs/M5_PHASE_C.md`). The pinned CTS
-is a fetch now -- `tools/fetch-vk-gl-cts.sh`, 1.7 GB under `.deps`, its revision verified
-and its `conformance_inventory/cts_pin.json` separating the revision from the external
-revisions the CTS only *declares* -- with `make lint` holding the record to the pin in
-`docs/CTS.md`.
+is a fetch now -- `tools/fetch-vk-gl-cts.sh`, 2.0 GB under `.deps` including its 988 MB
+external tree, its revision verified and its `conformance_inventory/cts_pin.json`
+separating the revision, the externals the CTS only *declares*, and the ones actually
+checked out (all seven equal the declared pins) -- with `make lint` holding the record to
+the pin in `docs/CTS.md`.
 
 **An upstream AGC source was checked against this driver** (2026-09-21). The
 static-recompilation project's published tile-equation table agrees, texel for texel, with

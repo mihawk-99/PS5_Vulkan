@@ -6839,3 +6839,29 @@ revisions when the payload build can report them.
 `tools/fetch-vk-gl-cts.sh --check` verifies the record against `docs/CTS.md`'s pin without
 needing the checkout or the network, and `make lint` runs it, so the pin cannot drift
 between the two files.
+
+## 2026-09-21 — the CTS's external dependencies are fetched, and all seven match the pins
+
+`tools/fetch-vk-gl-cts.sh --externals` runs the pinned CTS's own
+`external/fetch_sources.py` inside the checkout, so the external tree is built the way the
+CTS expects rather than by hand, and the record gains a third section:
+
+| | |
+| --- | --- |
+| the CTS revision | `vulkan-cts-1.3.8.4`, `a0270c18…`, verified from the checkout |
+| the declared externals | 7 git repositories and one file hash, read out of `external/fetch_sources.py` |
+| the checked-out externals | what is actually on disk under `external/<name>/src`, read back with `git rev-parse` |
+
+**All seven checked-out revisions equal the declared ones** (SPIRV-Tools `f9184c65…`,
+glslang `bada5c87…`, SPIRV-Headers `d3c2a6fa…`, Vulkan-Docs `d99193d3…`, amber
+`8e90b2d2…`, jsoncpp `9059f5ca…`, vk_video_samples `6821adf1…`), so for this fetch the two
+agree -- the divergence the reference project recorded came from *its* build using newer
+checkouts, not from the CTS's script. `--check` refuses a record whose checked-out section
+contradicts its declared section, and it does that with no checkout and no network, so
+`make lint` keeps the record honest without the 2 GB tree.
+
+The tree is now 2.0 GB, of which 988 MB is `external/` (glslang 124 MB, Vulkan-Docs 63 MB,
+SPIRV-Tools 58 MB, the NVIDIA video samples 29 MB, amber, jsoncpp, libpng, zlib,
+renderdoc's header). Disk: 239 GB free. What a *build* compiles can still differ from all
+three of these, which is why the record says the compiled revisions belong in the build's
+own manifest, and not here.
