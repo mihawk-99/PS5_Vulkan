@@ -756,8 +756,18 @@ ps5vk_queue_run_copy_steps(struct ps5vk_queue *queue, const struct vk_queue_subm
     * its end packets on them, so a split submission's capture keeps its own
     * copy of every step, end packets included (ps5vk_queue_run_step,
     * ps5vk_debug_submission_steps). It outlives this call: the runner's
-    * capture reads it until the next submission replaces it. */
-   const size_t capture_words = (size_t)words + (size_t)split_count * PS5VK_STREAM_END_WORDS;
+    * capture reads it until the next submission replaces it.
+    *
+    * The steps are the words before the first split, one step per split, and
+    * the words after the last one: at most split_count + 1 of them carry words,
+    * and each writes its own end packets -- so the buffer holds one step's end
+    * packets more than the split count alone suggests. Sizing it for the splits
+    * alone is what wrote PS5VK_STREAM_END_WORDS words past this allocation on
+    * every frame of a recording whose last split was followed by more words
+    * (R6: two render passes with the resolve recorded between them; the check
+    * below names that arithmetic instead of repeating it). */
+   const size_t capture_steps = (size_t)split_count + 1;
+   const size_t capture_words = (size_t)words + capture_steps * PS5VK_STREAM_END_WORDS;
    if (queue->step_capture_words < capture_words) {
       free(queue->step_capture);
       queue->step_capture = malloc(capture_words * sizeof(uint32_t));
@@ -782,6 +792,25 @@ ps5vk_queue_run_copy_steps(struct ps5vk_queue *queue, const struct vk_queue_subm
        * it anyway would put an empty stream and its marker in front of the
        * frame the capture reads. */
       if (end != start) {
+         /* R6: the capture buffer holds one step's end packets per *split*, but
+          * a recording whose last split is followed by more words runs
+          * split_count + 1 steps, and the last step's end packets land past the
+          * buffer: a heap write of PS5VK_STREAM_END_WORDS words, which is what
+          * corrupted the heap of an application that records two render passes
+          * a frame (docs/M5_PHASE_C.md, R6). The check is here rather than only
+          * in the size below so that a future change to how steps are counted
+          * names itself instead of writing past the buffer. */
+         const size_t step_words = (size_t)(end - start) + PS5VK_STREAM_END_WORDS;
+         if (capture_at + step_words > queue->step_capture_words) {
+            fprintf(stderr, "[ps5vk] step capture overflow: %zu words at %zu, buffer %zu\n",
+                    step_words, capture_at, queue->step_capture_words);
+            result = vk_errorf(queue, VK_ERROR_UNKNOWN,
+                               "a split submission's step capture needs %zu words where the "
+                               "buffer holds %zu (%u words, %u splits)",
+                               capture_at + step_words, queue->step_capture_words, words,
+                               split_count);
+            break;
+         }
          memcpy(stream + start, saved + start, (size_t)(end - start) * sizeof(uint32_t));
          result = ps5vk_queue_run_step(queue, submit, stream, capacity, marker, start, end,
                                        queue->step_capture + capture_at);

@@ -2388,6 +2388,7 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
     * before the four-sample source is: the flag has to be set here, not in
     * create_resolve_target (Phase C8). */
    triangle->resolve_output = input->resolve_output;
+   triangle->two_passes = input->two_passes;
    if (display ? !create_swapchain(triangle, physical)
                : !create_image(triangle, physical, input))
       return PS5VK_TRIANGLE_FAILED;
@@ -2753,6 +2754,32 @@ record(struct ps5vk_triangle *triangle, VkCommandBuffer command, VkRenderPass pa
    CALL(triangle, CmdBeginRenderPass)(command, &pass_begin, VK_SUBPASS_CONTENTS_INLINE);
    record_body(triangle, command, pipeline, then);
    CALL(triangle, CmdEndRenderPass)(command);
+   if (triangle->two_passes) {
+      /* R6: a *second* render pass in the same command buffer, over the same
+       * framebuffer and with the same clear, which is what a renderer that
+       * renders offscreen and then draws its target records -- and the shape
+       * whose recorded passes corrupted the heap (docs/M5_PHASE_C.md, R6). A
+       * frame that resolves its offscreen target records the resolve between
+       * the two passes, where an application that resolves its multisampled
+       * pass before the main one records it; that copy is what splits the
+       * submission, and the second pass's words are what follow the split. */
+      if (triangle->resolve_output) {
+         const VkImageResolve region = {
+            .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+            .srcOffset = {0, 0, 0},
+            .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+            .dstOffset = {0, 0, 0},
+            .extent = {PS5VK_TRIANGLE_WIDTH, PS5VK_TRIANGLE_HEIGHT, 1},
+         };
+         CALL(triangle, CmdResolveImage)(command, triangle->resolve_image,
+                                         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                         triangle->images[0], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                                         &region);
+      }
+      CALL(triangle, CmdBeginRenderPass)(command, &pass_begin, VK_SUBPASS_CONTENTS_INLINE);
+      record_body(triangle, command, pipeline, then);
+      CALL(triangle, CmdEndRenderPass)(command);
+   }
    if ((triangle->query_pool != VK_NULL_HANDLE || triangle->timestamp_pool != VK_NULL_HANDLE) &&
        triangle->query_copy_buffer != VK_NULL_HANDLE) {
       /* Phase V0-query: the same result vkGetQueryPoolResults answers, written
@@ -2764,10 +2791,13 @@ record(struct ps5vk_triangle *triangle, VkCommandBuffer command, VkRenderPass pa
          timestamp ? 1u : triangle->query, 1, triangle->query_copy_buffer, 0,
          2u * sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
    }
-   if (triangle->resolve_output) {
+   if (triangle->resolve_output && !triangle->two_passes) {
       /* Phase C8: the four-sample image the pass just rendered into, resolved
        * into the program's one-sample image, which is what a caller reads back.
-       * Its own view and image are the ones the framebuffers named. */
+       * Its own view and image are the ones the framebuffers named. A frame
+       * with a second pass resolves *between* the passes instead
+       * (record_resolve below), which is where a renderer that resolves its
+       * offscreen target and then draws the main pass records it. */
       const VkImageResolve region = {
          .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
          .srcOffset = {0, 0, 0},

@@ -12656,6 +12656,150 @@ void run_vulkan_resolve_frames(const TestContext &test, TestOutcome &outcome) no
     outcome.passed = framed == 4;
 }
 
+// R6: two render passes in one command buffer, and the copy a resolve records
+// between them.
+//
+// An application that renders offscreen and then draws its target records two
+// render passes in one command buffer, and a multisampled offscreen pass is
+// usually resolved before the second one. The console measured that shape
+// corrupting the heap: one pass a frame runs indefinitely, two die within a
+// frame or two, and the corruption surfaces at submit rather than during
+// recording (docs/M5_PHASE_C.md, R6). So the case records three shapes in
+// order, logging each before it runs, which is what names the shape that died:
+//
+//   one pass                    the control every earlier frame recorded
+//   two passes                  a second render pass, no copy between them
+//   two passes, resolve between the second pass after the resolve's copy
+//
+// Each shape runs kTwoPassFrames frames, one command buffer and one submit a
+// frame, and each frame logs before its draw so the last record names the frame
+// that completed. The frame's readback is folded after the shape's first and
+// last frame: the folds must be equal, which is what "the frames still draw the
+// same thing a hundred times over" means for a case that exists to stay alive.
+constexpr unsigned kTwoPassFrames = 40;
+
+void run_vulkan_two_pass_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8},
+    };
+    struct Shape
+    {
+        const char *name;
+        bool two_passes;
+        bool resolve;
+    };
+    // The control, then the passes, then the passes with the copy between them.
+    // Four samples throughout: the resolve needs it, and a four-sample target
+    // without a resolve is the C8 control frame, so the shapes differ in the
+    // two things under test and nothing else.
+    static constexpr Shape kShapes[] = {
+        {"one pass", false, false},
+        {"two passes", true, false},
+        {"two passes, resolve between", true, true},
+    };
+    static ps5vk_resolve_folds first_folds;
+    static ps5vk_resolve_folds last_folds;
+    unsigned passed = 0;
+    for (const Shape &shape : kShapes)
+    {
+        log.event("agc_two_pass_shape", "INFO", 0, shape.name);
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        // CLEAR, as an application's render pass clears its offscreen target:
+        // each pass's load operation is a meta clear the driver records.
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        // The whole viewport, as C8's resolve frames draw: every pixel is
+        // covered, so the frames are reproducible word for word.
+        input.vertex_data = kResolveVertices;
+        input.vertex_count = kSquareVertexCount;
+        input.vertex_stride = kVertexStride;
+        input.index_data = kIndices;
+        input.index_count = kIndexCount;
+        input.attribute_count = 2;
+        input.attributes[0] = attributes[0];
+        input.attributes[1] = attributes[1];
+        input.samples = VK_SAMPLE_COUNT_4_BIT;
+        input.two_passes = shape.two_passes;
+        input.resolve_output = shape.resolve;
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+            return;
+        ps5vk_triangle triangle{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+        unsigned framed = 0;
+        for (unsigned frame = 0; frame < kTwoPassFrames && status == PS5VK_TRIANGLE_OK; frame++)
+        {
+            log.number("agc_two_pass_step", "shape", static_cast<long long>(&shape - kShapes));
+            log.number("agc_two_pass_step", "frame", frame);
+            log.event("agc_two_pass_step", "INFO", 0, "recording");
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+            if (status != PS5VK_TRIANGLE_OK)
+                break;
+            ++framed;
+            if (test.capture && frame == 0)
+            {
+                // One capture a shape, not one a frame: the shape's recording is
+                // what a PC rebuild replays, and a hundred and twenty frames of
+                // capture would be the same stream over and over (tools/golden.py,
+                // capture_problems).
+                log_driver_submission(triangle.device, shape.name, log);
+                log_driver_stages(triangle.device, log);
+            }
+            if (frame == 0 && triangle.target_bytes >= kFramebufferBytes)
+                fold_frame(static_cast<const std::uint32_t *>(triangle.target), first_folds);
+        }
+        bool stable = false;
+        if (status == PS5VK_TRIANGLE_OK && framed == kTwoPassFrames &&
+            triangle.target_bytes >= kFramebufferBytes)
+        {
+            // The frame the last draw left, against the frame the first one did:
+            // a shape that records the same thing every frame has to leave the
+            // same image, and a fold that differs names the frame count that
+            // drifted.
+            flush_gpu_data(const_cast<void *>(triangle.target), kFramebufferBytes);
+            fold_frame(static_cast<const std::uint32_t *>(triangle.target), last_folds);
+            stable = std::memcmp(&first_folds, &last_folds, sizeof(first_folds)) == 0;
+            log.hex("agc_two_pass_shape", "first_checksum", first_folds.checksum);
+            log.hex("agc_two_pass_shape", "last_checksum", last_folds.checksum);
+            log.number("agc_two_pass_shape", "frames", framed);
+            log.event("agc_two_pass_shape", stable ? "PASS" : "FAIL", stable ? 0 : -1,
+                      stable ? "the first and last frames of the shape are the same image"
+                             : "the shape's frames are not the same image");
+        }
+        else
+        {
+            log.number("agc_two_pass_shape", "frames", framed);
+            log.event("agc_two_pass_shape", "FAIL", -1,
+                      status == PS5VK_TRIANGLE_FAILED
+                          ? "a frame could not be recorded or submitted"
+                          : "a submission did not complete; the program's objects stay allocated");
+        }
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            log.event("agc_two_passes", "FAIL", -1,
+                      "a submission did not complete; the program's objects stay allocated");
+            return;
+        }
+        ps5vk_triangle_finish(&triangle);
+        if (stable)
+            ++passed;
+    }
+    outcome.command_built = true;
+    outcome.passed = passed == std::size(kShapes);
+    char detail[160]{};
+    std::snprintf(detail, sizeof(detail),
+                  "%u of %zu shapes recorded %u frames each and read back the same image twice",
+                  passed, std::size(kShapes), kTwoPassFrames);
+    log.event("agc_two_passes", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1, detail);
+}
+
 // Phase D1's dynamic uniform buffer: one buffer holding two 16-byte colours,
 // one descriptor whose range is the shader's 16 bytes, and an offset the
 // application moves between the frames (VkDescriptorSetLayoutBinding's
@@ -19842,6 +19986,10 @@ constexpr RunnerTest kRunnerTests[] = {
     // resolved, and into a one-sample one, which the two readbacks must match
     // (run_vulkan_resolve_frames).
     {"c8-resolve", "m3-vertex", run_vulkan_resolve_frames},
+    // R6: one pass, two passes, and two passes with the resolve's copy between
+    // them, each forty frames into one command buffer a frame
+    // (run_vulkan_two_pass_frames).
+    {"v0-two-passes", "m3-vertex", run_vulkan_two_pass_frames},
     // Phase D2: a compute dispatch through the driver, its storage buffer and
     // its own pipeline (probes/c0/dispatch.spv, which the case reads itself:
     // the m2 set is only what the runner stages for every test).

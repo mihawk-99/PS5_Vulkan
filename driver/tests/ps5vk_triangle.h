@@ -438,6 +438,15 @@ struct ps5vk_triangle_input {
       uint32_t compare_mask;
       uint32_t write_mask;
    } stencil[PS5VK_TRIANGLE_MAX_PIPELINES];
+   /* Whether the frame records *two* render passes in one command buffer, each
+    * clearing the attachment and drawing the frame's geometry (R6): what a
+    * renderer that renders offscreen and then draws its target records, and the
+    * shape whose two passes corrupted the heap (docs/M5_PHASE_C.md). A frame
+    * with a resolve resolves between the two passes, where an application that
+    * resolves its multisampled pass before the main one records it. False is
+    * the one pass every earlier frame recorded, and the field is appended at
+    * the end for the same reason as target_format. */
+   bool two_passes;
 };
 
 /* The colour a clearing render pass clears to: red 0x40, green 0x80, blue
@@ -588,6 +597,9 @@ struct ps5vk_triangle {
    VkDeviceMemory resolve_memory;
    VkImageView resolve_view;
    bool resolve_output;
+   /* R6: whether the frame records a second render pass in the same command
+    * buffer (input->two_passes). */
+   bool two_passes;
    VkImage texture_image;
    /* The format the image was created with: a depth format's view and upload
     * name the depth aspect, a colour format's the colour one (round 21). */

@@ -1,0 +1,14 @@
+# PS5 Vulkan test runner job queue (PPSA99988): R6's multi-pass recording probe.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-two-passes/queue.txt
+#
+# v0-two-passes records three shapes -- one pass, two passes, and two passes
+# with the resolve's copy between them -- forty frames each, one command buffer
+# and one submit a frame, and folds each shape's first and last frame against
+# each other. The third shape is the one whose capture buffer the driver sized
+# one step short (docs/M5_PHASE_C.md, R6); c8-resolve and m2-solid are the
+# regressions behind it.
+hold 60
+v0-two-passes
+c8-resolve
+m2-solid
+exit
