@@ -11583,6 +11583,15 @@ constexpr std::array<IntegerTarget, 11> kUnsignedTargets = {{
 // width stores it exactly, and the words are the unsigned table's with the
 // signed colours -- R8G8_SINT's 0x4020 where R8G8_UINT holds 0x8040, and
 // A8B8G8R8_SINT_PACK32's 0x2040607f where the unsigned twin holds 0x4080c0ff.
+// The single-channel 32-bit float target: one row, because R32_SFLOAT's texel
+// is one 32-bit float and the driver compiles its pixel stage for the 32_R
+// export (driver/ps5vk_image.c). The value is 0.75, whose binary32 word is
+// 0x3F400000 exactly, so the readback is a word comparison like the integer
+// rows' and a wrong channel or a wrong encoding lands a different word.
+constexpr std::array<IntegerTarget, 1> kFloatTargets = {{
+    {VK_FORMAT_R32_SFLOAT, "R32_SFLOAT", {0x3f400000u}, 1, 0},
+}};
+
 constexpr std::array<IntegerTarget, 10> kSignedTargets = {{
     {VK_FORMAT_R8_SINT, "R8_SINT", {0x00000020u}, 1, 1},
     {VK_FORMAT_R8G8_SINT, "R8G8_SINT", {0x00004020u}, 1, 2},
@@ -11655,8 +11664,8 @@ bool integer_target_frame(const TestContext &test, const ps5vk_triangle_report &
 
 // The integer case: one frame a format, drawing with the unsigned package's
 // constant uvec4 colour (run_vulkan_uint_target_frames).
-void run_integer_target_frames(const TestContext &test, TestOutcome &outcome,
-                               const IntegerTarget *targets, std::size_t count) noexcept
+void run_target_frames(const TestContext &test, TestOutcome &outcome, const IntegerTarget *targets,
+                       std::size_t count, const char *probe, const char *what) noexcept
 {
     JsonLog &log = test.log;
     const ps5vk_triangle_report report{&log, log_vulkan_step};
@@ -11673,18 +11682,25 @@ void run_integer_target_frames(const TestContext &test, TestOutcome &outcome,
         return;
     outcome.command_built = true;
     outcome.passed = written == count;
-    char detail[160]{};
+    char detail[192]{};
     std::snprintf(detail, sizeof(detail),
-                  "%u of %zu integer colour targets hold the integer their texel's own word "
-                  "carries",
-                  written, count);
-    log.event("agc_v0_targets_int", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1,
-              detail);
+                  "%u of %zu %s targets hold the word their texel carries (%s)", written, count,
+                  what, probe);
+    log.event(probe, outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1, detail);
 }
 
 void run_vulkan_uint_target_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
-    run_integer_target_frames(test, outcome, kUnsignedTargets.data(), kUnsignedTargets.size());
+    run_target_frames(test, outcome, kUnsignedTargets.data(), kUnsignedTargets.size(),
+                      "agc_v0_targets_int", "integer colour");
+}
+
+// The single-channel float target family: the same walk the integer rows use,
+// because the machinery is the target format and the words its texels hold.
+void run_vulkan_float_target_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_target_frames(test, outcome, kFloatTargets.data(), kFloatTargets.size(),
+                      "agc_v0_target_float", "single-channel float colour");
 }
 
 // The signed family's case: the ten rows through the same machinery the
@@ -11695,7 +11711,8 @@ void run_vulkan_uint_target_frames(const TestContext &test, TestOutcome &outcome
 // (docs/HARDWARE_FINDINGS.md, "An unsupported image is refused, not asserted").
 void run_vulkan_signed_target_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
-    run_integer_target_frames(test, outcome, kSignedTargets.data(), kSignedTargets.size());
+    run_target_frames(test, outcome, kSignedTargets.data(), kSignedTargets.size(),
+                      "agc_v0_targets_int", "signed integer colour");
 }
 
 // The ramp case: one frame into the sixteen-byte float target, read back
@@ -13982,7 +13999,11 @@ constexpr FormatQuery kFormatQueries[] = {
          VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT,
      VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT | VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT |
          VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT},
-    {VK_FORMAT_R32_SFLOAT, "R32_SFLOAT", KSAMPLED | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT, 0},
+    /* The single-channel 32-bit float target carries the colour-attachment bit
+     * the CTS requires for R32_SFLOAT; the console proved the hardware encodes
+     * its 32_R export (runs/v0-target-float, docs/M5_PHASE_C.md round 7). */
+    {VK_FORMAT_R32_SFLOAT, "R32_SFLOAT",
+     KSAMPLED | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT, 0},
     {VK_FORMAT_D16_UNORM, "D16_UNORM",
      VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
          VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
@@ -22246,6 +22267,9 @@ constexpr RunnerTest kRunnerTests[] = {
     // same case shape as the unsigned family, with the constant ivec4 fragment
     // shader and the ten signed CB words (run_vulkan_signed_target_frames).
     {"v0-targets-sint", "v0-target-sint", run_vulkan_signed_target_frames},
+    // The single-channel 32-bit float target, whose colour-attachment bit the
+    // CTS requires for R32_SFLOAT (run_vulkan_float_target_frames).
+    {"v0-targets-float", "v0-target-float", run_vulkan_float_target_frames},
     // Round 19's ramp: where the hardware actually put each sixteen-byte texel,
     // read out of the storage with no map at all (run_vulkan_wide16_ramp_frame).
     {"v0-wide16-ramp", "m4-blend", run_vulkan_wide16_ramp_frame},

@@ -180,6 +180,19 @@ v0-target-uint)
     pixel_compiler="$root/build/host/opengnm-psbc-probe"
     expected_col_format=7
     ;;
+v0-target-float)
+    # The single-channel 32-bit float colour target: the m2 fullscreen triangle
+    # with a constant vec4 whose red channel is 0.75 (0x3F400000), which the
+    # driver compiles for SPI_SHADER_32_R -- the export its single-channel
+    # 32-bit rows name (driver/ps5vk_image.c).
+    vertex_source=shaders/m2/fullscreen.vert
+    pixel_source=shaders/v0/target_float.frag
+    output=probes/v0-target-float
+    vertex_flags=(--address32-hi 2)
+    pixel_flags=(--address32-hi 2 --color-format 0x99999991)
+    pixel_compiler="$root/build/host/opengnm-psbc-probe"
+    expected_col_format=1
+    ;;
 v0-target-sint)
     # Their signed twin (SPI_SHADER_SINT16_ABGR 8).
     vertex_source=shaders/m2/fullscreen.vert

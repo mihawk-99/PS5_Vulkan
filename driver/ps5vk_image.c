@@ -213,6 +213,7 @@ static const struct ps5vk_format ps5vk_formats[] = {
    {VK_FORMAT_R32_SFLOAT,
     VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
        VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT |
+       VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
        VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT,
     0, 22 /* 32_FLOAT */, PS5VK_FORMAT_SWIZZLE_R001},
    {VK_FORMAT_R32G32_SFLOAT,
@@ -599,6 +600,14 @@ static const struct ps5vk_colour_format ps5vk_colour_formats[] = {
    {VK_FORMAT_A8B8G8R8_UINT_PACK32, 10, 4, 2 /* SWAP_STD_REV */, 7},
    {VK_FORMAT_A2B10G10R10_UINT_PACK32, 9 /* 2_10_10_10 */, 4, 0, 7},
    {VK_FORMAT_R16G16_UINT, 5 /* 16_16 */, 4, 0, 7},
+   /* The single-channel 32-bit float target: the same 32 data format and 32_R
+    * export as its integer twins, with the FLOAT number type. The CTS requires
+    * a colour-attachment bit for R32_SFLOAT whatever the driver's taste
+    * (dEQP-VK.api.info.format_properties.r32_sfloat), and the row above its
+    * integer twins says the export exists; what the probe proves is that the
+    * console's hardware encodes a float into that target the way the export
+    * promises (runs/v0-target-float, one frame). */
+   {VK_FORMAT_R32_SFLOAT, 4 /* 32 */, 7 /* FLOAT */, 0 /* SWAP_STD */, 1 /* 32_R */},
    {VK_FORMAT_R32_UINT, 4 /* 32 */, 4, 0, 1 /* 32_R */},
    {VK_FORMAT_R8G8B8A8_SINT, 10, 5 /* SINT */, 0, 8},
    {VK_FORMAT_A8B8G8R8_SINT_PACK32, 10, 5, 2, 8},

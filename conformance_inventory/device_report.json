@@ -746,7 +746,7 @@
     "VK_FORMAT_R32_SFLOAT": {
       "buffer": "0x0",
       "linear": "0x0",
-      "optimal": "0xdc03"
+      "optimal": "0xdc83"
     },
     "VK_FORMAT_R32_SINT": {
       "buffer": "0x58",
@@ -1206,6 +1206,7 @@
     "VK_FORMAT_R32G32_UINT|2d-optimal-transfer-dst": "mips 13, layers 256, samples 0x5, size 4294967296",
     "VK_FORMAT_R32G32_UINT|2d-optimal-transfer-src": "mips 13, layers 256, samples 0x5, size 4294967296",
     "VK_FORMAT_R32G32_UINT|cube-optimal-sampled": "mips 13, layers 256, samples 0x5, size 4294967296",
+    "VK_FORMAT_R32_SFLOAT|2d-optimal-colour": "mips 13, layers 256, samples 0x5, size 4294967296",
     "VK_FORMAT_R32_SFLOAT|2d-optimal-sampled": "mips 13, layers 256, samples 0x5, size 4294967296",
     "VK_FORMAT_R32_SFLOAT|2d-optimal-storage": "mips 13, layers 256, samples 0x5, size 4294967296",
     "VK_FORMAT_R32_SFLOAT|2d-optimal-transfer-both": "mips 13, layers 256, samples 0x5, size 4294967296",
@@ -1435,7 +1436,7 @@
     "format_count": 184,
     "format_unsupported_count": 126,
     "image_combo_count": 12,
-    "image_combo_supported_count": 307,
+    "image_combo_supported_count": 308,
     "instance_api_version": 4194304,
     "instance_extension_count": 5,
     "limit_count": 97,

@@ -1,0 +1,17 @@
+# PS5 Vulkan test runner job queue (PPSA99988): the 32-bit float colour target.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-target-float/queue.txt
+#
+# The CTS requires a colour-attachment bit for R32_SFLOAT
+# (dEQP-VK.api.info.format_properties.r32_sfloat), and this driver now reports
+# one: its single-channel 32-bit rows export 32_R, the same export its integer
+# twins R32_UINT and R32_SINT already use. That claim is the console's to
+# confirm, so this queue draws the fullscreen triangle into an R32_SFLOAT target
+# whose fragment stage writes 0.75 -- 0x3F400000, exact in binary -- and reads
+# the target's own storage back. v0-targets-uint is the integer twin that must
+# keep passing beside it, and m2-solid is the frame every battery regresses.
+hold 60
+capture
+v0-targets-float
+v0-targets-uint
+m2-solid
+exit

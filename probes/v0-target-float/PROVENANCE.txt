@@ -1,0 +1,17 @@
+PS5 Vulkan v0-target-float shader packages, built by tools/build-probe-shaders.sh v0-target-float.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
+pixel compiler (tools/build-psbc-cli.sh) sha256: e99fb42fc699b1ff72deb95150203ca55d271d6d403988dd96e08bb43bd942e9
+vertex: -g -s vertex --ngg --address32-hi 2; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2 --color-format 0x99999991; writer --allow-unresolved
+pixel SPI_SHADER_COL_FORMAT: 1
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+6e3b120d5bfe1909da2ddeb8913be373d7e9cf290a62c4c3e3b4f4ac5432289a  shaders/m2/fullscreen.vert
+7690306450b8cf5a3e8213c3393286c89ed8e7256b6f5818f5aee653a9624b12  shaders/v0/target_float.frag
+ebc5c12b4c55b322bc1a61165e108bd3feb7b09d72f4d9a22b6f9d2a9c3143c9  build/shaders/v0-target-float/vertex.spv
+c594486dd2ec0c23e4f25704332e8b23a85e9320855320d63f4d91db030d5606  build/shaders/v0-target-float/pixel.spv
+229cfec58ba3b610e6e46f57865637408ccc075b5815e31e543240452b39e3f9  build/shaders/v0-target-float/vertex.ngg.bin
+5e47d958e25f3241b7648d63d252bcefbea61d47a1fbfe3b9f3e4c7193795c28  build/shaders/v0-target-float/vertex.hw.json
+84d4139e4e51ca8f08ac6fa29d35256614b12a364b5b28255ebb1a96685cf688  build/shaders/v0-target-float/pixel.raw.bin
+20824a2c970e61568511b8e525f968a1a8c73374352438d4f29de770c487a3d7  build/shaders/v0-target-float/pixel.hw.json

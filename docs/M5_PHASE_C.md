@@ -6953,3 +6953,51 @@ reads the headless platform's device creation and follows the version from there
 repair was worth landing on its own account -- a driver that advertises 1.3 while
 implementing 1.0 hands an application entry points it cannot honour -- but it does not
 close that case yet, and the round says so.
+
+## 2026-09-21 — round 7: the R32_SFLOAT colour target, required by the CTS and proved on the console
+
+The second of the five CTS failures taken, and the one with a known path behind it: the
+specification's required-format-feature table gives `R32_SFLOAT` a colour-attachment bit
+whatever a driver's taste, and this driver already had every other piece -- the
+single-channel 32-bit rows export `32_R`, the same export its integer twins use, and the
+float target only lacked the row.
+
+Three pieces, in the order the rules ask for:
+
+1. **The probe first**: a new probe set `v0-target-float` (`shaders/v0/target_float.frag`,
+   the m2 fullscreen triangle writing `0.75` into the red channel, compiled for
+   `SPI_SHADER_32_R` -- `bindings.txt`-free and `SPI_SHADER_COL_FORMAT: 1`, recorded in
+   `probes/v0-target-float/PROVENANCE.txt`) and a runner case `v0-targets-float`. The
+   case's words are exact: 0.75's binary32 word is `0x3F400000`, so the readback is a word
+   comparison, and the shared walk the integer families use was given the wording its
+   verdict needs rather than reporting a float target as an integer one.
+2. **The claim**: the driver's colour-target row for `R32_SFLOAT` (`32` data format,
+   `FLOAT` number type, `SWAP_STD`, `32_R`) and the `VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT`
+   the CTS requires. The repository's own audit mirror caught the second half immediately:
+   `v0-formats` failed with "57 of 58 formats report exactly the features
+   docs/V0_FORMATS_AUDIT.md records", and the case's table and the audit's colour-attachment
+   family were updated with it -- which is the mirror working, not a nuisance.
+3. **The console proof** (pid 109, title digest `1ac8b831…`, `Klog_Logs/v0-target-float.log`,
+   queue `jobs/v0-target-float/queue.txt`): **`v0-targets-float` PASS**, "1 of 1
+   single-channel float colour targets hold the word their texel carries", with
+   `v0-targets-uint` (the integer twin) and `m2-solid` green beside it. 450 PASS records.
+   A claim that had failed this run would have been reverted, which is the rule the signed
+   family's comment already records.
+
+**The CTS failure moved, and that is the measurement**: re-running
+`dEQP-VK.api.info.*` after the change, `format_properties.r32_sfloat` no longer names
+`COLOR_ATTACHMENT_BIT`; it now names the three **buffer** bits the same required-features
+row demands -- `UNIFORM_TEXEL_BUFFER`, `STORAGE_TEXEL_BUFFER`, `VERTEX_BUFFER` -- which
+this round did not add. So the group is still 5 failed, but one of the five has advanced
+from its tiling half to its buffer half, and the remaining work is named exactly rather
+than inferred. The other three failures are unchanged and each needs a real feature:
+`STORAGE_TEXEL_BUFFER_ATOMIC_BIT` for `R32_UINT`/`R32_SINT`, and a compressed-format set
+(BC, ETC2 or ASTC) that carries all five bits CTS requires -- the inventory shows every
+BC, ETC2 and ASTC format reporting `0x0`, so that one is a format-table gap, not a
+reporting one.
+
+Also recorded while hunting the last round's open thread: CTS's used-version source is
+still unidentified, but two candidates are now eliminated with evidence -- the driver's own
+answer (`0x400000`, called directly on the built shared object) and the loader's answer
+(which CTS's version graph would accept, since `1.3 <- 1.2 <- 1.1 <- 1.0`). That hunt
+continues in its own round rather than blocking this one.
