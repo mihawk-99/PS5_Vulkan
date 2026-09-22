@@ -7,6 +7,16 @@
 # the *next* case's compile faults (SIGFPE in aco::schedule_program, runs 1 and
 # 2 of this round), so the row's blit halves run in their own battery
 # (jobs/v0-blit-dst).
+#
+# m2-solid is in the queue for the *golden*, not for its own sake: a driver case's
+# capture carries no context register table -- the driver builds its tables rather
+# than the runner -- so tools/golden.py replay takes that table from a runner-built
+# frame of the same capture (its sibling_defaults). golden/v0-formats-sampled-uint
+# replayable today only because the run it came from queued one; without it a
+# re-capture of this queue writes a golden nothing can replay, and the refusal
+# ("no context register table") appears only when someone tries.
+# m2-solid comes after the case so the case's own capture is unaffected.
 hold 60
 v0-formats-sampled-uint
+m2-solid
 exit

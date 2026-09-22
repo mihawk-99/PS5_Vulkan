@@ -548,3 +548,61 @@ and fails this), set 1 with one buffer-type binding, and **no input attachment a
 vkQuake's real set 3 is three INPUT_ATTACHMENT bindings from its MBOIT pass, which is a
 separate family with MRT and subpasses going into the next request batch. The refusal keeps
 naming the advertised limit ("more than the four advertised"), not the current constant.
+
+## The four items after R7 — 1 to 3 closed, 4 next
+
+**1. The build hazard: closed, and closed twice over.** The Makefile fix from R7 round 4
+(`driver/Makefile`'s object rule now takes `$(wildcard $(DRIVER)/*.h)`) covers an edit under
+`driver/`, which is where the mixed layout came from. It cannot cover a header the build
+*consumes* from outside: the runtime's installed tree and the compiler's.
+`tools/build-driver.sh` now hashes every header the build reads into the same flags file the
+archive guard already compares, so a change to any of them discards every object for that
+target. **Probe of the fix**: appending a comment to
+`.deps/native/vulkan-runtime/include/vulkan/runtime/vk_command_buffer.h` -- a header the
+Makefile does not name -- recompiled **22 of 22** sources in all three targets; restoring it
+byte for byte (sha256 checked) recompiled 22 of 22 again. Then a forced full rebuild (every
+object and flags file removed) with the gates: `build/gates.sh` PASS, `tools/check-driver.sh`
+PASS, and the driver is byte-identical (`sha256 d04fcad4…`), which is the point -- the digest
+decides what is rebuilt, never what is built. **Gap left open**: `tooling/vulkan-runtime/
+Makefile`'s object rules name no header at all (`$(OUT)/util/%.o: $(SRC)/vulkan/util/%.c`).
+Blast radius: a wrapper object built against an older installed runtime header, silently,
+which is the same failure mode one door over. Not R7's to fix.
+
+**2. Anisotropy: closed at the reported limit, refused above it.** Status: the flag is
+accepted as a no-op while `maxAnisotropy` is inside `[1, maxSamplerAnisotropy]`, which this
+device reports as 1.0, and any value past it is refused with a sentence naming the limit and
+the number (`driver/ps5vk_image.c`). **Probe**: `v0-sampler-anisotropy` draws the address
+probe's four-group texture through a sampler with the flag at the reported maximum and through
+one without it, and compares the two frames **texel for texel over the whole target**;
+then a third sampler asking for 2.0, refused on both frames with the sentence in the log.
+**Digest**: run **pid 138**, `Klog_Logs/v0-sampler-anisotropy.log` -- `frames_drawn` 2,
+`mismatched_texels` **0**, and the refusal's sentence twice. **Golden**:
+`golden/v0-sampler-anisotropy/` (two submissions, four pipelines; `m2-solid` is queued beside
+the case because a driver capture carries no context register table). The claim follows the
+proof: `docs/M5_REFERENCE.md`'s C4 row and its limits row now say exactly this and no more.
+**Gap left open**: `samplerAnisotropy` stays **FALSE**. That is deliberate -- nothing is
+filtered, so the feature is not claimed -- and an application that sets the flag anyway gets
+the isotropic sampler rather than an error, which is what a conformant application at this
+limit is entitled to.
+
+**3. R7 round 3's fallout.** *(a) The driver-only-queue audit is done.* All **103** queues in
+`jobs/` were classified by their cases' runner functions: **91** cases are driver cases and
+**24** are runner-built. Exactly **two** queues name nothing but driver cases.
+`jobs/v0-u16/queue.txt` was the real one: its golden, `golden/v0-formats-sampled-uint`, replays
+only because the run it came from happened to queue `m2-solid` elsewhere -- the committed queue
+would have written an unreplayable golden on the next re-capture, and the refusal ("no context
+register table to take register defaults from") appears only when someone tries to replay it.
+It now queues `m2-solid` after its case (so the case's own capture is unchanged) and says why.
+`jobs/device-report/queue.txt` says why it is not a golden capture at all: its case creates no
+device and draws nothing. Separately, **all 31 goldens the driver gate reads were replayed as
+an audit and every one succeeds** -- no committed evidence is in the broken state.
+*(b) The submission comparison was already in, from round 4.* `driver/tests/
+vk_v0_multiset_quake_test.c` draws exactly the console case's one frame and
+`tools/check-driver.sh` compares it with `compare-run`; re-verified for this document:
+`identical to v0-multiset-quake-1.json: 17 packets, 6 register tables`, in both build modes.
+*(c) This document is that item.* **Gap left open**: nothing enforces the rule the two queues
+now document. A future driver-only queue can be written without a sibling and without a
+reason, and the defect stays invisible until a replay is attempted; the blast radius is one
+console cycle and one unusable golden. A guard would be "a queue whose cases are all driver
+cases must name a runner-built frame or say why it is not a golden capture", which is policy
+this round chose not to invent.

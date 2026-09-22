@@ -9,6 +9,14 @@
 # tools/collect-device-report.py turns the records into
 # conformance_inventory/device_report.json, checking their completeness against
 # the Vulkan headers.
+#
+# This queue is not a golden capture and cannot become one on its own: its case
+# creates no device and draws nothing, so its log carries no context register
+# table -- which is what tools/golden.py replay takes a register default from, and
+# why every golden's capture carries a runner-built frame beside its driver case
+# (jobs/v0-multiset-quake/queue.txt, jobs/v0-u16/queue.txt). What this queue is for
+# is conformance_inventory/device_report.json, which
+# tools/collect-device-report.py reads out of the log.
 hold 60
 device-report
 exit
