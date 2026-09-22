@@ -8230,3 +8230,53 @@ appears".
 
 **Host gates.** `make lint` PASS (213 files), `tools/check-driver.sh v0_capability` PASS in all three
 builds. The full driver check, the suite and the archive are in the round's own entry below.
+
+## 2026-09-22 — R10, first ask: the subpass read, through its descriptor
+
+**The question the port asked** was whether the lowering runs at all and whether the descriptor-based
+read is available to this fork. Both answers came from this host in one session, and the second one
+is yes: the fork's RADV front end calls `nir_lower_input_attachments` with
+`.use_ia_coord_intrin = true` (`src/amd/vulkan/radv_shader.c`), which is the tile form --
+`nir_load_input_attachment_coord`, the intrinsic its ACO has no case for -- while the same pass with
+that option false computes the coordinate from the fragment's position and layer and reads the texel
+**through the input attachment's own descriptor**, which is exactly what this driver binds.
+
+**Measured before anything was written.** The port's own `postprocess_frag`, extracted from
+`build/vkquake/generated/postprocess_frag_spv.c`, compiled on this host with the stock compiler:
+
+```
+SPIR-V WARNING: Unsupported SPIR-V capability: SpvCapabilityInputAttachment (40)
+ACO ERROR: aco_select_nir_intrinsics.cpp:5132
+    Unimplemented intrinsic instr: div 32x3  %1 = @load_input_attachment_coord
+exit 134
+```
+
+and with the one-field patch (`.use_ia_coord_intrin = false`) applied, the same command gives
+`Compiled /tmp/r10/postprocess.frag.spv (main) -> postprocess.bin (324 bytes)`, exit 0, with metadata
+`{"set": 0, "binding": 0, "type": 4, "stride": 32}` -- the storage-image-shaped entry this driver
+already writes for an input attachment (`ps5vk_descriptor_options` maps
+`VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT` onto `PSBC_DESCRIPTOR_STORAGE_IMAGE`). The port's other two
+live subpass shaders, `wboit_resolve_frag` and `mboit_resolve_frag`, compile the same way.
+
+**The compiler edit** is `tooling/psbc/patch-subpass-input.py`, one field, registered in
+`tools/build-psbc-ps5.sh` and in the migration check's patch list. Metadata version 14 is untouched.
+
+**The driver half** is the part Vulkan makes implicit: `VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT` is the
+one image type an application may not write with `vkUpdateDescriptorSets`, so the entry has to come
+from the subpass. `ps5vk_spirv_input_attachments` (`driver/ps5vk_pipeline.c`) reads the module's own
+`InputAttachmentIndex`, `DescriptorSet` and `Binding` decorations -- all three are `OpDecorate` on the
+same id, so the scan is flat -- and the pipeline keeps the pairs (the application may destroy its
+modules afterwards). At draw time `ps5vk_input_attachment_descriptor` (`driver/ps5vk_draw.c`) takes
+the subpass from `cmd_buffer->vk.render_pass` / `subpass_idx` / `framebuffer`, resolves the shader's
+index into the subpass's input attachment, and builds the same 32-byte entry a storage image gets;
+the flush the read needs is the machinery that was already there -- subpass 0 rendered into that image
+in this command buffer, so `ps5vk_sampled_image`'s `rendered_here` sets the colour barrier and the
+draw splits the submission (event 45). A subpass whose input attachments do not answer the shader's
+index is refused by name rather than read from the wrong image.
+
+**The probe** is two sets, one per subpass: `probes/v0-subpass-write` (whose fragment colour is a
+function of `gl_FragCoord` -- four vertical bands in R, four horizontal in G, so the readback says
+*where* it read) and `probes/v0-subpass-read` (`subpassLoad` written straight out, set 0 binding 0 read
+as a 32-byte entry). The console case that draws them through a two-subpass render pass is the next
+action, with the console run; until it passes, **nothing here is claimed** -- the compile-side
+measurement above is what is, and it is the port's own shader.

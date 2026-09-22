@@ -1,0 +1,2 @@
+address32_hi 0
+pixel_user_sgpr_count 2

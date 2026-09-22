@@ -147,6 +147,13 @@ python3 "$root/tooling/psbc/patch-descriptor-sets.py" "$tree"
 # R9 of the vkQuake port's requests.
 python3 "$root/tooling/psbc/patch-specialization.py" "$tree"
 
+# The subpass input read: the fork lowers an input attachment to the tile
+# coordinate intrinsic, which its ACO has no case for, so a shader that reads
+# one does not compile at all. The patch asks for the pass's other form, the
+# texel fetch through the input attachment's own descriptor -- which is what
+# this driver binds; docs/M5_PHASE_C.md, R10.
+python3 "$root/tooling/psbc/patch-subpass-input.py" "$tree"
+
 # libpsbc_support.ps5.a completes the archive for titles that link only the
 # compiler: ps5-opengl's C package writer (identical to the Python writer for
 # every probe package, A2), S3TC (ps5-opengl leaves it out because its Mesa

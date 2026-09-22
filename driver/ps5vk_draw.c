@@ -55,6 +55,8 @@
 #include "ps5vk_private.h"
 
 #include "vk_format.h"
+#include "vk_framebuffer.h"
+#include "vk_render_pass.h"
 
 #include <assert.h>
 #include <string.h>
@@ -1324,6 +1326,85 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
    return true;
 }
 
+/* R10: the entry an input-attachment binding reads, built from the subpass the
+ * command buffer is inside rather than from an application's write -- Vulkan
+ * forbids a descriptor write of VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, so the
+ * application never has one (driver/ps5vk_pipeline.c records which bindings
+ * each stage reads that way, from the shader's own InputAttachmentIndex,
+ * DescriptorSet and Binding decorations).
+ *
+ * Nothing here is a new read path: the entry is the same 32-byte image
+ * descriptor a storage image gets, and ps5vk_sampled_image builds it from the
+ * attachment's view. What the entry then does differently follows from the
+ * machinery that was already there -- subpass 0 rendered into that image in
+ * this command buffer, so the draw that reads it carries the colour-buffer
+ * barrier and splits the submission, which is what makes subpass 1's fetch see
+ * subpass 0's writes (ps5vk_sampled_image's rendered_here, HARDWARE_FINDINGS.md
+ * event 45).
+ *
+ * Returns the entry, NULL when this binding is not an input attachment (the
+ * application's own write is then what fills it), or NULL with *refused set
+ * when it is one and the subpass cannot supply it: a sentence rather than a
+ * wrong picture. */
+static const struct ps5vk_descriptor_buffer *
+ps5vk_input_attachment_descriptor(struct ps5vk_cmd_buffer *cmd_buffer,
+                                  const struct ps5vk_pipeline *pipeline, uint32_t stage,
+                                  const PsbcDescriptorBinding *binding, bool *refused,
+                                  struct ps5vk_descriptor_buffer *out)
+{
+   const struct ps5vk_input_attachment *declared = NULL;
+   for (uint32_t at = 0; at < pipeline->input_attachment_count; at++) {
+      if (pipeline->input_attachments[at].stage == stage &&
+          pipeline->input_attachments[at].set == binding->set &&
+          pipeline->input_attachments[at].binding == binding->binding) {
+         declared = &pipeline->input_attachments[at];
+         break;
+      }
+   }
+   if (declared == NULL)
+      return NULL;
+   const struct vk_render_pass *const pass = cmd_buffer->vk.render_pass;
+   const struct vk_framebuffer *const framebuffer = cmd_buffer->vk.framebuffer;
+   if (pass == NULL || framebuffer == NULL ||
+       cmd_buffer->vk.subpass_idx >= pass->subpass_count) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                              "set %u binding %u is an input attachment the shader reads and the "
+                              "draw is not inside a render pass subpass; an input attachment is "
+                              "read from the subpass that names it (docs/M5_PHASE_C.md, R10)",
+                              (unsigned)binding->set, (unsigned)binding->binding);
+      *refused = true;
+      return NULL;
+   }
+   const struct vk_subpass *const subpass = &pass->subpasses[cmd_buffer->vk.subpass_idx];
+   if (declared->index >= subpass->input_count) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                              "set %u binding %u reads input attachment %u and the subpass the "
+                              "draw is in declares %u of them; the shader's own "
+                              "InputAttachmentIndex is what has to name one of its subpass's input "
+                              "attachments (docs/M5_PHASE_C.md, R10)",
+                              (unsigned)binding->set, (unsigned)binding->binding, declared->index,
+                              subpass->input_count);
+      *refused = true;
+      return NULL;
+   }
+   const uint32_t attachment = subpass->input_attachments[declared->index].attachment;
+   if (attachment == VK_ATTACHMENT_UNUSED || attachment >= framebuffer->attachment_count) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                              "set %u binding %u reads input attachment %u, which is "
+                              "VK_ATTACHMENT_UNUSED or past the framebuffer's %u attachments "
+                              "(docs/M5_PHASE_C.md, R10)",
+                              (unsigned)binding->set, (unsigned)binding->binding, declared->index,
+                              framebuffer->attachment_count);
+      *refused = true;
+      return NULL;
+   }
+   *out = (struct ps5vk_descriptor_buffer){
+      .type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+      .view = framebuffer->attachments[attachment],
+   };
+   return out;
+}
+
 /* The 48 bytes of a combined image sampler, as write_image_descriptor writes
  * them (src/diagnostics.cpp): words 4, 6, 7 and 11 stay zero. */
 static void
@@ -1556,8 +1637,16 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
             }
             if (!(binding->binding == PS5VK_PUSH_CONSTANT_BINDING &&
                   (pipeline->push_constant_stages & stage_bits[s]))) {
-               const struct ps5vk_descriptor_buffer *const written =
-                  ps5vk_cmd_buffer_descriptor(cmd_buffer, binding->set, binding->binding);
+               /* R10: an input attachment comes from the subpass, everything
+                * else from the application's write. */
+               struct ps5vk_descriptor_buffer attachment = {0};
+               bool refused_attachment = false;
+               const struct ps5vk_descriptor_buffer *written = ps5vk_input_attachment_descriptor(
+                  cmd_buffer, pipeline, s, binding, &refused_attachment, &attachment);
+               if (refused_attachment)
+                  return false;
+               if (written == NULL)
+                  written = ps5vk_cmd_buffer_descriptor(cmd_buffer, binding->set, binding->binding);
                if (written == NULL) {
                   ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                                           "set %u binding %u is not bound or holds no write; the "

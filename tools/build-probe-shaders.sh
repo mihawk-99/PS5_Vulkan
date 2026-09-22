@@ -298,6 +298,32 @@ v0-spec-hardcoded)
         --vertex-attribute 1:r32g32_float:0:8:16:4)
     pixel_flags=(--address32-hi 2)
     ;;
+v0-subpass-write)
+    # R10's subpass input probe, first half: the full-target triangle whose
+    # fragment colour encodes the fragment's own band (shaders/v0/subpass_write.frag).
+    # No descriptors, so the stock compiler serves it.
+    vertex_source=shaders/m2/fullscreen.vert
+    pixel_source=shaders/v0/subpass_write.frag
+    output=probes/v0-subpass-write
+    vertex_flags=()
+    pixel_flags=()
+    ;;
+v0-subpass-read)
+    # R10's subpass input probe, second half: `subpassLoad` on the subpass's
+    # input attachment, which this driver binds as a 32-byte image entry -- the
+    # storage-image descriptor type the compiler's own table gives an input
+    # attachment (tooling/psbc/patch-subpass-input.py, driver/ps5vk_pipeline.c).
+    vertex_source=shaders/m2/fullscreen.vert
+    pixel_source=shaders/v0/subpass_read.frag
+    output=probes/v0-subpass-read
+    # The input attachment is a storage-image-shaped entry, which is the
+    # descriptor type the patched work copy knows and the SDK's prebuilt binary
+    # does not name: this set needs the probe CLI from tools/build-psbc-cli.sh,
+    # the way every other storage-image probe does.
+    pixel_compiler="$root/build/host/opengnm-psbc-probe"
+    vertex_flags=()
+    pixel_flags=(--descriptor-binding 0:0:storage_image:1:0:32)
+    ;;
 v0-multiset-quake)
     # R7's console shape: vkQuake's collapsed texture sets -- three combined
     # image samplers at set 0's bindings 0, 1 and 2 -- and the frame's uniform
@@ -776,7 +802,8 @@ def dword(meta: dict, key: str, label: str) -> int:
 
 vertex = json.loads((work / "vertex.hw.json").read_text())
 pixel = json.loads((work / "pixel.hw.json").read_text())
-expected_hi = 0 if set_name in ("m2", "b7-corner", "b8-corner") else 2
+expected_hi = 0 if set_name in ("m2", "b7-corner", "b8-corner",
+                                      "v0-subpass-write", "v0-subpass-read") else 2
 for label, meta in (("vertex", vertex), ("pixel", pixel)):
     if meta.get("address32_hi") != expected_hi:
         fail(f"{label} address32_hi is {meta.get('address32_hi')!r}, expected {expected_hi}")
@@ -1061,6 +1088,22 @@ elif set_name in ("v0-spec", "v0-spec-hardcoded"):
                 *vertex_input("vertex attributes: location 0 r32g32_float offset 0, "
                               "location 1 r32g32_float offset 8, stride 16, binding 0"),
                 ("pixel_user_sgpr_count", pixel["user_sgpr_count"])]
+elif set_name == "v0-subpass-write":
+    # R10's writer: no descriptors at all -- the fragment colour is a function
+    # of the fragment's own position -- so the only metadata that matters is the
+    # empty binding list.
+    if pixel.get("descriptor_bindings"):
+        fail("pixel stage unexpectedly declares descriptor bindings")
+    notes.append("no descriptors: the band colour comes from gl_FragCoord, so a "
+                 "readback that shows it came from the first subpass's target")
+    bindings = [("address32_hi", expected_hi),
+                ("pixel_user_sgpr_count", pixel["user_sgpr_count"])]
+elif set_name == "v0-subpass-read":
+    # R10's reader: set 0 binding 0 is the subpass input, and the compiler reads
+    # it as a 32-byte storage-image entry -- which is what the driver builds for
+    # an input attachment (driver/ps5vk_pipeline.c, ps5vk_draw.c).
+    bindings = [("address32_hi", expected_hi),
+                *pixel_descriptor(32)]
 elif set_name == "m3-vertex":
     if pixel.get("descriptor_bindings"):
         fail("pixel stage unexpectedly declares descriptor bindings")

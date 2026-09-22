@@ -690,6 +690,90 @@ ps5vk_spirv_refusal(const uint32_t *words, size_t size, char *reason, size_t rea
    return false;
 }
 
+/* R10: the bindings a stage reads as input attachments, which is one thing the
+ * application never writes: Vulkan forbids a descriptor write of type
+ * VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, so the draw has to build the entry from
+ * the subpass's own input attachment instead (ps5vk_draw.c). What says which
+ * subpass input a binding is is the shader's own InputAttachmentIndex
+ * decoration, and what says where it is read from is its DescriptorSet and
+ * Binding decorations -- all three are OpDecorate on the variable, so the scan
+ * is flat: no type resolution, no instruction beyond those three.
+ *
+ * The scan is over the module the pipeline was created from, taken once at
+ * creation because the application may destroy the module afterwards. */
+uint32_t
+ps5vk_spirv_input_attachments(const uint32_t *words, size_t size, uint8_t stage,
+                              struct ps5vk_input_attachment *out, uint32_t capacity)
+{
+   const size_t count = size / sizeof(uint32_t);
+   if (words == NULL || count < PS5VK_SPIRV_HEADER_WORDS || words[0] != PS5VK_SPIRV_MAGIC)
+      return 0;
+   /* The three decorations are on the same result id, and this walk sees them
+    * in whatever order the module wrote them: each id gets a slot the first
+    * time one of the three is seen, and a slot that never gathers all three is
+    * an ordinary binding the application writes rather than an input
+    * attachment. */
+   struct decorated
+   {
+      uint32_t id;
+      uint32_t set;
+      uint32_t binding;
+      uint32_t index;
+      bool have_set;
+      bool have_binding;
+      bool have_index;
+   } slots[PS5VK_MAX_INPUT_ATTACHMENTS];
+   uint32_t seen = 0;
+   for (size_t at = PS5VK_SPIRV_HEADER_WORDS; at < count;) {
+      const uint32_t word_count = words[at] >> 16;
+      const uint32_t opcode = words[at] & 0xffff;
+      if (word_count == 0 || word_count > count - at)
+         break;
+      /* OpDecorate: target, decoration, value. */
+      if (opcode == PS5VK_SPIRV_OP_DECORATE && word_count >= 4) {
+         const uint32_t decoration = words[at + 2];
+         if (decoration != PS5VK_SPIRV_DECORATION_DESCRIPTOR_SET &&
+             decoration != PS5VK_SPIRV_DECORATION_BINDING &&
+             decoration != PS5VK_SPIRV_DECORATION_INPUT_ATTACHMENT_INDEX) {
+            at += word_count;
+            continue;
+         }
+         uint32_t slot = 0;
+         while (slot < seen && slots[slot].id != words[at + 1])
+            slot++;
+         if (slot == seen) {
+            if (seen == PS5VK_MAX_INPUT_ATTACHMENTS)
+               break;
+            slots[seen] = (struct decorated){.id = words[at + 1]};
+            slot = seen++;
+         }
+         if (decoration == PS5VK_SPIRV_DECORATION_DESCRIPTOR_SET) {
+            slots[slot].set = words[at + 3];
+            slots[slot].have_set = true;
+         } else if (decoration == PS5VK_SPIRV_DECORATION_BINDING) {
+            slots[slot].binding = words[at + 3];
+            slots[slot].have_binding = true;
+         } else {
+            slots[slot].index = words[at + 3];
+            slots[slot].have_index = true;
+         }
+      }
+      at += word_count;
+   }
+   uint32_t found = 0;
+   for (uint32_t slot = 0; slot < seen && found < capacity; slot++) {
+      if (!slots[slot].have_index || !slots[slot].have_set || !slots[slot].have_binding)
+         continue;
+      out[found++] = (struct ps5vk_input_attachment){
+         .set = (uint8_t)slots[slot].set,
+         .binding = (uint8_t)slots[slot].binding,
+         .stage = stage,
+         .index = slots[slot].index,
+      };
+   }
+   return found;
+}
+
 /* Every capability the module declares, named where this driver knows the name
  * and numbered where it does not, into out: "SpvCapabilityShader,
  * SpvCapabilityInputAttachment (40)". It is what a refusal that cannot say
@@ -1781,6 +1865,23 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
    if (result != VK_SUCCESS) {
       ps5vk_pipeline_free(device, pipeline, allocator);
       return result;
+   }
+   /* R10: what the stages read as input attachments, taken from the modules
+    * while they are still the application's to destroy (ps5vk_draw.c binds
+    * those entries from the subpass, not from a descriptor write). */
+   const VkPipelineShaderStageCreateInfo *const stage_infos[PS5VK_PIPELINE_STAGE_COUNT] = {
+      vertex, pixel};
+   for (unsigned index = 0; index < PS5VK_PIPELINE_STAGE_COUNT; index++) {
+      VK_FROM_HANDLE(ps5vk_shader_module, module,
+                     stage_infos[index] ? stage_infos[index]->module : VK_NULL_HANDLE);
+      if (module == NULL)
+         continue;
+      const uint32_t room = PS5VK_MAX_INPUT_ATTACHMENTS - pipeline->input_attachment_count;
+      pipeline->input_attachment_count +=
+         ps5vk_spirv_input_attachments(module->words, module->size, (uint8_t)index,
+                                       pipeline->input_attachments +
+                                          pipeline->input_attachment_count,
+                                       room);
    }
 #if DETECT_OS_LINUX
    ps5vk_pipeline_dump(pipeline);

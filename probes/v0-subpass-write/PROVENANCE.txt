@@ -1,0 +1,16 @@
+PS5 Vulkan v0-subpass-write shader packages, built by tools/build-probe-shaders.sh v0-subpass-write.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
+vertex: -g -s vertex --ngg; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw; writer --allow-unresolved
+no descriptors: the band colour comes from gl_FragCoord, so a readback that shows it came from the first subpass's target
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+6e3b120d5bfe1909da2ddeb8913be373d7e9cf290a62c4c3e3b4f4ac5432289a  shaders/m2/fullscreen.vert
+980eb3dfe1583861ac79cc19d5753c9345d077c480dcbf44bfda8d95ecb63663  shaders/v0/subpass_write.frag
+ebc5c12b4c55b322bc1a61165e108bd3feb7b09d72f4d9a22b6f9d2a9c3143c9  build/shaders/v0-subpass-write/vertex.spv
+1ac7228933068482d3c245ce9b1cc8b3db4faf1d3436b56b83d5c610a447403e  build/shaders/v0-subpass-write/pixel.spv
+229cfec58ba3b610e6e46f57865637408ccc075b5815e31e543240452b39e3f9  build/shaders/v0-subpass-write/vertex.ngg.bin
+72352e4ebb049a5c7c17a74074cce90c3298f93a421d7536f42a908dc383300c  build/shaders/v0-subpass-write/vertex.hw.json
+018ef76df4ee8b7402670c8269b9c3ace67622f01c92f22519b7ed9bb5d3f8e5  build/shaders/v0-subpass-write/pixel.raw.bin
+862c7bb5b203890fc99a6d29dedc64d0e1428a46c7da06b9f1f1fe94bcb02e06  build/shaders/v0-subpass-write/pixel.hw.json

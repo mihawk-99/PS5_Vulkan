@@ -736,6 +736,16 @@ struct ps5vk_sampler {
 #define PS5VK_SPIRV_OP_MEMORY_MODEL 14
 #define PS5VK_SPIRV_OP_ENTRY_POINT 15
 #define PS5VK_SPIRV_OP_CAPABILITY 17
+#define PS5VK_SPIRV_OP_DECORATE 71
+/* OpDecorate's own decorations, for the input-attachment scan. */
+#define PS5VK_SPIRV_DECORATION_BINDING 33
+#define PS5VK_SPIRV_DECORATION_DESCRIPTOR_SET 34
+#define PS5VK_SPIRV_DECORATION_INPUT_ATTACHMENT_INDEX 43
+/* The input attachments one pipeline stage may read: Vulkan's own per-stage
+ * limit is 4 in the core profile this device reports
+ * (VkPhysicalDeviceLimits::maxPerStageDescriptorInputAttachments), and the
+ * table is sized from the advertised number rather than from it. */
+#define PS5VK_MAX_INPUT_ATTACHMENTS 8
 #define PS5VK_SPIRV_OP_EXECUTION_MODE 16
 #define PS5VK_SPIRV_EXECUTION_MODE_LOCAL_SIZE 17
 #define PS5VK_SPIRV_EXECUTION_MODEL_VERTEX 0
@@ -814,6 +824,22 @@ struct ps5vk_shader_module {
 bool
 ps5vk_spirv_has_entry_point(const struct ps5vk_shader_module *module, uint32_t model,
                             const char *name);
+
+/* R10: the bindings a stage reads as input attachments, from the module's own
+ * InputAttachmentIndex, DescriptorSet and Binding decorations
+ * (ps5vk_pipeline.c). The draw fills them from the subpass's input attachment
+ * rather than from a descriptor write, which Vulkan does not allow for this
+ * type. */
+struct ps5vk_input_attachment
+{
+   uint8_t set;
+   uint8_t binding;
+   uint8_t stage;
+   uint32_t index;
+};
+uint32_t
+ps5vk_spirv_input_attachments(const uint32_t *words, size_t size, uint8_t stage,
+                              struct ps5vk_input_attachment *out, uint32_t capacity);
 
 /* R10: what this compiler has no path for, which a shader is refused for before
  * the compiler runs (ps5vk_pipeline.c). The graphics and compute paths both
@@ -1175,6 +1201,13 @@ struct ps5vk_pipeline {
    uint32_t push_constant_bytes;
    VkShaderStageFlags push_constant_stages;
    struct ps5vk_pipeline_shaders shaders;
+   /* R10: the bindings this pipeline's stages read as input attachments, taken
+    * from their modules at creation because the application may destroy a
+    * module afterwards. The draw builds those entries from the subpass's input
+    * attachment instead of from the application's descriptor writes, which
+    * Vulkan forbids for this type (ps5vk_draw.c). */
+   struct ps5vk_input_attachment input_attachments[PS5VK_MAX_INPUT_ATTACHMENTS];
+   uint32_t input_attachment_count;
    /* The bind point the pipeline was created for: VK_PIPELINE_BIND_POINT_GRAPHICS
     * (zero, which is what a zeroed graphics pipeline is) or COMPUTE -- the only
     * one that fills the block below (Phase D2). */

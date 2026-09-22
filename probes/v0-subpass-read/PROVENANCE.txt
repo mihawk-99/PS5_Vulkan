@@ -1,0 +1,17 @@
+PS5 Vulkan v0-subpass-read shader packages, built by tools/build-probe-shaders.sh v0-subpass-read.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
+pixel compiler (tools/build-psbc-cli.sh) sha256: 9a04f2b438821fd9d9aa1c30bf1283ee3a498c4a70a570add1f1b7b1771948de
+vertex: -g -s vertex --ngg; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --descriptor-binding 0:0:storage_image:1:0:32; writer --allow-unresolved
+pixel binding metadata: {"array_size": 1, "binding": 0, "offset": 0, "set": 0, "stride": 32, "type": 4}
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+6e3b120d5bfe1909da2ddeb8913be373d7e9cf290a62c4c3e3b4f4ac5432289a  shaders/m2/fullscreen.vert
+0b960251caae70c9586796e3b9f68883e12c0bda7dc93628838757d58ea18ef8  shaders/v0/subpass_read.frag
+ebc5c12b4c55b322bc1a61165e108bd3feb7b09d72f4d9a22b6f9d2a9c3143c9  build/shaders/v0-subpass-read/vertex.spv
+af10c4287e309d048b172d9b9bfaad73d0e02e979ff152e6b25fa9e991f86c8a  build/shaders/v0-subpass-read/pixel.spv
+229cfec58ba3b610e6e46f57865637408ccc075b5815e31e543240452b39e3f9  build/shaders/v0-subpass-read/vertex.ngg.bin
+72352e4ebb049a5c7c17a74074cce90c3298f93a421d7536f42a908dc383300c  build/shaders/v0-subpass-read/vertex.hw.json
+4760cee2216e8a0e1b80efb5fd11767c9698e397bbbb383f899bd8d4783743dc  build/shaders/v0-subpass-read/pixel.raw.bin
+306c722a5f0d1385eb00bb4601544367dfafa017765ededeb9f0c7a6b27a0fad  build/shaders/v0-subpass-read/pixel.hw.json
