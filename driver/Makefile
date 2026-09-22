@@ -62,7 +62,16 @@ all: $(OUT)/$(ARCHIVE)
 # caller's stack, which aborts at the next return. make does not track it on
 # its own, and the first symptom is a stack-smashing abort inside a shader
 # compile rather than a link error.
-$(OUT)/%.o: $(DRIVER)/%.c $(DRIVER)/ps5vk_private.h $(GENERATED)/ps5vk_entrypoints.h \
+#
+# Every driver header is a prerequisite for the same reason, and the list is a
+# wildcard because the ones that are not ps5vk_private.h are easy to forget: R7
+# added a field to a struct in ps5vk_debug.h that the device holds an array of,
+# the object that copies those records was not rebuilt, and the archive mixed
+# two layouts of one struct. The symptom was not a build error but a table
+# reported with a NULL pointer and zero bytes (docs/M5_PHASE_C.md, R7 round 2).
+DRIVER_HEADERS := $(wildcard $(DRIVER)/*.h)
+
+$(OUT)/%.o: $(DRIVER)/%.c $(DRIVER_HEADERS) $(GENERATED)/ps5vk_entrypoints.h \
 	$(PSBC_INCLUDE)/psbc_compile.h
 	@mkdir -p $(dir $@)
 	$(CC) $(INCLUDES) $(CFLAGS) -Werror -c $< -o $@

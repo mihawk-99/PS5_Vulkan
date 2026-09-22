@@ -40,8 +40,19 @@ from vkQuake's source, so each was re-checked at HEAD before anything was writte
   pointer would be black (R9). The same shape is asserted on the host
   (`driver/tests/vk_v0_multiset_draw_test.c`, 23 of 23 checks direct: set 0's table is
   three 48-byte image entries one after another, set 1's the 16-byte uniform entry).
-  **Round 4** is the fallout, the whole regression list, the golden re-capture and the
-  docs. Round 1 also corrected a stale
+  Round 4 is the fallout and closes the request: the new host half
+  `driver/tests/vk_v0_multiset_quake_test.c` draws exactly the console case's one frame,
+  and `tools/check-driver.sh` compares the two **word for word** -- `identical to
+  v0-multiset-quake-1.json: 17 packets, 6 register tables`, in both build modes. The
+  build-system hazard Round 2 hit is fixed at its cause (`driver/Makefile` now depends on
+  every driver header; touching one recompiles 21 of 21 sources where it used to
+  recompile none), the whole regression list is green (`check-driver.sh` PASS, gates PASS,
+  console **16 of 16**, pid 131), and no committed golden needed re-capturing -- every
+  `compare-run` case came back identical. Two items are left for later and named in
+  `docs/M5_PHASE_C.md`: a probe that reaches the **advertised set limit** and asks for one
+  more (the refusal is written in three places, asserted on no console case), and
+  `tooling/vulkan-runtime/Makefile`, whose object rules name no header at all -- the same
+  stale-object failure mode this round fixed for the driver. Round 1 also corrected a stale
   artifact: the shipped `probes/v0-push` package had been written by a probe CLI built
   *before* the R9 compiler fix (R9's own conclusion is unaffected).
 - **R4's coverage note is answered by correcting our own claim**: the runner *does*

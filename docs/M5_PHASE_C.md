@@ -7396,3 +7396,77 @@ console golden holds one, and a `compare-run` needs a per-frame host program or 
 `drawing_cases` entry that compares against this case's own frame. Round 4's fallout list is
 where that belongs. Round 2's stale-object build finding is still unfixed, too: a header
 change still recompiles only the sources that changed.
+
+## 2026-09-21 — R7, Round 4: the fallout, and the stream the two sides agree on word for word
+
+Round 4 closes the request. Three things were left open by Rounds 1 to 3, and the round's
+evidence is what closes them: the *stream comparison* the console case never had, the
+**build system's** stale-object hazard, and the whole regression list run over every case
+whose frame carries a descriptor table.
+
+**The full stream comparison.** `driver/tests/vk_v0_multiset_quake_test.c` is the new host
+half of the runner case: it draws **exactly one frame** -- the vkQuake shape, through the
+harness's `textures_in_first_set` mode and `probes/v0-multiset-quake` -- because that case's
+golden holds exactly one submission, and `tools/check-driver.sh` compares the two with
+`compare-run` after running it. The two sides agree completely:
+
+```
+v0_multiset_quake_loader.dump v0-multiset-quake multiset-quake: identical to
+    v0-multiset-quake-1.json: 17 packets, 6 register tables
+v0_multiset_quake_direct.dump v0-multiset-quake multiset-quake: identical to
+    v0-multiset-quake-1.json: 17 packets, 6 register tables
+```
+
+That is the strongest statement R7 can make about this shape: the console's own command
+stream -- its two set tables, its two user-data writes, its two pipelines -- is reproduced
+word for word on the PC, in both build modes. The test also asserts the tables through the
+debug API on the way (**11 of 11 checks direct**), and the frame's *values* stay the console
+case's (255/64/255).
+
+The frame moved out of `vk_v0_multiset_draw_test.c`, which keeps the two-set mechanism frame
+from Round 2 and its 23 checks; the table helpers both programs need now live in
+`driver/tests/ps5vk_test.h` beside `check()` (`check_two_tables`, `test_table_uniform_entry`,
+`test_table_image_entry`), `static inline` so a test that includes the scaffolding and uses
+none of them stays warning-clean.
+
+**The build system's stale-object hazard, fixed at its cause.** Round 2 hit it: a field added
+to a struct in `ps5vk_debug.h` rebuilt only the sources that had also changed, because
+`driver/Makefile`'s object rule named `ps5vk_private.h` and no other driver header. The
+archive then mixed two layouts of one struct, and the symptom was not a build error but a
+table reported with a NULL pointer and zero bytes. The rule now takes `$(wildcard
+$(DRIVER)/*.h)` -- every driver header, named by wildcard because the ones that are not
+`ps5vk_private.h` are exactly the ones easy to forget -- and the comment records the R7
+round 2 symptom. Measured after the fix: touching `ps5vk_debug.h` recompiles **21 of 21**
+sources in each of the three targets, where before it recompiled none of them.
+
+The same hazard exists one door over and is *not* fixed: `tooling/vulkan-runtime/Makefile`'s
+object rules name no header at all (`$(OUT)/util/%.o: $(SRC)/vulkan/util/%.c`), so a change
+to the installed runtime headers leaves every wrapper object stale. It is out of R7's blast
+radius -- Round 1's wrapper patch changed *sources* -- but it is the same failure mode with
+the same silence.
+
+**The whole regression list.** `tools/check-driver.sh` PASS over every test and all three
+modes, with every `compare-run` case reporting `identical to` its committed golden: the
+descriptor-table cases included (`c3-uniform`, `c4-texture`, `d1-dynamic-ubo`, `c7-*`,
+`v0-array-layers`, `v0-cube-faces`, `v0-formats-sampled`, `v0-push-constant`'s replay and the
+new one). `build/gates.sh` PASS (11 gates). The console ran **16 of 16**: the standing nine
+plus `v0-two-sets` and `v0-multiset-quake` (R7's own) and `v0-formats-texel-buffer`,
+`c3-uniform`, `c4-texture`, `d1-dynamic-ubo`, `v0-array-layers` -- every case whose frame
+carries a table R7 rewired. Run **pid 131**, `Klog_Logs/r7-round4.log`. The driver is
+byte-identical to the one Round 3's cycle ran (sha256 `d04fcad4…`), so this cycle is the same
+binary measured wider.
+
+**No golden needed re-capturing.** The evidence is the comparison itself: every committed
+driver-run golden the gates compare against came back `identical`, so no stream R7 touched
+changed. The one golden this request added, `golden/v0-multiset-quake`, was captured twice --
+the second time with the runner-built sibling a replay needs -- and is consumed by the gate
+above.
+
+**Still open from Round 2.** No probe reaches four sets and asks for a fifth, so the "more
+than the four advertised" refusal is named in three places (compiler options, the bind path,
+the table builder) and asserted nowhere on the console. The bind path's version is the
+cheapest to test -- a host program that binds `firstSet = maxBoundDescriptorSets` and reads
+the refusal's sentence -- and the table builder's is defensive: an application whose layout
+declares a binding for a stage the shader does not read it in gets the options refusal
+first, so the draw-time guard is a net rather than a path. That test, and the wrapper
+Makefile's header prerequisites, are the two items this request leaves behind.

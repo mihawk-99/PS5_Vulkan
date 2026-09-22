@@ -94,6 +94,7 @@ tests=(
     v0_texel_buffer
     psbc_multiset
     v0_multiset_draw
+    v0_multiset_quake
 )
 # Negative tests: name, and the host variable that breaks the rule it checks
 # unless the test sets it itself (b3_window).
@@ -167,7 +168,7 @@ instancing_run="$root/golden/c2-instancing/run-1.json"
 # attachment the probe fills itself, so only a capture of that run holds the
 # addresses (golden/c7-mip-tiled, the runner's c7-mip-tiled test).
 tiled_mip_run="$root/golden/c7-mip-tiled/run-1.json"
-if want b7_draw || want b8_groups || want c2_indirect; then
+if want b7_draw || want b8_groups || want c2_indirect || want v0_multiset_draw; then
     python3 "$root/tools/golden.py" replay "$draw_golden" "$work/b4-headless.replay"
 fi
 # R7 round 3's two-set frame runs against the console capture it is the host
@@ -177,7 +178,7 @@ fi
 # runner-built sibling for that table -- a driver case's capture carries none --
 # which is why jobs/v0-multiset-quake/queue.txt names m2-solid beside the case.
 multiset_quake_run="$root/golden/v0-multiset-quake/run-1.json"
-want v0_multiset_draw &&
+want v0_multiset_quake &&
     python3 "$root/tools/golden.py" replay "$multiset_quake_run" "$work/v0-multiset-quake.replay"
 # The C5 depth test runs against the console's own c5-depth run, like every
 # other driver-path test: its depth attachment means the submission names an
@@ -464,11 +465,16 @@ run_test() {
             compare=() ;;
         v0_push_constant) replay=v0-push-constant
             compare=() ;;
-        # R7's two-set frames draw against the console capture of the very case
-        # they are the host half of, so the register defaults and the stage
-        # mappings are the ones that frame ran with.
-        v0_multiset_draw) replay=v0-multiset-quake
+        # The Round 2 frame draws like the plain colour-target frame the B7 draw
+        # does; what it needs from a replay is AGC's register defaults, and its
+        # own pipelines and tables are what the test asserts.
+        v0_multiset_draw) replay=b4-headless
             compare=() ;;
+        # R7 round 3's frame is the host half of the runner case v0-multiset-quake
+        # and draws exactly its one frame, so its recording is compared with that
+        # case's own console capture word for word.
+        v0_multiset_quake) replay=v0-multiset-quake
+            compare=(compare-run "$multiset_quake_run" "$dump" --test v0-multiset-quake) ;;
         v0_query_full) replay=v0-query-full
             compare=(compare-run "$query_run" "$dump" --test v0-query-full) ;;
         v0_texel_buffer) replay=v0-texel-buffer
@@ -489,6 +495,7 @@ run_test() {
         $test != c5_depth_bias && $test != v0_push_constant &&
         $test != v0_query_full &&
         $test != v0_timestamp && $test != v0_vertex_sint && $test != v0_vertex_uint &&
+        $test != v0_multiset_quake &&
         $test != c7_mip_upload && $test != v0_array && $test != v0_cube &&
         ${#compare[@]} -gt 0 ]]; then
         # Every draw the driver records writes both stages' user data, which the
