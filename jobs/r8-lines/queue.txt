@@ -1,16 +1,19 @@
-# PS5 Vulkan test runner job queue (PPSA99988): R8's line list and R6's strip, one
-# run.
+# PS5 Vulkan test runner job queue (PPSA99988): R8's line list, R6's strip and the
+# fragment-less pipeline, one run.
 # Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/r8-lines/queue.txt
 #
 # m2-solid first is the capture's runner-built frame. v0-lines draws two segments
 # against the one-pixel rectangles they must cover, then both culled; v0-strip is
-# R6's seven frames (its first run to reach a draw); the regression after them is
+# R6's seven frames (its first run to reach a draw); v0-fragmentless stores
+# stencil and depth from a vertex-only pipeline with the colour left the clear,
+# then tests the stencil it stored; the regression after them is
 # the set every round has kept green (docs/M5_PHASE_C.md, 2026-09-22).
 hold 60
 capture
 m2-solid
 v0-lines
 v0-strip
+v0-fragmentless
 v0-cull
 v0-depth-bias
 v0-stencil-clear

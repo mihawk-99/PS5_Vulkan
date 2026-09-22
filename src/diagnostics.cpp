@@ -18680,6 +18680,240 @@ void run_vulkan_stencil_frames(const TestContext &test, TestOutcome &outcome) no
     log.number("agc_stencil", "frames_total", std::size(kFrames));
 }
 
+// The fragment-less pipeline: a graphics pipeline whose only stage is the vertex
+// stage, which Vulkan allows and a stencil or depth pre-pass is (vkQuake's sky
+// stencil pipelines are one: stageCount 1, stencil ALWAYS/REPLACE, colour write
+// mask 0). The driver links the vertex stage with an empty fragment shader of its
+// own (ps5vk_nir_noop_fragment, RADV's noop FS) and writes no colour: the pipeline's
+// write mask is zeroed, which is the word the draw programs into CB_TARGET_MASK
+// and CB_SHADER_MASK. Three frames over a D32_SFLOAT_S8_UINT attachment cleared to
+// depth 1.0 and stencil 0, colour cleared to the canary word:
+//
+//   0  the fragment-less pass alone, over the middle quarter at depth 0.5, storing
+//      the reference: the colour target must be the clear everywhere, word for
+//      word, and the depth plane 0.5 exactly inside the quarter and 1.0 outside
+//   1  the same pass, then v0-stencil-test's green over the whole target testing
+//      EQUAL against the reference: green exactly inside the quarter, the clear
+//      outside -- the stencil test passed only where the first pass marked
+//   2  frame 1 with the test's reference one higher: the clear everywhere, so the
+//      stencil test in frame 1 was live rather than always passing
+constexpr unsigned kFragmentlessFrames = 3;
+constexpr std::uint32_t kMarkLeft = kOutputWidth / 4;
+constexpr std::uint32_t kMarkRight = kOutputWidth / 4 * 3;
+constexpr std::uint32_t kMarkTop = kOutputHeight / 4;
+constexpr std::uint32_t kMarkBottom = kOutputHeight / 4 * 3;
+constexpr std::uint32_t kMarkDepthBits = 0x3f000000u; // 0.5f
+
+constexpr bool marked_pixel(std::uint32_t x, std::uint32_t y) noexcept
+{
+    return x >= kMarkLeft && x < kMarkRight && y >= kMarkTop && y < kMarkBottom;
+}
+
+void run_vulkan_fragmentless_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    struct Frame
+    {
+        const char *name;
+        unsigned pipelines;
+        std::uint32_t test_reference;
+    };
+    static constexpr Frame kFrames[kFragmentlessFrames] = {
+        {"the fragment-less pass alone", 1, kStencilReference},
+        {"the fragment-less pass, then the stencil test", 2, kStencilReference},
+        {"the fragment-less pass, then a test for another reference", 2, kStencilReference + 1},
+    };
+    const std::uint32_t clear_word = 0xffff8040u;
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12},
+    };
+    bool frames_passed[kFragmentlessFrames] = {false, false, false};
+    for (unsigned at = 0; at < kFragmentlessFrames; at++)
+    {
+        const Frame &frame = kFrames[at];
+        log.event("agc_fragmentless", "INFO", 0, frame.name);
+        // The marked quarter first (the fragment-less draw's six indices), then the
+        // whole target for the test pass's draw.
+        std::array<float, 8 * 7> vertices{};
+        std::array<std::uint16_t, 12> indices{};
+        put_driver_depth_rect(vertices.data(), indices.data(), 0, 0, kMarkLeft, kMarkTop,
+                              kMarkRight, kMarkBottom, 0.5f, 0xff, 0x00, 0x00);
+        put_driver_depth_rect(vertices.data(), indices.data(), 4, 6, 0, 0, kOutputWidth,
+                              kOutputHeight, 0.25f, 0x00, 0xff, 0x00);
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = frame.pipelines;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = vertices.data();
+        input.vertex_count = frame.pipelines == 1 ? 4u : 8u;
+        input.vertex_stride = kDriverDepthVertexStride;
+        input.index_data = indices.data();
+        input.index_count = frame.pipelines == 1 ? 6u : 12u;
+        input.first_draw_indices = frame.pipelines == 1 ? 0u : 6u;
+        input.attribute_count = 2;
+        input.attributes[0] = attributes[0];
+        input.attributes[1] = attributes[1];
+        input.depth = true;
+        input.depth_test = true;
+        input.depth_write = true;
+        input.depth_compare_op = VK_COMPARE_OP_LESS;
+        input.depth_load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.depth_clear_value = kDriverDepthClear;
+        input.depth_format = VK_FORMAT_D32_SFLOAT_S8_UINT;
+        input.stencil_load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.stencil[0] = ps5vk_triangle_input::ps5vk_stencil_state{true,
+                                                                     VK_STENCIL_OP_KEEP,
+                                                                     VK_STENCIL_OP_REPLACE,
+                                                                     VK_STENCIL_OP_KEEP,
+                                                                     VK_COMPARE_OP_ALWAYS,
+                                                                     kStencilReference,
+                                                                     0xffu,
+                                                                     0xffu};
+        input.stencil[1] = ps5vk_triangle_input::ps5vk_stencil_state{true,
+                                                                     VK_STENCIL_OP_KEEP,
+                                                                     VK_STENCIL_OP_KEEP,
+                                                                     VK_STENCIL_OP_KEEP,
+                                                                     VK_COMPARE_OP_EQUAL,
+                                                                     frame.test_reference,
+                                                                     0xffu,
+                                                                     0xffu};
+        // The case's own set is v0-stencil-setup, whose vertex stage is the m4
+        // depth layout; the fragment-less pipeline takes that stage alone. The
+        // test pass is v0-stencil-test's, as in v0-stencil.
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+            return;
+        input.shaders[0].pixel_spirv = nullptr;
+        input.shaders[0].pixel_bytes = 0;
+        if (frame.pipelines == 2 && !load_vulkan_shaders(package_paths("v0-stencil-test"),
+                                                         &g_vulkan_spirv[2], input.shaders[1], log))
+            return;
+        ps5vk_triangle triangle{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+        // One pipeline draws once; two draw one after the other in one command
+        // buffer, the first taking the marked quarter's six indices.
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, frame.pipelines == 1
+                                                        ? PS5VK_TRIANGLE_ONE_DRAW
+                                                        : PS5VK_TRIANGLE_ONE_COMMAND_BUFFER);
+        const bool drew = status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes;
+        if (test.capture && drew)
+        {
+            log_driver_submission(triangle.device, frame.name, log);
+            log_driver_stages(triangle.device, log);
+        }
+        if (drew)
+        {
+            // The colour target, pixel by pixel against the frame's own prediction.
+            flush_gpu_data(const_cast<void *>(triangle.target), kFramebufferBytes);
+            const FramebufferView view{static_cast<const std::uint32_t *>(triangle.target),
+                                       kTiledRgba8Layout};
+            const bool green_inside = at == 1;
+            std::uint32_t wrong = 0;
+            std::uint32_t inside_word = 0;
+            std::uint32_t first_wrong_x = 0;
+            std::uint32_t first_wrong_y = 0;
+            std::uint32_t first_wrong_word = 0;
+            for (std::uint32_t y = 0; y < kOutputHeight; ++y)
+                for (std::uint32_t x = 0; x < kOutputWidth; ++x)
+                {
+                    const std::uint32_t word = view.word(x, y);
+                    const bool inside = marked_pixel(x, y);
+                    if (inside && x == kMarkLeft && y == kMarkTop)
+                        inside_word = word;
+                    const std::uint32_t expected =
+                        inside && green_inside ? kStencilGreenWord : clear_word;
+                    if (word != expected)
+                    {
+                        if (wrong == 0)
+                        {
+                            first_wrong_x = x;
+                            first_wrong_y = y;
+                            first_wrong_word = word;
+                        }
+                        ++wrong;
+                    }
+                }
+            log.hex("agc_fragmentless_frame", "clear_word", clear_word);
+            log.hex("agc_fragmentless_frame", "marked_corner_word", inside_word);
+            log.number("agc_fragmentless_frame", "colour_mismatches", wrong);
+            if (wrong != 0)
+            {
+                log.number("agc_fragmentless_frame", "first_mismatch_x", first_wrong_x);
+                log.number("agc_fragmentless_frame", "first_mismatch_y", first_wrong_y);
+                log.hex("agc_fragmentless_frame", "first_mismatch_word", first_wrong_word);
+            }
+            bool depth_exact = true;
+            if (at == 0)
+            {
+                // The depth plane the fragment-less pass wrote, walked whole with
+                // the tiled map the c5-depth check uses.
+                const std::size_t depth_texels = std::size_t{kOutputWidth} * kOutputHeight;
+                std::uint32_t marked = 0;
+                std::uint32_t cleared = 0;
+                std::uint32_t other = 0;
+                if (triangle.depth_target != nullptr &&
+                    triangle.depth_target_bytes >= depth_texels * 4u)
+                {
+                    flush_gpu_data(const_cast<void *>(triangle.depth_target), depth_texels * 4u);
+                    const auto *const depth =
+                        static_cast<const std::uint8_t *>(triangle.depth_target);
+                    for (std::uint32_t y = 0; y < kOutputHeight; ++y)
+                        for (std::uint32_t x = 0; x < kOutputWidth; ++x)
+                        {
+                            std::uint32_t bits = 0;
+                            std::memcpy(&bits, depth + tiled_depth_offset(x, y), sizeof(bits));
+                            const bool inside = marked_pixel(x, y);
+                            if (inside && bits == kMarkDepthBits)
+                                ++marked;
+                            else if (!inside && bits == kDriverDepthClearBits)
+                                ++cleared;
+                            else
+                                ++other;
+                        }
+                }
+                else
+                {
+                    other = 1;
+                }
+                log.number("agc_fragmentless_frame", "depth_marked_0_5", marked);
+                log.number("agc_fragmentless_frame", "depth_cleared_1_0", cleared);
+                log.number("agc_fragmentless_frame", "depth_other", other);
+                depth_exact = other == 0 && marked != 0;
+                log_stencil_planes(triangle.depth_target, triangle.depth_target_bytes, log);
+            }
+            frames_passed[at] = wrong == 0 && depth_exact;
+            log.event("agc_fragmentless_frame", frames_passed[at] ? "PASS" : "FAIL",
+                      frames_passed[at] ? 0 : -1, frame.name);
+        }
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            log.event("agc_fragmentless", "FAIL", -1,
+                      "a submission did not complete; the program's objects stay allocated");
+            return;
+        }
+        ps5vk_triangle_finish(&triangle);
+        if (!drew)
+        {
+            outcome.command_built = false;
+            log.event("agc_fragmentless", "FAIL", -1, "a frame could not be recorded or submitted");
+            return;
+        }
+    }
+    outcome.command_built = true;
+    outcome.passed = frames_passed[0] && frames_passed[1] && frames_passed[2];
+    log.event("agc_fragmentless", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1,
+              outcome.passed
+                  ? "a pipeline with no fragment stage wrote depth and stencil where it "
+                    "rasterised and no colour, and a later stencil test passed only there"
+                  : "a fragment-less frame is not the frame its depth, stencil and colour "
+                    "state predict");
+}
+
 void run_vulkan_texture_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
     JsonLog &log = test.log;
@@ -23667,6 +23901,10 @@ constexpr RunnerTest kRunnerTests[] = {
     // Round 12: the stencil path. The mixed format's depth and stencil planes,
     // written and read back by the frame's own two passes.
     {"v0-stencil", "v0-stencil-setup", run_vulkan_stencil_frames},
+    // The fragment-less pipeline: a vertex-only pass storing stencil and depth with
+    // no colour, then v0-stencil-test's green passing only where it marked
+    // (run_vulkan_fragmentless_frames).
+    {"v0-fragmentless", "v0-stencil-setup", run_vulkan_fragmentless_frames},
     {"c5-depth-16", "m4-depth", run_vulkan_depth_16_frames},
     // Phase C5's image clear: vkCmdClearDepthStencilImage, whose value decides
     // the frame's depth test (run_vulkan_depth_image_clear_frames).

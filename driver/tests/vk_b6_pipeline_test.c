@@ -40,24 +40,27 @@ struct pipeline_description {
    /* The rasterization state's lineWidth; 0 means 1.0. */
    float line_width;
    bool primitive_restart;
+   /* Which stages the pipeline has: both (0), the vertex stage alone (1) or the
+    * fragment stage alone (2). */
+   unsigned stages;
 };
 
 static const struct pipeline_description kProbeSets[] = {
-   {"m2", 0, {{0}}, 0, NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false},
-   {"m3", 0, {{0}}, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false},
+   {"m2", 0, {{0}}, 0, NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0},
+   {"m3", 0, {{0}}, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0},
    {"m3-vertex", 2,
     {{0, 0, VK_FORMAT_R32G32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8}}, 24,
-    NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false},
+    NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0},
    {"m3-texture", 2, {{0, 0, VK_FORMAT_R32G32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 8}}, 16,
-    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false},
+    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0},
    {"m4-depth", 2,
     {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}}, 28,
-    NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false},
+    NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0},
    {"m4-blend", 2,
     {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}}, 28,
-    NO_DESCRIPTOR, true, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false},
+    NO_DESCRIPTOR, true, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0},
    /* Phase B7's orientation probe: the M2 set's options, a half-target triangle. */
-   {"b7-corner", 0, {{0}}, 0, NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false},
+   {"b7-corner", 0, {{0}}, 0, NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0},
 };
 
 static VkShaderModule
@@ -143,6 +146,10 @@ create_pipeline(const struct pipeline_description *description, VkShaderModule v
          {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
           .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = pixel, .pName = name},
       };
+      /* A single stage is the first element (the vertex stage) or the second. */
+      const uint32_t stage_count = description->stages == 0 ? 2u : 1u;
+      const VkPipelineShaderStageCreateInfo *const first_stage =
+         description->stages == 2 ? &stages[1] : &stages[0];
       const VkVertexInputBindingDescription vertex_binding = {0, description->stride,
                                                               VK_VERTEX_INPUT_RATE_VERTEX};
       const VkPipelineVertexInputStateCreateInfo vertex_input = {
@@ -194,8 +201,8 @@ create_pipeline(const struct pipeline_description *description, VkShaderModule v
       };
       const VkGraphicsPipelineCreateInfo info = {
          .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-         .stageCount = 2,
-         .pStages = stages,
+         .stageCount = stage_count,
+         .pStages = first_stage,
          .pVertexInputState = &vertex_input,
          .pInputAssemblyState = &assembly,
          .pViewportState = &viewport_state,
@@ -406,6 +413,40 @@ check_probe_pipelines(void)
                VK_ERROR_UNKNOWN,
             kRefused[at].what);
    }
+   /* The fragment-less pipeline (the vkQuake sky-stencil shape): the vertex stage
+    * alone is created, its vertex package is the one the set's pipeline has, and
+    * the pixel package it is linked with is the driver's own empty fragment shader
+    * (ps5vk_nir_noop_fragment), not the set's. A pipeline without a vertex stage
+    * is still refused. */
+   struct pipeline_description vertex_only = kProbeSets[4];
+   vertex_only.stages = 1;
+   check(build_and_dump(probes, directory, "m4-depth-vertex-only", "m4-depth", &vertex_only) ==
+               VK_SUCCESS &&
+            dump_matches(probes, directory, "m4-depth-vertex-only", "m4-depth", "vertex", true) &&
+            !dump_matches(probes, directory, "m4-depth-vertex-only", "m4-depth", "pixel", false),
+         "a pipeline with no fragment stage is created: the set's vertex package, linked with "
+         "the driver's empty fragment shader");
+   char noop[1024];
+   snprintf(noop, sizeof(noop), "%s/m4-depth-vertex-only-pixel.bin", directory);
+   size_t noop_size = 0;
+   uint8_t *const noop_package = read_file(noop, &noop_size);
+   /* Every stage's package is an ELF container whose .shader_header section
+    * starts with AGC's header magic (ps5vk_package_sections checks the rest when
+    * the pipeline is first drawn, which v0_fragmentless does). */
+   static const uint8_t kElf[4] = {0x7f, 'E', 'L', 'F'};
+   static const uint8_t kHeaderMagic[4] = {0x31, 0x32, 0x33, 0x34};
+   bool header_magic = false;
+   for (size_t at = 0; noop_package && at + 4 <= noop_size && !header_magic; at++)
+      header_magic = memcmp(noop_package + at, kHeaderMagic, 4) == 0;
+   check(noop_package && noop_size >= 4 && memcmp(noop_package, kElf, 4) == 0 && header_magic,
+         "the empty fragment shader is an AGC package like any other stage's");
+   free(noop_package);
+   struct pipeline_description fragment_only = kProbeSets[4];
+   fragment_only.stages = 2;
+   check(build_and_dump(probes, directory, "m4-depth-fragment-only", "m4-depth", &fragment_only) ==
+            VK_ERROR_UNKNOWN,
+         "a pipeline with no vertex stage is refused");
+
    struct pipeline_description restart = lines;
    restart.primitive_restart = true;
    check(build_and_dump(probes, directory, "m3-vertex-restart", "m3-vertex", &restart) ==

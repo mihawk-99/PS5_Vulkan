@@ -97,6 +97,7 @@ tests=(
     v0_multiset_draw
     v0_multiset_quake
     v0_topology
+    v0_fragmentless
 )
 # Negative tests: name, and the host variable that breaks the rule it checks
 # unless the test sets it itself (b3_window).
@@ -217,7 +218,9 @@ want c5_depth &&
 # (golden/v0-stencil, four submissions and twelve pipelines) is what provides
 # the stage mapping and the allocations its replay hands out.
 stencil_run="$root/golden/v0-stencil/run-1.json"
-want c5_stencil &&
+# The fragment-less pipeline's frame draws through the same combined attachment
+# with the same two packages' vertex stage, so it takes the same replay.
+{ want c5_stencil || want v0_fragmentless; } &&
     python3 "$root/tools/golden.py" replay "$stencil_run" "$work/v0-stencil.replay" \
         --test v0-stencil
 # R1's depth bias: its own case's capture, because the six PA_SU_POLY_OFFSET_*
@@ -502,6 +505,10 @@ run_test() {
         # The topologies' frames: what they assert is what each pipeline is linked
         # as and what its submission draws (driver/tests/vk_v0_topology_test.c).
         v0_topology) replay=v0-cull
+            compare=() ;;
+        # The fragment-less pipeline's words are the gate, against v0-stencil's
+        # replay (driver/tests/vk_v0_fragmentless_test.c).
+        v0_fragmentless) replay=v0-stencil
             compare=() ;;
         # R7 round 3's frame is the host half of the runner case v0-multiset-quake
         # and draws exactly its one frame, so its recording is compared with that

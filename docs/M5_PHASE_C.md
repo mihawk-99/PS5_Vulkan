@@ -8062,3 +8062,38 @@ segments' end pixels (the end pixel missing or one past it), which is where non-
 place pixels differently; every interior pixel and every pixel beside a segment must be exact,
 in the rectangles' colour. The counts and each segment's first and last lit pixel are logged, so
 the first run is the golden. **Unclaimed** until that run passes.
+
+## 2026-09-22 — the fragment-less pipeline gets its probe and its host gate
+
+**The draft, read again before building on it.** `a6f43d7` links a vertex-only pipeline with
+`ps5vk_nir_noop_fragment()` and zeroes `colour_write_mask`, which the draw programs into
+CB_TARGET_MASK and CB_SHADER_MASK. What the compiler makes of the empty shader, read with
+`PSBC_DEBUG_DISASM` on the host: a pixel program of **`s_endpgm` alone -- no export, not even a
+null one** -- with `colors_written` 0, so SPI_SHADER_COL_FORMAT and CB_SHADER_MASK are 0 and
+SPI_SHADER_Z_FORMAT is ZERO. That is the GFX10 form RADV documents for a pixel shader without
+exports (`radv_needs_null_export_workaround`: "GFX10 supports pixel shaders without exports by
+setting both the color and Z formats to SPI_SHADER_ZERO"; the null export is needed on GFX9 and
+earlier, for discard and for POPS, none of which this is). Depth and stencil are the
+fixed-function units' work, so nothing in the shader has to reach them. Judged sound; the
+console is what proves it.
+
+**Host gates.** B6 (24/24): the vertex stage alone is created, its vertex package is the set's own
+(m4-depth) and the pixel package it is linked with is not the set's but an AGC package in the
+same ELF container; a pipeline with no vertex stage is refused. New `v0_fragmentless` (9/9
+direct, check-driver, `v0-stencil` replay): the case's second frame -- the vertex-only pass over
+the middle quarter, then v0-stencil-test testing EQUAL -- records and submits, and its
+fragment-less draw records CB_TARGET_MASK and CB_SHADER_MASK 0, DB_DEPTH_CONTROL with the depth
+test, write and LESS and stencil ALWAYS on both faces, DB_STENCIL_CONTROL PASS REPLACE on both
+faces and both DB_STENCILREFMASK words 0x01ffff5a. check-driver PASS, 292 identical golden
+comparisons.
+
+**The console case, `v0-fragmentless`** (v0-stencil-setup's vertex stage, v0-stencil-test for the
+test pass, a D32_SFLOAT_S8_UINT attachment cleared to 1.0 and 0, colour cleared to the canary
+word; `jobs/r8-lines/queue.txt`). Frame 0, the vertex-only pass alone over the middle quarter at
+depth 0.5 storing 0x5a: the colour target must be the clear in every pixel, and the depth plane
+0.5 exactly inside the quarter and 1.0 outside, walked whole with `tiled_depth_offset`. Frame 1,
+the same pass then the green test: `kStencilGreenWord` exactly inside, the clear outside -- the
+stencil test passed only where the first pass marked. Frame 2, the test's reference one higher:
+the clear everywhere, so frame 1's test was live. **Unclaimed** until that run passes; the
+port's own evidence (vkQuake's `sky_stencil` pipelines created, `evidence/m2-debug-lines/`) is
+creation, not a frame.
