@@ -14,7 +14,8 @@
 set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-set_name=c0
+set_name=${1:-c0}
+case "$set_name" in c0|c0-images) ;; *) echo "unknown compute probe: $set_name" >&2; exit 2 ;; esac
 source_file="$root/shaders/$set_name/dispatch.comp"
 output="$root/probes/$set_name"
 work="$root/build/probes/$set_name"
@@ -44,6 +45,7 @@ PY
 # tools/build-driver.sh builds -- the 0.3.0 fork's compiler plus this
 # repository's patches -- and reads the words where that compiler reports them,
 # in the shader register table.
+if [[ $set_name == c0 ]]; then
 psbc_archive="$root/build/driver/host/libpsbc_driver.pic.a"
 psbc_include="$root/.deps/native/psbc/include"
 [[ -f $psbc_archive && -f $psbc_include/psbc_compile.h ]] ||
@@ -62,15 +64,19 @@ g++ "$work/compute-resources.o" "$psbc_archive" -pthread -lm -o "$work/compute-r
     cat "$work/resources.txt"
 } > "$output/resources.txt"
 
+fi
+
 {
-    echo "PS5 Vulkan c0 compute dispatch probe, built by tools/build-compute-probe.sh."
+    echo "PS5 Vulkan $set_name compute dispatch probe, built by tools/build-compute-probe.sh $set_name."
     echo "source: shaders/$set_name/dispatch.comp"
     echo "pipeline: GLSL -> SPIR-V (glslang, vulkan1.0), compiled on the console by libpsbc"
     printf 'glslang: %s\n' "$("$glslang" --version | head -n 1)"
     printf 'dispatch.spv: %s words, sha256 %s\n' "$spirv_words" \
         "$(sha256sum "$output/dispatch.spv" | cut -d' ' -f1)"
-    printf 'resources.txt: sha256 %s\n' \
-        "$(sha256sum "$output/resources.txt" | cut -d' ' -f1)"
+    if [[ $set_name == c0 ]]; then
+        printf 'resources.txt: sha256 %s\n' \
+            "$(sha256sum "$output/resources.txt" | cut -d' ' -f1)"
+    fi
 } > "$output/PROVENANCE.txt"
 
 cat "$output/PROVENANCE.txt"

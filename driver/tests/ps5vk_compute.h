@@ -46,6 +46,8 @@ extern "C"
     * of vkCmdDispatch: the same dispatch, its workgroup counts read from
     * memory. */
    bool indirect;
+      /* Sample set 0 into set 1, then compare every output texel. */
+      bool images;
       /* The word every element of the storage buffer starts at, and the word the
          * shader leaves there: the console's readback compares them. */
       uint32_t initial_word;
@@ -64,16 +66,21 @@ extern "C"
       VkDeviceMemory memory;
       void *mapped;
       VkShaderModule module;
-      VkDescriptorSetLayout set_layout;
+      VkDescriptorSetLayout set_layout[2];
       VkPipelineLayout pipeline_layout;
       VkDescriptorPool descriptor_pool;
-      VkDescriptorSet descriptor_set;
+      VkDescriptorSet descriptor_set[2];
       VkPipeline pipeline;
       VkCommandPool command_pool;
       VkCommandBuffer command;
       VkFence fence;
       /* What the buffer holds when the dispatch's fence has signalled. */
       uint32_t result_word;
+      VkImage images[2];
+      VkDeviceMemory image_memory[2];
+      VkImageView views[2];
+      VkSampler sampler;
+      uint32_t mismatched_texels;
    };
 
    /* Creates the program, records the dispatch, submits it and waits for its

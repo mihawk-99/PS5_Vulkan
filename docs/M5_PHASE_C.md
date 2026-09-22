@@ -7852,3 +7852,70 @@ statement is that the type is implemented and the port's own run is its first te
 **The harness grew the pair** (`input.separated_texture_pair`): the same view and sampler in two
 sets with their own types, both bound, which is what every previous descriptor path in it could
 not express -- one field plus the sampler set's layout, set and writes.
+
+
+## 2026-09-22: R7 promoted to startup — compute descriptor tables
+
+The vkQuake port measured `vkCreateComputePipelines(cs_tex_warp)` returning
+`VK_ERROR_UNKNOWN` after compilation in both `evidence/m2-compute-bindings/`
+and `evidence/m2-compute-creation/` in its repository. Compute creation still
+required exactly one storage-buffer binding; dispatch read metadata binding 0
+and programmed only that set's pointer. The graphics R7 rounds had not changed
+this path. This request took priority over the active file's CTS work and the MRT dump.
+
+**Change.** `ps5vk_cmd_buffer_shader_resources` is the existing graphics resource
+builder extracted for both callers. Compute now uses every declared binding
+and one table per metadata-valid set, with the same `PS5VK_MAX_USER_DATA` budget
+and descriptor-type writers as graphics. The old byte-addressed storage-buffer
+entry remains byte-identical. The shared writer also copies only 32 bytes of an
+image descriptor into a storage-image entry: the previous 48-byte write could
+reach the next binding. Compute layouts retain their push-constant ranges for
+the shared pointer writer. Descriptor arrays remain subject to the existing
+single-element restriction; this change adds no new format or device claim.
+
+**Acceptance.** `shaders/c0-images/dispatch.comp` fetches a varying 64x4 RGBA8
+source from set 0 binding 0 and stores its BGRA permutation into set 1 binding 0.
+The Vulkan harness uploads the input, dispatches once (four 64-thread workgroups),
+copies the destination back, and compares all 256 texels. It shares its setup and
+cleanup with the existing D2 buffer probe. The console now requires the buffer's
+actual shader word too: an unchanged zero buffer is no longer a pass.
+
+- Console pid 161, digest `a02a685b…`: **0 mismatched image texels**; both buffer
+  dispatches read `0xa5a5a5a5`; `v0-multiset-quake` and `m2-solid` pass. The battery
+  was 4/6 because the pre-existing unfinished R6 harness rejected vertex-less
+  shaders before creating their device/pipeline (`v0-two-sets`, `v0-formats`).
+- Restored the vertex-less early return in that working-tree harness, preserving
+  its pending strip work. Console pid **162**, digest
+  `1ccd486d07f79a61c53150104f3e575593d45dab0ffe7cbb6497039642db4cf0`:
+  **6/6 PASS**, again **0/256 mismatches**, direct and indirect buffer readbacks
+  both `0xa5a5a5a5`. Queue: `jobs/d2-compute-images/queue.txt`. Capture:
+  `Klog_Logs/r7-compute-regression.log`; committed acceptance records:
+  `evidence/r7-compute/capture.json`. The only warning is the established benign
+  VideoOut unregister busy result.
+- Host image probe: 10/10 direct checks, loader and PS5 link pass. It explicitly
+  expects all 256 texels to remain unwritten on the non-executing host, and checks
+  both tables, their distinct compiler-named pointer dwords, image extents, and
+  the sampler/storage distinction. The dispatch stream matches the console's
+  **14 packets** exactly. `golden/d2-compute-images/` holds the new capture;
+  `tools/check-driver.sh` replays and compares it in both modes. The standing D2
+  buffer streams remain identical to their existing goldens.
+
+Reproduce the shader with `bash tools/build-compute-probe.sh c0-images`; build
+the driver with `bash tools/build-driver.sh`, then run
+`bash tools/check-driver.sh d2_compute d2_compute_images v0_multiset_draw v0_multiset_quake`.
+Deploy the runner as documented and run
+`python3 tools/ps5_console.py battery PPSA99988 jobs/d2-compute-images/queue.txt --output Klog_Logs/r7-compute-regression.log`.
+
+**Boundary.** This proves the driver acceptance, not a vkQuake startup run.
+The port should relink the rebuilt archive and verify `cs_tex_warp` creation;
+the lightmap pass remains its M6 acceptance. The six-binding application kernels
+and animation kernels were not executed by this two-binding image probe. The
+pending R6 strip edits and the local harness repair remain outside this R7 commit.
+
+**Final gates.** `tools/check-driver.sh` PASS: 152 build/run checks and 292 identical golden comparisons;
+no differing stream. `make lint` PASS (208 attributed files), `make test` PASS
+(31 tests, one skipped), `check-runner-cases.sh` PASS (206 PASS records), and all
+three command/limit/format audits pass with their counts unchanged. The driver
+built for host, PS5 and PS5 PIC with zero compiler warnings. The broad driver
+check was rerun after the vertex-less harness repair; the earlier attempt is
+not counted as a passing gate.

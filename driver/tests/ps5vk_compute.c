@@ -98,9 +98,13 @@ bool ps5vk_compute_run(const struct ps5vk_compute_input *input, struct ps5vk_com
               "the caller's compute SPIR-V"))
       return false;
 
+   const uint32_t set_count = input->images ? 2 : 1;
+   for (uint32_t i = 0; i < set_count; i++) {
    const VkDescriptorSetLayoutBinding binding = {
       .binding = 0,
-      .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+      .descriptorType = input->images ? (i == 0 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                                                   : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                      : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
       .descriptorCount = 1,
       .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
    };
@@ -111,14 +115,15 @@ bool ps5vk_compute_run(const struct ps5vk_compute_input *input, struct ps5vk_com
    };
    if (!step(compute, input, "create_descriptor_set_layout",
               CALL(compute, CreateDescriptorSetLayout)(compute->device, &set_layout_info, NULL,
-                                                       &compute->set_layout),
-              "one storage buffer at set 0 binding 0"))
+                                                       &compute->set_layout[i]),
+              "binding 0 of the compute set"))
       return false;
+   }
 
    const VkPipelineLayoutCreateInfo layout_info = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-      .setLayoutCount = 1,
-      .pSetLayouts = &compute->set_layout,
+      .setLayoutCount = set_count,
+      .pSetLayouts = compute->set_layout,
    };
    if (!step(compute, input, "create_pipeline_layout",
               CALL(compute, CreatePipelineLayout)(compute->device, &layout_info, NULL,
@@ -145,7 +150,8 @@ bool ps5vk_compute_run(const struct ps5vk_compute_input *input, struct ps5vk_com
    const VkBufferCreateInfo buffer_info = {
       .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
       .size = PS5VK_COMPUTE_BUFFER_BYTES,
-      .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+      .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+               (input->images ? VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT : 0),
       .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
    };
    if (!step(compute, input, "create_buffer",
@@ -195,46 +201,104 @@ bool ps5vk_compute_run(const struct ps5vk_compute_input *input, struct ps5vk_com
          words[PS5VK_COMPUTE_INDIRECT_OFFSET / sizeof(uint32_t) + axis] =
             PS5VK_COMPUTE_GROUP_COUNT;
 
-   const VkDescriptorPoolSize pool_size = {
-      .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-      .descriptorCount = 1,
+   if (input->images) {
+      /* 64x4 RGBA texels: full 256-byte rows in the driver's linear storage. */
+      uint8_t *pixels = compute->mapped;
+      for (uint32_t y = 0; y < 4; y++)
+         for (uint32_t x = 0; x < 64; x++) {
+            const uint32_t at = (y * 64 + x) * 4;
+            pixels[at] = (uint8_t)(x * 3);
+            pixels[at + 1] = (uint8_t)(y * 61 + 7);
+            pixels[at + 2] = (uint8_t)(255 - x * 2);
+            pixels[at + 3] = 255;
+         }
+      for (uint32_t i = 0; i < 2; i++) {
+         const VkImageCreateInfo image_info = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .imageType = VK_IMAGE_TYPE_2D, .format = VK_FORMAT_R8G8B8A8_UNORM,
+            .extent = {64, 4, 1}, .mipLevels = 1, .arrayLayers = 1,
+            .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+            .usage = i == 0 ? VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                            : VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+         };
+         if (!step(compute, input, "create_image",
+                   CALL(compute, CreateImage)(compute->device, &image_info, NULL, &compute->images[i]), NULL))
+            return false;
+         CALL(compute, GetImageMemoryRequirements)(compute->device, compute->images[i], &requirements);
+         uint32_t image_type = 0;
+         while (image_type < memory_properties.memoryTypeCount &&
+                !(requirements.memoryTypeBits & (1u << image_type)))
+            image_type++;
+         const VkMemoryAllocateInfo image_allocate = {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .allocationSize = requirements.size, .memoryTypeIndex = image_type,
+         };
+         if (!step(compute, input, "allocate_image_memory",
+                   CALL(compute, AllocateMemory)(compute->device, &image_allocate, NULL, &compute->image_memory[i]), NULL) ||
+             !step(compute, input, "bind_image_memory",
+                   CALL(compute, BindImageMemory)(compute->device, compute->images[i], compute->image_memory[i], 0), NULL))
+            return false;
+         const VkImageViewCreateInfo view_info = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = compute->images[i], .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = VK_FORMAT_R8G8B8A8_UNORM,
+            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+         };
+         if (!step(compute, input, "create_image_view",
+                   CALL(compute, CreateImageView)(compute->device, &view_info, NULL, &compute->views[i]), NULL))
+            return false;
+      }
+      const VkSamplerCreateInfo sampler_info = {
+         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+         .magFilter = VK_FILTER_NEAREST, .minFilter = VK_FILTER_NEAREST,
+         .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+         .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+         .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+         .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+      };
+      if (!step(compute, input, "create_sampler",
+                CALL(compute, CreateSampler)(compute->device, &sampler_info, NULL, &compute->sampler), NULL))
+         return false;
+   }
+   const VkDescriptorPoolSize pool_sizes[2] = {
+      {input->images ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
    };
    const VkDescriptorPoolCreateInfo pool_info = {
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-      .maxSets = 1,
-      .poolSizeCount = 1,
-      .pPoolSizes = &pool_size,
+      .maxSets = set_count, .poolSizeCount = set_count, .pPoolSizes = pool_sizes,
    };
    if (!step(compute, input, "create_descriptor_pool",
               CALL(compute, CreateDescriptorPool)(compute->device, &pool_info, NULL,
-                                                  &compute->descriptor_pool),
-              NULL))
+                                                  &compute->descriptor_pool), NULL))
       return false;
    const VkDescriptorSetAllocateInfo set_info = {
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
       .descriptorPool = compute->descriptor_pool,
-      .descriptorSetCount = 1,
-      .pSetLayouts = &compute->set_layout,
+      .descriptorSetCount = set_count, .pSetLayouts = compute->set_layout,
    };
    if (!step(compute, input, "allocate_descriptor_sets",
               CALL(compute, AllocateDescriptorSets)(compute->device, &set_info,
-                                       &compute->descriptor_set),
-              NULL))
+                                                    compute->descriptor_set), NULL))
       return false;
    const VkDescriptorBufferInfo buffer_binding = {
-      .buffer = compute->buffer,
-      .offset = 0,
-      .range = VK_WHOLE_SIZE,
+      .buffer = compute->buffer, .offset = 0, .range = VK_WHOLE_SIZE,
    };
-   const VkWriteDescriptorSet write = {
-      .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-      .dstSet = compute->descriptor_set,
-      .dstBinding = 0,
-      .descriptorCount = 1,
-      .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-      .pBufferInfo = &buffer_binding,
-   };
-   CALL(compute, UpdateDescriptorSets)(compute->device, 1, &write, 0, NULL);
+   for (uint32_t i = 0; i < set_count; i++) {
+      const VkDescriptorImageInfo image_binding = {
+         .sampler = i == 0 ? compute->sampler : VK_NULL_HANDLE,
+         .imageView = compute->views[i], .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+      };
+      const VkWriteDescriptorSet write = {
+         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+         .dstSet = compute->descriptor_set[i], .dstBinding = 0, .descriptorCount = 1,
+         .descriptorType = pool_sizes[i].type,
+         .pBufferInfo = input->images ? NULL : &buffer_binding,
+         .pImageInfo = input->images ? &image_binding : NULL,
+      };
+      CALL(compute, UpdateDescriptorSets)(compute->device, 1, &write, 0, NULL);
+   }
 
    const VkCommandPoolCreateInfo command_pool_info = {
       .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -271,17 +335,62 @@ bool ps5vk_compute_run(const struct ps5vk_compute_input *input, struct ps5vk_com
    CALL(compute, CmdPipelineBarrier)(compute->command, VK_PIPELINE_STAGE_HOST_BIT,
                                       VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, NULL,
                                       0, NULL);
+   VkBufferImageCopy image_copy = {
+      .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+      .imageExtent = {64, 4, 1},
+   };
+   if (input->images) {
+      VkImageMemoryBarrier image_barriers[2] = {0};
+      for (uint32_t i = 0; i < 2; i++) {
+         image_barriers[i] = (VkImageMemoryBarrier){
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .dstAccessMask = i == 0 ? VK_ACCESS_TRANSFER_WRITE_BIT : VK_ACCESS_SHADER_WRITE_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = compute->images[i],
+            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+         };
+      }
+      CALL(compute, CmdPipelineBarrier)(compute->command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+         VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
+         0, NULL, 0, NULL, 2, image_barriers);
+      CALL(compute, CmdCopyBufferToImage)(compute->command, compute->buffer, compute->images[0],
+                                        VK_IMAGE_LAYOUT_GENERAL, 1, &image_copy);
+      image_barriers[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      image_barriers[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+      image_barriers[0].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+      CALL(compute, CmdPipelineBarrier)(compute->command, VK_PIPELINE_STAGE_TRANSFER_BIT,
+         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL, 0, NULL, 1, image_barriers);
+   }
    CALL(compute, CmdBindPipeline)(compute->command, VK_PIPELINE_BIND_POINT_COMPUTE,
                                    compute->pipeline);
    CALL(compute, CmdBindDescriptorSets)(compute->command, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                         compute->pipeline_layout, 0, 1, &compute->descriptor_set,
+                                         compute->pipeline_layout, 0, set_count, compute->descriptor_set,
                                          0, NULL);
    if (input->indirect)
       CALL(compute, CmdDispatchIndirect)(compute->command, compute->buffer,
                                         PS5VK_COMPUTE_INDIRECT_OFFSET);
    else
       CALL(compute, CmdDispatch)(compute->command, PS5VK_COMPUTE_GROUP_COUNT,
-                                PS5VK_COMPUTE_GROUP_COUNT, PS5VK_COMPUTE_GROUP_COUNT);
+                                input->images ? 4u : PS5VK_COMPUTE_GROUP_COUNT, PS5VK_COMPUTE_GROUP_COUNT);
+   if (input->images) {
+      const VkMemoryBarrier readback_barrier = {
+         .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+         .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT, .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+      };
+      CALL(compute, CmdPipelineBarrier)(compute->command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &readback_barrier, 0, NULL, 0, NULL);
+      image_copy.bufferOffset = 1024;
+      CALL(compute, CmdCopyImageToBuffer)(compute->command, compute->images[1],
+                                        VK_IMAGE_LAYOUT_GENERAL, compute->buffer, 1, &image_copy);
+      const VkMemoryBarrier host_barrier = {
+         .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+         .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT, .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+      };
+      CALL(compute, CmdPipelineBarrier)(compute->command, VK_PIPELINE_STAGE_TRANSFER_BIT,
+         VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &host_barrier, 0, NULL, 0, NULL);
+   }
    if (!step(compute, input, "end_command_buffer",
               CALL(compute, EndCommandBuffer)(compute->command),
               input->indirect ? "one indirect dispatch" : "one dispatch"))
@@ -310,6 +419,14 @@ bool ps5vk_compute_run(const struct ps5vk_compute_input *input, struct ps5vk_com
    /* The host wrote the buffer before the dispatch and reads what the shader
      * left after its fence: coherent memory is the one mapping both see. */
    compute->result_word = words[0];
+   if (input->images) {
+      const uint8_t *pixels = compute->mapped;
+      for (uint32_t at = 0; at < 1024; at += 4) {
+         const uint8_t expected[4] = {pixels[at + 2], pixels[at + 1], pixels[at], pixels[at + 3]};
+         if (memcmp(pixels + 1024 + at, expected, 4) != 0)
+            compute->mismatched_texels++;
+      }
+   }
    return true;
 }
 
@@ -328,8 +445,18 @@ void ps5vk_compute_finish(struct ps5vk_compute *compute)
       CALL(compute, DestroyPipeline)(compute->device, compute->pipeline, NULL);
    if (compute->pipeline_layout != VK_NULL_HANDLE)
       CALL(compute, DestroyPipelineLayout)(compute->device, compute->pipeline_layout, NULL);
-   if (compute->set_layout != VK_NULL_HANDLE)
-      CALL(compute, DestroyDescriptorSetLayout)(compute->device, compute->set_layout, NULL);
+   for (uint32_t i = 0; i < 2; i++) {
+      if (compute->set_layout[i] != VK_NULL_HANDLE)
+         CALL(compute, DestroyDescriptorSetLayout)(compute->device, compute->set_layout[i], NULL);
+      if (compute->views[i] != VK_NULL_HANDLE)
+         CALL(compute, DestroyImageView)(compute->device, compute->views[i], NULL);
+      if (compute->images[i] != VK_NULL_HANDLE)
+         CALL(compute, DestroyImage)(compute->device, compute->images[i], NULL);
+      if (compute->image_memory[i] != VK_NULL_HANDLE)
+         CALL(compute, FreeMemory)(compute->device, compute->image_memory[i], NULL);
+   }
+   if (compute->sampler != VK_NULL_HANDLE)
+      CALL(compute, DestroySampler)(compute->device, compute->sampler, NULL);
    if (compute->module != VK_NULL_HANDLE)
       CALL(compute, DestroyShaderModule)(compute->device, compute->module, NULL);
    if (compute->mapped != NULL)

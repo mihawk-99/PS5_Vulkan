@@ -17778,7 +17778,8 @@ void run_vulkan_separated_pair_frames(const TestContext &test, TestOutcome &outc
         ps5vk_triangle_input separated_input = input;
         separated_input.shaders[0] = separated_shaders;
         separated_input.separated_texture_pair = true;
-        ps5vk_triangle_status separated_status = ps5vk_triangle_create(&separated, &separated_input);
+        ps5vk_triangle_status separated_status =
+            ps5vk_triangle_create(&separated, &separated_input);
         if (separated_status == PS5VK_TRIANGLE_OK)
             separated_status = ps5vk_triangle_draw(&separated, PS5VK_TRIANGLE_ONE_DRAW);
         separated_drew =
@@ -20130,10 +20131,10 @@ void run_vulkan_page_mip_frames_six(const TestContext &test, TestOutcome &outcom
 // console's readback is exact; a PC rebuild records the dispatch without running
 // it, which is why the submission is what the PC comparison covers.
 #ifdef AGC_VULKAN_DRIVER
-void run_vulkan_compute_dispatch(const TestContext &test, TestOutcome &outcome) noexcept
+void run_vulkan_compute(const TestContext &test, TestOutcome &outcome, bool images) noexcept
 {
     JsonLog &log = test.log;
-    const PackagePaths compute = package_paths("c0");
+    const PackagePaths compute = package_paths(images ? "c0-images" : "c0");
     char spirv_download[96]{};
     char spirv_app[96]{};
     std::snprintf(spirv_download, sizeof(spirv_download), "%sdispatch.spv", compute.download);
@@ -20176,13 +20177,14 @@ void run_vulkan_compute_dispatch(const TestContext &test, TestOutcome &outcome) 
     input.initial_word = 0;
     input.expected_word = kComputeWord;
     input.report = report;
+    input.images = images;
     // Two dispatches: vkCmdDispatch over the counts the command names, then
     // vkCmdDispatchIndirect over the counts the buffer holds. Each is its own
     // program and its own submission, so the capture and the PC comparison see
     // both.
     bool built = true;
     bool passed = true;
-    for (unsigned frame = 0; frame < 2; frame++)
+    for (unsigned frame = 0; frame < (images ? 1u : 2u); frame++)
     {
         struct ps5vk_compute program{};
         struct ps5vk_compute_input run = input;
@@ -20202,16 +20204,16 @@ void run_vulkan_compute_dispatch(const TestContext &test, TestOutcome &outcome) 
         // a PC rebuild only records the dispatch, and its readback is the
         // buffer's own contents, which is what the host layer's NOT_REQUIRED
         // records say.
-        const bool exact = program.result_word == kComputeWord;
-        const bool recorded_only = program.result_word == 0;
-        const bool ok = ran && (exact || recorded_only);
+        const bool exact =
+            images ? program.mismatched_texels == 0 : program.result_word == kComputeWord;
+        const bool ok = ran && exact;
+        if (images)
+            log.number("d2_compute_images", "mismatched_texels", program.mismatched_texels);
         char detail[192]{};
         std::snprintf(detail, sizeof(detail), "the %s dispatch %s; the readback is %s",
                       frame == 1 ? "indirect" : "direct",
                       ran ? "recorded, submitted and signalled its fence" : "did not run",
-                      exact           ? "the shader's word"
-                      : recorded_only ? "the buffer's own contents"
-                                      : "neither");
+                      exact ? "the expected shader output" : "different from the shader output");
         log.event("d2_compute", ok ? "PASS" : "FAIL", ok ? 0 : -1, detail);
         built = built && ran;
         passed = passed && ok;
@@ -20219,6 +20221,16 @@ void run_vulkan_compute_dispatch(const TestContext &test, TestOutcome &outcome) 
     }
     outcome.command_built = built;
     outcome.passed = passed;
+}
+
+void run_vulkan_compute_dispatch(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_vulkan_compute(test, outcome, false);
+}
+
+void run_vulkan_compute_images(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_vulkan_compute(test, outcome, true);
 }
 
 // The three format items this session's driver work added and no console run
@@ -23160,6 +23172,7 @@ constexpr RunnerTest kRunnerTests[] = {
     // its own pipeline (probes/c0/dispatch.spv, which the case reads itself:
     // the m2 set is only what the runner stages for every test).
     {"d2-compute", "m2", run_vulkan_compute_dispatch},
+    {"d2-compute-images", "m2", run_vulkan_compute_images},
     // Phase C5: the tutorial's depth program, the m4-depth canary's two
     // rectangles over a D32_SFLOAT attachment the frame clears through
     // vk_meta, testing and writing depth with LESS.

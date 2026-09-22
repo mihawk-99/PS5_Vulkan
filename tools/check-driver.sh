@@ -73,6 +73,7 @@ tests=(
     c8_msaa
     c8_resolve
     d2_compute
+    d2_compute_images
     v0_query_full
     v0_robust
     v0_formats
@@ -351,6 +352,7 @@ resolve_run="$root/golden/c8-resolve/run-1.json"
 # buffer are all the driver's own allocations, so only a capture of that run
 # holds their addresses (golden/d2-compute).
 compute_run="$root/golden/d2-compute/run-1.json"
+compute_images_run="$root/golden/d2-compute-images/run-1.json"
 want c8_msaa &&
     python3 "$root/tools/golden.py" replay "$msaa_run" "$work/c8-msaa.replay" --test c8-msaa
 want c8_resolve &&
@@ -359,6 +361,9 @@ want c8_resolve &&
 want d2_compute &&
     python3 "$root/tools/golden.py" replay "$compute_run" "$work/d2-compute.replay" \
         --test d2-compute
+want d2_compute_images &&
+    python3 "$root/tools/golden.py" replay "$compute_images_run" "$work/d2-compute-images.replay" \
+        --test d2-compute-images
 # The C3 uniform test is compared with its own console run, like the C2 tests:
 # the application's buffer is one of the addresses its submission names.
 uniform_run="$root/golden/c3-uniform/run-1.json"
@@ -444,6 +449,8 @@ run_test() {
             compare=(compare-run "$msaa_run" "$dump" --test c8-msaa) ;;
         c8_resolve) replay=c8-resolve
             compare=(compare-run "$resolve_run" "$dump" --test c8-resolve) ;;
+        d2_compute_images) replay=d2-compute-images
+            compare=(compare-run "$compute_images_run" "$dump" --test d2-compute-images) ;;
         d2_compute) replay=d2-compute
             compare=(compare-run "$compute_run" "$dump" --test d2-compute) ;;
         v0_timestamp) replay=v0-timestamp
@@ -502,7 +509,7 @@ run_test() {
     if [[ $test != c1_present && $test != c2_indexed && $test != c2_staging &&
         $test != c2_instancing && $test != c7_tiled_mip && $test != v0_robust &&
         $test != v0_formats && $test != c7_copy && $test != c7_blit_formats &&
-        $test != c8_msaa && $test != c8_resolve && $test != d2_compute &&
+        $test != c8_msaa && $test != c8_resolve && $test != d2_compute && $test != d2_compute_images &&
         $test != d1_dynamic_ubo &&
         $test != c3_uniform &&
         $test != c3_quad && $test != c4_texture &&

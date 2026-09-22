@@ -1,0 +1,5 @@
+PS5 Vulkan c0-images compute dispatch probe, built by tools/build-compute-probe.sh c0-images.
+source: shaders/c0-images/dispatch.comp
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0), compiled on the console by libpsbc
+glslang: Glslang Version: 11:16.4.0
+dispatch.spv: 256 words, sha256 a813651e373c0b5e13a85c3aa9dc8be1a6e69f23628c67d2508bf0aeac37b35b

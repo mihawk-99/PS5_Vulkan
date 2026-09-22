@@ -1,0 +1,9 @@
+hold 60
+capture
+d2-compute-images
+d2-compute
+v0-multiset-quake
+v0-two-sets
+v0-formats
+m2-solid
+exit

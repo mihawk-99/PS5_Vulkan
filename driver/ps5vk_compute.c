@@ -12,11 +12,9 @@
  * in a GPU-visible mapping, and vkCmdDispatch records the packets into the
  * command buffer's stream, which the queue submits like any draw.
  *
- * A dispatch reads its operand through one descriptor: the compiler reports
- * which binding, which table offset and which user-data dword, and the table
- * entry is the storage-buffer form the probe proved (base, high word, byte
- * extent and the control word). Everything the dispatch programs is written
- * out rather than left to AGC, exactly as the probe wrote it.
+ * A dispatch uses the draw path's descriptor writer: one table per set and
+ * every declared binding at its compiler-reported offset, with the table
+ * pointer in the compiler-reported user-data dword.
  */
 
 #include "ps5vk_private.h"
@@ -60,15 +58,6 @@
  * operation that has to observe the compute waves. */
 #define PS5VK_EVENT_CS_PARTIAL_FLUSH 0x00000407u
 
-/* The reference project's audited raw storage-buffer descriptor's control word
- * (src/diagnostics.cpp, kStorageBufferControl): the compute shader's ACO code
- * loads the entry with it, and the console ran it exactly. */
-#define PS5VK_STORAGE_BUFFER_FLAGS UINT32_C(0x31016fac)
-
-/* The descriptor set sits in this user-data dword when the compiler does not
- * report one; the declared probes report dword 2 for their first set. */
-#define PS5VK_COMPUTE_DEFAULT_DESCRIPTOR_DWORD 2
-#define PS5VK_COMPUTE_MAX_USER_DATA 16
 /* The registers, the DISPATCH_DIRECT packet and the flush, with room to spare. */
 #define PS5VK_COMPUTE_MAX_WORDS 96
 
@@ -144,6 +133,14 @@ static VkResult ps5vk_compute_pipeline_compile(struct ps5vk_device *device,
    if (result != VK_SUCCESS)
       return result;
 
+   for (uint32_t i = 0; layout && i < layout->push_range_count; i++) {
+      const VkPushConstantRange *range = &layout->push_ranges[i];
+      pipeline->push_constant_bytes = MAX2(pipeline->push_constant_bytes, range->offset + range->size);
+      pipeline->push_constant_stages |= range->stageFlags;
+   }
+   if (pipeline->push_constant_bytes > PS5VK_MAX_PUSH_CONSTANT_BYTES)
+      return vk_errorf(device, VK_ERROR_UNKNOWN, "compute push constants exceed the driver budget");
+
    call_once(&ps5vk_compile_once, ps5vk_compile_mutex_init);
    mtx_lock(&ps5vk_compile_mutex);
    PsbcShaderOutput output;
@@ -200,26 +197,13 @@ static VkResult ps5vk_compute_pipeline_compile(struct ps5vk_device *device,
       return vk_errorf(device, VK_ERROR_UNKNOWN,
                          "the compiler reported no COMPUTE_PGM_RSRC words for the dispatch");
    }
-   if (metadata.user_sgpr_count > PS5VK_COMPUTE_MAX_USER_DATA ||
-      metadata.descriptor_binding_count != 1)
-   {
-      psbc_free_output(&output);
-      return vk_errorf(
-         device, VK_ERROR_UNKNOWN,
-         "a dispatch needs one declared binding and at most %u user-data dwords; the "
-         "compiler reported %u binding(s) and %u dwords",
-         (unsigned)PS5VK_COMPUTE_MAX_USER_DATA, (unsigned)metadata.descriptor_binding_count,
-         (unsigned)metadata.user_sgpr_count);
-   }
-   const PsbcDescriptorBinding *const binding = &metadata.descriptor_bindings[0];
-   if (binding->type != PSBC_DESCRIPTOR_STORAGE_BUFFER ||
-      binding->offset + PS5VK_STORAGE_BUFFER_DESCRIPTOR_BYTES > PS5VK_TABLE_CHUNK_BYTES)
+   if (metadata.user_sgpr_count > PS5VK_MAX_USER_DATA ||
+       metadata.descriptor_binding_count > PSBC_MAX_DESCRIPTOR_BINDINGS)
    {
       psbc_free_output(&output);
       return vk_errorf(device, VK_ERROR_UNKNOWN,
-                         "the dispatch's binding is not a storage buffer whose table entry fits a "
-                         "chunk (type %d, offset %u, stride %u)",
-                         (int)binding->type, (unsigned)binding->offset, (unsigned)binding->stride);
+                         "compute resource metadata exceeds %u user-data dwords or %u bindings",
+                         PS5VK_MAX_USER_DATA, PSBC_MAX_DESCRIPTOR_BINDINGS);
    }
 
    /* A direct mapping is a whole number of direct-memory pages: the ISA is
@@ -360,7 +344,7 @@ ps5vk_CreateComputePipelines(
 
 /* One dispatch's workgroups, whichever command named them: a direct dispatch
  * passes its arguments, an indirect one the three dwords it read from the
- * buffer. One descriptor table holds the bound storage buffer, and then the
+ * buffer. The shared resource writer builds the stage's tables, then the
  * packets the V0-compute probe proved -- the COMPUTE_* SH registers,
  * DISPATCH_DIRECT and a CS partial flush -- go into the command buffer's
  * stream, which the queue submits and waits on like any other. */
@@ -380,51 +364,16 @@ ps5vk_dispatch(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t groupCountX, uint32
    if (groupCountX == 0 || groupCountY == 0 || groupCountZ == 0)
       return;
    const PsbcShaderMetadata *const metadata = &pipeline->compute.metadata;
-   const PsbcDescriptorBinding *const binding = &metadata->descriptor_bindings[0];
-   struct ps5vk_descriptor_set *const set = cmd_buffer->descriptor_sets[binding->set];
-   const struct ps5vk_descriptor_buffer *written =
-      set != NULL && binding->binding < PSBC_MAX_DESCRIPTOR_BINDINGS
-         ? &set->buffers[binding->binding]
-         : NULL;
-   if (written == NULL || written->type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ||
-      written->address == 0)
-   {
-      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                        "a dispatch reads set %u binding %u as a storage buffer, and the "
-                        "binding is not one bound to memory",
-                        (unsigned)binding->set, (unsigned)binding->binding);
+   const VkShaderStageFlags stage_bit = VK_SHADER_STAGE_COMPUTE_BIT;
+   uint32_t user_data[1][PS5VK_MAX_USER_DATA] = {{0}};
+   bool colour_barrier = false;
+   if (!ps5vk_cmd_buffer_shader_resources(cmd_buffer, pipeline, &metadata, &stage_bit, 1,
+                                          user_data, &colour_barrier))
       return;
-   }
-
-   /* The table the compiler's binding names, in a GPU-visible chunk; the
-     * storage-buffer entry is the form the probe ran (base, high word, byte
-     * extent, control word). */
-   const size_t table_bytes = ALIGN_POT(
-      (size_t)binding->offset + PS5VK_STORAGE_BUFFER_DESCRIPTOR_BYTES, PS5VK_BUFFER_ALIGNMENT);
-   uint32_t *const table = ps5vk_cmd_buffer_table(cmd_buffer, table_bytes, PS5VK_BUFFER_ALIGNMENT);
-   if (table == NULL)
+   /* The split completes and flushes preceding colour writes before compute
+    * samples them, just as the draw path does. */
+   if (colour_barrier && !ps5vk_cmd_buffer_split(cmd_buffer))
       return;
-   memset(table, 0, table_bytes);
-   uint32_t *const descriptor = table + binding->offset / sizeof(uint32_t);
-   descriptor[0] = (uint32_t)written->address;
-   descriptor[1] = (uint32_t)(written->address >> 32);
-   descriptor[2] = (uint32_t)written->size;
-   descriptor[3] = PS5VK_STORAGE_BUFFER_FLAGS;
-   ps5vk_flush_cpu_cache(table, table_bytes);
-
-   const uint32_t descriptor_dword = metadata->descriptor_set0_valid
-                                          ? metadata->descriptor_set0_user_data_dword
-                                          : PS5VK_COMPUTE_DEFAULT_DESCRIPTOR_DWORD;
-   if (descriptor_dword >= metadata->user_sgpr_count)
-   {
-      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                        "the descriptor table's user-data dword %u is past the %u the "
-                        "dispatch programs",
-                        descriptor_dword, (unsigned)metadata->user_sgpr_count);
-      return;
-   }
-   uint32_t user_data[PS5VK_COMPUTE_MAX_USER_DATA] = {0};
-   user_data[descriptor_dword] = (uint32_t)(uintptr_t)table;
 
    const uint64_t code_address = (uint64_t)(uintptr_t)pipeline->compute.code.address;
    const uint32_t start[3] = {0, 0, 0};
@@ -449,8 +398,9 @@ ps5vk_dispatch(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t groupCountX, uint32
    at = ps5vk_compute_sh_registers(at, PS5VK_COMPUTE_REG_RESOURCES, resources, 2);
    at = ps5vk_compute_sh_registers(at, PS5VK_COMPUTE_REG_LIMITS, limits, 1);
    at = ps5vk_compute_sh_registers(at, PS5VK_COMPUTE_REG_RESOURCE3, resource3, 1);
-   at = ps5vk_compute_sh_registers(at, PS5VK_COMPUTE_REG_USER_DATA, user_data,
-                           metadata->user_sgpr_count);
+   if (metadata->user_sgpr_count != 0)
+      at = ps5vk_compute_sh_registers(at, PS5VK_COMPUTE_REG_USER_DATA, user_data[0],
+                                     metadata->user_sgpr_count);
    at = ps5vk_compute_sh_registers(at, PS5VK_COMPUTE_REG_DESTINATIONS, destinations, 2);
    at = ps5vk_compute_sh_registers(at, PS5VK_COMPUTE_REG_NO_DESTINATIONS, no_destinations, 2);
    at = ps5vk_compute_sh_registers(at, PS5VK_COMPUTE_REG_ACCUMULATORS, accumulators, 4);

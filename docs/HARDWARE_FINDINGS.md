@@ -2985,3 +2985,19 @@ plane the frame itself wrote:
   is the polygon's, so that half is the hardware's word plus a named gap). Whether the
   register needs a mode this path does not set is not measured; what is measured is
   that it does not clamp here.
+
+
+## 2026-09-22: compute reads a sampled image and writes a storage image
+
+`d2-compute-images`, runner pid 162 (`Klog_Logs/r7-compute-regression.log`,
+`evidence/r7-compute/capture.json`), dispatched once over 64x4 RGBA8 texels,
+fetching set 0's combined image sampler and writing set 1's storage image.
+A Vulkan image-to-buffer copy after the dispatch read back the shader's BGRA
+permutation with **0 mismatches over 256 texels**. Each set had its own table
+and compiler-named user-data pointer. Both descriptor encodings came from the
+shared graphics writer. The same battery read `0xa5a5a5a5` from the existing
+single-storage-buffer shader under both direct and indirect dispatch.
+
+This proves the two-set sampled/storage-image compute path for this linear
+RGBA8 allocation. It does not establish additional formats, descriptor arrays,
+or the vkQuake lightmap pass. Goldens: `golden/d2-compute-images/`.

@@ -1,0 +1,44 @@
+{
+ "schema": 1,
+ "kind": "driver-run",
+ "source": {
+  "klog": "r7-compute-regression.log",
+  "pid": 162
+ },
+ "video": -1,
+ "videos": {
+  "d2-compute-images": -1
+ },
+ "stages": [
+  {
+   "index": 0,
+   "address": "0x20002c000",
+   "bytes": "0x4000",
+   "fnv1a64": "0x2358b64b5e0b9fc7",
+   "chunk_words": 64,
+   "chunks": {
+    "0x0000": "be800303be810382be830382bfa10001f40c0200fa000000f40c0401fa000000d746000004010c047e020205bf8cc07ff0001f0800040400bf8c3f707e08cb06f0201f0800020400bf810000bf9f0000bf9f0000bf9f0000bf9f0000bf9f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "test": "d2-compute-images"
+  }
+ ],
+ "regions": {
+  "tables-d2-compute-images-0x20003c000": {
+   "address": "0x20003c000",
+   "bytes": 262144,
+   "test": "d2-compute-images"
+  },
+  "tables-d2-compute-images-0x200030000": {
+   "address": "0x200030000",
+   "bytes": 16384,
+   "test": "d2-compute-images"
+  }
+ },
+ "submissions": [
+  {
+   "test": "d2-compute-images",
+   "label": "dispatch",
+   "file": "d2-compute-images-1.json"
+  }
+ ]
+}

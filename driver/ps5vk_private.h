@@ -753,7 +753,15 @@ PsbcResult
 ps5vk_compile_shader_deep(struct nir_shader *nir, const uint32_t *words, size_t size,
                           const PsbcCompileOptions *options, PsbcShaderOutput *output);
 
-/* A pipeline's descriptor bindings of set 0 for one stage bit, into the
+#define PS5VK_MAX_USER_DATA 16
+bool
+ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
+                                  const struct ps5vk_pipeline *pipeline,
+                                  const PsbcShaderMetadata *const *metadata,
+                                  const VkShaderStageFlags *stage_bits, uint32_t stage_count,
+                                  uint32_t user_data[][PS5VK_MAX_USER_DATA], bool *colour_barrier);
+
+/* A pipeline's descriptor bindings across sets for one stage bit, into the
  * compiler options (ps5vk_pipeline.c); a compute pipeline calls it with
  * VK_SHADER_STAGE_COMPUTE_BIT. */
 VkResult

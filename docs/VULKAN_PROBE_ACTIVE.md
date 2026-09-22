@@ -1,183 +1,64 @@
 # Active work
 
-Volatile by design. Rewrite this file in place; keep it under about 120 lines.
-Specifications belong in `docs/VULKAN_PROBE_PLAN.md`, and run results belong in
-the phase logs (`docs/M5_PHASE_A.md`, `docs/M5_PHASE_B.md`,
-`docs/M5_PHASE_C.md`).
+Volatile by design. Keep this file under about 120 lines. Specifications are in
+`docs/VULKAN_PROBE_PLAN.md`; measurements are in `docs/M5_PHASE_C.md` and
+`docs/HARDWARE_FINDINGS.md`.
 
-_Updated: 2026-09-21_
+_Updated: 2026-09-22_
 
 ## Now
 
-**The anisotropy gate is cleared** (the thing that stood between vkQuake's port and its
-first world draw): `anisotropyEnable` with `maxAnisotropy` inside `[1, maxSamplerAnisotropy]`
-is accepted as a no-op at the 1.0 this device reports, and anything above it is refused by
-name. `v0-sampler-anisotropy` proves it on the console -- two frames, the flag off and on at
-the reported maximum, **0 mismatched texels** over the whole target (pid 138,
-`Klog_Logs/v0-sampler-anisotropy.log`, golden `golden/v0-sampler-anisotropy/`). The
-`samplerAnisotropy` feature stays FALSE: nothing is filtered, and the flag cannot change a
-fetch at one sample. `docs/M5_REFERENCE.md`'s C4 row and its limits row now claim exactly
-that and no more.
+**R7 compute startup blocker: driver acceptance passed.** The promoted vkQuake
+request took priority over CTS and the MRT dump. Compute creation no longer
+requires exactly one storage buffer. Draw and dispatch share their descriptor
+builder: every declared binding, one table per set, the same 16 user-data dword
+budget, and the existing descriptor-type writers. Details and boundaries:
+`docs/M5_PHASE_C.md`, entry "R7 promoted to startup".
 
+Console pid **162**, digest `1ccd486d…`, passed **6/6** cases: the new
+`d2-compute-images` (one dispatch, texture in set 0, storage image in set 1,
+**0 mismatches over 256 texels**), the direct/indirect `d2-compute` buffer probe
+(both `0xa5a5a5a5`), `v0-multiset-quake`, `v0-two-sets`, `v0-formats`, and `m2-solid`.
+Evidence: `evidence/r7-compute/capture.json`, `golden/d2-compute-images/`,
+`Klog_Logs/r7-compute-regression.log`. The host image stream is identical to the
+console's 14 packets; the old D2 goldens remain unchanged.
+Full driver gate: 152 build/run checks and 292 identical golden comparisons.
+Lint, unit tests, runner cases and all three audits pass.
 
-**The second request batch (`PS5_VULKAN_REQUESTSv2.md`, R7-R9) is worked**, one commit
-per item, and its evidence was weaker on purpose -- each item was a prediction read
-from vkQuake's source, so each was re-checked at HEAD before anything was written:
+**Port handoff.** Relink `build/driver/ps5/libps5vk.ps5.a` and check
+`cs_tex_warp` creation. The actual vkQuake startup run, its six-binding kernels,
+and the lightmap pass at M6 are not claimed by this probe.
 
-- **R8, the clamp decision, R9 and R4's residual are closed**: dynamic depth bias from
-  the command buffer's state, a by-name refusal of a non-zero `depthBiasClamp`, push
-  constants declared through the pointer form and written by the draw, and a colour clear
-  read back with nothing over it. Details and run digests: `docs/M5_PHASE_C.md`.
-- **R7 is confirmed, the route is chosen, and Rounds 1 to 3 of four are done**: the
-  two-set refusal happens at the *draw*, and route (b) -- multi-set within the advertised
-  four -- is chosen. Round 1 removed the compiler wrapper's single-set assumption (one
-  layout per set, per-set tables sized per set, a pointer per set in the metadata, a total
-  slot budget), with `probes/v0-multiset` (two sets that differ in kind) and the host test
-  `psbc_multiset` proving it: set 0's pointer at user-data dword 2, set 1's at 3, and both
-  new bounds refusing. Round 2 is the **driver** half: one table per set, each sized from
-  that set's own bindings, one user-data pointer per set written into the dword the
-  metadata names for it, `ps5vk_debug_descriptor_tables` to read both back, and the
-  set-count refusal replaced by the advertised limit where it is reached. Its gates: host
-  test `v0_multiset_draw` 12 of 12 direct (set 0 dword 2 -> the 16-byte uniform descriptor,
-  set 1 dword 3 -> the 48-byte image sampler of the 64x64 texture), `check-driver.sh` PASS,
-  `build/gates.sh` PASS, and 10 of 10 console cases (the standing nine plus `v0-two-sets`,
-  whose expectation flipped from "refused" to "draws"). Round 3 is the shape the request
-  exists for: `probes/v0-multiset-quake` -- three combined image samplers at set 0's
-  bindings 0, 1 and 2 (vkQuake's collapsed texture sets) and the frame's block at set 1's
-  binding 0 -- the harness mode that builds and binds it, the console case
-  `v0-multiset-quake`, its golden and its queue. Its readback is one word that names the
-  whole mechanism at once: **255/64/255**, one channel from each of set 0's three
-  bindings and the value set 1's block carries, where a stage reading an unwritten
-  pointer would be black (R9). The same shape is asserted on the host
-  (`driver/tests/vk_v0_multiset_draw_test.c`, 23 of 23 checks direct: set 0's table is
-  three 48-byte image entries one after another, set 1's the 16-byte uniform entry).
-  Round 4 is the fallout and closes the request: the new host half
-  `driver/tests/vk_v0_multiset_quake_test.c` draws exactly the console case's one frame,
-  and `tools/check-driver.sh` compares the two **word for word** -- `identical to
-  v0-multiset-quake-1.json: 17 packets, 6 register tables`, in both build modes. The
-  build-system hazard Round 2 hit is fixed at its cause (`driver/Makefile` now depends on
-  every driver header; touching one recompiles 21 of 21 sources where it used to
-  recompile none), the whole regression list is green (`check-driver.sh` PASS, gates PASS,
-  console **16 of 16**, pid 131), and no committed golden needed re-capturing -- every
-  `compare-run` case came back identical. Two items are left for later and named in
-  `docs/M5_PHASE_C.md`: a probe that reaches the **advertised set limit** and asks for one
-  more (the refusal is written in three places, asserted on no console case), and
-  `tooling/vulkan-runtime/Makefile`, whose object rules name no header at all -- the same
-  stale-object failure mode this round fixed for the driver. Round 1 also corrected a stale
-  artifact: the shipped `probes/v0-push` package had been written by a probe CLI built
-  *before* the R9 compiler fix (R9's own conclusion is unaffected).
-- **R4's coverage note is answered by correcting our own claim**: the runner *does*
-  install a `VK_EXT_debug_utils` messenger and forwards every refusal to the log; the
-  gap was that a frame expecting a refusal passed no report. Fixed, and one sweep now
-  carries all three refusal sentences.
+**Working tree.** Pre-existing R6 triangle-strip edits remain separate. Their
+unfinished harness had removed the vertex-less early return, causing unrelated
+cases to fail before creating a pipeline. That early return is restored locally;
+the rest of the strip harness and its acceptance remain pending.
 
-**The first batch (R1-R6) is answered too**, one commit each: R6, R2, R1, R3, R5 and
-R4, with `docs/REQUESTS_RESPONSE.md` as the hand-off.
+## Standing work
 
-Eight console-proved cases carry them -- `v0-two-passes`, `v0-sampler-address`,
-`v0-cull`, `v0-stencil-clear`, `v0-depth-bias`, `v0-dynamic-depth-bias`, `v0-two-sets`
-and `v0-resolve-usage` -- each with a
-queue under `jobs/`, a golden under `golden/` and, for the depth bias, a focused host
-gate (`driver/tests/vk_c5_depth_bias_test.c`).
-
-**The linked runtime was four days older than the migration.** The stale
-`libvk_runtime.ps5.a` was rebuilt, the title digest moved with it (`c3a99b98…` ->
-`b33b813c…`), and the nine-case battery was re-run against the rebuilt artifact. The one
-recorded stream that moved is `golden/v0-stencil`'s first submission (`docs/M5_PHASE_C.md`).
-
-**What is left in the objective.** Nothing from either mission: the next gate is
-the CTS subset (`docs/CTS.md`).
-
-**Rules this workstream keeps.** One mechanism a round; the encoding comes from a
-public codebase or the register database before anything is written; the compiler
-changes as a patch script (never an SDK edit); a claim lands only with a console
-run, a focused host gate and the audit move in the same commit; a mechanism that
-fails its battery reverts its claim and is quoted against what failed; every
-battery regresses `v0-formats` (the audit mirror) and `m2-solid`.
-
-## Rung 1.0's remainder
-
-Every feature a per-row `{sym1}` cell requires is proved by a console run and
-reported by the driver; the rows left are the hardware's and one footnote clause's:
-
-Command audit 137 required (90 driver, 0 refused, 47 runtime, 0 gap); limits audit 106
-members, 97 compared, 0 missing; format audit 179 required, 58 reported, 55 conditional
-and no `must:` clause unmet; the split 0 / 0 / 0 / 0 / 0; no blocker left from the
-enum, depth/stencil, sRGB or console-fault families.
-
-## Last verified
-
-| Check | Result |
-| --- | --- |
-| R7 Round 1, the compiler (host, then the console) | One layout per set: `psbc_multiset` 9 of 9 checks direct ("set 0 at user-data dword 2, set 1 at 3, 4 user SGPRs"), loader and PS5 link PASS; every probe package byte-identical to its pre-patch build except `probes/v0-push`, which the rebuild *corrected* (its package predated the R9 fix); `tools/check-driver.sh` 288 comparisons identical, none `DIFFERENT`, 47 tests PASS; `build/gates.sh` 11 of 11 -- the new `check-probe-packages.sh` rebuilds all 41 buildable probe sets byte-identically and asserts its own coverage; the console regression 9 of 9 PASS (pid 114, digest `9adf1241…`, `Klog_Logs/r7-round1.log`), only the named clamp refusal in the FAIL records |
-| the second batch, one sweep (pid 380) | Ten of ten tests PASS on title digest `c9c57b40…`: R8's `v0-dynamic-depth-bias`, R7's `v0-two-sets`, R5's `v0-resolve-usage`, R1's `v0-depth-bias`, R6's `v0-two-passes`, R2's `v0-sampler-address`, R3's `v0-stencil-clear`, `v0-cull`, `c8-resolve` and `m2-solid`, with all three refusal sentences in the klog (`Klog_Logs/r-coverage.log`). `v0-push-constant` (R9) is red on purpose and is not in that sweep |
-| R7's two-set layout (pid 378) | The pipeline was created and its draw refused: "descriptor set 1 is beyond the 1 this driver binds; sets past 0 are D1" (`Klog_Logs/r7-two-sets.log`, digest `084a7c84…`) |
-| the R round on the rebuilt runtime (pid 331, digest `b33b813c…`) | Nine of nine tests PASS, 1509 PASS records, no `signal:` |
-| the six requests' probes | R6's guard, R1's four cull frames (132/65/67/0 drawn pixels), R2's four-group sampling, R3's 65536-byte stencil plane |
-| the linked runtime | rebuilt: the Sep 16 archive predated the fork (stamp tree `a92a1228…`, script `cf4765ca…`); the rebuild changes the stubs and moves the title digest. All 60 objects differ, three of them by source |
-| the goldens and the replay model | `check-driver.sh` PASS: 288 comparisons identical, no `DIFFERENT`, no fault; `check-runner-cases.sh` PASS |
-| the host gates | `make lint` (199 files), `make test` (30 tests), the three audits (`--check`, counts unchanged), `check-sdk-fork-migration.sh`, `check-mip-layout.sh`, `check-psbc-link.sh`, `check-probe-packages.sh` (43 committed sets, 41 rebuilt byte-identically, 2 named as not rebuildable), `check-vulkan-runtime.sh`, `check-runner-cases.sh`, `check-driver.sh` |
-
-**Phase E1 is open: the capability set is an artefact** (2026-09-21). The runner's
-`device-report` case walks the device's own reporting and
-`tools/collect-device-report.py` collects it into
-`conformance_inventory/device_report.json`, completeness-checked against the Vulkan
-headers and diffed by `tools/check-runner-cases.sh` so it cannot drift. It carries 97
-limits, 55 features with **one** true (`robustBufferAccess`), one queue family, one
-host-coherent memory type, `display`/`surface`/`swapchain` among the extensions, and the
-format matrix: **184 of 184 core formats probed, 58 with any feature** (the format
-audit's own count), 307 image-format combinations accepted, none linear and none 3D. Two
-self-inconsistencies it exposed are the campaign's first work items:
-`maxImageDimension3D` is 256 while no 3D combination exists, and four formats claim
-cube-compatibility while two answer a cube query (`docs/M5_PHASE_C.md`). The pinned CTS
-is a fetch now -- `tools/fetch-vk-gl-cts.sh`, 2.0 GB under `.deps` including its 988 MB
-external tree, its revision verified and its `conformance_inventory/cts_pin.json`
-separating the revision, the externals the CTS only *declares*, and the ones actually
-checked out (all seven equal the declared pins) -- with `make lint` holding the record to
-the pin in `docs/CTS.md`.
-
-**The CTS runs against this driver** (2026-09-21). `tools/run-cts-host.sh` builds the
-pinned `deqp-vk` (vulkan_headless, 1,841,090 cases) and runs a group against the host ICD
-through the loader: `dEQP-VK.info.*` is 16 pass / **0 fail**, `dEQP-VK.api.info.*` is 2539
-pass / **5 fail** / 1342 not supported, and all five failures are reporting -- two missing
-`STORAGE_TEXEL_BUFFER_ATOMIC_BIT` claims, a missing `COLOR_ATTACHMENT_BIT` for R32_SFLOAT,
-an illegal compressed-format feature combination, and `VK_KHR_surface`'s version word
-(`conformance_inventory/cts_host_baseline.json`). Two are taken. The instance was claiming
-Vulkan 1.3 while the driver implements 1.0: a regression test in the runner's
-`device-report` case now fails if the two disagree, and the claim is gone (its CTS case
-still fails; the driver's own answer is 1.0 and the loader's version is ruled out, so the
-hunt for CTS's `getUsedApiVersion()` continues). And `R32_SFLOAT` gained the
-colour-attachment bit the specification requires, with a new probe set and runner case
-proved on the console (`v0-targets-float` PASS, digest `1ac8b831…`), then its two
-texel-buffer bits with both cases' rows proved the same way (digest `c1f75ff6…`, 17 of 17
-uniform and 8 of 8 storage). Its `VERTEX_BUFFER` bit followed in round 9, claimed
-only once the driver's vertex-format table and the v0-vertex-formats case could fetch one
-(digest `7e8ac5ea…`) -- which **closed that CTS case**: `dEQP-VK.api.info.*` is now 2540
-passed / **4 failed**. Then the atomic bit for the integer twins,
-earned by a new probe that atomically adds per fragment and checks the count
-(`v0-formats-texel-buffer-atomic` PASS, digest `28d073e9…`). `dEQP-VK.api.info.*` is now
-**2542 passed / 2 failed**. The rest: the compressed-format set (every BC, ETC2 and ASTC
-format reports `0x0` today, so it is a real format-table gap -- the mip-layout oracle now
-asks AddrLib for a compressed tile's own row, which is where that work starts), and the
-console payload.
-`extension_core_versions` is no longer counted as driver work: it fails for every extension
-including the loader's own, and four candidate inputs were eliminated -- the last by
-measurement -- so it carries the **HARNESS/PORT** label for the run's manifest
-(`docs/M5_PHASE_C.md`, rounds 6 to 12).
-
-**An upstream AGC source was checked against this driver** (2026-09-21). The
-static-recompilation project's published tile-equation table agrees, texel for texel, with
-every tiled map this driver measured (`tools/check-tile-equations.py`, run by the
-mip-layout gate), and its AGC shader-handle resource-slot table is the largest untaken
-item -- it would turn R9's silent-zero class into a named refusal. Ranked list, with what
-was corroborated and what does not transfer: `docs/AGC_UPSTREAM_NOTES.md`.
-
-**The formatting policy is enforced by the tool now** (2026-09-21). `driver/`, `host/`,
-`vendor/`, `payload/`, `tooling/psbc/` and `tooling/vulkan-runtime/` keep the style they
-were derived from and each carries a `.clang-format` with `DisableFormat: true`, so
-`clang-format -i` on any file in them is a no-op rather than the 120-hunk rewrite that
-broke three gates in CTS round 8. `tools/run_clang_format.sh` lists those trees and fails
-if one loses its marker (`docs/M5_PHASE_C.md`, round 10).
+- Graphics R7 rounds 1-4, R8 dynamic depth bias, R9 push pointers, and the R4
+  clear/refusal coverage are recorded in `docs/M5_PHASE_C.md`; the first R1-R6
+  request batch is in `docs/REQUESTS_RESPONSE.md`. The advertised-set-limit probe
+  and vulkan-runtime header dependencies remain follow-ups from graphics R7.
+- Anisotropy at the reported maximum is accepted as a no-op, proved by
+  `v0-sampler-anisotropy` with zero differences. `samplerAnisotropy` stays FALSE.
+- Rung 1.0 audit counts remain: commands 137 (90 driver, 47 runtime, 0 gap);
+  limits 106 required, 97 compared, 0 missing; formats 179 required, 58 reported,
+  55 conditional, no unmet mandatory clause.
+- E1's device inventory is `conformance_inventory/device_report.json`, checked
+  by `tools/check-runner-cases.sh`: 97 limits, 55 features, 184 core formats,
+  307 image-format combinations. The 3D dimension claim versus no 3D images and
+  cube-query inconsistencies remain inventory findings.
+- The pinned CTS and seven externals are fetched. `dEQP-VK.info.*` is 16 pass /
+  0 fail; the latest `dEQP-VK.api.info.*` is **2542 pass / 2 fail**. The open
+  driver item is compressed-format reporting; `extension_core_versions` is
+  labelled HARNESS/PORT after four candidate inputs were eliminated. The
+  console CTS payload remains outstanding. Details: `docs/CTS.md` and the
+  phase log's CTS rounds 6-12.
+- Upstream AGC tile equations agree with the measured maps; the resource-slot
+  table remains an untaken diagnostic opportunity (`docs/AGC_UPSTREAM_NOTES.md`).
+- Imported driver/host/vendor/tooling trees retain their own style with
+  `DisableFormat: true`; the format gate enforces those markers.
 
 ## Open findings
 
