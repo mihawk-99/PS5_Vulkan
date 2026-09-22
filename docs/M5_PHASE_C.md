@@ -7089,3 +7089,32 @@ test caught before the console did -- and the console's own queue parser then re
 first run with "unknown test name", so no round was lost to a battery that proved nothing;
 and the audit mirror's `v0-formats` case refused the new bit until its expectation table
 carried it too.
+
+## 2026-09-21 — round 10: the formatting policy stops being a habit
+
+CTS round 8 lost time to a landmine that was still armed afterwards: `driver/ps5vk_image.c`
+is not a file this repository keeps clang-formatted -- the formatter's policy is `src/`,
+`tooling/native/` and `tests/` only -- and running `clang-format -i` over it rewrote the
+whole file, 120 hunks, which broke `mip-layout`, `audit-commands` and `test` at once. The
+recovery (restore, re-apply one hunk by hand) fixed the symptom; this round fixes the
+mechanism, because the next agent to run that command would spend the same round.
+
+**Measured first, so the fix covers what is actually unformatted**: of the trees this
+repository tracks, `driver` (79 of 79 files), `host` (4 of 5), `vendor` (4 of 6), `payload`
+(1 of 1) and six files under `tooling/psbc` and `tooling/vulkan-runtime` are rewritten by
+clang-format, while `src` and `tests` -- the policy's own trees -- are clean. Every one of
+those trees keeps the style it was derived from (Mesa's, for the driver and the runtime
+shims).
+
+**The fix is the tool's own switch, not a list in a script**: each tree carries a
+`.clang-format` with `DisableFormat: true`, which makes `clang-format -i` a no-op on any
+file inside it -- verified on `driver/ps5vk_image.c`, which is now left byte-identical --
+and which also satisfies `--dry-run --Werror`. A `.clang-format-ignore` was tried first and
+does *not* protect an explicitly named file, only directory walks, so it would not have
+helped the command that caused the incident.
+
+`tools/run_clang_format.sh` then makes the markers a policy rather than a habit: it lists
+the six trees and **fails** if one loses its marker or if the marker stops setting
+`DisableFormat: true`, and its `--check` output now says how many files are under the policy
+and how many trees are disabled by marker (22 and 6 today). Deleting a marker is therefore
+a gate failure, not a silent reopening of the landmine.

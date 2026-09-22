@@ -128,6 +128,13 @@ mip-layout gate), and its AGC shader-handle resource-slot table is the largest u
 item -- it would turn R9's silent-zero class into a named refusal. Ranked list, with what
 was corroborated and what does not transfer: `docs/AGC_UPSTREAM_NOTES.md`.
 
+**The formatting policy is enforced by the tool now** (2026-09-21). `driver/`, `host/`,
+`vendor/`, `payload/`, `tooling/psbc/` and `tooling/vulkan-runtime/` keep the style they
+were derived from and each carries a `.clang-format` with `DisableFormat: true`, so
+`clang-format -i` on any file in them is a no-op rather than the 120-hunk rewrite that
+broke three gates in CTS round 8. `tools/run_clang_format.sh` lists those trees and fails
+if one loses its marker (`docs/M5_PHASE_C.md`, round 10).
+
 ## Open findings
 
 - **A title cannot load a graphics library at run time** (2026-09-18): every `.so`

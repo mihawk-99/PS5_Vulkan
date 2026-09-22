@@ -1,0 +1,8 @@
+# This tree keeps the style it was derived from -- Mesa's, for the driver and
+# the runtime shims -- and this repository's formatting policy (tools/run_clang_format.sh,
+# .clang-format at the root: four-space indents, Allman braces) does not apply to it.
+# DisableFormat is what makes that a property of the tool rather than a habit: without
+# it, a clang-format -i on any file here rewrites the whole file -- 120 hunks for
+# driver/ps5vk_image.c, which broke three gates at once (docs/M5_PHASE_C.md, CTS round 8).
+DisableFormat: true
+SortIncludes: false
