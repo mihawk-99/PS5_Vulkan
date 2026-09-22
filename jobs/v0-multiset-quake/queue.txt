@@ -1,10 +1,17 @@
 # Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-multiset-quake/queue.txt
-# R7 Round 3's case: vkQuake's collapsed texture sets. Three combined image
+# R7 Round 3's case: vkQuake's collapsed texture sets -- three combined image
 # samplers at set 0's bindings 0, 1 and 2 and the frame's uniform block at set
 # 1's binding 0, with the fragment stage reading one channel from each set and
 # the readback holding all of them (src/diagnostics.cpp,
 # run_vulkan_multiset_quake_frames).
+#
+# m2-solid is in the queue for the *golden*, not for its own sake: a driver
+# case's capture carries no context register table, because the driver builds
+# its tables rather than the runner, and tools/golden.py replay takes that
+# table from a runner-built frame of the same capture (its sibling_defaults).
+# Without one the golden cannot be replayed on the PC at all.
 hold 60
 capture
 v0-multiset-quake
+m2-solid
 exit

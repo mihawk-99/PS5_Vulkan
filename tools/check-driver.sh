@@ -167,9 +167,18 @@ instancing_run="$root/golden/c2-instancing/run-1.json"
 # attachment the probe fills itself, so only a capture of that run holds the
 # addresses (golden/c7-mip-tiled, the runner's c7-mip-tiled test).
 tiled_mip_run="$root/golden/c7-mip-tiled/run-1.json"
-if want b7_draw || want b8_groups || want c2_indirect || want v0_multiset_draw; then
+if want b7_draw || want b8_groups || want c2_indirect; then
     python3 "$root/tools/golden.py" replay "$draw_golden" "$work/b4-headless.replay"
 fi
+# R7 round 3's two-set frame runs against the console capture it is the host
+# half of: golden/v0-multiset-quake holds the case's own driver run (its two
+# pipeline stages and its submission), and the replay built from it is where the
+# driver's AGC register defaults come from. It needs the capture's own
+# runner-built sibling for that table -- a driver case's capture carries none --
+# which is why jobs/v0-multiset-quake/queue.txt names m2-solid beside the case.
+multiset_quake_run="$root/golden/v0-multiset-quake/run-1.json"
+want v0_multiset_draw &&
+    python3 "$root/tools/golden.py" replay "$multiset_quake_run" "$work/v0-multiset-quake.replay"
 # The C5 depth test runs against the console's own c5-depth run, like every
 # other driver-path test: its depth attachment means the submission names an
 # address no runner frame has, so only a capture of itself provides the stage
@@ -455,10 +464,10 @@ run_test() {
             compare=() ;;
         v0_push_constant) replay=v0-push-constant
             compare=() ;;
-        # R7's two-set frame draws against the same plain colour-target frame the
-        # B7 draw does: what it needs from a replay is AGC's register defaults,
-        # and its own pipelines and tables are what the test asserts.
-        v0_multiset_draw) replay=b4-headless
+        # R7's two-set frames draw against the console capture of the very case
+        # they are the host half of, so the register defaults and the stage
+        # mappings are the ones that frame ran with.
+        v0_multiset_draw) replay=v0-multiset-quake
             compare=() ;;
         v0_query_full) replay=v0-query-full
             compare=(compare-run "$query_run" "$dump" --test v0-query-full) ;;

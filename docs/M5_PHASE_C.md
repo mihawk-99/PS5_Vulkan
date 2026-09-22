@@ -7376,10 +7376,23 @@ link PASS. Set 0's table is three 48-byte image entries one after another -- eac
 the 64x64 extent the case's images have -- set 1's is the 16-byte uniform entry of the
 frame's block, and the two pointers are the two dwords (2 and 3) the metadata names.
 
-**Gap left open.** The golden is captured but no gate consumes it yet: the case is a *runner*
-case, so its frame is the console's, and the PC half that runs its recording is the host test
-above. Wiring the golden into a gate means either a `compare-run` against the display
-driver's own host build, or a `drawing_cases` entry in `tools/check-runner-cases.sh` that
-compares against this case's own frame rather than b4-headless. Round 4's fallout list is
+**What a golden needs to be replayable, found by trying to use it.** The first capture of
+this case ran alone in its queue, and `tools/golden.py replay` refused its golden outright:
+*"no context register table to take register defaults from"*. A capture of a **driver** case
+carries no context table -- the driver builds its tables rather than the runner -- so the
+replay takes that table from a **runner-built frame of the same capture**
+(`sibling_defaults`). With none in the queue, the golden is not replayable at all, which no
+gate would have said: the file looks complete, and only a replay attempt refuses it. The
+queue now names `m2-solid` beside the case for exactly that reason, and its comment says so.
+
+**The golden is consumed by a gate**: `tools/check-driver.sh` builds
+`build/driver/check/v0-multiset-quake.replay` from `golden/v0-multiset-quake/run-1.json` when
+the test is selected, and `v0_multiset_draw` -- the case's host half -- runs against it, so
+the register defaults and stage mappings it draws with are the ones this frame ran with.
+Measured with that replay: **23 of 23 checks direct**, both tables at the metadata's dwords
+(2 and 3). What is still not compared is the *submission*: the host test draws two frames
+(the two-set probe and the vkQuake shape), so its dump holds two submissions where the
+console golden holds one, and a `compare-run` needs a per-frame host program or a
+`drawing_cases` entry that compares against this case's own frame. Round 4's fallout list is
 where that belongs. Round 2's stale-object build finding is still unfixed, too: a header
 change still recompiles only the sources that changed.
