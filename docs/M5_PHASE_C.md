@@ -7697,3 +7697,46 @@ wrong frame. Next measurement: one console cycle on the four-attachment frame wi
 per-attachment words, which will say whether more than two targets need something the mask and
 the offsets do not provide (the `CB_COLORi_VIEW`/`ATTRIB2`/`ATTRIB3` fields and the exports are
 the remaining candidates, and the values will point at one).
+
+## 2026-09-21 — the count of four stops earlier than the mask, measured on the host
+
+The vkQuake port project retired one of the three remaining candidates from its own reading of
+this repository's register database: **`ATTRIB2`/`ATTRIB3`'s offsets are right for gfx103** --
+`R_028EC0/…C4/…C8/…CC_CB_COLOR0..3_ATTRIB2` at context `0x3b0..0x3b3` and
+`R_028EE0/…E4/…E8/…EC_CB_COLOR0..3_ATTRIB3` at `0x3b8..0x3bb`, both marked for gfx10, gfx103,
+gfx11 and gfx115 -- with the generation trap that makes the table *look* wrong: `0x028C68` is
+`CB_COLOR0_ATTRIB2` on gfx9 and `CB_COLOR0_SLICE` on gfx10 and later, one address with two
+names, so a single-match lookup lands on the wrong generation. What remains are the **values**
+in those fields and the exports, not their addresses.
+
+**A hang is a different signal from a wrong word, and the host can tell them apart.** The
+four-attachment frame, dumped through `PS5_HOST_SUBMISSION_DUMP` with the refusal lifted:
+
+```
+count 2: attachment 0 offset 0x318 value 0x2004000, its mapping 0x2004000
+         attachment 1 offset 0x327 value 0x2024000, its mapping 0x2024000   both rows right
+count 4: attachment 0 offset 0x318 value 0x2044000, its mapping 0x2044000
+         attachment 1 offset 0x327 value 0x2064000, its mapping 0x2064000
+         the count assertion fails -- two rows where the frame declared four -- and the
+         process then dies in Mesa's vk_object_base_assert_valid
+```
+
+So the advertised maximum fails **at or before begin-rendering**, not in the per-target
+programming: the draw never filled rows 2 and 3, so what stops it is earlier than the registers
+this round has been fixing. That matches the console, where every run has stopped on the
+four-attachment frame and never reported its words. The candidates it leaves are the ones the
+port has not retired: the harness's own four-attachment construction, the runtime's delivery of
+`colorAttachmentCount == 4` to `CmdBeginRendering`, and `CB_COLOR_CONTROL`'s MODE -- and the
+next host dump (four rows, both mask words `0x08e`/`0x08f`, and `0x202`) reads all three at
+once, with no console cycle.
+
+**Two instrument lessons from this measurement.** The test binary links the driver archive
+statically, so a rebuilt driver means a relinked test -- the same order-of-operations trap the
+brief named, hit once more. And the replay matters for *memory* as well as registers: the
+b4-headless replay's address window cannot hold two 32 MiB targets ("33554432 bytes of direct
+memory could not be mapped in the address window"), so the two-attachment frame fails under it
+for a reason that has nothing to do with the driver; the probe's own capture fits them, which
+is why its replay is the one the host half uses.
+
+Capability still unclaimed, refusal live, and the mask fix (`7660a4d`) stands on its own
+console evidence for counts 1 and 2.
