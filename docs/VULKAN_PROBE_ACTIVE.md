@@ -4,35 +4,56 @@ Volatile by design. Keep this file under about 120 lines. Specifications are in
 `docs/VULKAN_PROBE_PLAN.md`; measurements are in `docs/M5_PHASE_C.md` and
 `docs/HARDWARE_FINDINGS.md`.
 
-_Updated: 2026-09-22_
+_Updated: 2026-09-22 (evening)_
 
 ## Now
 
-**R7 compute startup blocker: driver acceptance passed.** The promoted vkQuake
-request took priority over CTS and the MRT dump. Compute creation no longer
-requires exactly one storage buffer. Draw and dispatch share their descriptor
-builder: every declared binding, one table per set, the same 16 user-data dword
-budget, and the existing descriptor-type writers. Details and boundaries:
-`docs/M5_PHASE_C.md`, entry "R7 promoted to startup".
+**Round of 2026-09-22 (port requests R8, R6, R4 and the fragment-less pipeline): implemented
+and host-gated, nothing claimed.** No console run this round -- the session that did the work
+could not reach the console -- so every capability below waits on one run of
+`jobs/r8-lines/queue.txt`. Phase-log entries: `docs/M5_PHASE_C.md`, 2026-09-22.
 
-Console pid **162**, digest `1ccd486d…`, passed **6/6** cases: the new
-`d2-compute-images` (one dispatch, texture in set 0, storage image in set 1,
-**0 mismatches over 256 texels**), the direct/indirect `d2-compute` buffer probe
-(both `0xa5a5a5a5`), `v0-multiset-quake`, `v0-two-sets`, `v0-formats`, and `m2-solid`.
-Evidence: `evidence/r7-compute/capture.json`, `golden/d2-compute-images/`,
-`Klog_Logs/r7-compute-regression.log`. The host image stream is identical to the
-console's 14 packets; the old D2 goldens remain unchanged.
-Full driver gate: 152 build/run checks and 292 identical golden comparisons.
-Lint, unit tests, runner cases and all three audits pass.
+- **R8, `VK_PRIMITIVE_TOPOLOGY_LINE_LIST`** (`6d000b7`): DI_PT_LINELIST 2 to the link, both
+  stages compiled with `primitive_type = 2` (the NGG vertex stage exports two vertices a
+  primitive), and a line's draw records VGT_GS_OUT_PRIM_TYPE LINESTRIP (0x29b = 1),
+  PA_SU_LINE_CNTL 8 (width 1.0) and PA_SC_LINE_CNTL 0, all sourced from the register database,
+  RADV and ps5-opengl. Cull bits cleared for lines. Wide and multisampled lines, points, line
+  strips, fans, adjacency, patches and restart stay refused. Case `v0-lines`.
+- **R6, the strip** (`15878c3`): the parked "GPU wedge" was the harness aborting on a
+  zero-size index buffer before any frame recorded (`Klog_Logs/r6-strip.log`: "abort is called"
+  after the vertex buffer mapped; reproduced on the host), and `a6f43d7` linked the strip as
+  DI_PT **5, the fan**; the strip is 6. Both fixed, `v0-strip` rewritten and re-registered.
+  The port's `warp` strip pipelines were created against the fan value.
+- **Fragment-less pipelines** (`bfbfc32`): the draft read again (the empty shader is `s_endpgm`
+  alone with colour and Z formats zero, RADV's GFX10 no-export form) and kept; case
+  `v0-fragmentless`, host test `v0_fragmentless`, B6's vertex-only checks.
+- **R4** (`1414853`): swapchain and plane-surface creates refuse by field with
+  `VK_ERROR_UNKNOWN` instead of asserting; host-gated in C1 present, needs no console run.
 
-**Port handoff.** Relink `build/driver/ps5/libps5vk.ps5.a` and check
-`cs_tex_warp` creation. The actual vkQuake startup run, its six-binding kernels,
-and the lightmap pass at M6 are not claimed by this probe.
+**Before this round.** R7 (`358bde4`, compute shares the draw path's descriptor tables) is
+console-proven: pid 162, 6/6, `evidence/r7-compute/capture.json`. R2, R3 and R5 are closed.
 
-**Working tree.** Pre-existing R6 triangle-strip edits remain separate. Their
-unfinished harness had removed the vertex-less early return, causing unrelated
-cases to fail before creating a pipeline. That early return is restored locally;
-the rest of the strip harness and its acceptance remain pending.
+**Host evidence.** check-driver PASS with 292 identical golden comparisons (new tests
+`v0_topology` 35/35 and `v0_fragmentless` 9/9 direct, B6 24/24, C1 16/16); lint, unit tests,
+runner cases (inventory unchanged), the three audits, migration, mip layout, psbc link and the
+Vulkan runtime gate PASS. Built in a clean clone with clang 18.1.3 (the host's archive is clang
+22.1.8); `probe-packages` differs there only in `probes/v0-push/bindings.txt`
+(`pixel_user_sgpr_count` 4 against the committed 7, packages byte-identical) at `a6f43d7` as
+well, so it is that environment's and not this round's -- re-check on the reference host.
+
+**Port handoff.** `build/driver/ps5/libps5vk.ps5.a` on the reference host predates these
+commits: rebuild it (`tools/build-driver.sh`) before the port relinks, and check its content --
+`strings` must find `only triangle lists, triangle strips and line lists`. Then the port's
+`debug_lines` and `md5_debug` edits can retire, pending `v0-lines` passing on the console.
+
+**Next.** One console run of `jobs/r8-lines/queue.txt`, capture with
+`python3 tools/ps5_console.py klog`; record pids, goldens and the three verdicts, then claim.
+
+**Parked.** MRT's four-attachment frame (counts 1 and 2 console-proven; the advertised maximum
+dies in Mesa's `vk_object_base_assert_valid` before the registers): the next action is a host
+dump of four rows, both mask words `0x08e`/`0x08f` and `CB_COLOR_CONTROL`, no console cycle.
+The CTS subset was not re-run this round (its build tree was not available); reporting did not
+change, which the inventory diff in the runner-cases gate confirms.
 
 ## Standing work
 

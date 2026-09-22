@@ -867,3 +867,42 @@ their own rounds.
 the driver table and the write path, then the probe's two frames on the console -- and the
 compiler question this reconnaissance settled is the one that could have made R2 a compiler
 project, so it is recorded before the code rather than after it.
+
+## 2026-09-22 — R8, R6's correction, R4 and the fragment-less pipeline (vkQuake port, `PS5_VULKAN_REQUESTS.md`)
+
+Implemented and host-gated in four commits; **no console run yet**, so nothing here is claimed.
+One run of `jobs/r8-lines/queue.txt` (`v0-lines`, `v0-strip`, `v0-fragmentless` and the
+regression) decides all three drawing items.
+
+| Request | Status | Commit | Console case | Host gate |
+| --- | --- | --- | --- | --- |
+| R8 `LINE_LIST` | implemented, unclaimed | `6d000b7` | `v0-lines` | `v0_topology` 35/35, B6 24/24 |
+| R6 strip, correction | fixed, unclaimed | `15878c3` | `v0-strip` | `v0_topology` |
+| fragment-less pipeline | case written, unclaimed | `bfbfc32` | `v0-fragmentless` | `v0_fragmentless` 9/9, B6 |
+| R4 swapchain assert | closed (reporting, no draw) | `1414853` | -- | C1 present 16/16 |
+
+**R8.** A line list is linked as DI_PT_LINELIST 2, compiled with the topology (the NGG vertex
+stage exports two vertices a primitive, not three), and its draw records VGT_GS_OUT_PRIM_TYPE
+LINESTRIP, PA_SU_LINE_CNTL width 1.0 and PA_SC_LINE_CNTL 0 (Vulkan's non-strict lines). A line
+pipeline ignores cullMode, as Vulkan says it must. `wideLines` stays unclaimed: a static
+`lineWidth` other than 1.0 is refused naming it; a multisampled line list is refused until one
+is measured. For the port: `debug_lines` and `md5_debug` will create against this archive; the
+two edits in `vkquake-edits.py` can retire once `v0-lines` passes.
+
+**R6, a correction to our own record.** The parked strip case did not wedge the GPU: the harness
+aborted on a zero-size index buffer before any frame recorded, and the "hang" was the title
+gone. Behind it, the driver linked the strip as DI_PT **5**, which is the triangle **fan**; the
+strip is 6. Your `warp` pipelines were created against the fan value -- a water frame drawn
+with the old archive would have been a fan. Relink before you draw water.
+
+**Fragment-less.** vkQuake's `sky_stencil` creation was yours; the frame is ours to prove: a
+vertex-only pass leaves the colour target exactly the clear, writes depth 0.5 and stencil where
+it rasterises, and a later EQUAL test passes only there.
+
+**R4.** A swapchain the surface does not allow returns `VK_ERROR_UNKNOWN` with a sentence
+beginning with the field -- `imageUsage`, `imageExtent`, `presentMode`, `minImageCount`,
+`imageFormat`, `imageColorSpace`, `imageArrayLayers` -- and so does a plane surface with the
+wrong extent or plane.
+
+**The archive.** Rebuild `build/driver/ps5/libps5vk.ps5.a` on the reference host before
+relinking; the one there predates these commits.
