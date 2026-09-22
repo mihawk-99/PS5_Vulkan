@@ -1,0 +1,8 @@
+address32_hi 2
+vertex_user_sgpr_count 4
+vertex_buffer_table_dword 0
+vertex_base_vertex_dword 1
+vertex_ngg_lds_dword 3
+vertex_ngg_lds_layout 512
+pixel_user_sgpr_count 2
+pixel_col_format 0x9999

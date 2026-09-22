@@ -100,6 +100,25 @@ typedef struct ps5vk_debug_table {
 uint32_t
 ps5vk_debug_descriptor_tables(VkDevice device, ps5vk_debug_table *tables, uint32_t capacity);
 
+/* One colour attachment of the last begin-rendering, as the draw programmed it:
+ * the attachment's index, the dword offset of its CB_COLORi_BASE register, and
+ * the address word written there. This is what makes the per-attachment table
+ * (ps5vk_draw.c, ps5vk_target_offsets) assertable on the host: the offsets are
+ * the derivation and the values are the attachments, so a driver that programmed
+ * one target and reused its row for the others reports one address twice, and a
+ * driver that derived the wrong column reports an offset its neighbours share
+ * (R7 step 1b; the probe is v0-mrt in src/diagnostics.cpp). */
+typedef struct ps5vk_debug_target {
+   uint32_t index;
+   uint32_t base_offset;
+   uint32_t base_value;
+} ps5vk_debug_target;
+
+/* The colour attachments of the last begin-rendering, in attachment order, up to
+ * capacity; returns how many there were. */
+uint32_t
+ps5vk_debug_colour_targets(VkDevice device, ps5vk_debug_target *targets, uint32_t capacity);
+
 /* The device's live bound buffers, newest first, up to capacity; returns how
  * many there are. A submission names their addresses -- an index buffer's
  * INDEX_BASE, a vertex-buffer table's first record -- so a capture that

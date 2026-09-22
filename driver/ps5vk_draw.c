@@ -270,11 +270,26 @@ static bool
 ps5vk_default_target_registers(struct ps5vk_agc_register *records, uint32_t target)
 {
    assert(target < PS5VK_MAX_COLOR_TARGETS);
+   /* AGC's default set describes the **first** colour target: it does not carry
+    * CB_COLOR1..3's copies of these registers, and it is not required to -- the
+    * console's set happened to answer for them, the host model's does not, and
+    * either could change. A field's default belongs to the *field*, not to the
+    * target: CB_COLORi_INFO's bits that say "no compression" mean the same thing
+    * for every i. So every row starts from target 0's defaults and takes only its
+    * own offsets from the table, which is what makes a rendering into the second,
+    * third or fourth attachment program the same register shapes as the first
+    * (R7 step 1b; before this, target 1's uncomputed fields -- CB_COLOR1_BASE_EXT
+    * among them -- kept values no target wrote, and the console's clear reached
+    * attachment 0 while attachment 1 stayed at zero). */
+   struct ps5vk_agc_register first[PS5VK_TARGET_REGISTER_COUNT];
+   for (unsigned index = 0; index < PS5VK_TARGET_REGISTER_COUNT; index++) {
+      first[index] = (struct ps5vk_agc_register){.offset = ps5vk_target_offsets[index][0]};
+      if (!ps5vk_default_register(first[index].offset, &first[index].value))
+         return false;
+   }
    for (unsigned index = 0; index < PS5VK_TARGET_REGISTER_COUNT; index++) {
       records[index] = (struct ps5vk_agc_register){
-         .offset = ps5vk_target_offsets[index][target]};
-      if (!ps5vk_default_register(records[index].offset, &records[index].value))
-         return false;
+         .offset = ps5vk_target_offsets[index][target], .value = first[index].value};
    }
    return true;
 }
@@ -613,6 +628,8 @@ VKAPI_ATTR void VKAPI_CALL
 ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pRenderingInfo)
 {
    VK_FROM_HANDLE(ps5vk_cmd_buffer, cmd_buffer, commandBuffer);
+   struct ps5vk_device *const device =
+      container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk);
    const VkRenderingInfo *const info = pRenderingInfo;
    cmd_buffer->rendering = false;
    if (vk_command_buffer_has_error(&cmd_buffer->vk))
@@ -645,7 +662,6 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
    const struct ps5vk_image *depth_attachment_image = NULL;
    VkFormat depth_format = VK_FORMAT_UNDEFINED;
    VkSampleCountFlagBits depth_samples = VK_SAMPLE_COUNT_1_BIT;
-   const struct ps5vk_colour_format *colour_format = NULL;
    if (info->pDepthAttachment && info->pDepthAttachment->imageView != VK_NULL_HANDLE) {
       const VkRenderingAttachmentInfo *const depth_attachment = info->pDepthAttachment;
       if (depth_attachment->resolveMode != VK_RESOLVE_MODE_NONE) {
@@ -711,68 +727,111 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
          return;
       }
    }
-   if (info->colorAttachmentCount > 1 ||
-       (info->colorAttachmentCount == 1 && info->pColorAttachments[0].imageView == VK_NULL_HANDLE)) {
+   /* The attachments this device binds are the ones it advertises. The number is
+    * read from the physical device that reports it rather than from the constant
+    * that sizes the tables, so the refusal cannot drift from what the device
+    * says (VkPhysicalDeviceLimits.maxColorAttachments). */
+   const uint32_t advertised_targets = device->vk.physical->properties.maxColorAttachments;
+   /* The per-attachment rows are programmed (ps5vk_target_offsets, the loop
+    * below), but a rendering into more than one colour attachment does not land
+    * its writes past the first yet: the console probe v0-mrt reads attachment 0's
+    * value and zero in the others, with the clear colour unreached too, so the
+    * registers -- not the export -- are where the second attachment stops. Two
+    * hypotheses were tested and refuted on the way (the colour-export word, and
+    * AGC's per-target defaults for the fields the driver does not compute); the
+    * evidence and the next shape are in docs/M5_PHASE_C.md, step 1b. Until the
+    * writes land, a rendering that asks for several attachments is refused by
+    * name rather than drawn wrong: a picture with one attachment's data in all of
+    * them is exactly the failure a probe must not accept silently. */
+   if (info->colorAttachmentCount > 1) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                              "renderings into %u colour attachments are not supported yet; "
-                              "one is", info->colorAttachmentCount);
+                              "a rendering into %u colour attachments: the per-attachment "
+                              "registers are programmed but writes past the first do not land "
+                              "yet, and this driver refuses them rather than draw a wrong "
+                              "picture (the probe is v0-mrt; docs/M5_PHASE_C.md, R7 step 1b)",
+                              info->colorAttachmentCount);
+      return;
+   }
+   if (info->colorAttachmentCount > advertised_targets) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                              "a rendering into %u colour attachments, more than the %u this "
+                              "device advertises (VkPhysicalDeviceLimits.maxColorAttachments; "
+                              "PS5VK_MAX_COLOR_TARGETS, ps5vk_private.h)",
+                              info->colorAttachmentCount, advertised_targets);
       return;
    }
    /* A rendering may have no colour attachment at all when it has a depth one:
     * vk_meta's depth clear is exactly that pass (Phase C5). It keeps AGC's
     * default colour registers, which nothing writes through. */
-   const bool has_colour =
-      info->colorAttachmentCount == 1 && info->pColorAttachments[0].imageView != VK_NULL_HANDLE;
+   const bool has_colour = info->colorAttachmentCount > 0 &&
+                           info->pColorAttachments[0].imageView != VK_NULL_HANDLE;
    if (!has_colour && depth_address == NULL) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                               "a rendering needs a colour or a depth attachment");
       return;
    }
-   const VkRenderingAttachmentInfo *const attachment =
-      has_colour ? &info->pColorAttachments[0] : NULL;
-   VK_FROM_HANDLE(vk_image_view, view, has_colour ? attachment->imageView : VK_NULL_HANDLE);
-   struct ps5vk_image *const image =
-      has_colour ? container_of(view->image, struct ps5vk_image, vk) : NULL;
-   if (has_colour) {
-      extent = (VkExtent2D){image->vk.extent.width, image->vk.extent.height};
-      colour_format = ps5vk_find_colour_format(view->format);
-      if (colour_format == NULL || view->view_type != VK_IMAGE_VIEW_TYPE_2D ||
-          image->vk.mip_levels != 1 || image->vk.array_layers != 1 ||
-          (image->vk.samples != VK_SAMPLE_COUNT_1_BIT &&
-           image->vk.samples != VK_SAMPLE_COUNT_4_BIT) ||
-          image->storage != PS5VK_IMAGE_STORAGE_TILES ||
-          extent.width != PS5VK_TARGET_WIDTH || extent.height != PS5VK_TARGET_HEIGHT) {
-         ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                                 "colour attachments other than a single-level 3840x2160 image "
-                                 "of a format this driver has a CB_COLOR0_INFO word for are not "
-                                 "supported yet");
-         return;
-      }
-   }
-   if (attachment != NULL && attachment->resolveMode != VK_RESOLVE_MODE_NONE) {
-      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                              "resolving attachments is not supported yet");
-      return;
-   }
-   if (info->renderArea.offset.x != 0 || info->renderArea.offset.y != 0 ||
-       info->renderArea.extent.width != extent.width ||
-       info->renderArea.extent.height != extent.height) {
-      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                              "render areas other than the whole target are not supported yet");
-      return;
-   }
-   if (has_colour) {
-      /* Valid usage: the attachment's image is bound; swapchain images are bound
-       * from their creation. */
-      assert(image->address != 0);
-      if (!ps5vk_target_registers(image->address, extent, colour_format, image->vk.samples,
-                                  cmd_buffer->target_registers[0], 0)) {
+   /* Every colour attachment the rendering declares, in attachment order: each
+    * one's own image, format and address, its own row of target registers, and
+    * its own entry in the target list the submission flushes. The extent, the
+    * sample count and the colour format are the ones attachment 0's image has --
+    * a framebuffer's attachments share their dimensions, and the render pass's
+    * sample count is the pipeline's -- and an attachment that disagrees is
+    * refused by name rather than programmed into another's registers. */
+   const uint32_t colour_count = has_colour ? info->colorAttachmentCount : 0u;
+   VkSampleCountFlagBits target_samples = VK_SAMPLE_COUNT_1_BIT;
+   if (colour_count == 0) {
+      /* Nothing writes colour, but every draw's table still programs a target:
+       * AGC's own defaults, which the M2-M4 frames ran with. */
+      if (!ps5vk_default_target_registers(cmd_buffer->target_registers[0], 0)) {
          ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                                  "AGC's context defaults lack a colour target register");
          return;
       }
-      ps5vk_multisample_registers(image->vk.samples, &cmd_buffer->multisample_count,
-                                  cmd_buffer->multisample_registers);
+      cmd_buffer->colour_attachment_count = 1;
+      cmd_buffer->multisample_count = 0;
+   }
+   for (uint32_t at = 0; at < colour_count; at++) {
+      const VkRenderingAttachmentInfo *const attachment = &info->pColorAttachments[at];
+      VK_FROM_HANDLE(vk_image_view, view, attachment->imageView);
+      struct ps5vk_image *const image =
+         view != NULL ? container_of(view->image, struct ps5vk_image, vk) : NULL;
+      const struct ps5vk_colour_format *const format =
+         view != NULL ? ps5vk_find_colour_format(view->format) : NULL;
+      if (view == NULL || image == NULL || format == NULL ||
+          view->view_type != VK_IMAGE_VIEW_TYPE_2D || image->vk.mip_levels != 1 ||
+          image->vk.array_layers != 1 ||
+          (image->vk.samples != VK_SAMPLE_COUNT_1_BIT &&
+           image->vk.samples != VK_SAMPLE_COUNT_4_BIT) ||
+          image->storage != PS5VK_IMAGE_STORAGE_TILES ||
+          image->vk.extent.width != PS5VK_TARGET_WIDTH ||
+          image->vk.extent.height != PS5VK_TARGET_HEIGHT) {
+         ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                                 "colour attachment %u is not a 3840x2160 one-mip one-layer "
+                                 "tiled 2D view this driver has a colour format word for",
+                                 at);
+         return;
+      }
+      if (at == 0) {
+         extent = (VkExtent2D){image->vk.extent.width, image->vk.extent.height};
+         target_samples = image->vk.samples;
+         ps5vk_multisample_registers(image->vk.samples, &cmd_buffer->multisample_count,
+                                     cmd_buffer->multisample_registers);
+      } else if (image->vk.samples != target_samples) {
+         ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                                 "colour attachment %u has %u samples where attachment 0 has "
+                                 "%u; a rendering's attachments share one sample count",
+                                 at, (unsigned)image->vk.samples, (unsigned)target_samples);
+         return;
+      }
+      /* Valid usage: the attachment's image is bound; swapchain images are bound
+       * from their creation. */
+      assert(image->address != 0);
+      if (!ps5vk_target_registers(image->address, extent, format, image->vk.samples,
+                                  cmd_buffer->target_registers[at], at)) {
+         ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                                 "AGC's context defaults lack a colour target register");
+         return;
+      }
       struct ps5vk_render_target *const target =
          util_dynarray_grow(&cmd_buffer->targets, struct ps5vk_render_target, 1);
       if (!target) {
@@ -783,14 +842,17 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
       *target = (struct ps5vk_render_target){(void *)(uintptr_t)image->address,
                                              (size_t)image->size, image->video,
                                              image->buffer_index};
-   } else if (ps5vk_default_target_registers(cmd_buffer->target_registers[0], 0)) {
-      /* Nothing writes colour, but every draw's table still programs a target:
-       * AGC's own defaults, which the M2-M4 frames ran with. */
-      cmd_buffer->multisample_count = 0;
-   } else {
-      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                              "AGC's context defaults lack a colour target register");
-      return;
+   }
+   if (colour_count != 0) {
+      cmd_buffer->colour_attachment_count = colour_count;
+      /* What the debug API reports to the probe's host half (ps5vk_debug.h):
+       * each attachment's CB_COLORi_BASE word, which is what says the rows were
+       * filled from the attachments rather than from one of them. */
+      device->target_attachment_count = colour_count;
+      for (uint32_t at = 0; at < colour_count; at++) {
+         device->target_base_offsets[at] = cmd_buffer->target_registers[at][0].offset;
+         device->target_base_values[at] = cmd_buffer->target_registers[at][0].value;
+      }
    }
    cmd_buffer->depth_bound = depth_address != NULL;
    cmd_buffer->depth_format = cmd_buffer->depth_bound ? depth_format : VK_FORMAT_UNDEFINED;
@@ -824,11 +886,11 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
    /* A clear is a vk_meta draw of this rendering's attachment, recorded like
     * any other draw but with vk_meta's pipeline, vertex buffer and push
     * constants. The application's state around it is its own. */
-   if ((attachment != NULL && attachment->loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR) ||
+   const VkRenderingAttachmentInfo *const first_colour =
+      has_colour ? &info->pColorAttachments[0] : NULL;
+   if ((first_colour != NULL && first_colour->loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR) ||
        (info->pDepthAttachment != NULL &&
         info->pDepthAttachment->loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR)) {
-      struct ps5vk_device *const device =
-         container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk);
       struct ps5vk_meta_saved_state saved;
       ps5vk_meta_save(cmd_buffer, &saved);
       /* WORKAROUND(R3): Mesa's vk_meta_clear unwraps a stencil attachment's
@@ -928,6 +990,7 @@ ps5vk_cmd_buffer_inherit(struct ps5vk_cmd_buffer *cmd_buffer,
       }
       ps5vk_multisample_registers(colour->vk.samples, &cmd_buffer->multisample_count,
                                   cmd_buffer->multisample_registers);
+      cmd_buffer->colour_attachment_count = 1;
       struct ps5vk_render_target *const target =
          util_dynarray_grow(&cmd_buffer->targets, struct ps5vk_render_target, 1);
       if (target == NULL) {
@@ -943,6 +1006,7 @@ ps5vk_cmd_buffer_inherit(struct ps5vk_cmd_buffer *cmd_buffer,
                               "AGC's context defaults lack a colour target register");
       return false;
    } else {
+      cmd_buffer->colour_attachment_count = 1;
       cmd_buffer->multisample_count = 0;
    }
    if (depth != NULL) {
@@ -1884,8 +1948,14 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
       depth_bias && cmd_buffer->depth_bound ? PS5VK_POLY_OFFSET_COUNT : 0u;
    const uint32_t raster_count = (rasterizer_word != 0 ? 1u : 0u) +
                                  (pipeline->discard_rasterizer ? 1u : 0u) + depth_bias_count;
-   const uint32_t fixed = PS5VK_TARGET_REGISTER_COUNT + msaa_count + depth_count +
-                          stencil_count + PS5VK_VIEWPORT_REGISTER_COUNT;
+   /* One row of target registers per colour attachment the rendering declared:
+    * together with the copy below, this is the arithmetic R6's heap corruption
+    * lived in, so the reservation and the copy read the same number
+    * (cmd_buffer->colour_attachment_count, set by begin-rendering). */
+   const uint32_t target_words =
+      cmd_buffer->colour_attachment_count * PS5VK_TARGET_REGISTER_COUNT;
+   const uint32_t fixed = target_words + msaa_count + depth_count + stencil_count +
+                          PS5VK_VIEWPORT_REGISTER_COUNT;
    const uint32_t cx_count = fixed + PS5VK_STAGE_CONTEXT_RECORDS + vertex->cx_count +
                              pixel->cx_count + mask_count + blend_count + raster_count;
    const uint32_t sh_count = vertex->sh_count + pixel->sh_count;
@@ -1902,24 +1972,21 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
     * write three of them past what this stream reserved (the arithmetic R6's heap
     * corruption lived in). The draw's loop over the rendering's attachments is
     * what multiplies the reservation and this copy together. */
-   memcpy(cx, cmd_buffer->target_registers[0], sizeof(cmd_buffer->target_registers[0]));
+   memcpy(cx, cmd_buffer->target_registers, target_words * sizeof(*cx));
    if (msaa_count != 0)
-      memcpy(cx + PS5VK_TARGET_REGISTER_COUNT, cmd_buffer->multisample_registers,
-             msaa_count * sizeof(*cx));
+      memcpy(cx + target_words, cmd_buffer->multisample_registers, msaa_count * sizeof(*cx));
    if (cmd_buffer->depth_bound) {
-      memcpy(cx + PS5VK_TARGET_REGISTER_COUNT + msaa_count, cmd_buffer->depth_registers,
+      memcpy(cx + target_words + msaa_count, cmd_buffer->depth_registers,
              sizeof(cmd_buffer->depth_registers));
-      cx[PS5VK_TARGET_REGISTER_COUNT + msaa_count + PS5VK_DEPTH_REGISTER_COUNT] =
+      cx[target_words + msaa_count + PS5VK_DEPTH_REGISTER_COUNT] =
          (struct ps5vk_agc_register){.offset = PS5VK_DEPTH_CONTROL_REGISTER,
                                      .value = ps5vk_depth_control(dynamic,
                                                                   cmd_buffer->stencil_bound)};
       if (stencil_count != 0)
-         ps5vk_stencil_registers(dynamic,
-                                 cx + PS5VK_TARGET_REGISTER_COUNT + msaa_count + depth_count);
+         ps5vk_stencil_registers(dynamic, cx + target_words + msaa_count + depth_count);
    }
    ps5vk_viewport_registers(&dynamic->vp.viewports[0], &dynamic->vp.scissors[0],
-                            cx + PS5VK_TARGET_REGISTER_COUNT + msaa_count + depth_count +
-                               stencil_count);
+                            cx + target_words + msaa_count + depth_count + stencil_count);
    memcpy(cx + fixed, stage + PS5VK_STAGE_CONTEXT_OFFSET,
           PS5VK_STAGE_CONTEXT_RECORDS * sizeof(*cx));
    memcpy(cx + fixed + PS5VK_STAGE_CONTEXT_RECORDS, vertex->cx, vertex->cx_count * sizeof(*cx));

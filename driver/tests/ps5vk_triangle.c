@@ -10,6 +10,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <assert.h>
 #include <string.h>
 
 /* Longer than the driver's 2 s completion wait (driver/ps5vk_queue.c). */
@@ -251,11 +252,8 @@ texture_is_depth(VkFormat format)
  * unless the caller asked for another format the driver has a CB_COLOR0_INFO
  * word for (input->target_format). */
 static bool
-create_image(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
-             const struct ps5vk_triangle_input *input)
+create_image(struct ps5vk_triangle *triangle, VkPhysicalDevice physical)
 {
-   triangle->format = input->target_format != VK_FORMAT_UNDEFINED ? input->target_format
-                                                                 : VK_FORMAT_R8G8B8A8_UNORM;
    /* A resolve's destination is the one-sample image a caller reads back; the
     * samples below belong to the image the frame renders into, which
     * create_resolve_target makes (Phase C8). */
@@ -323,6 +321,104 @@ create_image(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
              NULL))
       return false;
    triangle->memory_bytes = (size_t)requirements.size;
+   triangle->colour_attachment_count = 1;
+   triangle->target_mappings[0] = triangle->mapped;
+   triangle->target_memory_bytes[0] = triangle->memory_bytes;
+   return true;
+}
+
+/* A frame that declares more than one colour attachment: one image with its own
+ * host-visible mapped memory per attachment, all in the frame's colour format and
+ * at its sample count, with a view each. The first attachment's mapping is also
+ * target/target_bytes, so a case reads attachment 0 the way it reads a
+ * single-target frame and the others through target_mappings.
+ *
+ * The images are kept in images[] and views[] like the single target's, but
+ * image_count stays 1: image_count is how many *frames* the output double-buffers
+ * (the display's swapchain images), and each of those framebuffers names every
+ * attachment at once. */
+static bool
+create_color_attachments(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
+                         const struct ps5vk_triangle_input *input)
+{
+   const uint32_t count = input->color_attachment_count;
+   if (count == 0 || count > PS5VK_TRIANGLE_MAX_TARGETS)
+      return step(triangle, "colour attachments", VK_ERROR_INITIALIZATION_FAILED,
+                  "a colour attachment count inside the advertised maximum");
+   const VkSampleCountFlagBits samples =
+      triangle->resolve_output ? VK_SAMPLE_COUNT_1_BIT : triangle->samples;
+   VkPhysicalDeviceMemoryProperties memory_properties;
+   CALL(triangle, GetPhysicalDeviceMemoryProperties)(physical, &memory_properties);
+   for (uint32_t at = 0; at < count; at++) {
+      const VkImageCreateInfo image_info = {
+         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+         .imageType = VK_IMAGE_TYPE_2D,
+         .format = triangle->format,
+         .extent = {PS5VK_TRIANGLE_WIDTH, PS5VK_TRIANGLE_HEIGHT, 1},
+         .mipLevels = 1,
+         .arrayLayers = 1,
+         .samples = samples,
+         .tiling = VK_IMAGE_TILING_OPTIMAL,
+         .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+      };
+      char detail[96];
+      snprintf(detail, sizeof(detail), "colour attachment %u of %u", at + 1, count);
+      if (!step(triangle, "create_image",
+                CALL(triangle, CreateImage)(triangle->device, &image_info, NULL,
+                                            &triangle->images[at]),
+                detail))
+         return false;
+      VkMemoryRequirements requirements;
+      CALL(triangle, GetImageMemoryRequirements)(triangle->device, triangle->images[at],
+                                                 &requirements);
+      uint32_t memory_type = UINT32_MAX;
+      for (uint32_t index = 0; index < memory_properties.memoryTypeCount && memory_type == UINT32_MAX;
+           index++) {
+         if ((requirements.memoryTypeBits & (UINT32_C(1) << index)) &&
+             (memory_properties.memoryTypes[index].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
+            memory_type = index;
+      }
+      const VkMemoryAllocateInfo allocate_info = {
+         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+         .allocationSize = requirements.size,
+         .memoryTypeIndex = memory_type,
+      };
+      if (memory_type == UINT32_MAX ||
+          !step(triangle, "allocate_memory",
+                CALL(triangle, AllocateMemory)(triangle->device, &allocate_info, NULL,
+                                               &triangle->target_memories[at]),
+                NULL) ||
+          !step(triangle, "bind_image_memory",
+                CALL(triangle, BindImageMemory)(triangle->device, triangle->images[at],
+                                                triangle->target_memories[at], 0),
+                NULL) ||
+          !step(triangle, "map_memory",
+                CALL(triangle, MapMemory)(triangle->device, triangle->target_memories[at], 0,
+                                          VK_WHOLE_SIZE, 0, &triangle->target_mappings[at]),
+                NULL))
+         return false;
+      triangle->target_memory_bytes[at] = (size_t)requirements.size;
+      const VkImageViewCreateInfo view_info = {
+         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+         .image = triangle->images[at],
+         .viewType = VK_IMAGE_VIEW_TYPE_2D,
+         .format = triangle->format,
+         .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+      };
+      if (!step(triangle, "create_image_view",
+                CALL(triangle, CreateImageView)(triangle->device, &view_info, NULL,
+                                                &triangle->views[at]),
+                NULL))
+         return false;
+   }
+   triangle->colour_attachment_count = count;
+   triangle->image_count = 1;
+   triangle->target = triangle->target_mappings[0];
+   triangle->target_bytes = triangle->target_memory_bytes[0];
+   triangle->mapped = triangle->target_mappings[0];
+   triangle->memory_bytes = triangle->target_memory_bytes[0];
    return true;
 }
 
@@ -1734,8 +1830,9 @@ ps5vk_triangle_query_samples(struct ps5vk_triangle *triangle, VkQueryPool pool, 
  * render-to-texture frame samples leaves its fill pass ready to be sampled. */
 static VkResult
 create_render_pass(struct ps5vk_triangle *triangle, VkFormat format, VkAttachmentLoadOp load_op,
-                   VkImageLayout final_layout, VkRenderPass *pass)
+                   VkImageLayout final_layout, uint32_t colour_count, VkRenderPass *pass)
 {
+   assert(colour_count >= 1 && colour_count <= PS5VK_TRIANGLE_MAX_TARGETS);
    const bool load = load_op == VK_ATTACHMENT_LOAD_OP_LOAD;
    const VkAttachmentDescription attachment = {
       .format = format,
@@ -1778,19 +1875,28 @@ create_render_pass(struct ps5vk_triangle *triangle, VkFormat format, VkAttachmen
                           : VK_IMAGE_LAYOUT_UNDEFINED,
       .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
    };
-   const VkAttachmentReference reference = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-   const VkAttachmentReference depth_reference = {1,
-                                                  VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+   /* One attachment description and one reference per colour attachment, in
+    * attachment order, with the depth attachment after them: the order the
+    * framebuffer's views and the draw's register rows follow too. */
+   VkAttachmentDescription attachments[PS5VK_TRIANGLE_MAX_TARGETS + 1];
+   VkAttachmentReference references[PS5VK_TRIANGLE_MAX_TARGETS];
+   for (uint32_t at = 0; at < colour_count; at++) {
+      attachments[at] = attachment;
+      references[at] = (VkAttachmentReference){at, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+   }
+   const VkAttachmentReference depth_reference = {
+      colour_count, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+   if (triangle->depth)
+      attachments[colour_count] = depth_attachment;
    const VkSubpassDescription subpass = {
       .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
-      .colorAttachmentCount = 1,
-      .pColorAttachments = &reference,
+      .colorAttachmentCount = colour_count,
+      .pColorAttachments = references,
       .pDepthStencilAttachment = triangle->depth ? &depth_reference : NULL,
    };
-   const VkAttachmentDescription attachments[2] = {attachment, depth_attachment};
    const VkRenderPassCreateInfo pass_info = {
       .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-      .attachmentCount = triangle->depth ? 2u : 1u,
+      .attachmentCount = colour_count + (triangle->depth ? 1u : 0u),
       .pAttachments = attachments,
       .subpassCount = 1,
       .pSubpasses = &subpass,
@@ -1928,7 +2034,7 @@ create_rendered_texture(struct ps5vk_triangle *triangle, VkPhysicalDevice physic
        !step(triangle, "create_rendered_pass",
              create_render_pass(triangle, VK_FORMAT_R8G8B8A8_UNORM,
                                 VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1,
                                 &triangle->rendered_pass),
              "the image the frame samples"))
       return false;
@@ -2355,10 +2461,16 @@ create_pipeline(struct ps5vk_triangle *triangle, uint32_t index,
       .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                         VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
    };
+   /* One blend attachment per colour attachment: Vulkan requires the pipeline's
+    * count to equal the render pass's, and every attachment takes the caller's
+    * settings. */
+   VkPipelineColorBlendAttachmentState blend_attachments[PS5VK_TRIANGLE_MAX_TARGETS];
+   for (uint32_t at = 0; at < triangle->colour_attachment_count; at++)
+      blend_attachments[at] = blend_attachment;
    VkPipelineColorBlendStateCreateInfo blend = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-      .attachmentCount = 1,
-      .pAttachments = &blend_attachment,
+      .attachmentCount = triangle->colour_attachment_count,
+      .pAttachments = blend_attachments,
    };
    /* The constant factors' four values, which the driver records as
     * CB_BLEND_RED/GREEN/BLUE/ALPHA (input->blend_constants). */
@@ -2610,6 +2722,16 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
    triangle->two_descriptor_sets = input->two_descriptor_sets;
    triangle->two_passes = input->two_passes;
    triangle->texture_address_mode_set = input->texture_address_mode_set;
+   triangle->colour_attachment_count =
+      input->color_attachment_count > 1 ? input->color_attachment_count : 1u;
+   /* Every colour attachment's format, whatever creates them: the caller's, or
+    * the RGBA8 the canary ran (ps5vk_triangle.c, create_image and
+    * create_color_attachments). */
+   triangle->format = input->target_format != VK_FORMAT_UNDEFINED ? input->target_format
+                                                                 : VK_FORMAT_R8G8B8A8_UNORM;
+   VkPhysicalDeviceProperties properties;
+   CALL(triangle, GetPhysicalDeviceProperties)(physical, &properties);
+   triangle->max_color_attachments = properties.limits.maxColorAttachments;
    triangle->sampler_anisotropy = input->sampler_anisotropy;
    triangle->sampler_max_anisotropy = input->sampler_max_anisotropy;
    triangle->texture_address_mode = input->texture_address_mode;
@@ -2620,7 +2742,9 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
    triangle->depth_bias_slope = input->depth_bias_slope;
    triangle->depth_bias_clamp = input->depth_bias_clamp;
    if (display ? !create_swapchain(triangle, physical)
-               : !create_image(triangle, physical, input))
+               : (input->color_attachment_count > 1
+                     ? !create_color_attachments(triangle, physical, input)
+                     : !create_image(triangle, physical)))
       return PS5VK_TRIANGLE_FAILED;
 
    /* The caller's geometry, when it draws an indexed frame (Phase C2). */
@@ -2659,11 +2783,12 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
                                               : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
    if (!step(triangle, "create_render_pass",
              create_render_pass(triangle, triangle->format, input->load_op, target_layout,
-                                &triangle->first_pass),
+                                triangle->colour_attachment_count, &triangle->first_pass),
              "first") ||
        !step(triangle, "create_render_pass",
              create_render_pass(triangle, triangle->format, VK_ATTACHMENT_LOAD_OP_LOAD,
-                                target_layout, &triangle->load_pass),
+                                target_layout, triangle->colour_attachment_count,
+                                &triangle->load_pass),
              "loading"))
       return PS5VK_TRIANGLE_FAILED;
    for (uint32_t index = 0; index < triangle->image_count; index++) {
@@ -2681,13 +2806,20 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
          return PS5VK_TRIANGLE_FAILED;
       /* Phase C5: a frame with a depth attachment gives every framebuffer the
        * depth view after its colour view. */
-      const VkImageView framebuffer_views[2] = {
-         triangle->resolve_output ? triangle->resolve_view : triangle->views[index],
-         triangle->depth_view};
+      /* Every colour attachment the pass declares, in its order, then the depth
+       * view (Phase C5). A one-attachment frame keeps the view of the frame's own
+       * image -- the display's per-image view, or the resolve destination's. */
+      VkImageView framebuffer_views[PS5VK_TRIANGLE_MAX_TARGETS + 1];
+      for (uint32_t at = 0; at < triangle->colour_attachment_count; at++)
+         framebuffer_views[at] =
+            triangle->colour_attachment_count > 1
+               ? triangle->views[at]
+               : (triangle->resolve_output ? triangle->resolve_view : triangle->views[index]);
+      framebuffer_views[triangle->colour_attachment_count] = triangle->depth_view;
       const VkFramebufferCreateInfo framebuffer_info = {
          .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
          .renderPass = triangle->first_pass,
-         .attachmentCount = triangle->depth ? 2u : 1u,
+         .attachmentCount = triangle->colour_attachment_count + (triangle->depth ? 1u : 0u),
          .pAttachments = framebuffer_views,
          .width = PS5VK_TRIANGLE_WIDTH,
          .height = PS5VK_TRIANGLE_HEIGHT,

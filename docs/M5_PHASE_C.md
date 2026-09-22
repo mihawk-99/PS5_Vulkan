@@ -7591,3 +7591,64 @@ sits at a different set index per shader family: `alias.frag:42-43` defaults
 as 3. Any driver code that recognised the input-attachment set by its index would be shaped
 around one family's present choice; the descriptor type, its stride and its write path are
 what the driver has to key on instead.
+
+## 2026-09-21 — R7 step 1b: the loop, the probe, and the second attachment that does not land
+
+**What landed.** `ps5vk_target_offsets` has a column per colour attachment (step 1a), the draw
+now **loops over the rendering's attachments**: each one's own view, image, format and
+address, its own row of target registers, its own entry in the target list the submission
+flushes, and an attachment whose extent, sample count or format disagrees is refused by
+name. The context stream reserves and copies `colour_attachment_count * 16` records -- the
+arithmetic R6's heap corruption lived in -- and `v0-two-passes` (R6's case) plus the standing
+list run in the battery for exactly that reason. The harness grew the attachment-count mode
+(N images, N memories, N views, a render pass and framebuffer naming all of them, one blend
+attachment each), the probe is `probes/v0-mrt` (four outputs at locations 0..3, red, green,
+blue and white, no descriptors), and the console case `v0-mrt` varies the count over 1, 2 and
+the device's **own** `maxColorAttachments` with a distinct value in each and every attachment
+read back.
+
+**The claimed capability is not claimed.** A rendering into more than one colour attachment
+does not land its writes past the first yet, so the driver **refuses it by name** rather than
+draw a wrong picture: *"a rendering into %u colour attachments: the per-attachment registers
+are programmed but writes past the first do not land yet, and this driver refuses them rather
+than draw a wrong picture (the probe is v0-mrt; docs/M5_PHASE_C.md, R7 step 1b)"*. The case
+measures that interim state -- one attachment draws, more are refused -- and the round that
+lands the writes flips its expectation the way R7 round 2 flipped `v0-two-sets`'.
+
+**What the console measured.** With one attachment the frame is `0xff0000ff`: the shader's
+location 0 output, exact. With two (and with the advertised four) attachment 0 holds the same
+word and **attachment 1 reads `0x0`**. The first version of the probe cleared to black, so
+`0x0` could not tell "cleared but not drawn" from "never written"; the case's clear colour is
+now `0.25/0.5/0.75/1.0`, and attachment 1 still reads `0x0` -- **the clear does not reach it
+either**, which puts the fault in the registers, not in the colour export.
+
+**Two hypotheses, tested and refuted, with what refuted each:**
+
+1. *The colour-export word.* `ps5vk_color_export_options` passes the compiler one
+   `SPI_SHADER_COL_FORMAT` nibble per attachment, and the probe's package shows the compiler
+   packs `0x9999` -- four live nibbles -- when it is told nothing. Refuted by the clear: a
+   missing export would leave attachment 1 holding the *clear* colour, and it holds zero.
+2. *AGC's per-target defaults.* The fields the driver does not compute were inherited from
+   AGC per target, and AGC's default set describes target 0 (the host model's does not carry
+   CB_COLOR1..3 at all, and refused the frame where the console did not). A field's default
+   belongs to the field, not the target, so every row now starts from target 0's defaults with
+   its own offsets. That fix is right on its own terms -- it removes a dependency on AGC
+   enumerating unused targets -- and it is **not** what stops the writes: attachment 1 still
+   reads zero.
+
+**A third failure, not chased.** `driver/tests/vk_v0_mrt_test.c` -- the host half that asserts
+the rows through `ps5vk_debug_colour_targets` -- is **parked and unregistered**: its refusal
+assertion passes and prints the driver's sentence, and then the direct build dies inside
+Mesa's `vk_object_base_assert_valid`. That is a different fault from the one being chased and
+the round records it rather than guessing at it.
+
+**Gap left open, with its next shapes.** The per-attachment *writes*. What is known: the rows
+are built (`ps5vk_target_offsets`, the loop), the offsets come from the header's gfx103 rows
+and row 0 reproduces the measured table exactly, the mask `CB_TARGET_MASK` is 0xF on every
+draw, and the failure is at the *hardware programming* of targets past the first. What is not
+yet known, and is the next thing to measure rather than assume: whether the context stream's
+target records are consumed as four 16-record rows at all (the block may be indexed
+differently for targets past the first), whether the `SPI_SHADER_COL_FORMAT` word needs to
+accompany them in the same stream for the exports to be live, and whether `CB_COLOR_CONTROL`'s
+MODE or a per-target `CB_COLORi_VIEW` field gates the writes. The instrument for all three is
+the same: the `v0-mrt` case, whose per-attachment words say which one moved.

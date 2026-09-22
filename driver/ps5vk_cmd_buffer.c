@@ -457,6 +457,23 @@ ps5vk_debug_descriptor_tables(VkDevice _device, ps5vk_debug_table *tables, uint3
 }
 
 uint32_t
+ps5vk_debug_colour_targets(VkDevice _device, ps5vk_debug_target *targets, uint32_t capacity)
+{
+   VK_FROM_HANDLE(ps5vk_device, device, _device);
+   const uint32_t count = device != NULL ? device->target_attachment_count : 0;
+   if (device == NULL || targets == NULL || capacity == 0)
+      return count;
+   const uint32_t copied = MIN2(count, capacity);
+   for (uint32_t at = 0; at < copied; at++)
+      targets[at] = (ps5vk_debug_target){
+         .index = at,
+         .base_offset = device->target_base_offsets[at],
+         .base_value = device->target_base_values[at],
+      };
+   return count;
+}
+
+uint32_t
 ps5vk_debug_table_chunks(VkDevice _device, ps5vk_debug_stage *chunks, uint32_t capacity)
 {
    VK_FROM_HANDLE(ps5vk_device, device, _device);

@@ -177,6 +177,11 @@ fi
 # driver's AGC register defaults come from. It needs the capture's own
 # runner-built sibling for that table -- a driver case's capture carries none --
 # which is why jobs/v0-multiset-quake/queue.txt names m2-solid beside the case.
+# R7 step 1b's MRT frames draw against the console capture of their own case: the
+# probe's shader writes four outputs, and the register tables a shader needs are
+# part of what a replay carries -- another frame's replay is sized for another
+# shader and refuses this one ("a created shader's register tables are out of
+# bounds", measured with b4-headless).
 multiset_quake_run="$root/golden/v0-multiset-quake/run-1.json"
 want v0_multiset_quake &&
     python3 "$root/tools/golden.py" replay "$multiset_quake_run" "$work/v0-multiset-quake.replay"

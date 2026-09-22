@@ -297,6 +297,25 @@ v0-multiset-quake)
         --descriptor-binding 0:2:combined_image_sampler:1:96:48
         --descriptor-binding 1:0:uniform_buffer:1:0:16)
     ;;
+v0-mrt)
+    # R7 step 1b's MRT probe: one fragment output per colour attachment. The
+    # pixel stage declares no descriptors, writes four constants at locations
+    # 0..3 and takes nothing in, so a wrong attachment's readback cannot come
+    # from a texture, a uniform or an interpolation -- and the *frame* chooses
+    # how many of the four the pipeline's colour-blend state makes live
+    # (shaders/v0/mrt.frag). The geometry is the m3-texture quad, as the other
+    # R7 sets use, so one vertex buffer serves the draw.
+    vertex_source=shaders/m3/texture.vert
+    pixel_source=shaders/v0/mrt.frag
+    output=probes/v0-mrt
+    # No descriptor sets at all, so the SDK's pinned compiler is the one to use:
+    # the patched probe CLI is for per-set layouts, which this program does not
+    # declare. pixel_compiler stays at the script's default.
+    vertex_flags=(--address32-hi 2
+        --vertex-attribute 0:r32g32_float:0:0:16:4
+        --vertex-attribute 1:r32g32_float:0:8:16:4)
+    pixel_flags=(--address32-hi 2)
+    ;;
 v0-stencil-setup)
     # Round 12's stencil path: the pass that writes the stencil plane. The
     # geometry is the m4-depth vertex layout (position and colour, 28-byte
@@ -927,6 +946,35 @@ elif set_name == "v0-multiset-quake":
                 ("pixel_set0_binding2_stride", 48),
                 ("pixel_set1_binding0_offset", 0),
                 ("pixel_set1_binding0_stride", 16)]
+elif set_name == "v0-mrt":
+    # R7 step 1b's MRT probe. Neither stage declares a descriptor binding, so
+    # what this file records is the vertex input the quad needs and the pixel
+    # stage's user-data count -- the number the compiler gave a shader that
+    # writes four outputs and reads nothing. The four outputs are the compiler's
+    # SPI_SHADER_COL_FORMAT business (four nibbles, one per location), which the
+    # driver's own export path builds per attachment (ps5vk_color_export_options);
+    # nothing here asserts a single one, because a four-output stage has four.
+    if pixel.get("descriptor_bindings"):
+        fail("pixel stage unexpectedly declares descriptor bindings")
+    # The four outputs the probe exists for. The compiler packs one nibble per
+    # fragment output into SPI_SHADER_COL_FORMAT (context register 0x1C5), so a
+    # single word whose four nibbles are all set is what says the stage writes
+    # four exports and not one -- a collapsed word would leave the probe unable
+    # to tell a driver that programmed one target from one that programmed four.
+    # Measured, for the legacy 32_ABGR a pixel stage compiles for when no set
+    # passes --color-format: 0x9999.
+    col_format = [record["value"] for record in pixel.get("context_registers", [])
+                  if record.get("offset") == 0x1C5]
+    if len(col_format) != 1 or any((col_format[0] >> (4 * nibble)) & 0xF == 0
+                                   for nibble in range(4)):
+        fail(f"pixel SPI_SHADER_COL_FORMAT {[hex(value) for value in col_format]!r}, expected one "
+             f"word with four live nibbles, one per fragment output")
+    notes.append(f"pixel SPI_SHADER_COL_FORMAT: {col_format[0]:#06x} (four outputs)")
+    bindings = [("address32_hi", expected_hi),
+                *vertex_input("vertex attributes: location 0 r32g32_float offset 0, "
+                              "location 1 r32g32_float offset 8, stride 16, binding 0"),
+                ("pixel_user_sgpr_count", pixel["user_sgpr_count"]),
+                ("pixel_col_format", f"{col_format[0]:#06x}")]
 elif set_name == "m3-vertex":
     if pixel.get("descriptor_bindings"):
         fail("pixel stage unexpectedly declares descriptor bindings")

@@ -58,6 +58,12 @@ extern "C" {
 /* Colour targets: the program's image, or the swapchain's images. */
 #define PS5VK_TRIANGLE_MAX_IMAGES 2
 
+/* The colour attachments one rendering may declare: the number this device
+ * advertises as VkPhysicalDeviceLimits.maxColorAttachments, which a case reads
+ * and passes rather than writing 4 into the test (input->color_attachment_count,
+ * the MRT probe in src/diagnostics.cpp). */
+#define PS5VK_TRIANGLE_MAX_TARGETS 4
+
 typedef PFN_vkVoidFunction (*ps5vk_get_instance_proc_addr)(VkInstance instance, const char *name);
 
 /* How the program reports each step: its name, whether it succeeded, the
@@ -546,6 +552,12 @@ struct ps5vk_triangle_input {
     * earlier phase created. */
    bool sampler_anisotropy;
    float sampler_max_anisotropy;
+   /* The colour attachments the rendering declares: 1 is the single target every
+    * earlier phase drew into, and 2..PS5VK_TRIANGLE_MAX_TARGETS render into that
+    * many images at once. The caller passes the device's own advertised
+    * VkPhysicalDeviceLimits.maxColorAttachments, so the probe varies the count
+    * against what the device says. */
+   uint32_t color_attachment_count;
 };
 
 
@@ -767,6 +779,20 @@ struct ps5vk_triangle {
    void *multiset_mappings[PS5VK_TRIANGLE_MULTISET_TEXTURES];
    size_t multiset_bytes[PS5VK_TRIANGLE_MULTISET_TEXTURES];
    VkImageView multiset_views[PS5VK_TRIANGLE_MULTISET_TEXTURES];
+   /* A frame that renders into more than one colour attachment: each
+    * attachment's mapped memory and its size, in attachment order, with
+    * target/target_bytes naming the first -- the readback every case already
+    * uses. Zero and NULL for a one-attachment frame, whose image and memory are
+    * images[0] and memory. */
+   /* The colour attachments the device advertises, read from the physical device
+    * when the frame is created: a case varies its attachment count up to this,
+    * so the probe varies against what the device says rather than against a
+    * number written into the test (src/diagnostics.cpp, v0-mrt). */
+   uint32_t max_color_attachments;
+   VkDeviceMemory target_memories[PS5VK_TRIANGLE_MAX_TARGETS];
+   void *target_mappings[PS5VK_TRIANGLE_MAX_TARGETS];
+   size_t target_memory_bytes[PS5VK_TRIANGLE_MAX_TARGETS];
+   uint32_t colour_attachment_count;
    VkDescriptorSetLayout multiset_set_layout;
    VkDescriptorPool multiset_pool;
    VkDescriptorSet multiset_set;

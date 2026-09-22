@@ -507,6 +507,11 @@ struct ps5vk_cmd_buffer {
     * attachments (ps5vk_draw.c). */
    struct ps5vk_agc_register target_registers[PS5VK_MAX_COLOR_TARGETS]
                                            [PS5VK_TARGET_REGISTER_COUNT];
+   /* How many of those rows the last begin-rendering filled: the rendering's
+    * colour attachment count, or 1 when it has none and every draw still
+    * programs AGC's defaults (ps5vk_draw.c). The draw's context stream reserves
+    * and copies this many rows. */
+   uint32_t colour_attachment_count;
    /* The rasterizer registers a four-sample target needs, and how many of them
     * this rendering has: zero for a one-sample one (Phase C8). */
    uint32_t multisample_count;
@@ -622,6 +627,12 @@ struct ps5vk_device {
     * last one. */
    uint32_t descriptor_table_count;
    ps5vk_debug_table descriptor_tables[PS5VK_PIPELINE_STAGE_COUNT * PS5VK_DESCRIPTOR_SET_COUNT];
+   /* The last begin-rendering's colour attachments, for the debug API: how many
+    * it declared and the CB_COLORi_BASE address word each one's row carries
+    * (R7 step 1b, ps5vk_debug_colour_targets). */
+   uint32_t target_attachment_count;
+   uint32_t target_base_offsets[PS5VK_MAX_COLOR_TARGETS];
+   uint32_t target_base_values[PS5VK_MAX_COLOR_TARGETS];
    /* The pipelines whose stage mapping exists, newest first: what
     * ps5vk_debug_pipeline_stages reports to the runner's capture. */
    struct ps5vk_pipeline *stages;

@@ -17533,6 +17533,153 @@ void run_vulkan_sampler_anisotropy_frames(const TestContext &test, TestOutcome &
     outcome.passed = passed;
 }
 
+// R7 step 1b's acceptance: the four colour attachments this driver advertises
+// have to be four the draw programs. ps5vk_target_offsets carries one register
+// row per attachment (sixteen rows by four columns, derived from the gfx103 rows
+// of amdgfxregs.h), the draw fills and copies as many rows as the rendering
+// declares, and this frame is what says so on the console.
+//
+// The probe varies the attachment count -- 1, 2 and the maximum **read from the
+// device's own maxColorAttachments**, never a number written here -- and every
+// attachment carries a **different** value, all four read back. A driver that
+// programmed one target and copied it into the others, or wired two outputs to
+// one attachment, produces a picture a single-output probe would accept: with a
+// distinct constant per location, one attachment's data cannot be mistaken for
+// another's.
+//
+// The program is probes/v0-mrt, whose fragment stage writes four outputs at
+// locations 0..3 and reads nothing; the frame's pipeline colour-blend state
+// declares how many of them are live, which is what makes one program serve all
+// three counts (Vulkan allows outputs no attachment reads).
+constexpr std::uint32_t kMrtColours[4] = {0xff0000ffu, 0xff00ff00u, 0xffff0000u, 0xffffffffu};
+
+void run_vulkan_mrt_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32_SFLOAT, 8},
+    };
+    // The third count is the device's advertised maximum, which the first frame
+    // reports.
+    unsigned counts[3] = {1, 2, 0};
+    unsigned advertised = 0;
+    unsigned frames = 0;
+    unsigned frame_passed = 0;
+    for (unsigned at = 0; at < 3; at++)
+    {
+        if (counts[at] == 0)
+            counts[at] = advertised;
+        if (counts[at] == 0 || counts[at] > PS5VK_TRIANGLE_MAX_TARGETS)
+        {
+            log.event("agc_mrt", "FAIL", -1,
+                      "the device advertises fewer than two colour attachments, so a rendering "
+                      "with several has nothing to vary");
+            outcome.command_built = true;
+            outcome.passed = false;
+            return;
+        }
+        char label[64]{};
+        std::snprintf(label, sizeof(label), "%u colour attachment%s", counts[at],
+                      counts[at] == 1 ? "" : "s");
+        log.event("agc_mrt", "INFO", 0, label);
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = kAddressVertices;
+        input.vertex_count = kSquareVertexCount;
+        input.vertex_stride = kTextureVertexStride;
+        input.index_data = kIndices;
+        input.index_count = kIndexCount;
+        input.attribute_count = 2;
+        input.attributes[0] = attributes[0];
+        input.attributes[1] = attributes[1];
+        input.color_attachment_count = counts[at];
+        // A clear colour that is neither black nor any of the four outputs: an
+        // attachment the clear reached but the draw did not export into reads
+        // this word, and one whose registers never reached the hardware reads
+        // zero -- a distinction a black clear cannot make (2026-09-21, this
+        // probe's first run read 0x0 and could not tell the two apart).
+        input.clear_colour[0] = 0.25f;
+        input.clear_colour[1] = 0.5f;
+        input.clear_colour[2] = 0.75f;
+        input.clear_colour[3] = 1.0f;
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+            return;
+        ps5vk_triangle triangle{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+        if (advertised == 0)
+            advertised = triangle.max_color_attachments;
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (test.capture && status == PS5VK_TRIANGLE_OK)
+        {
+            log_driver_submission(triangle.device, label, log);
+            log_driver_stages(triangle.device, log);
+        }
+        /* The interim state, measured rather than assumed: a rendering into one
+         * colour attachment draws, and a rendering into more is refused by name
+         * until the per-attachment writes land (driver/ps5vk_draw.c). The probe
+         * reports which of the two happened, so the round that makes the writes
+         * land flips this expectation the way R7 round 2 flipped v0-two-sets'. */
+        const bool refused = status != PS5VK_TRIANGLE_OK;
+        /* One attachment draws; more are refused, and the driver's sentence
+         * reaches this log through the debug messenger the runner installs. */
+        bool matched = counts[at] == 1 ? status == PS5VK_TRIANGLE_OK : refused;
+        for (unsigned index = 0; index < counts[at] && matched; index++)
+        {
+            const void *const mapping = triangle.target_mappings[index];
+            const std::size_t bytes = triangle.target_memory_bytes[index];
+            if (mapping == nullptr || bytes < kFramebufferBytes)
+            {
+                matched = false;
+                break;
+            }
+            flush_gpu_data(mapping, kFramebufferBytes);
+            const auto *const words = static_cast<const std::uint32_t *>(mapping);
+            const FramebufferView view{words, kTiledRgba8Layout};
+            const std::uint32_t got = view.word(kOutputWidth / 2, kOutputHeight / 2);
+            char field[64]{};
+            std::snprintf(field, sizeof(field), "attachment_%u_of_%u", index, counts[at]);
+            log.hex("agc_mrt", field, got);
+            matched = matched && got == kMrtColours[index];
+        }
+        ++frames;
+        frame_passed += matched ? 1u : 0u;
+        log.event("agc_mrt", matched ? "PASS" : "FAIL", matched ? 0 : -1,
+                  counts[at] == 1
+                      ? (matched ? "the frame's one attachment holds its own output"
+                                 : "the frame's one attachment does not hold its output")
+                      : (matched ? "the rendering was refused by name, which is the state the "
+                                   "per-attachment writes are in (ps5vk_draw.c, step 1b)"
+                                 : "the rendering neither drew nor was refused"));
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            log.event("agc_mrt", "FAIL", -1,
+                      "a submission did not complete; the program's objects stay allocated");
+            return;
+        }
+        ps5vk_triangle_finish(&triangle);
+    }
+    const bool passed = frame_passed == frames && frames == 3;
+    (void)0;
+    log.number("agc_mrt", "advertised_max_color_attachments", advertised);
+    log.number("agc_mrt", "frames", frames);
+    char detail[192]{};
+    std::snprintf(detail, sizeof(detail),
+                  "%u of %u attachment counts (1, 2 and the advertised %u) drew every attachment's "
+                  "own output into its own target",
+                  frame_passed, frames, advertised);
+    log.event("agc_mrt", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
+    outcome.command_built = true;
+    outcome.passed = passed;
+}
+
 // R4's residual gap (PS5_VULKAN_REQUESTS.md, R4; docs/REQUESTS_RESPONSE.md): the
 // colour clear, read back with nothing drawn over it. The stencil plane has had a
 // case of this shape since R3; the colour target has not -- and it is the shape
@@ -22818,6 +22965,10 @@ constexpr RunnerTest kRunnerTests[] = {
     // with a frame whose every value is read out of one of the two sets
     // (run_vulkan_multiset_quake_frames).
     {"v0-multiset-quake", "v0-multiset-quake", run_vulkan_multiset_quake_frames},
+    // R7 step 1b: the four colour attachments the device advertises, drawn
+    // through 1, 2 and the advertised maximum counts with a distinct value in
+    // each and every one read back (run_vulkan_mrt_frames).
+    {"v0-mrt", "v0-mrt", run_vulkan_mrt_frames},
     // R7's next gate for the vkQuake port: anisotropyEnable at the maximum this
     // device reports is a no-op and has to render the isotropic frame texel for
     // texel, while a value past the maximum is refused by name
