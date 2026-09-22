@@ -609,17 +609,17 @@ ps5vk_compile_stage(struct ps5vk_device *device, const VkPipelineShaderStageCrea
                     const PsbcCompileOptions *options, uint32_t push_constant_bytes,
                     struct ps5vk_shader_package *package)
 {
-   VK_FROM_HANDLE(ps5vk_shader_module, module, stage->module);
+   VK_FROM_HANDLE(ps5vk_shader_module, module, stage ? stage->module : VK_NULL_HANDLE);
    const VkPipelineShaderStageNirCreateInfoMESA *const nir_info =
-      vk_find_struct_const(stage->pNext, PIPELINE_SHADER_STAGE_NIR_CREATE_INFO_MESA);
+      stage ? vk_find_struct_const(stage->pNext, PIPELINE_SHADER_STAGE_NIR_CREATE_INFO_MESA) : NULL;
    const bool vertex = options->stage == PSBC_STAGE_VERTEX;
    const char *const stage_name = vertex ? "vertex" : "fragment";
-   if (!module && !nir_info)
+   if (stage && !module && !nir_info)
       return vk_errorf(device, VK_ERROR_UNKNOWN,
                        "shader stages without a shader module are not supported");
-   if (stage->pSpecializationInfo && stage->pSpecializationInfo->mapEntryCount != 0)
+   if (stage && stage->pSpecializationInfo && stage->pSpecializationInfo->mapEntryCount != 0)
       return vk_errorf(device, VK_ERROR_UNKNOWN, "specialization constants are not supported");
-   if (!nir_info && !ps5vk_spirv_has_entry_point(module,
+   if (stage && !nir_info && !ps5vk_spirv_has_entry_point(module,
                                                  vertex ? PS5VK_SPIRV_EXECUTION_MODEL_VERTEX
                                                         : PS5VK_SPIRV_EXECUTION_MODEL_FRAGMENT,
                                                  stage->pName))
@@ -629,8 +629,9 @@ ps5vk_compile_stage(struct ps5vk_device *device, const VkPipelineShaderStageCrea
 
    /* Lowering runs outside the compiler lock: it touches only this clone. */
    struct nir_shader *const nir =
-      nir_info ? ps5vk_nir_prepare(nir_info->nir, push_constant_bytes) : NULL;
-   if (nir_info && !nir)
+      !stage ? ps5vk_nir_noop_fragment()
+             : (nir_info ? ps5vk_nir_prepare(nir_info->nir, push_constant_bytes) : NULL);
+   if ((!stage || nir_info) && !nir)
       return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
 
    call_once(&ps5vk_compile_once, ps5vk_compile_mutex_init);
@@ -693,8 +694,10 @@ ps5vk_pipeline_dump(const struct ps5vk_pipeline *pipeline)
 #define PS5VK_PACKAGE_MIN_HEADER_BYTES 96
 /* Stage workspace regions start on 4 KiB boundaries (link_shader_packages). */
 #define PS5VK_STAGE_REGION_ALIGNMENT 0x1000
-/* The link's primitive type for triangle lists (DI_PT_TRILIST). */
+/* The link's primitive types (AMD's DI_PT_* enumeration, which AGC's
+ * sceAgcLinkShaders takes): the list and the strip. */
 #define PS5VK_LINK_TRIANGLE_LIST 4
+#define PS5VK_LINK_TRIANGLE_STRIP 5
 /* A shader object's context and SH table pointers and their record counts,
  * with the bounds the runner accepts (emit_linked_shader_state). */
 #define PS5VK_SHADER_CX_TABLE_OFFSET 24
@@ -842,7 +845,7 @@ ps5vk_pipeline_create_shaders(struct ps5vk_device *device, struct ps5vk_pipeline
    if (result == 0 && pixel_shader)
       result = sceAgcLinkShaders(stage + PS5VK_STAGE_CONTEXT_OFFSET,
                                  stage + PS5VK_STAGE_UNIFORM_OFFSET, NULL, vertex_shader,
-                                 pixel_shader, PS5VK_LINK_TRIANGLE_LIST);
+                                 pixel_shader, pipeline->link_primitive_type);
    mtx_unlock(&ps5vk_compile_mutex);
    if (result != 0 || !vertex_shader || !pixel_shader) {
       ps5vk_direct_mapping_destroy(&shaders->stage);
@@ -1204,18 +1207,29 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
       else if (info->pStages[i].stage == VK_SHADER_STAGE_FRAGMENT_BIT)
          pixel = &info->pStages[i];
    }
-   if (!vertex || !pixel)
-      return vk_errorf(device, VK_ERROR_UNKNOWN,
-                       "only pipelines with a vertex and a fragment stage are supported");
+   if (!vertex)
+      return vk_errorf(device, VK_ERROR_UNKNOWN, "a vertex stage is required");
    /* Mesa's meta draws use a rectangle topology whose vertex buffer already
     * holds two triangles per rectangle, so it is a triangle list here, as it
     * is in nvk (vk_to_nv9097_primitive_topology). */
-   if (!info->pInputAssemblyState ||
-       (info->pInputAssemblyState->topology != VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST &&
-        info->pInputAssemblyState->topology != VK_PRIMITIVE_TOPOLOGY_META_RECT_LIST_MESA) ||
+   /* The topologies this driver links: a triangle list (which is what Mesa's
+    * META_RECT_LIST vertices already are, as in nvk) and a triangle strip, which
+    * is core Vulkan 1.0 with no feature bit gating it and what a tessellated mesh
+    * is built as -- consecutive rows sharing an edge, which a list cannot express
+    * without regenerating the mesh. The strip's alternating winding for its second
+    * and later triangles is the hardware's own (the link's primitive type below),
+    * so the front-face and cull state this driver programs is untouched and a
+    * culled strip is culled by the same rule a list is. Every other topology is
+    * still refused by name. */
+   const VkPrimitiveTopology topology =
+      info->pInputAssemblyState != NULL ? info->pInputAssemblyState->topology
+                                        : VK_PRIMITIVE_TOPOLOGY_MAX_ENUM;
+   if ((topology != VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST &&
+        topology != VK_PRIMITIVE_TOPOLOGY_META_RECT_LIST_MESA &&
+        topology != VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP) ||
        info->pInputAssemblyState->primitiveRestartEnable)
       return vk_errorf(device, VK_ERROR_UNKNOWN,
-                       "only triangle lists without primitive restart are supported");
+                       "only triangle lists and strips without primitive restart are supported");
    /* One sample or four (C8): the colour target's register block carries the
     * count (ps5vk_draw.c, CB_COLOR0_ATTRIB.NUM_SAMPLES), and nothing in the
     * compiled shader does. */
@@ -1228,6 +1242,8 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
    uint32_t push_constant_bytes = 0;
    VkShaderStageFlags push_constant_stages = 0;
    ps5vk_push_constant_range(layout, &push_constant_bytes, &push_constant_stages);
+   if (!pixel)
+      push_constant_stages &= ~VK_SHADER_STAGE_FRAGMENT_BIT;
    if (push_constant_bytes > PS5VK_MAX_PUSH_CONSTANT_BYTES)
       return vk_errorf(device, VK_ERROR_UNKNOWN, "push-constant ranges reach %u bytes, past %d",
                        push_constant_bytes, PS5VK_MAX_PUSH_CONSTANT_BYTES);
@@ -1243,7 +1259,7 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
    PsbcCompileOptions pixel_options = {
       .target = PSBC_TARGET_PS5,
       .stage = PSBC_STAGE_FRAGMENT,
-      .entrypoint = pixel->pName,
+      .entrypoint = pixel ? pixel->pName : "main",
       .optimise = true,
       .address32_hi = (uint32_t)PS5VK_ADDRESS_HIGH_WORD,
       /* The pipeline's sample count reaches the compiler as well as the
@@ -1263,10 +1279,10 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
       ps5vk_vertex_input_options(device, info->pVertexInputState, vertex_bindings, &vertex_options);
    if (result == VK_SUCCESS)
       result = ps5vk_descriptor_options(device, layout, VK_SHADER_STAGE_VERTEX_BIT, &vertex_options);
-   if (result == VK_SUCCESS)
+   if (result == VK_SUCCESS && pixel)
       result = ps5vk_descriptor_options(device, layout, VK_SHADER_STAGE_FRAGMENT_BIT, &pixel_options);
    uint32_t exports = 0;
-   if (result == VK_SUCCESS)
+   if (result == VK_SUCCESS && pixel)
       result = ps5vk_color_export_options(device, info, &exports);
    if (result != VK_SUCCESS)
       return result;
@@ -1281,6 +1297,13 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
    if (!pipeline)
       return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
    pipeline->spi_shader_col_format = exports;
+   /* What the link is told: the strip's own DI_PT value, so the hardware alternates
+    * the winding the way the specification defines it, and a list's otherwise. */
+   pipeline->link_primitive_type =
+      info->pInputAssemblyState != NULL &&
+            info->pInputAssemblyState->topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP
+         ? PS5VK_LINK_TRIANGLE_STRIP
+         : PS5VK_LINK_TRIANGLE_LIST;
    /* The colour write masks a draw programs, as one word: Vulkan gives **each**
     * attachment its own VkPipelineColorBlendAttachmentState::colorWriteMask, and
     * the two registers that carry them are per-target nibble fields --
@@ -1300,6 +1323,9 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
                                : (at == 0 ? 0xfu : 0u);
       pipeline->colour_write_mask |= (mask & 0xfu) << (4 * at);
    }
+   /* No fragment stage means no colour output, even with attachment writes enabled. */
+   if (!pixel)
+      pipeline->colour_write_mask = 0;
    /* The word a blending draw records, 0 for one that does not blend. A state
     * this driver cannot program has already set draw_refusal below, so the word
     * only has to be safe here. A state that reads the blend constants takes

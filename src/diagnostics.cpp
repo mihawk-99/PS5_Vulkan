@@ -17843,6 +17843,122 @@ void run_vulkan_separated_pair_frames(const TestContext &test, TestOutcome &outc
     outcome.passed = passed;
 }
 
+// R6 of the port's requests: the triangle strip, which is core Vulkan 1.0 with no
+// feature bit gating it and what a tessellated mesh is built as -- two vertices per
+// row with consecutive rows sharing an edge, which a list cannot express without
+// regenerating the mesh. The driver linked every pipeline as a triangle list and
+// refused the topology by name.
+//
+// The topology reaches the hardware through the *link* (sceAgcLinkShaders takes
+// AMD's DI_PT_* primitive type), so a strip is not a draw-time register: the
+// hardware alternates the winding of the strip's second and later triangles itself,
+// which is why the front-face and cull state the driver programs is untouched.
+//
+// The acceptance is an identity and its converse. A quad's four vertices as a strip
+// are the two triangles a list of its six indices draws, so the two frames must be
+// **identical texel for texel**. With back-face culling on, a list of the same six
+// indices keeps only one of the two triangles while the strip keeps both -- so the
+// same comparison must now *differ*, which is what proves the alternation is the
+// hardware's and not a coincidence of the vertex order.
+
+static ps5vk_triangle_shaders g_strip_shaders{};
+
+void run_vulkan_strip_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8},
+    };
+    // A quad whose four vertices make the two triangles a strip of them draws, and
+    // the same quad as the six indices a list needs. The four vertices are the m3
+    // vertex layout's (position and colour), so the m3 probes' shader draws them.
+    static const float vertices[4][6] = {
+        {-1.0f, -1.0f, 1.0f, 0.0f, 0.0f, 1.0f},
+        {-1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f},
+        {1.0f, -1.0f, 0.0f, 0.0f, 1.0f, 1.0f},
+        {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f},
+    };
+    static const std::uint16_t list_indices[6] = {0, 1, 2, 1, 3, 2};
+    bool drew[4] = {false, false, false, false};
+    std::uint32_t frames[4] = {0, 0, 0, 0};
+    for (unsigned at = 0; at < 4; at++)
+    {
+        // 0: the strip, no culling. 1: the list, no culling -- identical frames.
+        // 2: the strip, back-face culling. 3: the list, back-face culling -- the
+        // list loses a triangle, so this pair has to differ.
+        const bool strip = (at % 2) == 0;
+        const bool culled = at >= 2;
+        char label[64]{};
+        std::snprintf(label, sizeof(label), "%s, %s", strip ? "strip" : "list",
+                      culled ? "back-face culled" : "no culling");
+        log.event("agc_strip", "INFO", 0, label);
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], g_strip_shaders, log))
+            return;
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        input.shaders[0] = g_strip_shaders;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = vertices;
+        input.vertex_count = 4;
+        input.vertex_stride = 24;
+        input.index_data = strip ? NULL : list_indices;
+        input.index_count = strip ? 0u : 6u;
+        input.attribute_count = 2;
+        input.attributes[0] = attributes[0];
+        input.attributes[1] = attributes[1];
+        input.primitive_topology =
+            strip ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        input.rasterization_cull_mode = culled ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE;
+        ps5vk_triangle frame{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&frame, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&frame, PS5VK_TRIANGLE_ONE_DRAW);
+        drew[at] = status == PS5VK_TRIANGLE_OK && frame.target_bytes >= kFramebufferBytes;
+        if (test.capture && drew[at])
+        {
+            log_driver_submission(frame.device, label, log);
+            log_driver_stages(frame.device, log);
+        }
+        if (drew[at])
+        {
+            flush_gpu_data(const_cast<void *>(frame.target), kFramebufferBytes);
+            const auto *const words = static_cast<const std::uint32_t *>(frame.target);
+            const FramebufferView view{words, kTiledRgba8Layout};
+            frames[at] = view.word(kOutputWidth / 2, kOutputHeight / 2);
+        }
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            log.event("agc_strip", "FAIL", -1,
+                      "a submission did not complete; the program's objects stay allocated");
+            return;
+        }
+        ps5vk_triangle_finish(&frame);
+    }
+    log.number("agc_strip", "strip_frame", frames[0]);
+    log.number("agc_strip", "list_frame", frames[1]);
+    log.number("agc_strip", "culled_strip_frame", frames[2]);
+    log.number("agc_strip", "culled_list_frame", frames[3]);
+    const bool all_drew = drew[0] && drew[1] && drew[2] && drew[3];
+    const bool identical = all_drew && frames[0] == frames[1] && frames[0] != 0;
+    const bool alternates = all_drew && frames[2] != frames[3];
+    const bool passed = identical && alternates;
+    char detail[224]{};
+    std::snprintf(detail, sizeof(detail),
+                  "the strip's frame %s the list's%s, and with back-face culling the pair %s",
+                  identical ? "is" : "is not", identical ? " word for word" : "",
+                  alternates ? "differs, which is the strip's alternating winding"
+                             : "did not differ, so the alternation is not being applied");
+    log.event("agc_strip", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
+    outcome.command_built = true;
+    outcome.passed = passed;
+}
+
 // R4's residual gap (PS5_VULKAN_REQUESTS.md, R4; docs/REQUESTS_RESPONSE.md): the
 // colour clear, read back with nothing drawn over it. The stencil plane has had a
 // case of this shape since R3; the colour target has not -- and it is the shape

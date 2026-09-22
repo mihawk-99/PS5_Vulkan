@@ -575,6 +575,12 @@ struct ps5vk_triangle_input {
     * combined frame's, texel for texel (driver/ps5vk_descriptor_set_layout.c,
     * driver/ps5vk_draw.c). */
    bool separated_texture_pair;
+   /* The topology the frame's pipelines declare: VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+    * -- which is what every phase before this one used -- unless the caller names
+    * another. A strip draws one triangle per vertex after the second with the
+    * hardware alternating the winding, so a strip of a quad's four vertices is the
+    * two triangles a list of its six indices draws (R6 of the port's requests). */
+   VkPrimitiveTopology primitive_topology;
 };
 
 
@@ -682,6 +688,7 @@ struct ps5vk_triangle {
    /* The indices those buffers hold, which a frame's recording needs: the
     * caller's input is not kept. Zero draws three vertices, with no binding,
     * as the B7/B8/C1 sets do. */
+   uint32_t vertex_count;
    uint32_t index_count;
    /* The caller's geometry when it is staged (Phase C2): the mapped staging
     * buffer the data was written into, and the copies the GPU-side buffers

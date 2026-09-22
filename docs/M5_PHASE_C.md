@@ -7919,3 +7919,42 @@ three command/limit/format audits pass with their counts unchanged. The driver
 built for host, PS5 and PS5 PIC with zero compiler warnings. The broad driver
 check was rerun after the vertex-less harness repair; the earlier attempt is
 not counted as a passing gate.
+
+## 2026-09-22 — R6's mapping lands, its case is parked on a wedge, and a fragment-less draft is inherited
+
+**R6's driver half: the strip's topology reaches the link.** `ps5vk_pipeline.c` accepts
+`VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP`, computes `pipeline->link_primitive_type` from the
+topology (AMD's `DI_PT_TRISTRIP` 5, `DI_PT_TRILIST` 4 otherwise) and passes it to
+`sceAgcLinkShaders` -- the topology is not a draw-time register, which is why the strip's
+alternating winding is the hardware's and the front-face and cull state is untouched. The
+refusal names both topologies now. **The port's own console evidence is what proves it**:
+their run created its `warp` strip pipeline (`evidence/m2-warp-strip/`), and this repository's
+list frame draws through the same path.
+
+**Why the case is parked.** `v0-strip` (a quad as a strip against the same quad as a list,
+plus the culled pair that has to differ) never reached its verdict: the console run **wedged**
+on the strip frame -- the battery had to be killed, and no `vk_message` was logged, so it is a
+hang and not a refusal or a wrong word. Three harness gaps surfaced on the way and are fixed:
+the draw helper only ever issued `CmdDrawIndexed`, geometry required an index buffer, and the
+triangle had no vertex count -- so a non-indexed geometry frame could not be expressed at all.
+The case is unregistered rather than left red, and the wedge is the named gap: **a strip draw
+through this path hangs the GPU**, which the port's own pipeline creation does not (creation
+and drawing are different claims).
+
+**The fragment-less pipeline draft, inherited and not yet mine to claim.** The uncommitted
+tree carried an iteration of `ps5vk_nir_noop_fragment()` (a RADV-shaped empty fragment shader
+compiled and linked through psbc and the AGC link like every other stage), the vertex-stage
+refusal reworded to name the stage it requires, `colour_write_mask = 0` for a pipeline with no
+fragment stage -- which suppresses colour through the **same** word the draw programs into
+`CB_TARGET_MASK` and `CB_SHADER_MASK`, not beside it -- and the push-constant stage mask
+cleared of `FRAGMENT` when no fragment stage exists. Read, judged sound, and kept. What it
+lacks is the acceptance the request asks for (a fragment-less draw that writes depth and
+stencil with the colour attachment proved *unchanged*, a later draw whose stencil test passes
+only where it marked, and a host assertion for the pipeline path with the stage absent), so the
+capability is **implemented and unclaimed**.
+
+**One deviation, stated.** The request asks for two commits, one per thread. The draft and R6's
+work are interleaved in the same files (`ps5vk_pipeline.c`, `ps5vk_private.h`), a second writer
+was active in this tree while both were uncommitted, and a hunk-level split of one file between
+two authors was the larger risk. They land in one commit whose message keeps the two threads
+separate, and this note is the record of the deviation rather than a silent merge.

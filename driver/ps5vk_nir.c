@@ -127,6 +127,16 @@ ps5vk_nir_prepare(const nir_shader *source, uint32_t push_constant_bytes)
    return nir;
 }
 
+/* AGC links both packages. Like RADV's noop FS, an empty fragment shader
+ * leaves rasterized depth and fixed-function stencil intact without exports. */
+nir_shader *
+ps5vk_nir_noop_fragment(void)
+{
+   nir_builder b = nir_builder_init_simple_shader(
+      MESA_SHADER_FRAGMENT, psbc_get_nir_options(PSBC_STAGE_FRAGMENT), "ps5vk_noop_fs");
+   return b.shader;
+}
+
 void
 ps5vk_nir_free(nir_shader *nir)
 {

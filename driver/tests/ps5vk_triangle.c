@@ -495,17 +495,22 @@ create_geometry(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
    if (input->attribute_count > 2)
       return step(triangle, "vertex geometry", VK_ERROR_INITIALIZATION_FAILED,
                   "at most two vertex attributes are supported");
-   if (input->index_count == 0)
+   /* Vertex-less shaders generate their own triangle from gl_VertexIndex. */
+   if (input->index_count == 0 && input->vertex_data == NULL)
       return true;
+   /* A frame with vertices and no indices is a non-indexed draw -- a triangle
+    * strip is one -- and its vertex buffer is as necessary as an indexed frame's. */
    if (input->vertex_data == NULL || input->vertex_count == 0 || input->vertex_stride == 0)
       return step(triangle, "vertex geometry", VK_ERROR_INITIALIZATION_FAILED,
                   "indexed draws need vertex data, a vertex count and a stride");
-   if (input->index_data == NULL)
-      return step(triangle, "vertex geometry", VK_ERROR_INITIALIZATION_FAILED,
-                  "indexed draws need index data");
+   /* Indices are optional: a frame with vertices and none draws them with
+    * VkCmdDraw, which is the shape a triangle strip is (input.primitive_topology),
+    * and then it has no index buffer to create. */
+   triangle->vertex_count = input->vertex_count;
+   triangle->index_count = input->index_data != NULL ? input->index_count : 0u;
    const VkDeviceSize vertex_bytes = (VkDeviceSize)input->vertex_count * input->vertex_stride;
    /* 16-bit indices, two bytes each. */
-   const VkDeviceSize index_bytes = (VkDeviceSize)input->index_count * 2;
+   const VkDeviceSize index_bytes = (VkDeviceSize)triangle->index_count * 2;
    if (input->stage_geometry) {
       /* Phase C2's upload: the geometry goes into one mapped staging buffer,
        * the records first and the indices right after them, and the copies a
@@ -2456,10 +2461,11 @@ create_pipeline(struct ps5vk_triangle *triangle, uint32_t index,
              CALL(triangle, CreateShaderModule)(triangle->device, &vertex_info, NULL,
                                                 &triangle->vertex[index]),
              "vertex") ||
-       !step(triangle, "create_shader_modules",
+       (shaders->pixel_spirv &&
+        !step(triangle, "create_shader_modules",
              CALL(triangle, CreateShaderModule)(triangle->device, &pixel_info, NULL,
                                                 &triangle->pixel[index]),
-             "fragment"))
+             "fragment")))
       return false;
    const VkPipelineShaderStageCreateInfo stages[2] = {
       {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -2487,7 +2493,8 @@ create_pipeline(struct ps5vk_triangle *triangle, uint32_t index,
    };
    const VkPipelineInputAssemblyStateCreateInfo assembly = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-      .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+      .topology = input->primitive_topology != 0 ? input->primitive_topology
+                                                 : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
    };
    const VkViewport viewport = {0.0f, 0.0f, PS5VK_TRIANGLE_WIDTH, PS5VK_TRIANGLE_HEIGHT, 0.0f, 1.0f};
    /* The pipeline's scissor: the caller's rect when it declares one (V0-query's
@@ -2589,7 +2596,7 @@ create_pipeline(struct ps5vk_triangle *triangle, uint32_t index,
    };
    const VkGraphicsPipelineCreateInfo pipeline_info = {
       .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-      .stageCount = 2,
+      .stageCount = shaders->pixel_spirv ? 2 : 1,
       .pStages = stages,
       .pDynamicState = input->dynamic_depth_bias ? &dynamic_state : NULL,
       .pVertexInputState = input->attribute_count != 0 ? &geometry_input : &vertex_input,
@@ -3085,6 +3092,19 @@ draw(struct ps5vk_triangle *triangle, VkCommandBuffer command)
    }
    const VkDeviceSize zero = 0;
    CALL(triangle, CmdBindVertexBuffers)(command, 0, 1, &triangle->vertex_buffer, &zero);
+   if (triangle->index_count == 0) {
+      /* The caller's vertices with no indices: VkCmdDraw, which is the shape a
+       * triangle strip is (input.primitive_topology). */
+      if (!triangle->indirect) {
+         CALL(triangle, CmdDraw)(command, triangle->vertex_count, instances, 0, 0);
+         return;
+      }
+      const uint32_t parameters[4] = {triangle->vertex_count, instances, 0, 0};
+      memcpy(triangle->indirect_mapped, parameters, sizeof(parameters));
+      CALL(triangle, CmdDrawIndirect)(command, triangle->indirect_buffer, 0, 1,
+                                      (uint32_t)sizeof(parameters));
+      return;
+   }
    CALL(triangle, CmdBindIndexBuffer)(command, triangle->index_buffer, 0, VK_INDEX_TYPE_UINT16);
    uint32_t indices =
       triangle->draw_index_count != 0 ? triangle->draw_index_count : triangle->index_count;
