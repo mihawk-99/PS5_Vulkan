@@ -1,0 +1,7 @@
+# R12: context defaults, unchanged tight rows, then padded 32x36 rows.
+hold 1
+capture
+m2-solid
+c4-texture
+c4-padded
+exit

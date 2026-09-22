@@ -26,9 +26,19 @@ an AGC-level anchor). No existing golden changed.
 **Gates:** `bash build/gates.sh` all eleven PASS; full `tools/check-driver.sh`
 PASS (55 loader, 55 direct, 55 PS5 links, two negative arms). The template's
 five gates pass and its final driver relink passes. Archive: 14,383,172 bytes,
-SHA-256 `65550cae…`; the port is relinked, awaiting its own first-frame run.
-R11 is not yet closed for vkQuake: its presentation and visible picture remain
-unmeasured with this change.
+SHA-256 `65550cae…`. The port's identity `6b437103…`, PID 195, compiled 540
+shaders then reached a named `ps5vk_sampled_image` refusal: a 32-texel-wide
+image has 256-byte padded rows. No frame presented; the harness ended with
+count=0. R11 diagnostics work, but its positive presentation criterion is open.
+Port evidence: `../PS5_vkQuake/evidence/m2-texture-row-pitch/`.
+
+**Stopped at the mission's contradiction rule.** The R12 pitch candidate's
+first host check was reported as testing new code but used the old archive.
+The explicit rebuild failed on an undeclared ALIGN macro. The candidate was
+removed from source and parked at `parked/r12-row-pitch/` with the exact patch,
+probe queue and resumption plan. It was never deployed. A separate correction
+is appended to the phase log. The restored archive still hashes to `65550cae…`;
+the R11 driver remains the active implementation. M2–M6 remain unaccepted.
 
 **Still open from R10:** the subpass read is correct only through x=960 of 3840;
 the row-stored input descriptor needs its own readback fix. `v0-lines` still

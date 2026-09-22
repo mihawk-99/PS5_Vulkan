@@ -1088,3 +1088,11 @@ SHA-256 `65550cae897ee2fab14224d07b7cf6766e986be21c9e5ba81359b0a0535c75ce`.
 The R10 quarter-width read defect and the hardware line failure are unchanged.
 The phase log separately records the host loader's deferred surface creation and
 the resulting correction to C1's direct-only surface-refusal assertion.
+
+
+### 2026-09-22 — R11 port result and R12 pitch request
+
+| Request | Result | Evidence / next witness |
+| --- | --- | --- |
+| R11, actual vkQuake boot | Negative diagnostic criterion met; positive presentation still open. PID 195 reached 540 successful compiles and a named padded-row refusal, no frame. | Port identity `6b437103…`, `../PS5_vkQuake/evidence/m2-texture-row-pitch/`; runner PID 194 remains the secondary replay proof. |
+| R12, 32-wide sampled image with 256-byte row stride | Unverified candidate parked; no deployment. Initial host PASS used the old archive and was incorrectly described as validating new code; explicit build failed on ALIGN. | Separate correction in M5_PHASE_C.md. `parked/r12-row-pitch/` records exact patch, queue, source witness and resumption plan. Mission stop rule applied. |

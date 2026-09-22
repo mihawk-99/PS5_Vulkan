@@ -1,0 +1,206 @@
+diff --git a/driver/ps5vk_draw.c b/driver/ps5vk_draw.c
+index 04b796a..ca4ead7 100644
+--- a/driver/ps5vk_draw.c
++++ b/driver/ps5vk_draw.c
+@@ -217,9 +217,6 @@
+  * ps5vk_queue.c has the queue's copy of the same packet). */
+ #define PS5VK_COLOUR_BARRIER_EVENT 45
+ #define PS5VK_COLOUR_BARRIER_CONTROL 12
+-/* The texels one 256-byte row of RGBA8 holds: the M3 canary's texture is 64 of
+- * them wide, which is the padded row pitch the untiled descriptor encodes. */
+-#define PS5VK_TEXTURE_ROW_TEXELS 64
+ /* The most words one draw records: three 5-word register-table loads, both
+  * stages' user data at the 16-dword maximum and a 14-word indexed draw (the
+  * index size, base, count and DRAW_INDEX_2 packets), which is more than
+@@ -1000,6 +997,7 @@ struct ps5vk_sampled_image {
+    /* The image's IMG_DATA_FORMAT, which the descriptor's FORMAT field carries
+     * (V0-formats: one per format, ps5vk_image.c's table). */
+    uint32_t format_word;
++   uint32_t pitch_texels;
+    /* The format's DST_SEL channel selectors, which word 3's low twelve bits
+     * carry: they are what fills a format's missing channels with zero and one
+     * the way Vulkan's fetch rule says, since the hardware aliases them
+@@ -1140,16 +1138,19 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t
+       return false;
+    }
+    const bool tiled = image->storage == PS5VK_IMAGE_STORAGE_TILES;
+-   /* An untiled image's rows pad to 256 bytes (ps5vk_image.c) and the canary's
+-    * descriptor leaves word 4 zero, where ps5-opengl puts a row pitch wider
+-    * than the width, so only a width that is whole rows has a recorded
+-    * descriptor (docs/M5_REFERENCE.md, C4). */
+-   if (!tiled && image->vk.extent.width % PS5VK_TEXTURE_ROW_TEXELS != 0) {
++   /* Row storage aligns bytes, not texels. Word 4 can encode a custom
++    * pitch for a single-level 2D image (ps5-opengl ps5_screen.c); arrays
++    * use that field for layers, and mip chains have their own layout. */
++   const uint32_t texel_bytes = vk_format_get_blocksize(image->vk.format);
++   const uint32_t pitch_texels = ALIGN(image->vk.extent.width * texel_bytes, 256) / texel_bytes;
++   const bool padded = !tiled && pitch_texels != image->vk.extent.width;
++   if (padded && (view->view_type != VK_IMAGE_VIEW_TYPE_2D || image->vk.array_layers != 1 ||
++                  image->vk.mip_levels != 1 || pitch_texels > 0x4000)) {
+       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+-                              "set %u binding %u samples a %u-texel-wide image whose rows are "
+-                              "padded to 256 bytes; the descriptor's row pitch needs a runner "
+-                              "probe (docs/M5_REFERENCE.md, C4)",
+-                              (unsigned)set, binding, image->vk.extent.width);
++                              "set %u binding %u needs a padded texture pitch of %u texels; "
++                              "only single-level, single-layer 2D images up to 16384 texels "
++                              "have a custom-pitch descriptor probe (C4)",
++                              (unsigned)set, binding, pitch_texels);
+       return false;
+    }
+    /* Sampling a target this command buffer rendered into needs both the
+@@ -1180,6 +1181,7 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t
+    sampled->address = image->address;
+    sampled->extent = (VkExtent2D){image->vk.extent.width, image->vk.extent.height};
+    sampled->format_word = entry->image_format << 20;
++   sampled->pitch_texels = padded ? pitch_texels : 0;
+    sampled->dst_sel = entry->dst_sel;
+    /* Only a combined image sampler carries a sampler's words; a storage image's
+     * 32 bytes leave them out (ps5vk_write_image_descriptor). */
+@@ -1279,7 +1281,7 @@ ps5vk_input_attachment_descriptor(struct ps5vk_cmd_buffer *cmd_buffer,
+ }
+ 
+ /* The 48 bytes of a combined image sampler, as write_image_descriptor writes
+- * them (src/diagnostics.cpp): words 4, 6, 7 and 11 stay zero. */
++ * them (src/diagnostics.cpp), with word 4 also carrying a custom row pitch. */
+ static void
+ ps5vk_write_image_descriptor(uint32_t *descriptor, const struct ps5vk_sampled_image *sampled)
+ {
+@@ -1314,6 +1316,10 @@ ps5vk_write_image_descriptor(uint32_t *descriptor, const struct ps5vk_sampled_im
+     * is every descriptor before this step. */
+    descriptor[4] = (sampled->layer_count > 0 ? (sampled->layer_count - 1u) & 0x1fffu : 0u) |
+                    ((sampled->base_layer & 0x1fffu) << 16);
++   /* GFX10.3 custom linear pitch: DEPTH and PITCH_MSB form bits 0-13.
++    * Only the guarded non-array 2D case uses this instead of layer fields. */
++   if (sampled->pitch_texels != 0)
++      descriptor[4] = sampled->pitch_texels - 1;
+    descriptor[5] = PS5VK_TEXTURE_SINGLE_LEVEL | (sampled->image_last_mip_level << 4);
+    descriptor[8] = sampled->address_word;
+    descriptor[9] = sampled->image_last_mip_level == 0 ? PS5VK_TEXTURE_LOD_RANGE : sampled->lod_word;
+diff --git a/src/diagnostics.cpp b/src/diagnostics.cpp
+index 07ae3da..423ea18 100644
+--- a/src/diagnostics.cpp
++++ b/src/diagnostics.cpp
+@@ -4260,18 +4260,19 @@ std::uint32_t bilinear_level(std::uint32_t top_left, std::uint32_t top_right,
+ // that target row y holds is flipped where the target turned the geometry over,
+ // so the texture's rows land the other way up.
+ std::uint32_t expected_texture_word(std::uint32_t x, std::uint32_t y, TargetPacking packing,
+-                                    bool bilinear) noexcept
++                                    bool bilinear,
++                                    std::uint32_t texture_width = kTextureWidth) noexcept
+ {
+     const std::uint32_t width = kSquareRight - kSquareLeft;
+     const std::uint32_t height = kSquareBottom - kSquareTop;
+     const std::uint32_t row = packing.rows_bottom_up ? height - 1u - y : y;
+     Texel texel{};
+     if (!bilinear)
+-        texel = texel_at((2u * x + 1u) * kTextureWidth / (2u * width),
++        texel = texel_at((2u * x + 1u) * texture_width / (2u * width),
+                          (2u * row + 1u) * kTextureHeight / (2u * height));
+     else
+     {
+-        const AxisSample u = axis_sample(x, width, kTextureWidth);
++        const AxisSample u = axis_sample(x, width, texture_width);
+         const AxisSample v = axis_sample(row, height, kTextureHeight);
+         const Texel a = texel_at(u.first, v.first);
+         const Texel b = texel_at(u.second, v.first);
+@@ -4373,7 +4374,7 @@ std::uint32_t colour_error(std::uint32_t actual, std::uint32_t expected) noexcep
+ // match the clamp-to-edge float blend within kBilinearTolerance per channel,
+ // with the error distribution logged.
+ bool check_texture_frame(void *framebuffer, TargetPacking packing, bool bilinear, unsigned frame,
+-                         JsonLog &log) noexcept
++                         JsonLog &log, std::uint32_t texture_width = kTextureWidth) noexcept
+ {
+     flush_gpu_data(framebuffer, kFramebufferBytes);
+     const auto *const words = static_cast<const std::uint32_t *>(framebuffer);
+@@ -4446,8 +4447,8 @@ bool check_texture_frame(void *framebuffer, TargetPacking packing, bool bilinear
+                 continue;
+             }
+             ++inside_drawn;
+-            const std::uint32_t expected =
+-                expected_texture_word(x - kSquareLeft, y - kSquareTop, packing, bilinear);
++            const std::uint32_t expected = expected_texture_word(x - kSquareLeft, y - kSquareTop,
++                                                                 packing, bilinear, texture_width);
+             const std::uint32_t error = colour_error(pixel, expected);
+             ++error_histogram[error < 3 ? error : 3];
+             max_error = error > max_error ? error : max_error;
+@@ -4476,7 +4477,7 @@ bool check_texture_frame(void *framebuffer, TargetPacking packing, bool bilinear
+         std::snprintf(detail, sizeof(detail), "x=%u y=%u word=0x%08x expected=0x%08x", sample[0],
+                       sample[1], view.word(sample[0], sample[1]),
+                       expected_texture_word(sample[0] - kSquareLeft, sample[1] - kSquareTop,
+-                                            packing, bilinear));
++                                            packing, bilinear, texture_width));
+         log.event("agc_texture_sample", "INFO", 0, detail);
+     }
+ 
+@@ -19231,14 +19232,23 @@ void run_vulkan_fragmentless_frames(const TestContext &test, TestOutcome &outcom
+                     "state predict");
+ }
+ 
+-void run_vulkan_texture_frames(const TestContext &test, TestOutcome &outcome) noexcept
++void run_vulkan_texture_width(const TestContext &test, TestOutcome &outcome,
++                              std::uint32_t texture_width) noexcept
+ {
+     JsonLog &log = test.log;
+     const ps5vk_triangle_report report{&log, log_vulkan_step};
+     // The canary's texels: red encodes the column, green the row and blue a
+     // two-level checker, uploaded as R,G,B,A bytes row by row.
+     std::array<std::uint8_t, kTextureWidth * kTextureHeight * 4> texels{};
+-    upload_texture(texels.data());
++    for (std::uint32_t row = 0; row < kTextureHeight; ++row)
++        for (std::uint32_t column = 0; column < texture_width; ++column)
++        {
++            const Texel texel = texel_at(column, row);
++            const std::uint32_t word =
++                0xff000000u | (texel.blue << 16) | (texel.green << 8) | texel.red;
++            std::memcpy(texels.data() + (row * texture_width + column) * 4, &word, 4);
++        }
++    log.number("agc_c4_texture", "texture_width", texture_width);
+     // The m3-texture vertex shader's layout: location 0 R32G32_SFLOAT position
+     // at offset 0 and location 1 R32G32_SFLOAT texture coordinate at offset 8,
+     // stride 16 (probes/m3-texture/compile.txt, bindings.txt).
+@@ -19264,7 +19274,7 @@ void run_vulkan_texture_frames(const TestContext &test, TestOutcome &outcome) no
+                                0,
+                                0,
+                                texels.data(),
+-                               kTextureWidth,
++                               texture_width,
+                                kTextureHeight,
+                                false};
+     if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+@@ -19292,7 +19302,7 @@ void run_vulkan_texture_frames(const TestContext &test, TestOutcome &outcome) no
+             log_driver_submission(triangle.device, bilinear ? "draw 2" : "draw 1", log);
+         if (triangle.target_bytes >= kFramebufferBytes &&
+             check_texture_frame(const_cast<void *>(triangle.target), kRgba8ImagePacking, bilinear,
+-                                frame, log))
++                                frame, log, texture_width))
+             frames++;
+     }
+     outcome.command_built = status != PS5VK_TRIANGLE_FAILED;
+@@ -19313,6 +19323,18 @@ void run_vulkan_texture_frames(const TestContext &test, TestOutcome &outcome) no
+     log.event("agc_c4_texture", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1, detail);
+ }
+ 
++void run_vulkan_texture_frames(const TestContext &test, TestOutcome &outcome) noexcept
++{
++    run_vulkan_texture_width(test, outcome, kTextureWidth);
++}
++
++// R12: 32 RGBA8 texels occupy 128 bytes; each stored row occupies 256.
++// Every sampled pixel must still agree with the tight source pattern.
++void run_vulkan_texture_padded(const TestContext &test, TestOutcome &outcome) noexcept
++{
++    run_vulkan_texture_width(test, outcome, 32);
++}
++
+ // Phase C4's render-to-texture case, the last item of its console criterion:
+ // the frame draws the canary's texels into a colour image of its own and then,
+ // in the SAME command buffer, samples that image. That is the case the driver's
+@@ -24116,6 +24138,7 @@ constexpr RunnerTest kRunnerTests[] = {
+     // buffer with vkCmdCopyBufferToImage, sampled through a combined image
+     // sampler and read back, nearest exactly and bilinear within tolerance.
+     {"c4-texture", "m3-texture", run_vulkan_texture_frames},
++    {"c4-padded", "m3-texture", run_vulkan_texture_padded},
+     // Phase C4's render-to-texture case: the same canary frame, with the image
+     // its pixel shader samples rendered by the frame itself in the same command
+     // buffer, which is the draw the driver's colour barrier is written for.

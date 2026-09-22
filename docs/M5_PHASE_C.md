@@ -8385,3 +8385,42 @@ Reproduction: build/deploy the runner, then
 close PPSA99988, and extract with `tools/golden.py extract`. Exact replay commands
 are in `golden/r11-secondary/README.md`. R11's driver substrate is proven; the
 port's first presentation remains the next independent acceptance run.
+
+
+## 2026-09-22 — R11 port response: named padded-row refusal
+
+The actual vkQuake boot (PPSA99010 PID 195, identity `6b437103…`) linked
+R11 archive SHA-256 `65550cae897ee2fab14224d07b7cf6766e986be21c9e5ba81359b0a0535c75ce`.
+It compiled 540 shaders successfully, then named `ps5vk_sampled_image`, set 0
+binding 0: a 32-texel-wide image uses 256-byte stored rows, but the descriptor
+has no row pitch. The first frame never presented. The port read trace.txt
+twice identically and matched the listener's PID; its evidence and full
+identity are in `../PS5_vkQuake/evidence/m2-texture-row-pitch/`. The title is
+closed. R11's diagnostic criterion is met; positive first-frame acceptance
+remains open. This is new request R12, owned by the driver.
+
+## 2026-09-22 — Correction: stale archive invalidated the R12 host claim
+
+The proposed R12 encoding reused ps5-opengl's single-level 2D descriptor word 4
+pitch, with a c4-padded runner case using 32-wide RGBA8 rows and the existing
+nearest/bilinear readback. `bash tools/check-driver.sh c4_texture` passed all
+three arms, but the statement that this validated the changed driver was
+wrong: that tool does not rebuild the archive. `tools/build.sh` refused its
+stale input. An explicit `bash tools/build-driver.sh` then failed in all modes:
+`ps5vk_draw.c:1145:34: error: call to undeclared function 'ALIGN'`.
+
+No R12 candidate was deployed and no R12 console run occurred. Per the mission's
+stop-on-contradiction rule, source was restored exactly to R11 and the unverified
+patch/queue were parked in `parked/r12-row-pitch/`, whose README records the
+resumption steps. The PS5 archive still has the R11 SHA-256 `65550cae…`.
+The parallel `bash build/gates.sh` reported all eleven PASS, but its unchanged
+archive does not validate the candidate either. The earlier full R11 check
+(167 arms) and hardware evidence remain the verification of active source.
+Local raw diagnostic logs: build/r12-host-texture.log,
+build/r12-runner-build.log, build/r12-build-driver.log, build/r12-gates.log.
+
+Cleanup verification: after restoring R11 source, `bash tools/build-driver.sh`
+PASS and the PS5 archive reproduced exactly as
+`65550cae897ee2fab14224d07b7cf6766e986be21c9e5ba81359b0a0535c75ce`.
+`git apply --check parked/r12-row-pitch/row-pitch.patch` PASS verifies the
+parked candidate can be reapplied; it does not validate its implementation.
