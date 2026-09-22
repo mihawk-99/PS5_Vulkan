@@ -3,14 +3,15 @@
  * Copyright (C) 2026 Mihawk-99
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * R6 of the vkQuake port's requests (docs/M5_PHASE_C.md); built and run through
- * the loader and directly by tools/check-driver.sh (see ps5vk_test.h).
+ * R6 and R8 of the vkQuake port's requests (docs/M5_PHASE_C.md); built and run
+ * through the loader and directly by tools/check-driver.sh (see ps5vk_test.h).
  *
  * A topology reaches the hardware through AGC's link, which takes AMD's DI_PT_*
  * value and writes it into VGT_PRIMITIVE_TYPE. The PC model replays the link's
  * outputs instead of computing them, so what the console's link is told is read
  * here through the driver's debug API (ps5vk_debug_pipeline_primitive_type):
  *
+ *   line list        DI_PT_LINELIST  2
  *   triangle list    DI_PT_TRILIST   4
  *   triangle strip   DI_PT_TRISTRIP  6  (R6 first passed 5, which is the fan)
  *
@@ -18,9 +19,13 @@
  * case v0-strip draws with, so the frames the console reads back are the ones
  * this program records: a strip of three vertices and a strip of four, drawn with
  * VkCmdDraw from a bound vertex buffer -- the DRAW_INDEX_AUTO in the submission
- * carries the frame's own vertex count -- and the quad as an indexed list. The
- * pixels are the console's to prove (runner case v0-strip). PS5VK_PROBES names
- * the probes directory, which holds the m3-vertex package the frames use.
+ * carries the frame's own vertex count -- and the quad as an indexed list. A line
+ * list's draw records the line's own three words, VGT_GS_OUT_PRIM_TYPE LINESTRIP,
+ * PA_SU_LINE_CNTL's width 1.0 and PA_SC_LINE_CNTL 0, and a PA_SU_SC_MODE_CNTL with
+ * no cull bits even when the pipeline asked to cull both faces (cullMode is a
+ * polygon's); a triangle's draw records none of the three. The pixels are the
+ * console's to prove (runner cases v0-strip and v0-lines). PS5VK_PROBES names the
+ * probes directory, which holds the m3-vertex package the frames use.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -108,6 +113,34 @@ last_draw_count(VkDevice device, uint32_t header)
 }
 #endif
 
+#if defined(PS5VK_TEST_DIRECT)
+/* The value the draw's register tables give a context register, and whether any
+ * of them names it: the tables live in the driver's chunks
+ * (ps5vk_debug_table_chunks), the frame's own draw's last, after vk_meta's clear.
+ * Only the direct build reads them: the loader build sees the driver through its
+ * ICD, which exports no debug symbol (driver/ps5vk_icd.map). */
+static bool
+recorded(VkDevice device, uint16_t offset, uint32_t *value)
+{
+   ps5vk_debug_stage chunks[8] = {{0}};
+   const uint32_t count = ps5vk_debug_table_chunks(device, chunks, 8);
+   bool found = false;
+   /* Newest chunk first: walk them oldest first so the last record wins, as it
+    * does in the hardware's table load. */
+   for (uint32_t chunk = count < 8 ? count : 8; chunk-- > 0;) {
+      const uint32_t *const words = chunks[chunk].address;
+      const size_t records = chunks[chunk].bytes / (2 * sizeof(uint32_t));
+      for (size_t record = 0; record < records; record++) {
+         if ((words[2 * record] & 0xffffu) == offset) {
+            *value = words[2 * record + 1];
+            found = true;
+         }
+      }
+   }
+   return found;
+}
+#endif
+
 struct frame {
    const char *name;
    VkPrimitiveTopology topology;
@@ -117,6 +150,7 @@ struct frame {
    /* The count the frame's own draw packet carries: vertices for a
     * DRAW_INDEX_AUTO, indices for a DRAW_INDEX_2. */
    uint32_t draw_count;
+   VkCullModeFlags cull;
 };
 
 static void
@@ -142,6 +176,7 @@ draw_frame(const struct frame *frame, const uint32_t *vertex, size_t vertex_byte
    input.attributes[1] =
       (VkVertexInputAttributeDescription){1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8};
    input.primitive_topology = frame->topology;
+   input.rasterization_cull_mode = frame->cull;
    struct ps5vk_triangle triangle = {0};
    enum ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
    if (status == PS5VK_TRIANGLE_OK)
@@ -170,6 +205,41 @@ draw_frame(const struct frame *frame, const uint32_t *vertex, size_t vertex_byte
       check(count == frame->draw_count, what);
       if (count != frame->draw_count)
          printf("  (its count is %u)\n", count);
+      /* The line's three words, and the rasterizer word without cull bits. */
+      const bool line = frame->topology == VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+      static const struct {
+         uint16_t offset;
+         uint32_t value;
+         const char *name;
+      } kLineWords[] = {
+         {0x29b, 1u, "VGT_GS_OUT_PRIM_TYPE is LINESTRIP"},
+         {0x282, 8u, "PA_SU_LINE_CNTL's width is 1.0 (8 in 12.4 half-width)"},
+         {0x2f7, 0u, "PA_SC_LINE_CNTL is 0: non-strict lines, no diamond test"},
+      };
+      for (size_t at = 0; at < sizeof(kLineWords) / sizeof(kLineWords[0]); at++) {
+         uint32_t value = 0;
+         const bool found = recorded(triangle.device, kLineWords[at].offset, &value);
+         if (line) {
+            snprintf(what, sizeof(what), "%s: %s", frame->name, kLineWords[at].name);
+            check(found && value == kLineWords[at].value, what);
+            if (!found || value != kLineWords[at].value)
+               printf("  (0x%03x %s 0x%08x)\n", kLineWords[at].offset,
+                      found ? "holds" : "is not recorded; would be", value);
+         } else if (kLineWords[at].offset != 0x29b) {
+            /* The link's own records name 0x29b for every pipeline; the two line
+             * registers are the line's alone. */
+            snprintf(what, sizeof(what), "%s: records no 0x%03x", frame->name,
+                     kLineWords[at].offset);
+            check(!found, what);
+         }
+      }
+      if (line) {
+         uint32_t value = UINT32_MAX;
+         const bool found = recorded(triangle.device, 0x205, &value);
+         snprintf(what, sizeof(what), "%s: PA_SU_SC_MODE_CNTL is recorded without cull bits",
+                  frame->name);
+         check(found && (value & 3u) == 0u, what);
+      }
    }
 #endif
    if (status != PS5VK_TRIANGLE_IN_FLIGHT)
@@ -196,10 +266,16 @@ main(void)
 #endif
 
    static const struct frame kFrames[] = {
-      {"three vertices, strip", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, 3, NULL, 6, 3},
-      {"three vertices, list", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 3, NULL, 4, 3},
-      {"quad, strip", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, 4, NULL, 6, 4},
-      {"quad, indexed list", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 4, kConsistent, 4, 6},
+      {"three vertices, strip", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, 3, NULL, 6, 3,
+       VK_CULL_MODE_NONE},
+      {"three vertices, list", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 3, NULL, 4, 3,
+       VK_CULL_MODE_NONE},
+      {"quad, strip", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, 4, NULL, 6, 4, VK_CULL_MODE_NONE},
+      {"quad, indexed list", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 4, kConsistent, 4, 6,
+       VK_CULL_MODE_NONE},
+      {"two lines", VK_PRIMITIVE_TOPOLOGY_LINE_LIST, 4, NULL, 2, 4, VK_CULL_MODE_NONE},
+      {"two lines, both faces culled", VK_PRIMITIVE_TOPOLOGY_LINE_LIST, 4, NULL, 2, 4,
+       VK_CULL_MODE_FRONT_AND_BACK},
    };
    for (size_t at = 0; vertex && pixel && at < sizeof(kFrames) / sizeof(kFrames[0]); at++)
       draw_frame(&kFrames[at], vertex, vertex_bytes, pixel, pixel_bytes);

@@ -126,6 +126,29 @@
  * floating-point format"). A UNORM depth attachment's word is not measured, so
  * a bias through one is refused by name rather than guessed at. */
 #define PS5VK_POLY_OFFSET_DB_FMT_D32F 0x000001e9u
+/* R8: the three words a line list's draw records, and no other draw does, in the
+ * same numbering, sourced from the register database and RADV rather than
+ * guessed:
+ *   VGT_GS_OUT_PRIM_TYPE (0x29b) = LINESTRIP 1: what the NGG stage's primitives
+ *     are rasterized as. The link writes this register among its context
+ *     records (a triangle list's holds TRISTRIP 2, golden/c1-triangle); RADV
+ *     derives it from the topology (radv_conv_prim_to_gs_out: a line list is
+ *     LINESTRIP), and the draw writes it after the linked records, so the
+ *     value holds whichever the link chose.
+ *   PA_SU_LINE_CNTL (0x282) = 8: WIDTH is half the line's width in 12.4 fixed
+ *     point, so 1.0 is 8 -- RADV's width * 8 and ps5-opengl's default
+ *     point/line block (ps5_agc_native_runtime.c, runtime_point_line[2]).
+ *   PA_SC_LINE_CNTL (0x2f7) = 0: RADV's word for Vulkan's default
+ *     (non-rectangular) lines, no perpendicular end caps and no DX10 diamond
+ *     test ("unnecessary with Vulkan", radv_cmd_buffer.c); strictLines is
+ *     reported false, which is what allows it. */
+#define PS5VK_GS_OUT_PRIM_TYPE_REGISTER 0x29b
+#define PS5VK_GS_OUT_PRIM_LINESTRIP 1u
+#define PS5VK_LINE_WIDTH_REGISTER 0x282
+#define PS5VK_LINE_WIDTH_ONE 8u
+#define PS5VK_LINE_CONTROL_REGISTER 0x2f7
+#define PS5VK_LINE_CONTROL_NON_STRICT 0u
+#define PS5VK_LINE_REGISTER_COUNT 3
 #define PS5VK_BLEND_CONSTANT_COUNT 4
 #define PS5VK_COLOR_CONTROL_REGISTER 0x202
 #define PS5VK_COLOR_CONTROL_WORD 0x00cc0011u
@@ -2029,8 +2052,14 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
     * format the draw does not have. */
    const uint32_t depth_bias_count =
       depth_bias && cmd_buffer->depth_bound ? PS5VK_POLY_OFFSET_COUNT : 0u;
-   const uint32_t raster_count = (rasterizer_word != 0 ? 1u : 0u) +
-                                 (pipeline->discard_rasterizer ? 1u : 0u) + depth_bias_count;
+   const uint32_t line_count = pipeline->line_rasterizer ? PS5VK_LINE_REGISTER_COUNT : 0u;
+   /* A line's rasterizer word is recorded even when it is 0: the pipeline
+    * cleared its cull bits (ps5vk_pipeline.c), and a table without the word
+    * would leave an earlier culling draw's in the register. */
+   const bool rasterizer_recorded = rasterizer_word != 0 || pipeline->line_rasterizer;
+   const uint32_t raster_count = (rasterizer_recorded ? 1u : 0u) +
+                                 (pipeline->discard_rasterizer ? 1u : 0u) + depth_bias_count +
+                                 line_count;
    /* One row of target registers per colour attachment the rendering declared:
     * together with the copy below, this is the arithmetic R6's heap corruption
     * lived in, so the reservation and the copy read the same number
@@ -2099,7 +2128,7 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
       struct ps5vk_agc_register *raster =
          cx + fixed + PS5VK_STAGE_CONTEXT_RECORDS + vertex->cx_count + pixel->cx_count +
          mask_count + blend_count;
-      if (rasterizer_word != 0)
+      if (rasterizer_recorded)
          *raster++ = (struct ps5vk_agc_register){.offset = PS5VK_RASTERIZER_REGISTER,
                                                  .value = rasterizer_word};
       if (pipeline->discard_rasterizer)
@@ -2120,6 +2149,14 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
             *raster++ = (struct ps5vk_agc_register){
                .offset = (uint16_t)(PS5VK_POLY_OFFSET_DB_FMT_REGISTER + index),
                .value = words[index]};
+      }
+      if (line_count != 0) {
+         *raster++ = (struct ps5vk_agc_register){.offset = PS5VK_GS_OUT_PRIM_TYPE_REGISTER,
+                                                 .value = PS5VK_GS_OUT_PRIM_LINESTRIP};
+         *raster++ = (struct ps5vk_agc_register){.offset = PS5VK_LINE_WIDTH_REGISTER,
+                                                 .value = PS5VK_LINE_WIDTH_ONE};
+         *raster++ = (struct ps5vk_agc_register){.offset = PS5VK_LINE_CONTROL_REGISTER,
+                                                 .value = PS5VK_LINE_CONTROL_NON_STRICT};
       }
    }
    memcpy(sh, vertex->sh, vertex->sh_count * sizeof(*sh));

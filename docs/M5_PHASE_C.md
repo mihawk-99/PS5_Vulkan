@@ -8011,3 +8011,54 @@ from a strip, the quad can.
 replay (their pixels are empty there, as every drawing case's are); check-driver PASS with 292
 identical golden comparisons. **Unclaimed**: the strip is proved when a console run of
 `jobs/v0-strip` passes; until then the mapping is implemented and the record says so.
+
+## 2026-09-22 — R8: the line list, mapped through the compiler, the link and three draw words
+
+**The request.** vkQuake's start-up stops at `vkCreateGraphicsPipelines failed (debug_lines)` and,
+guarded, at `(md5_debug)`: both inherit `VK_PRIMITIVE_TOPOLOGY_LINE_LIST` from
+`R_CreateShowTrisPipelines` (the port's `evidence/m2-debug-lines/`, `evidence/m2-md5-debug/`).
+Core 1.0, no feature bit: the strip's class.
+
+**What a line needs that a strip did not, and where each value comes from.**
+
+- *The link*: `DI_PT_LINELIST` 2 (`V_030908_DI_PT_LINELIST`; ps5-opengl's
+  `ps5_agc_gate2_set_draw_state` hands the link the same value, `case 2: /* LINELIST */`).
+- *The compiler*: the vertex stage is an NGG primitive shader, and its primitive export carries
+  the vertices of one primitive -- three unless the compiler is told the topology
+  (`radv_get_num_vertices_per_prim`; the driver never set `PsbcCompileOptions.primitive_type`).
+  A line pipeline compiles both stages with `primitive_type = 2`, RADV's `ia.topology` key; the
+  fragment stage takes it as RADV's does (a line's fragments are front-facing). Triangle
+  pipelines keep 0, so every triangle package is byte-identical to before (B6's package checks).
+- *The draw*: three words a line's draw records and no other draw does, after the linked
+  records -- `VGT_GS_OUT_PRIM_TYPE` (0x29b) = LINESTRIP 1 (the link writes this register; a
+  list's holds TRISTRIP 2 in `golden/c1-triangle`; RADV's `radv_conv_prim_to_gs_out` makes a
+  line list LINESTRIP), `PA_SU_LINE_CNTL` (0x282) = 8 (WIDTH is half the width in 12.4, RADV's
+  `width * 8`, ps5-opengl's default `runtime_point_line[2]`), and `PA_SC_LINE_CNTL` (0x2f7) = 0
+  (RADV's word for Vulkan's default lines: no end caps, no DX10 diamond test; strictLines is
+  reported false). The context numbering is the one ps5-opengl programs 0x280-0x282 with.
+- *Culling*: cullMode is a polygon's; a line pipeline clears the cull bits and always records
+  PA_SU_SC_MODE_CNTL, so an earlier culling draw's word cannot linger.
+- *Refusals kept*: points, line strips, fans, adjacency, patches and primitive restart stay
+  refused; a line list whose static `lineWidth` is not 1.0 is refused naming `wideLines`
+  (unclaimed, `lineWidthRange` 1 to 1); a multisampled line list is refused -- one-sample
+  lines are the only ones this case measures.
+
+**Host gates.** B6 (21/21): the strip compiles to the list's packages, the line list is created
+and its vertex package differs from the list's, the refused topologies, restart and a 2.0 width
+are refused. `v0_topology` (35/35 direct): two line frames link as 2, draw a DRAW_INDEX_AUTO of
+their four vertices, record 0x29b = 1, 0x282 = 8, 0x2f7 = 0 and a PA_SU_SC_MODE_CNTL without
+cull bits -- with cullMode FRONT_AND_BACK too -- and no triangle frame records 0x282 or 0x2f7.
+check-driver PASS, 292 identical golden comparisons; runner cases, audits, lint and unit tests
+PASS.
+
+**The console case, `v0-lines`** (m3-vertex set, `jobs/r8-lines/queue.txt`). A horizontal
+segment through the centres of row H/4 from W/4 to 3W/4 and a vertical one through column W/2
+from H/2 to 3H/4, against the one-pixel rectangles they should cover, which are known without
+drawing: frame 0 the lines, frame 1 the rectangles as triangle pairs (must be exactly the
+rectangles, one colour -- the reference's own check), frame 2 the lines with both faces culled
+(must equal frame 0 word for word), frame 3 the triangle pairs culled (must be empty, so the cull
+state frame 2 ignored was live). Frame 0 passes if it is frame 1, or differs only at the
+segments' end pixels (the end pixel missing or one past it), which is where non-strict lines may
+place pixels differently; every interior pixel and every pixel beside a segment must be exact,
+in the rectangles' colour. The counts and each segment's first and last lit pixel are logged, so
+the first run is the golden. **Unclaimed** until that run passes.

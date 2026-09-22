@@ -1,0 +1,23 @@
+# PS5 Vulkan test runner job queue (PPSA99988): R8's line list and R6's strip, one
+# run.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/r8-lines/queue.txt
+#
+# m2-solid first is the capture's runner-built frame. v0-lines draws two segments
+# against the one-pixel rectangles they must cover, then both culled; v0-strip is
+# R6's seven frames (its first run to reach a draw); the regression after them is
+# the set every round has kept green (docs/M5_PHASE_C.md, 2026-09-22).
+hold 60
+capture
+m2-solid
+v0-lines
+v0-strip
+v0-cull
+v0-depth-bias
+v0-stencil-clear
+v0-stencil
+v0-push-constant
+v0-multiset-quake
+v0-two-sets
+v0-separated-pair
+c8-resolve
+exit

@@ -37,24 +37,27 @@ struct pipeline_description {
    VkPrimitiveTopology topology;
    /* Both stages' entry point; NULL means "main". */
    const char *entrypoint;
+   /* The rasterization state's lineWidth; 0 means 1.0. */
+   float line_width;
+   bool primitive_restart;
 };
 
 static const struct pipeline_description kProbeSets[] = {
-   {"m2", 0, {{0}}, 0, NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL},
-   {"m3", 0, {{0}}, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL},
+   {"m2", 0, {{0}}, 0, NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false},
+   {"m3", 0, {{0}}, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false},
    {"m3-vertex", 2,
     {{0, 0, VK_FORMAT_R32G32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8}}, 24,
-    NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL},
+    NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false},
    {"m3-texture", 2, {{0, 0, VK_FORMAT_R32G32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 8}}, 16,
-    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL},
+    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false},
    {"m4-depth", 2,
     {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}}, 28,
-    NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL},
+    NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false},
    {"m4-blend", 2,
     {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}}, 28,
-    NO_DESCRIPTOR, true, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL},
+    NO_DESCRIPTOR, true, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false},
    /* Phase B7's orientation probe: the M2 set's options, a half-target triangle. */
-   {"b7-corner", 0, {{0}}, 0, NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL},
+   {"b7-corner", 0, {{0}}, 0, NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false},
 };
 
 static VkShaderModule
@@ -152,6 +155,7 @@ create_pipeline(const struct pipeline_description *description, VkShaderModule v
       const VkPipelineInputAssemblyStateCreateInfo assembly = {
          .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
          .topology = description->topology,
+         .primitiveRestartEnable = description->primitive_restart,
       };
       const VkViewport viewport = {0, 0, 3840, 2160, 0, 1};
       const VkRect2D scissor = {{0, 0}, {3840, 2160}};
@@ -167,7 +171,7 @@ create_pipeline(const struct pipeline_description *description, VkShaderModule v
          .polygonMode = VK_POLYGON_MODE_FILL,
          .cullMode = VK_CULL_MODE_NONE,
          .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-         .lineWidth = 1.0f,
+         .lineWidth = description->line_width != 0.0f ? description->line_width : 1.0f,
       };
       const VkPipelineMultisampleStateCreateInfo multisample = {
          .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
@@ -368,6 +372,50 @@ check_probe_pipelines(void)
    points.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
    check(build_and_dump(probes, directory, "m2-points", "m2", &points) == VK_ERROR_UNKNOWN,
          "a point-list pipeline is refused with VK_ERROR_UNKNOWN");
+
+   /* The topologies (R6, R8): a strip compiles to exactly the list's packages --
+    * nothing about three vertices a primitive changes -- while a line list's
+    * vertex stage is compiled for two vertices a primitive and has to differ.
+    * The topologies nothing has measured stay refused, and so do the line's
+    * states this device does not advertise. */
+   struct pipeline_description strip = kProbeSets[2];
+   strip.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+   check(build_and_dump(probes, directory, "m3-vertex-strip", "m3-vertex", &strip) == VK_SUCCESS &&
+            dump_matches(probes, directory, "m3-vertex-strip", "m3-vertex", "vertex", true) &&
+            dump_matches(probes, directory, "m3-vertex-strip", "m3-vertex", "pixel", true),
+         "a triangle-strip pipeline compiles to the list's packages");
+   struct pipeline_description lines = kProbeSets[2];
+   lines.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+   check(build_and_dump(probes, directory, "m3-vertex-lines", "m3-vertex", &lines) == VK_SUCCESS &&
+            !dump_matches(probes, directory, "m3-vertex-lines", "m3-vertex", "vertex", false),
+         "a line-list pipeline is created, its vertex stage compiled for two vertices a "
+         "primitive rather than the list's three");
+   static const struct {
+      VkPrimitiveTopology topology;
+      const char *what;
+   } kRefused[] = {
+      {VK_PRIMITIVE_TOPOLOGY_LINE_STRIP, "a line-strip pipeline is refused"},
+      {VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN, "a triangle-fan pipeline is refused"},
+      {VK_PRIMITIVE_TOPOLOGY_LINE_LIST_WITH_ADJACENCY, "a line list with adjacency is refused"},
+      {VK_PRIMITIVE_TOPOLOGY_PATCH_LIST, "a patch-list pipeline is refused"},
+   };
+   for (size_t at = 0; at < sizeof(kRefused) / sizeof(kRefused[0]); at++) {
+      struct pipeline_description refused = kProbeSets[2];
+      refused.topology = kRefused[at].topology;
+      check(build_and_dump(probes, directory, "m3-vertex-refused", "m3-vertex", &refused) ==
+               VK_ERROR_UNKNOWN,
+            kRefused[at].what);
+   }
+   struct pipeline_description restart = lines;
+   restart.primitive_restart = true;
+   check(build_and_dump(probes, directory, "m3-vertex-restart", "m3-vertex", &restart) ==
+            VK_ERROR_UNKNOWN,
+         "a line list with primitive restart is refused");
+   struct pipeline_description wide = lines;
+   wide.line_width = 2.0f;
+   check(build_and_dump(probes, directory, "m3-vertex-wide", "m3-vertex", &wide) ==
+            VK_ERROR_UNKNOWN,
+         "a line list 2.0 wide is refused: wideLines is not advertised");
 
    struct pipeline_description misnamed = kProbeSets[0];
    misnamed.entrypoint = "missing";

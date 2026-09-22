@@ -1092,10 +1092,10 @@ struct ps5vk_pipeline {
    struct ps5vk_shader_package stages[PS5VK_PIPELINE_STAGE_COUNT];
    /* SPI_SHADER_COL_FORMAT export nibbles the pixel stage was compiled for. */
    uint32_t spi_shader_col_format;
-   /* The primitive type the shaders were linked as (DI_PT_TRILIST or
-    * DI_PT_TRISTRIP): the strip's alternating winding is the hardware's, which is
-    * why the topology reaches the link rather than a draw-time register
-    * (ps5vk_pipeline.c, R6 of the port's requests). */
+   /* The primitive type the shaders were linked as (DI_PT_TRILIST, DI_PT_TRISTRIP
+    * or DI_PT_LINELIST): the strip's alternating winding is the hardware's, which
+    * is why the topology reaches the link rather than a draw-time register
+    * (ps5vk_pipeline.c, R6 and R8 of the port's requests). */
    uint32_t link_primitive_type;
    /* The pipeline's colour write mask: 0xf for RGBA, 0 for a pipeline that
     * writes no colour (vk_meta's depth clear is one). A draw whose pipeline
@@ -1126,6 +1126,10 @@ struct ps5vk_pipeline {
     * (rasterizerDiscardEnable): the draw records PA_CL_CLIP_CNTL (0x204) with
     * DX_RASTERIZATION_KILL set. */
    bool discard_rasterizer;
+   /* R8: whether the pipeline rasterizes lines (VK_PRIMITIVE_TOPOLOGY_LINE_LIST):
+    * its draws record the line's own three words -- VGT_GS_OUT_PRIM_TYPE, the
+    * width and the line control (ps5vk_draw.c) -- and no other pipeline's do. */
+   bool line_rasterizer;
    /* Why command buffers cannot draw with the pipeline yet, or NULL. */
    const char *draw_refusal;
    /* What vkCmdBindPipeline puts into the command buffer's dynamic state:

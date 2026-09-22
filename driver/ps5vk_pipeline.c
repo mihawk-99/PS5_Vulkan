@@ -702,6 +702,7 @@ ps5vk_pipeline_dump(const struct ps5vk_pipeline *pipeline)
  * ps5_agc_gate2_set_draw_state: 5 TRIFAN, 6 TRISTRIP), and so does opengnm's
  * gnm_types.h (GNM_PT_TRIFAN = 0x5). R6 first passed 5 for the strip, which is
  * the *fan*: the strip is 6. */
+#define PS5VK_LINK_LINE_LIST 2
 #define PS5VK_LINK_TRIANGLE_LIST 4
 #define PS5VK_LINK_TRIANGLE_STRIP 6
 /* A shader object's context and SH table pointers and their record counts,
@@ -1221,6 +1222,8 @@ ps5vk_link_primitive_type(VkPrimitiveTopology topology)
       return PS5VK_LINK_TRIANGLE_LIST;
    if (topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP)
       return PS5VK_LINK_TRIANGLE_STRIP;
+   if (topology == VK_PRIMITIVE_TOPOLOGY_LINE_LIST)
+      return PS5VK_LINK_LINE_LIST;
    return 0;
 }
 
@@ -1254,7 +1257,29 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
    const uint32_t link_primitive_type = ps5vk_link_primitive_type(topology);
    if (link_primitive_type == 0 || info->pInputAssemblyState->primitiveRestartEnable)
       return vk_errorf(device, VK_ERROR_UNKNOWN,
-                       "only triangle lists and strips without primitive restart are supported");
+                       "only triangle lists, triangle strips and line lists without primitive "
+                       "restart are supported");
+   /* R8: a line list is core Vulkan 1.0 with no feature bit gating it -- the class
+    * of the strip -- and it brings the state a triangle does not have: its width
+    * and its rasterization rules. The width is the one this device advertises,
+    * 1.0 (lineWidthRange, wideLines unclaimed), which Valid Usage requires of a
+    * pipeline without wideLines anyway; anything else is refused by name rather
+    * than drawn at 1.0. The rules are Vulkan's non-strict lines (strictLines is
+    * reported false), programmed at the draw (ps5vk_draw.c). A four-sample line is
+    * rasterized differently again and nothing has measured one here. */
+   const bool line = link_primitive_type == PS5VK_LINK_LINE_LIST;
+   if (line && info->pRasterizationState != NULL &&
+       info->pRasterizationState->lineWidth != 1.0f &&
+       !ps5vk_state_is_dynamic(info, VK_DYNAMIC_STATE_LINE_WIDTH))
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "a line width of %g needs wideLines, which this device does not "
+                       "advertise (lineWidthRange is 1.0 to 1.0)",
+                       (double)info->pRasterizationState->lineWidth);
+   if (line && info->pMultisampleState != NULL &&
+       info->pMultisampleState->rasterizationSamples != VK_SAMPLE_COUNT_1_BIT)
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "a multisampled line list needs a probe of its own: only one-sample "
+                       "lines are measured");
    /* One sample or four (C8): the colour target's register block carries the
     * count (ps5vk_draw.c, CB_COLOR0_ATTRIB.NUM_SAMPLES), and nothing in the
     * compiled shader does. */
@@ -1273,6 +1298,15 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
       return vk_errorf(device, VK_ERROR_UNKNOWN, "push-constant ranges reach %u bytes, past %d",
                        push_constant_bytes, PS5VK_MAX_PUSH_CONSTANT_BYTES);
 
+   /* The compiler is told the topology when it changes the shaders, which a
+    * line list does: the vertex stage is an NGG primitive shader whose primitive
+    * export carries the vertices of one primitive, three unless the compiler
+    * knows better (radv_get_num_vertices_per_prim), and a line has two -- the
+    * same key RADV compiles a line pipeline with (ia.topology, psbc_compile.c).
+    * The fragment stage takes it too, as RADV's does: a line's fragments are
+    * front-facing by definition. Triangles keep 0, so every triangle pipeline
+    * compiles to exactly the packages the goldens hold. */
+   const uint32_t compile_primitive_type = line ? PS5VK_LINK_LINE_LIST : 0u;
    PsbcCompileOptions vertex_options = {
       .target = PSBC_TARGET_PS5,
       .stage = PSBC_STAGE_VERTEX,
@@ -1280,6 +1314,7 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
       .optimise = true,
       .ngg = true,
       .address32_hi = (uint32_t)PS5VK_ADDRESS_HIGH_WORD,
+      .primitive_type = compile_primitive_type,
    };
    PsbcCompileOptions pixel_options = {
       .target = PSBC_TARGET_PS5,
@@ -1287,6 +1322,7 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
       .entrypoint = pixel ? pixel->pName : "main",
       .optimise = true,
       .address32_hi = (uint32_t)PS5VK_ADDRESS_HIGH_WORD,
+      .primitive_type = compile_primitive_type,
       /* The pipeline's sample count reaches the compiler as well as the
        * rasterizer registers (ps5vk_draw.c, ps5vk_multisample_registers): the
        * fragment stage's sample-mask and barycentric lowerings are built for
@@ -1397,8 +1433,15 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
    else if (raster->frontFace != VK_FRONT_FACE_COUNTER_CLOCKWISE)
       return vk_errorf(device, VK_ERROR_UNKNOWN, "front face %d is not a Vulkan front face",
                        (int)raster->frontFace);
+   /* Culling is a polygon's: Vulkan's cullMode does not apply to lines (Face
+    * Determination, which lines do not have), so a line pipeline programs none
+    * whatever the application set, rather than rely on the rasterizer ignoring
+    * the cull bits for a line. */
+   if (line)
+      rasterizer_word &= ~(UINT32_C(3) << 0);
    pipeline->rasterizer_word = rasterizer_word;
    pipeline->discard_rasterizer = raster->rasterizerDiscardEnable;
+   pipeline->line_rasterizer = line;
    pipeline->blend_uses_constants = blend_uses_constants;
    for (unsigned index = 0; index < 4; index++) {
       const float value = blend_uses_constants ? info->pColorBlendState->blendConstants[index] : 0.0f;

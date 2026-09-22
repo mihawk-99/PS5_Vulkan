@@ -18041,6 +18041,287 @@ void run_vulkan_strip_frames(const TestContext &test, TestOutcome &outcome) noex
                              : "a strip frame is not the frame its list draws");
 }
 
+// R8 of the port's requests: the line list, core Vulkan 1.0 with no feature bit
+// gating it -- the class of the strip -- and what a debug renderer, an editor grid
+// or a wire overlay draws with. The topology reaches the link as DI_PT_LINELIST,
+// the vertex stage is compiled for two vertices a primitive, and a line's draw
+// records its own three words: VGT_GS_OUT_PRIM_TYPE LINESTRIP, PA_SU_LINE_CNTL's
+// width 1.0 and PA_SC_LINE_CNTL 0, Vulkan's non-strict lines (strictLines is
+// reported false; ps5vk_draw.c).
+//
+// A line's pixels are not a triangle's by definition, so the case compares both
+// with the pixels an axis-aligned one-pixel-wide rectangle covers, which are known
+// without drawing anything: a horizontal segment through the centres of row
+// kLineRow from column kLineLeft to kLineRight, and a vertical one through the
+// centres of column kLineColumn from row kLineTop to kLineBottom. Four frames:
+//
+//   0  the two segments as a LINE_LIST, no culling
+//   1  the two rectangles as triangle pairs, no culling: exactly the rectangles'
+//      pixels -- the reference frame's own check
+//   2  frame 0 with both faces culled: identical to frame 0, because cullMode is
+//      a polygon's and a line has no face
+//   3  frame 1 with both faces culled: empty, which is what says the cull state
+//      frame 2 ignored was live in the same pipeline shape
+//
+// Frame 0 passes when it is frame 1's pixels exactly, or when it differs from them
+// only at the segments' end pixels -- one pixel past an end, or the end pixel
+// itself missing -- which is where non-strict lines are allowed to differ from a
+// rectangle (the specification's diamond-exit rule is for strict lines). Every
+// other pixel -- the interior of each segment, the rows beside the horizontal one
+// and the columns beside the vertical one -- must be exact, and every lit pixel
+// must hold the segments' one colour. The frame's own counts and end pixels are
+// logged, so the first console run is also the golden a later one is held to.
+constexpr unsigned kLineFrames = 4;
+constexpr std::uint32_t kLineRow = kOutputHeight / 4;
+constexpr std::uint32_t kLineLeft = kOutputWidth / 4;
+constexpr std::uint32_t kLineRight = kOutputWidth / 4 * 3;
+constexpr std::uint32_t kLineColumn = kOutputWidth / 2;
+constexpr std::uint32_t kLineTop = kOutputHeight / 2;
+constexpr std::uint32_t kLineBottom = kOutputHeight / 4 * 3;
+
+// Whether a pixel is one of the two rectangles' (right and bottom exclusive).
+constexpr bool line_rectangle_pixel(std::uint32_t x, std::uint32_t y) noexcept
+{
+    return (y == kLineRow && x >= kLineLeft && x < kLineRight) ||
+           (x == kLineColumn && y >= kLineTop && y < kLineBottom);
+}
+
+// Whether a pixel is one of the four end pixels of either segment or one pixel past
+// one, along the segment: the only places a non-strict line may differ.
+constexpr bool line_end_pixel(std::uint32_t x, std::uint32_t y) noexcept
+{
+    return (y == kLineRow &&
+            (x + 1 == kLineLeft || x == kLineLeft || x + 1 == kLineRight || x == kLineRight)) ||
+           (x == kLineColumn &&
+            (y + 1 == kLineTop || y == kLineTop || y + 1 == kLineBottom || y == kLineBottom));
+}
+
+struct LineFrameCount
+{
+    std::uint32_t inside = 0;        // lit pixels of the rectangles
+    std::uint32_t missing_end = 0;   // rectangle end pixels left unlit
+    std::uint32_t missing_other = 0; // any other rectangle pixel left unlit
+    std::uint32_t extra_end = 0;     // lit pixels one past an end
+    std::uint32_t extra_other = 0;   // any other lit pixel outside the rectangles
+    std::uint32_t off_colour = 0;    // lit pixels whose word is not the first lit one
+};
+
+LineFrameCount count_line_frame(const void *target, std::uint32_t clear_word,
+                                std::uint32_t colour) noexcept
+{
+    LineFrameCount count{};
+    const FramebufferView view{static_cast<const std::uint32_t *>(target), kTiledRgba8Layout};
+    for (std::uint32_t y = 0; y < kOutputHeight; ++y)
+    {
+        for (std::uint32_t x = 0; x < kOutputWidth; ++x)
+        {
+            const std::uint32_t word = view.word(x, y);
+            const bool lit = word != clear_word;
+            const bool rectangle = line_rectangle_pixel(x, y);
+            const bool end = line_end_pixel(x, y);
+            if (lit && word != colour)
+                ++count.off_colour;
+            if (rectangle && lit)
+                ++count.inside;
+            else if (rectangle)
+                ++(end ? count.missing_end : count.missing_other);
+            else if (lit)
+                ++(end ? count.extra_end : count.extra_other);
+        }
+    }
+    return count;
+}
+
+// A segment's lit extent along its own axis, which is what defines the golden when
+// the ends are not a rectangle's: the first and last lit pixel of the row (or
+// column) within one pixel of the segment.
+void log_line_extents(const void *target, std::uint32_t clear_word, JsonLog &log) noexcept
+{
+    const FramebufferView view{static_cast<const std::uint32_t *>(target), kTiledRgba8Layout};
+    std::uint32_t first = UINT32_MAX;
+    std::uint32_t last = 0;
+    for (std::uint32_t x = kLineLeft - 1; x <= kLineRight; ++x)
+        if (view.word(x, kLineRow) != clear_word)
+        {
+            first = std::min(first, x);
+            last = std::max(last, x);
+        }
+    log.number("agc_lines_frame", "row_first_lit_x", first);
+    log.number("agc_lines_frame", "row_last_lit_x", last);
+    first = UINT32_MAX;
+    last = 0;
+    for (std::uint32_t y = kLineTop - 1; y <= kLineBottom; ++y)
+        if (view.word(kLineColumn, y) != clear_word)
+        {
+            first = std::min(first, y);
+            last = std::max(last, y);
+        }
+    log.number("agc_lines_frame", "column_first_lit_y", first);
+    log.number("agc_lines_frame", "column_last_lit_y", last);
+}
+
+static ps5vk_triangle_shaders g_lines_shaders{};
+
+void run_vulkan_line_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    // The m3-vertex set's layout (probes/m3-vertex/compile.txt), as v0-strip's.
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8},
+    };
+    // A pixel coordinate in normalised device coordinates, in the convention every
+    // driver case's rectangles use (ndc_x, ndc_y, put_driver_depth_rect): the
+    // Vulkan viewport turns the image over and the readback turns it back
+    // (kRgba8ImagePacking), so a row here is the readback's row.
+    const auto ndc_x = [](float x) { return 2.0f * x / static_cast<float>(kOutputWidth) - 1.0f; };
+    const auto ndc_y = [](float y) { return 1.0f - 2.0f * y / static_cast<float>(kOutputHeight); };
+    constexpr float kRed = kSquareRed / 255.0f;
+    const auto put = [&](float *record, float x, float y)
+    {
+        const float values[6] = {ndc_x(x), ndc_y(y), kRed, 1.0f, 0.25f, 1.0f};
+        std::memcpy(record, values, sizeof(values));
+    };
+    // The segments through pixel centres, end to end along their own axis.
+    float line_vertices[4][6]{};
+    put(line_vertices[0], static_cast<float>(kLineLeft), kLineRow + 0.5f);
+    put(line_vertices[1], static_cast<float>(kLineRight), kLineRow + 0.5f);
+    put(line_vertices[2], kLineColumn + 0.5f, static_cast<float>(kLineTop));
+    put(line_vertices[3], kLineColumn + 0.5f, static_cast<float>(kLineBottom));
+    // The rectangles, corner by corner, and their two triangles each.
+    float rectangle_vertices[8][6]{};
+    put(rectangle_vertices[0], static_cast<float>(kLineLeft), static_cast<float>(kLineRow));
+    put(rectangle_vertices[1], static_cast<float>(kLineRight), static_cast<float>(kLineRow));
+    put(rectangle_vertices[2], static_cast<float>(kLineRight), kLineRow + 1.0f);
+    put(rectangle_vertices[3], static_cast<float>(kLineLeft), kLineRow + 1.0f);
+    put(rectangle_vertices[4], static_cast<float>(kLineColumn), static_cast<float>(kLineTop));
+    put(rectangle_vertices[5], kLineColumn + 1.0f, static_cast<float>(kLineTop));
+    put(rectangle_vertices[6], kLineColumn + 1.0f, static_cast<float>(kLineBottom));
+    put(rectangle_vertices[7], static_cast<float>(kLineColumn), static_cast<float>(kLineBottom));
+    static const std::uint16_t rectangle_indices[12] = {0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4};
+    struct Frame
+    {
+        const char *name;
+        bool lines;
+        VkCullModeFlags cull;
+    };
+    static constexpr Frame kFrames[kLineFrames] = {
+        {"lines, no culling", true, VK_CULL_MODE_NONE},
+        {"rectangles, no culling", false, VK_CULL_MODE_NONE},
+        {"lines, both faces culled", true, VK_CULL_MODE_FRONT_AND_BACK},
+        {"rectangles, both faces culled", false, VK_CULL_MODE_FRONT_AND_BACK},
+    };
+    const std::uint32_t clear_word = 0xffff8040u;
+    FrameSummary summaries[kLineFrames]{};
+    LineFrameCount counts[kLineFrames]{};
+    std::uint32_t rectangle_pixels = 0;
+    for (std::uint32_t y = 0; y < kOutputHeight; ++y)
+        for (std::uint32_t x = 0; x < kOutputWidth; ++x)
+            rectangle_pixels += line_rectangle_pixel(x, y) ? 1u : 0u;
+    for (unsigned at = 0; at < kLineFrames; at++)
+    {
+        const Frame &frame = kFrames[at];
+        log.event("agc_lines", "INFO", 0, frame.name);
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], g_lines_shaders, log))
+            return;
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        input.shaders[0] = g_lines_shaders;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = frame.lines ? &line_vertices[0][0] : &rectangle_vertices[0][0];
+        input.vertex_count = frame.lines ? 4u : 8u;
+        input.vertex_stride = kVertexStride;
+        input.index_data = frame.lines ? nullptr : rectangle_indices;
+        input.index_count = frame.lines ? 0u : 12u;
+        input.attribute_count = 2;
+        input.attributes[0] = attributes[0];
+        input.attributes[1] = attributes[1];
+        input.primitive_topology =
+            frame.lines ? VK_PRIMITIVE_TOPOLOGY_LINE_LIST : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        input.rasterization_cull_mode = frame.cull;
+        ps5vk_triangle triangle{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        const bool drew = status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes;
+        if (test.capture && drew)
+        {
+            log_driver_submission(triangle.device, frame.name, log);
+            log_driver_stages(triangle.device, log);
+        }
+        if (drew)
+        {
+            summaries[at] = summarise_frame(triangle.target, clear_word);
+            // Each frame is counted against its own first lit word, and the two
+            // frames' words are compared below: one colour, the same colour.
+            counts[at] = count_line_frame(triangle.target, clear_word, summaries[at].first_drawn);
+            log.number("agc_lines_frame", "drawn", summaries[at].drawn);
+            log.hex("agc_lines_frame", "first_drawn_word", summaries[at].first_drawn);
+            log.hex("agc_lines_frame", "frame_fnv1a64", summaries[at].hash);
+            log.number("agc_lines_frame", "inside", counts[at].inside);
+            log.number("agc_lines_frame", "missing_end", counts[at].missing_end);
+            log.number("agc_lines_frame", "missing_other", counts[at].missing_other);
+            log.number("agc_lines_frame", "extra_end", counts[at].extra_end);
+            log.number("agc_lines_frame", "extra_other", counts[at].extra_other);
+            log.number("agc_lines_frame", "off_colour", counts[at].off_colour);
+            if (frame.lines)
+                log_line_extents(triangle.target, clear_word, log);
+        }
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            log.event("agc_lines", "FAIL", -1,
+                      "a submission did not complete; the program's objects stay allocated");
+            return;
+        }
+        ps5vk_triangle_finish(&triangle);
+        if (!drew)
+        {
+            outcome.command_built = false;
+            log.event("agc_lines", "FAIL", -1, "a frame could not be recorded or submitted");
+            return;
+        }
+    }
+    log.number("agc_lines", "rectangle_pixels", rectangle_pixels);
+    const LineFrameCount &lines = counts[0];
+    const LineFrameCount &rectangles = counts[1];
+    // Frame 1 is the reference: exactly the rectangles, in one colour.
+    const bool reference = rectangles.inside == rectangle_pixels && rectangles.missing_end == 0 &&
+                           rectangles.missing_other == 0 && rectangles.extra_end == 0 &&
+                           rectangles.extra_other == 0 && rectangles.off_colour == 0;
+    // Frame 0: the same colour, every interior pixel exact, differences only at ends.
+    const bool same_colour = summaries[0].first_drawn == summaries[1].first_drawn;
+    const bool identical = reference && summaries[0].hash == summaries[1].hash &&
+                           summaries[0].drawn == summaries[1].drawn;
+    const bool interior = lines.missing_other == 0 && lines.extra_other == 0 &&
+                          lines.off_colour == 0 && lines.inside != 0 && same_colour;
+    const bool equivalent = reference && interior;
+    // Frames 2 and 3: a line has no face, a triangle pair does.
+    const bool unculled =
+        summaries[2].hash == summaries[0].hash && summaries[2].drawn == summaries[0].drawn;
+    const bool culled = summaries[3].drawn == 0;
+    log.event("agc_lines_reference", reference ? "PASS" : "FAIL", reference ? 0 : -1,
+              "the triangle pairs cover exactly the rectangles' pixels, in one colour");
+    log.event("agc_lines_equivalent", equivalent ? "PASS" : "FAIL", equivalent ? 0 : -1,
+              identical  ? "the lines are the rectangles' pixels word for word"
+              : interior ? "the lines are the rectangles' pixels except at their end pixels, "
+                           "which non-strict lines may place differently (counts logged)"
+                         : "the lines differ from the rectangles away from their ends");
+    log.event("agc_lines_unculled", unculled ? "PASS" : "FAIL", unculled ? 0 : -1,
+              "with both faces culled the lines draw the same frame word for word");
+    log.event("agc_lines_culled", culled ? "PASS" : "FAIL", culled ? 0 : -1,
+              "with both faces culled the triangle pairs draw nothing");
+    outcome.command_built = true;
+    outcome.passed = equivalent && unculled && culled;
+    log.event("agc_lines", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1,
+              outcome.passed ? "a line list draws the rectangles' pixels and is not culled"
+                             : "a line frame is not what its rectangles or its culled twin draw");
+}
+
 // R4's residual gap (PS5_VULKAN_REQUESTS.md, R4; docs/REQUESTS_RESPONSE.md): the
 // colour clear, read back with nothing drawn over it. The stencil plane has had a
 // case of this shape since R3; the colour target has not -- and it is the shape
@@ -23322,6 +23603,10 @@ constexpr RunnerTest kRunnerTests[] = {
     // quad, the quad culled -- and the raw-order list it must not equal, one frame
     // each (run_vulkan_strip_frames).
     {"v0-strip", "m3-vertex", run_vulkan_strip_frames},
+    // R8: the line list against the one-pixel rectangles it must cover, and culled
+    // against itself and against the rectangles' triangle pairs
+    // (run_vulkan_line_frames).
+    {"v0-lines", "m3-vertex", run_vulkan_line_frames},
     // R5: the same four-sample resolve twice, once into a destination declared
     // TRANSFER_DST and SAMPLED (refused, by name) and once into the same frame
     // with COLOR_ATTACHMENT added, which is the workaround
