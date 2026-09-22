@@ -1,0 +1,22 @@
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/standing-list/queue.txt
+# The standing regression list, run after every change to the driver: the eleven
+# cases the R7 rounds settled on, plus the anisotropy gate this batch added.
+#
+# m2-solid is one of them and is also what a driver case's golden needs to be
+# replayable: a driver capture carries no context register table, and
+# tools/golden.py replay takes one from a runner-built frame of the same capture.
+hold 60
+capture
+v0-cull
+v0-depth-bias
+v0-stencil-clear
+v0-sampler-address
+v0-two-passes
+v0-resolve-usage
+v0-push-constant
+v0-multiset-quake
+v0-two-sets
+c8-resolve
+m2-solid
+v0-sampler-anisotropy
+exit

@@ -7539,3 +7539,24 @@ console ran the runner's package staging, found no package, and reported
 console cycle was spent on it. `tests/test_tools.py` now has
 `test_every_runner_case_names_a_probe_set_that_exists`, which parses the runner table and
 requires every package column to name a directory under `probes/`; all 116 cases pass it.
+
+## 2026-09-21 — A coverage line that claimed a mirrored blit no evidence contains
+
+`docs/M5_REFERENCE.md`'s blit row listed "one-to-one blits and **scaled or mirrored** blits of
+`R8G8B8A8_UNORM`". The tree's recorded regions are one-to-one blits and a 2x scaled blit --
+`driver/tests/ps5vk_triangle.c` builds exactly two `VkImageBlit` regions, a 1:1 one and "the
+middle half of the source over the whole destination", with NEAREST or LINEAR -- and **no
+mirrored region anywhere**: `vk_c7_blit_formats_test.c` never calls `vkCmdBlitImage` at all
+despite its name, and the deferral recorded in this file (a *scaled* or mirrored blit region
+"becomes C7's blit draw") landed the scaled half only. The claim was corrected to what the
+evidence holds, and the row now says in the same breath what it does *not* hold: a mirrored
+region, and a `LINEAR` **minification**.
+
+The mechanism is not in doubt -- the application's BLIT demo ran
+`src (3840,0)-(0,2160) -> dst (0,0)-(3840,2160)` NEAREST on the console and its screenshot
+shows the mirror landing on the opposite side -- so what is missing is a *recording*, not a
+capability. That is a probe job with a shape known in advance: a mirrored region in the
+harness's blit path (the src offsets' x pair swapped) and a LINEAR minification beside it,
+run through the per-format blit case, which would let the row claim both again with evidence
+of its own. The correction was chosen over the re-capture because the claim and its evidence
+have to agree first; the re-capture is what lets the claim return.
