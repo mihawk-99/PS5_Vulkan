@@ -44,7 +44,22 @@ ps5vk_descriptor_stride(VkDescriptorType type)
    /* A storage image is the image descriptor alone: the compiler reads its
     * 32-byte entry where a combined image sampler's is 48 (docs/BLOCKERS.md). */
    case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+   /* An input attachment is a fetch of an image, so it is the same 32 bytes:
+    * the image words alone (R2 of the port's requests). */
+   case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
       return PS5VK_STORAGE_IMAGE_DESCRIPTOR_BYTES;
+   /* The separated form of a combined image sampler: the compiler validates a
+    * texture instruction's *two* halves by looking up a
+    * PSBC_DESCRIPTOR_COMBINED_IMAGE_SAMPLER entry at each half's own index
+    * (psbc_compile.c, legacy_texture_bindings_valid), so a bare SAMPLER and a
+    * bare SAMPLED_IMAGE are each the 48-byte combined entry and the instruction
+    * reads the half it needs from each: the image words from the SAMPLED_IMAGE
+    * binding's entry, the sampler words from the SAMPLER binding's. One mechanism
+    * for the pair, which is why its acceptance is that a frame the separated form
+    * draws is texel-for-texel the frame one COMBINED_IMAGE_SAMPLER draws (R2). */
+   case VK_DESCRIPTOR_TYPE_SAMPLER:
+   case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+      return PS5VK_COMBINED_IMAGE_SAMPLER_DESCRIPTOR_BYTES;
    default:
       return 0;
    }

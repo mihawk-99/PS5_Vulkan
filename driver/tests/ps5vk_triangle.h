@@ -566,6 +566,15 @@ struct ps5vk_triangle_input {
     * VkPhysicalDeviceLimits.maxColorAttachments, so the probe varies the count
     * against what the device says. */
    uint32_t color_attachment_count;
+   /* R2's separated form: the texture's view and its sampler in **two** sets
+    * instead of one combined descriptor -- set 0 binding 0 a bare sampled image,
+    * set 1 binding 0 a bare sampler -- the shape a renderer keeps when one sampler
+    * serves many textures (the port's GUI pipeline). The driver tells the compiler
+    * the combined type at each half's own index and the instruction reads the half
+    * it needs from that binding's entry, so the frame this draws has to be the
+    * combined frame's, texel for texel (driver/ps5vk_descriptor_set_layout.c,
+    * driver/ps5vk_draw.c). */
+   bool separated_texture_pair;
 };
 
 
@@ -813,6 +822,11 @@ struct ps5vk_triangle {
     * when the caller passed no texel buffer, and the driver's destroys ignore
     * zero, so a program that fetches none allocates nothing new. */
    bool texel_buffer_whole_size;
+   /* The sampler's own set, when a caller keeps the pair apart; the set itself
+    * goes with the texture's pool above. */
+   VkDescriptorSetLayout sampler_set_layout;
+   VkDescriptorSet sampler_set;
+   bool separated_texture_pair;
    VkBuffer texel_buffer;
    VkDeviceMemory texel_buffer_memory;
    void *texel_buffer_mapped;

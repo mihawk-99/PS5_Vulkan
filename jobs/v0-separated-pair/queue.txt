@@ -1,0 +1,17 @@
+hold 60
+capture
+m2-solid
+v0-separated-pair
+v0-cull
+v0-depth-bias
+v0-stencil-clear
+v0-sampler-address
+v0-sampler-anisotropy
+v0-two-passes
+v0-resolve-usage
+v0-push-constant
+v0-multiset-quake
+v0-two-sets
+c8-resolve
+v0-formats-texel-buffer
+exit

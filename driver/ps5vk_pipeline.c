@@ -233,7 +233,9 @@ ps5vk_descriptor_options(struct ps5vk_device *device, const struct vk_pipeline_l
                                       : (binding->type ==
                                                VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER
                                             ? PSBC_DESCRIPTOR_STORAGE_TEXEL_BUFFER
-                                            : (binding->type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                                            : (binding->type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
+                                                       binding->type ==
+                                                          VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT
                                                   ? PSBC_DESCRIPTOR_STORAGE_IMAGE
                                                   : PSBC_DESCRIPTOR_COMBINED_IMAGE_SAMPLER)))),
                .array_size = binding->count,

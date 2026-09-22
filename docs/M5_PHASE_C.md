@@ -7814,3 +7814,41 @@ commit.
 **Measured on the console**: `device-report` (the case whose report is the inventory) and the
 standing list, **14 of 14** -- `Klog_Logs/r5-input-usage.log`, `runner_summary` "14 of 14 queued
 tests passed". `build/gates.sh` 11/11 PASS, `make lint` PASS.
+
+## 2026-09-22 — R2: the separated sampler and image are one mechanism, and the identity holds
+
+**What moved.** Three core 1.0 descriptor types the device advertises and the table did not
+carry. `ps5vk_descriptor_stride` now answers `SAMPLER` and `SAMPLED_IMAGE` with the 48-byte
+combined entry and `INPUT_ATTACHMENT` with the 32-byte image descriptor `STORAGE_IMAGE`
+already had; `ps5vk_descriptor_options` tells the compiler the types it has (combined for the
+pair, the 32-byte image for the input attachment), which is what its texture-binding validator
+requires at each half's own index; the write recording takes the three types (a bare sampler
+records its sampler and no view, a sampled image and an input attachment record their view);
+and the draw fills each entry's own half -- the image words for a `SAMPLED_IMAGE`, the
+sampler's three words for a `SAMPLER`, the image words alone for an `INPUT_ATTACHMENT`.
+
+**The acceptance is an identity, and it holds on the console.** The probe is
+`probes/v0-separated-pair` -- set 0 binding 0 a bare `texture2D`, set 1 binding 0 a bare
+`sampler`, fragment stage, nearest -- and the case draws that frame beside one through a single
+`COMBINED_IMAGE_SAMPLER` of the same texture and compares them **texel for texel over the whole
+target**. Run `Klog_Logs/r2-separated.log`:
+
+```
+"field":"combined_frame_drawn","value":1
+"field":"separated_frame_drawn","value":1
+"field":"mismatched_texels","value":0
+"detail":"the separated pair's frame is the combined one's: yes (0 mismatched texels of 3840 x 2160)"
+```
+
+The port's GUI pipeline is this shape, so the menu pipelines and the menu are unblocked by it
+with no change on the application side. The standing list around the case is **14 of 14**.
+
+**What is implemented but not yet proved by a probe of its own**: `INPUT_ATTACHMENT`. The type
+is accepted end to end -- stride, options, write recording, and the draw's 32-byte entry -- and
+its *reads* are still subpasses' conversation, as the request asked. A probe for it is the
+three-input-attachment set the port's `basic_alphatest` layout names; until then the honest
+statement is that the type is implemented and the port's own run is its first test.
+
+**The harness grew the pair** (`input.separated_texture_pair`): the same view and sampler in two
+sets with their own types, both bound, which is what every previous descriptor path in it could
+not express -- one field plus the sampler set's layout, set and writes.

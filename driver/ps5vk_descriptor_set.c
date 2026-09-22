@@ -307,10 +307,23 @@ ps5vk_descriptor_set_write(struct ps5vk_device *device, const VkWriteDescriptorS
    }
    /* A storage image's write names a view too, and no sampler: the draw builds
     * its 32-byte descriptor from the image the view names (ps5vk_draw.c). */
-   if (write->descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE && write->pImageInfo != NULL) {
+   if ((write->descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
+        write->descriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ||
+        write->descriptorType == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) &&
+       write->pImageInfo != NULL) {
       *record = (struct ps5vk_descriptor_buffer){
          .type = write->descriptorType,
          .view = write->pImageInfo[0].imageView,
+      };
+      return;
+   }
+   /* A bare sampler's write names a sampler and no view (Vulkan's own shape for
+    * the type): the sampler's words are what the draw puts in that binding's
+    * entry (ps5vk_draw.c, R2). */
+   if (write->descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER && write->pImageInfo != NULL) {
+      *record = (struct ps5vk_descriptor_buffer){
+         .type = write->descriptorType,
+         .sampler = write->pImageInfo[0].sampler,
       };
       return;
    }

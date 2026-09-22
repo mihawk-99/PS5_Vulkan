@@ -316,6 +316,27 @@ v0-mrt)
         --vertex-attribute 1:r32g32_float:0:8:16:4)
     pixel_flags=(--address32-hi 2)
     ;;
+v0-separated-pair)
+    # R2's separated sampler and image: a bare sampled image at set 0 binding 0 and
+    # a bare sampler at set 1 binding 0, one texture fetched through the pair. The
+    # compiler wants PSBC_DESCRIPTOR_COMBINED_IMAGE_SAMPLER at each half's index --
+    # its texture-binding validator looks both halves up as that type
+    # (psbc_compile.c, legacy_texture_bindings_valid) -- so the CLI is given the
+    # combined type with the 48-byte stride the driver writes for it, and the two
+    # entries are the two halves the instruction reads its operands from.
+    vertex_source=shaders/m3/texture.vert
+    pixel_source=shaders/v0/separated_pair.frag
+    output=probes/v0-separated-pair
+    # Two sets, so the per-set layout is this repository's compiler patch and the
+    # probe CLI from tools/build-psbc-cli.sh is what has it.
+    pixel_compiler="$root/build/host/opengnm-psbc-probe"
+    vertex_flags=(--address32-hi 2
+        --vertex-attribute 0:r32g32_float:0:0:16:4
+        --vertex-attribute 1:r32g32_float:0:8:16:4)
+    pixel_flags=(--address32-hi 2
+        --descriptor-binding 0:0:combined_image_sampler:1:0:48
+        --descriptor-binding 1:0:combined_image_sampler:1:0:48)
+    ;;
 v0-stencil-setup)
     # Round 12's stencil path: the pass that writes the stencil plane. The
     # geometry is the m4-depth vertex layout (position and colour, 28-byte
@@ -975,6 +996,36 @@ elif set_name == "v0-mrt":
                               "location 1 r32g32_float offset 8, stride 16, binding 0"),
                 ("pixel_user_sgpr_count", pixel["user_sgpr_count"]),
                 ("pixel_col_format", f"{col_format[0]:#06x}")]
+elif set_name == "v0-separated-pair":
+    # R2's separated pair. Two sets, one binding each, and both at their own zero:
+    # set 0's entry is where the image half is read from and set 1's where the
+    # sampler half is, with the 48-byte stride the driver writes for the combined
+    # type the two halves are reported as.
+    declared = pixel.get("descriptor_bindings") or []
+    expected = [(0, 0, 0, 48), (1, 0, 0, 48)]
+    got = [(b.get("set"), b.get("binding"), b.get("offset"), b.get("stride"))
+           for b in declared]
+    if sorted(got) != sorted(expected):
+        fail(f"pixel bindings {got!r}, expected set 0 binding 0 and set 1 binding 0, each a "
+             f"48-byte combined-shaped entry at its own offset 0")
+    if vertex.get("descriptor_bindings"):
+        fail("vertex stage unexpectedly declares descriptor bindings")
+    for binding in declared:
+        notes.append(f"pixel binding metadata: {json.dumps(binding, sort_keys=True)}")
+    # The CLI prints set 0's pointer dword alone; set 1's is the metadata array's,
+    # which driver/tests/vk_psbc_multiset_test.c reads for the two-set probes.
+    notes.append("set 1's user-data dword is the metadata array's, asserted by "
+                 "driver/tests/vk_psbc_multiset_test.c")
+    bindings = [("address32_hi", expected_hi),
+                *vertex_input("vertex attributes: location 0 r32g32_float offset 0, "
+                              "location 1 r32g32_float offset 8, stride 16, binding 0"),
+                ("pixel_user_sgpr_count", pixel["user_sgpr_count"]),
+                ("pixel_descriptor_set0_dword",
+                 dword(pixel, "descriptor_set0_user_data_dword", "pixel")),
+                ("pixel_set0_binding0_offset", 0),
+                ("pixel_set0_binding0_stride", 48),
+                ("pixel_set1_binding0_offset", 0),
+                ("pixel_set1_binding0_stride", 48)]
 elif set_name == "m3-vertex":
     if pixel.get("descriptor_bindings"):
         fail("pixel stage unexpectedly declares descriptor bindings")

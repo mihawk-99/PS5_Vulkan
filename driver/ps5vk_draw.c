@@ -1728,11 +1728,24 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
                   /* The compiler reads one 48-byte entry per combined image
                    * sampler and one 32-byte entry per storage image: the same
                    * image descriptor, with a sampler after it for the first. */
+                  /* The entry's shape comes from the stride and the types that
+                   * fill it are the ones with that shape: a 48-byte entry is a
+                   * combined image sampler, a bare sampled image or a bare sampler
+                   * -- the last two carry one half each, the image's entry and the
+                   * sampler's entry of the same texture instruction (R2) -- and a
+                   * 32-byte one a storage or an input image. */
+                  const bool entry_48 =
+                     binding->stride == PS5VK_COMBINED_IMAGE_SAMPLER_DESCRIPTOR_BYTES;
                   const VkDescriptorType wanted =
-                     binding->stride == PS5VK_STORAGE_IMAGE_DESCRIPTOR_BYTES
-                        ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
-                        : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                  if (written->type != wanted) {
+                     entry_48 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                              : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                  const bool shape_matches =
+                     entry_48 ? (written->type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
+                                 written->type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ||
+                                 written->type == VK_DESCRIPTOR_TYPE_SAMPLER)
+                              : (written->type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
+                                 written->type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT);
+                  if (!shape_matches) {
                      ps5vk_cmd_buffer_refuse(
                         cmd_buffer, VK_ERROR_UNKNOWN,
                         "set %u binding %u: the compiler reads a %u-byte %s entry and the write is "
@@ -1743,10 +1756,14 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
                         (unsigned)written->type);
                      return;
                   }
-                  if (!ps5vk_sampled_image(cmd_buffer, set, binding->binding, written,
-                                          &sampled[b]))
-                     return;
-                  colour_barrier = colour_barrier || sampled[b].barrier;
+                  /* A bare sampler names no view: its entry is the sampler's
+                   * three words and nothing else, written below. */
+                  if (written->type != VK_DESCRIPTOR_TYPE_SAMPLER) {
+                     if (!ps5vk_sampled_image(cmd_buffer, set, binding->binding, written,
+                                             &sampled[b]))
+                        return;
+                     colour_barrier = colour_barrier || sampled[b].barrier;
+                  }
                } else if (binding->stride == PS5VK_UNIFORM_BUFFER_DESCRIPTOR_BYTES ||
                           binding->stride == PS5VK_TEXEL_BUFFER_DESCRIPTOR_BYTES) {
                   const bool texel_buffer =
@@ -1840,6 +1857,23 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
                continue;
             }
             if (binding->stride == PS5VK_COMBINED_IMAGE_SAMPLER_DESCRIPTOR_BYTES) {
+               /* A bare sampler's entry is the sampler half alone: the words the
+                * image descriptor leaves at 8, 9 and 10, with the image half zero
+                * because the paired SAMPLED_IMAGE binding's entry carries it. The
+                * instruction reads each half from its own binding, which is what
+                * makes the separated form fetch what the combined form fetches
+                * (R2 of the port's requests). */
+               const struct ps5vk_descriptor_buffer *const written_sampler =
+                  ps5vk_cmd_buffer_descriptor(cmd_buffer, binding->set, binding->binding);
+               if (written_sampler != NULL &&
+                   written_sampler->type == VK_DESCRIPTOR_TYPE_SAMPLER) {
+                  VK_FROM_HANDLE(ps5vk_sampler, sampler, written_sampler->sampler);
+                  memset(descriptor, 0, PS5VK_COMBINED_IMAGE_SAMPLER_DESCRIPTOR_BYTES);
+                  descriptor[8] = sampler->address_word;
+                  descriptor[9] = sampler->lod_word;
+                  descriptor[10] = sampler->word;
+                  continue;
+               }
                ps5vk_write_image_descriptor(descriptor, &sampled[b]);
                continue;
             }

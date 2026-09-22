@@ -821,9 +821,51 @@ update_texture_set(const struct ps5vk_triangle *triangle, VkDescriptorSet set, V
  * samples, in the filter the frame runs: the caller's uploaded texels, or --
  * when the frame renders into the texture first -- the image it rendered into,
  * which is the view this set has to name for the sample to read it back. */
+/* R2's separated form: the same view and sampler a combined write puts in one
+ * entry, in two sets with their own types -- VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+ * names the view and no sampler, VK_DESCRIPTOR_TYPE_SAMPLER names the sampler and
+ * no view, which is what Vulkan's valid usage for each asks. */
+static void
+update_separated_texture_sets(const struct ps5vk_triangle *triangle)
+{
+   const VkSampler sampler =
+      triangle->texture_samplers[triangle->texture_bilinear ? PS5VK_TRIANGLE_SAMPLER_LINEAR
+                                                            : PS5VK_TRIANGLE_SAMPLER_NEAREST];
+   const VkDescriptorImageInfo image_info = {
+      .sampler = VK_NULL_HANDLE,
+      .imageView = triangle->texture_view,
+      .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+   };
+   const VkDescriptorImageInfo sampler_info = {
+      .sampler = sampler,
+      .imageView = VK_NULL_HANDLE,
+      .imageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+   };
+   const VkWriteDescriptorSet writes[2] = {
+      {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+       .dstSet = triangle->texture_set,
+       .dstBinding = 0,
+       .descriptorCount = 1,
+       .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+       .pImageInfo = &image_info},
+      {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+       .dstSet = triangle->sampler_set,
+       .dstBinding = 0,
+       .descriptorCount = 1,
+       .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+       .pImageInfo = &sampler_info},
+   };
+   CALL(triangle, UpdateDescriptorSets)(triangle->device, 2, writes, 0, NULL);
+}
+
 static void
 update_texture_descriptor(const struct ps5vk_triangle *triangle)
 {
+   if (triangle->separated_texture_pair) {
+      update_separated_texture_sets(triangle);
+      return;
+   }
+
    /* The image the frame samples: the caller's uploaded texels, or -- when the
     * frame renders into the texture first, or copies the texels into a tiled
     * one (Phase C7) -- that image, whose view is the one this set has to name
@@ -1288,9 +1330,13 @@ create_texture(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
        !create_texture_samplers(triangle))
       return false;
 
+   /* See input->separated_texture_pair: the same view in set 0 and the sampler in
+    * set 1, each with its own type. */
+   const bool separated = input->separated_texture_pair;
    const VkDescriptorSetLayoutBinding binding = {
       .binding = 0,
-      .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      .descriptorType = separated ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+                                  : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
       .descriptorCount = 1,
       /* The pixel stage is what reads it: the m3-texture canary's fragment
        * shader, and only for that stage does the driver's compiler option
@@ -1305,21 +1351,41 @@ create_texture(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
    if (!step(triangle, "create_texture_set_layout",
              CALL(triangle, CreateDescriptorSetLayout)(triangle->device, &set_info, NULL,
                                                        &triangle->texture_set_layout),
-             "one combined image sampler at set 0, binding 0"))
+             separated ? "one sampled image at set 0, binding 0"
+                       : "one combined image sampler at set 0, binding 0"))
+      return false;
+   const VkDescriptorSetLayoutBinding sampler_binding = {
+      .binding = 0,
+      .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+      .descriptorCount = 1,
+      .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+   };
+   const VkDescriptorSetLayoutCreateInfo sampler_set_info = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      .bindingCount = 1,
+      .pBindings = &sampler_binding,
+   };
+   if (separated &&
+       !step(triangle, "create_sampler_set_layout",
+             CALL(triangle, CreateDescriptorSetLayout)(triangle->device, &sampler_set_info, NULL,
+                                                       &triangle->sampler_set_layout),
+             "one sampler at set 1, binding 0"))
       return false;
    /* One combined image sampler descriptor, for the one set a frame binds --
     * two when the frame renders into the image it samples, whose fill pass
     * needs a set of its own that names the uploaded texels. */
    const uint32_t sets = input->texture_is_rendered ? 2u : 1u;
-   const VkDescriptorPoolSize pool_size = {
-      .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-      .descriptorCount = sets,
+   const VkDescriptorPoolSize pool_sizes[2] = {
+      {.type = separated ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+                         : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+       .descriptorCount = sets},
+      {.type = VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = 1},
    };
    const VkDescriptorPoolCreateInfo pool_info = {
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-      .maxSets = sets,
-      .poolSizeCount = 1,
-      .pPoolSizes = &pool_size,
+      .maxSets = sets + (separated ? 1u : 0u),
+      .poolSizeCount = separated ? 2u : 1u,
+      .pPoolSizes = pool_sizes,
    };
    if (!step(triangle, "create_texture_pool",
              CALL(triangle, CreateDescriptorPool)(triangle->device, &pool_info, NULL,
@@ -1341,6 +1407,19 @@ create_texture(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
       return false;
    triangle->texture_set = allocated[0];
    triangle->texture_source_set = allocated[1];
+   if (separated) {
+      const VkDescriptorSetAllocateInfo sampler_allocate = {
+         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+         .descriptorPool = triangle->texture_pool,
+         .descriptorSetCount = 1,
+         .pSetLayouts = &triangle->sampler_set_layout,
+      };
+      if (!step(triangle, "allocate_sampler_set",
+                CALL(triangle, AllocateDescriptorSets)(triangle->device, &sampler_allocate,
+                                                       &triangle->sampler_set),
+                "the sampler's own set"))
+         return false;
+   }
    triangle->texture_bilinear = input->texture_bilinear;
    update_texture_descriptor(triangle);
    if (triangle->texture_source_set != VK_NULL_HANDLE)
@@ -2724,6 +2803,7 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
    triangle->texture_address_mode_set = input->texture_address_mode_set;
    triangle->colour_attachment_count =
       input->color_attachment_count > 1 ? input->color_attachment_count : 1u;
+   triangle->separated_texture_pair = input->separated_texture_pair;
    /* Every colour attachment's format, whatever creates them: the caller's, or
     * the RGBA8 the canary ran (ps5vk_triangle.c, create_image and
     * create_color_attachments). */
@@ -2877,6 +2957,14 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
    if (triangle->texture_set_layout != VK_NULL_HANDLE) {
       triangle->set_layouts[triangle->set_count] = triangle->texture_set_layout;
       triangle->descriptor_sets[triangle->set_count] = triangle->texture_set;
+      triangle->set_count++;
+   }
+   /* The sampler's own set follows the texture's, which is the order the
+    * separated pair's pipeline layout has: set 0 the image, set 1 the sampler
+    * (input->separated_texture_pair). */
+   if (triangle->sampler_set_layout != VK_NULL_HANDLE) {
+      triangle->set_layouts[triangle->set_count] = triangle->sampler_set_layout;
+      triangle->descriptor_sets[triangle->set_count] = triangle->sampler_set;
       triangle->set_count++;
    }
    /* R9: the push-constant range the caller's shaders read, for the stages it
@@ -3679,6 +3767,7 @@ ps5vk_triangle_finish(struct ps5vk_triangle *triangle)
       }
       CALL(triangle, DestroyDescriptorPool)(device, triangle->texture_pool, NULL);
       CALL(triangle, DestroyDescriptorSetLayout)(device, triangle->texture_set_layout, NULL);
+      CALL(triangle, DestroyDescriptorSetLayout)(device, triangle->sampler_set_layout, NULL);
       for (unsigned index = 0; index < PS5VK_TRIANGLE_TEXTURE_SAMPLERS; index++)
          CALL(triangle, DestroySampler)(device, triangle->texture_samplers[index], NULL);
       if (triangle->texture_lod_sampler != VK_NULL_HANDLE)

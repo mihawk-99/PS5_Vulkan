@@ -1,0 +1,20 @@
+PS5 Vulkan v0-separated-pair shader packages, built by tools/build-probe-shaders.sh v0-separated-pair.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
+pixel compiler (tools/build-psbc-cli.sh) sha256: e99fb42fc699b1ff72deb95150203ca55d271d6d403988dd96e08bb43bd942e9
+vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32_float:0:0:16:4 --vertex-attribute 1:r32g32_float:0:8:16:4; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2 --descriptor-binding 0:0:combined_image_sampler:1:0:48 --descriptor-binding 1:0:combined_image_sampler:1:0:48; writer --allow-unresolved
+pixel binding metadata: {"array_size": 1, "binding": 0, "offset": 0, "set": 0, "stride": 48, "type": 2}
+pixel binding metadata: {"array_size": 1, "binding": 0, "offset": 0, "set": 1, "stride": 48, "type": 2}
+set 1's user-data dword is the metadata array's, asserted by driver/tests/vk_psbc_multiset_test.c
+vertex attributes: location 0 r32g32_float offset 0, location 1 r32g32_float offset 8, stride 16, binding 0
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+1198986662ca2c7c6271e56a695471395491351bf6970795f6e4306ae3593cf0  shaders/m3/texture.vert
+51efed27fd8cff1bbb2ad6b0ea56fff6a9f18a5cf4db95ec2a502f667c2aee14  shaders/v0/separated_pair.frag
+26a020c3fe92d88b23c73ea10711b41b2d4b8f9225d4ce6bba6feabc66fe13ea  build/shaders/v0-separated-pair/vertex.spv
+a453ae09716594eef687660fbcf43369dccd2b663bf311849404fdbaeda45e36  build/shaders/v0-separated-pair/pixel.spv
+9797d9dc72fab55a72b118538a98ef6cf9f474810034021ab2d2a3083a9cf0f3  build/shaders/v0-separated-pair/vertex.ngg.bin
+a1f0fde09355aeed62ff8dfaf9c4f02791666a7f319916b61bf465f6250340e5  build/shaders/v0-separated-pair/vertex.hw.json
+de1da6030bea5be310af7815ab0445bf9f9016e4a71deeb2a18e2e7c916429c2  build/shaders/v0-separated-pair/pixel.raw.bin
+a5c4e93de2d32cfef7a487f64304049dacf8ec5f2bb06253043dceaf6a3d806c  build/shaders/v0-separated-pair/pixel.hw.json

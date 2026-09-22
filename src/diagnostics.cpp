@@ -17685,6 +17685,163 @@ void run_vulkan_mrt_frames(const TestContext &test, TestOutcome &outcome) noexce
     outcome.passed = passed;
 }
 
+// R2's acceptance: the separated sampler and image pair. ps5vk_descriptor_stride
+// answers VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE and VK_DESCRIPTOR_TYPE_SAMPLER, and the
+// driver tells the compiler the combined type at each half's index -- a texture2D
+// at set 0, binding 0 and a sampler at set 1, binding 0 -- which is the shape
+// vkQuake's GUI pipeline layout and its draw_pic shader have.
+//
+// The acceptance is an identity, not a picture: the frame the separated pair draws
+// of one texture has to be **texel for texel** the frame probes/m3-texture's
+// combined image sampler draws of the same texture, through the same geometry and
+// the same nearest sampler. A driver that wrote only the image half or only the
+// sampler half draws *something*, so "it rendered" is not evidence here and the
+// mismatch count is.
+//
+// One half of that pair is measurable today and the other is not. The **combined**
+// frame is drawn here from probes/m3-texture -- the case loads that set's SPIR-V
+// itself, because the case's own package column names the separated pair -- and its
+// readback is held for the comparison. The **separated** frame cannot be drawn yet:
+// every descriptor path ps5vk_triangle has writes a combined image sampler, so the
+// image and its sampler always land in the same set, and the pair needs them in
+// two. The flag it would take is named below, in the sentence this case logs, and
+// adding it is the only work between this case and the identity it exists for.
+
+void run_vulkan_separated_pair_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32_SFLOAT, 8},
+    };
+    // The bridge texture both forms sample: the address probe's four-group texels,
+    // whose fetch the sampler-address case already reads back column by column.
+    static const std::array<std::uint8_t, kAddressTextureWidth * 4 * 4> texels =
+        address_texture_texels();
+    // Frame B: one COMBINED_IMAGE_SAMPLER of that texture -- the picture the
+    // separated pair has to reproduce exactly. Its own package set, loaded into the
+    // storage's second pair of slots so the case's own shaders stay in the first.
+    const PackagePaths combined_packages = package_paths("m3-texture");
+    ps5vk_triangle_shaders combined_shaders{};
+    if (!load_vulkan_shaders(combined_packages, &g_vulkan_spirv[2], combined_shaders, log))
+        return;
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.shaders[0] = combined_shaders;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    input.vertex_data = kAddressVertices;
+    input.vertex_count = kSquareVertexCount;
+    input.vertex_stride = kTextureVertexStride;
+    input.index_data = kIndices;
+    input.index_count = kIndexCount;
+    input.attribute_count = 2;
+    input.attributes[0] = attributes[0];
+    input.attributes[1] = attributes[1];
+    input.texture_data = texels.data();
+    input.texture_width = kAddressTextureWidth;
+    input.texture_height = 4;
+    input.texture_format = VK_FORMAT_R8G8B8A8_UNORM;
+    input.texture_bilinear = false;
+    ps5vk_triangle combined{};
+    ps5vk_triangle_status status = ps5vk_triangle_create(&combined, &input);
+    if (status == PS5VK_TRIANGLE_OK)
+        status = ps5vk_triangle_draw(&combined, PS5VK_TRIANGLE_ONE_DRAW);
+    const bool combined_drew =
+        status == PS5VK_TRIANGLE_OK && combined.target_bytes >= kFramebufferBytes;
+    log.event("agc_separated_pair", combined_drew ? "INFO" : "FAIL", 0,
+              combined_drew ? "the combined image sampler frame drew: the picture the separated "
+                              "pair has to reproduce"
+                            : "the combined image sampler frame could not be drawn");
+    if (test.capture && combined_drew)
+    {
+        log_driver_submission(combined.device, "separated pair, combined form", log);
+        log_driver_stages(combined.device, log);
+    }
+    std::size_t mismatches = 0;
+    std::uint32_t first_x = 0;
+    std::uint32_t first_y = 0;
+    // Frame A: the same texture through the separated pair -- set 0 binding 0 a bare
+    // SAMPLED_IMAGE of the view, set 1 binding 0 a bare SAMPLER, both bound -- which
+    // is the port's GUI shape and the shape vkQuake's own menu pipeline has. Its
+    // package set is the case's own.
+    bool separated_drew = false;
+    ps5vk_triangle separated{};
+    if (combined_drew)
+    {
+        ps5vk_triangle_shaders separated_shaders{};
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], separated_shaders, log))
+            return;
+        ps5vk_triangle_input separated_input = input;
+        separated_input.shaders[0] = separated_shaders;
+        separated_input.separated_texture_pair = true;
+        ps5vk_triangle_status separated_status = ps5vk_triangle_create(&separated, &separated_input);
+        if (separated_status == PS5VK_TRIANGLE_OK)
+            separated_status = ps5vk_triangle_draw(&separated, PS5VK_TRIANGLE_ONE_DRAW);
+        separated_drew =
+            separated_status == PS5VK_TRIANGLE_OK && separated.target_bytes >= kFramebufferBytes;
+        if (test.capture && separated_drew)
+        {
+            log_driver_submission(separated.device, "separated pair, separated form", log);
+            log_driver_stages(separated.device, log);
+        }
+        log.event("agc_separated_pair", separated_drew ? "INFO" : "FAIL", 0,
+                  separated_drew ? "the separated pair frame drew through two sets"
+                                 : "the separated pair frame could not be drawn");
+    }
+    // The identity the acceptance asks for: the separated form's frame, texel for
+    // texel over the whole target, against the combined form's. A form that merely
+    // draws is not evidence, which is why the mismatch count is the result.
+    if (combined_drew && separated_drew)
+    {
+        flush_gpu_data(const_cast<void *>(combined.target), kFramebufferBytes);
+        flush_gpu_data(const_cast<void *>(separated.target), kFramebufferBytes);
+        const FramebufferView combined_view{static_cast<const std::uint32_t *>(combined.target),
+                                            kTiledRgba8Layout};
+        const FramebufferView separated_view{static_cast<const std::uint32_t *>(separated.target),
+                                             kTiledRgba8Layout};
+        for (std::uint32_t y = 0; y < kOutputHeight; y++)
+            for (std::uint32_t x = 0; x < kOutputWidth; x++)
+                if (combined_view.word(x, y) != separated_view.word(x, y))
+                {
+                    if (mismatches == 0)
+                    {
+                        first_x = x;
+                        first_y = y;
+                    }
+                    ++mismatches;
+                }
+    }
+    char detail[256]{};
+    const bool passed = combined_drew && separated_drew && mismatches == 0;
+    std::snprintf(detail, sizeof(detail),
+                  "the separated pair's frame is the combined one's: %s (%zu mismatched texels of "
+                  "%u x %u)",
+                  passed ? "yes" : "no", mismatches, kOutputWidth, kOutputHeight);
+    log.number("agc_separated_pair", "combined_frame_drawn", combined_drew ? 1u : 0u);
+    log.number("agc_separated_pair", "separated_frame_drawn", separated_drew ? 1u : 0u);
+    log.number("agc_separated_pair", "mismatched_texels", mismatches);
+    if (mismatches != 0)
+    {
+        log.number("agc_separated_pair", "first_mismatch_x", first_x);
+        log.number("agc_separated_pair", "first_mismatch_y", first_y);
+    }
+    log.event("agc_separated_pair", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        outcome.stage_in_use = true;
+        log.event("agc_separated_pair", "FAIL", -1,
+                  "a submission did not complete; the program's objects stay allocated");
+        return;
+    }
+    ps5vk_triangle_finish(&combined);
+    outcome.command_built = true;
+    outcome.passed = passed;
+}
+
 // R4's residual gap (PS5_VULKAN_REQUESTS.md, R4; docs/REQUESTS_RESPONSE.md): the
 // colour clear, read back with nothing drawn over it. The stencil plane has had a
 // case of this shape since R3; the colour target has not -- and it is the shape
@@ -22970,6 +23127,10 @@ constexpr RunnerTest kRunnerTests[] = {
     // with a frame whose every value is read out of one of the two sets
     // (run_vulkan_multiset_quake_frames).
     {"v0-multiset-quake", "v0-multiset-quake", run_vulkan_multiset_quake_frames},
+    // R2: the separated sampler and image pair -- set 0 binding 0 a bare sampled
+    // image, set 1 binding 0 a bare sampler -- accepted when the frame it draws is
+    // texel for texel the combined form's (run_vulkan_separated_pair_frames).
+    {"v0-separated-pair", "v0-separated-pair", run_vulkan_separated_pair_frames},
     // R7 step 1b: the four colour attachments the device advertises, drawn
     // through 1, 2 and the advertised maximum counts with a distinct value in
     // each and every one read back (run_vulkan_mrt_frames).
