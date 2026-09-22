@@ -980,3 +980,96 @@ zero-byte stub -- so two pipelines from one module with different values are two
 is also why this cannot be silently wrong today; when a cache lands, the constants' values belong
 in its key, as RADV hashes them. That is written beside the helper, not left for the cache's
 author to rediscover.
+
+## 2026-09-22 — R10: the subpass read, the refusal, and what your other twenty shaders do
+
+Three answers, all measured on this host except where a console run is named. The archive is
+rebuilt at the end of this section with its digest.
+
+### 1. The read: not a permanent limit. Do not delete your gamma/contrast pass.
+
+The question was whether this fork can lower a subpass read at all, and the answer is yes, through
+the path RADV uses when a driver binds input attachments as descriptors. The fork's front end
+called `nir_lower_input_attachments` with `.use_ia_coord_intrin = true`, which is the tile
+coordinate intrinsic its ACO has no case for; with that option false the same pass computes the
+coordinate from the fragment's position and layer and reads the texel **through the input
+attachment's own descriptor**, which is what this driver already writes for such a binding. One
+field, `tooling/psbc/patch-subpass-input.py`.
+
+Measured on your own shader, before anything was written: `postprocess_frag`, taken out of
+`build/vkquake/generated/postprocess_frag_spv.c`, aborts the stock compiler on this host exactly as
+it did on your console (exit 134, the same `@load_input_attachment_coord`) and compiles to a 324-byte
+package with the patch, metadata `{"set": 0, "binding": 0, "type": 4, "stride": 32}` -- the 32-byte
+image entry this driver builds. `wboit_resolve_frag` and `mboit_resolve_frag` compile the same way.
+
+On the console, `jobs/r10-subpass/queue.txt`'s `v0-subpass` case runs the shape your UI pass has: a
+two-subpass render pass, subpass 0 drawing a positional band pattern into attachment 0, subpass 1
+reading it with `subpassLoad` and writing attachment 1, which the case reads back. Subpass 0's
+attachment is right in its own memory, 16 of 16 samples; subpass 1's draw **reads through the input
+attachment's descriptor** -- 4 of 16 samples are exactly the writer's, and they are the first
+quarter-width. So the binding, the subpass lookup, the table entry and the flush all work.
+
+**What is still wrong, named precisely**: every texel past x = 960 reads as band 0, i.e. the read
+behaves as if the attachment were 960 texels wide -- `SQ_RSRC_IMG_WORD2`'s width field,
+`(extent.width - 1) >> 2`, 959 for a 3840-texel image. The image is row-stored (the writer's own
+mapping is linear), and the descriptor path was only ever proven on tiled images. That is a
+descriptor question about a row-stored attachment, not another subpass question, and it is the next
+thing on this side.
+
+### 2. The abort is a refusal now, and it fired on your console
+
+`ps5vk_spirv_refusal` runs before the compiler: the module's addressing model and its declared
+capabilities are read from the SPIR-V and the two measured cases are refused by name -- the
+`PhysicalStorageBuffer64` addressing model, which the front end itself rejects, and
+`SpvCapabilityPhysicalStorageBufferAddressesEXT` (4472), whose ACO has no case for the
+`@bindless_image_store` the shaders using it reach. Underneath, `ps5vk_compile_worker` guards the
+compile with `SIGABRT`/`SIGTRAP`, so a shader neither the table nor anyone else knows about still
+comes back as `VK_ERROR_UNKNOWN` with the sentence *"the shader compiler aborted on this shader
+instead of returning a result ... (the shader declares ...)"*.
+
+You can see it working in the port's own terms: the first console run of the round still had the
+unpatched compiler in the archive, and the log shows the guard's sentence where your run showed a
+dead title. `driver/tests/vk_v0_capability_test.c` is the acceptance you asked for, runnable here:
+five modules built by injecting one instruction into a probe's pixel SPIR-V -- created as it stands;
+refused by name **with no `SPIR-V` text on stderr at all** when 4472 is added, which is what says
+the compiler never ran; created with a warning when 46 or a logical-addressing 5347 is added;
+refused by name when the addressing model is `PhysicalStorageBuffer64`; and for an unknown capability
+the front end fails on, the guard's sentence with the compiler's own `SPIR-V parsing FAILED` on
+stderr and the process still alive.
+
+### 3. Your twenty shaders, checked against this compiler on the host
+
+Every deployed shader with a capability beyond `Shader`, compiled here with its own descriptor
+declarations. **Fifteen compile. Six do not, and they are the two classes above**:
+
+| shader | capabilities | verdict |
+| --- | --- | --- |
+| `postprocess_frag` | 40 | **compiles** (with the patch above) |
+| `wboit_resolve_frag`, `mboit_resolve_frag` | 40 | **compile** |
+| `wboit_resolve_msaa_frag`, `mboit_resolve_msaa_frag` | 35, 40 | **compile** |
+| `draw_pic_xbr_frag`, `draw_pic_xbr_alphatest_frag` | 50 | **compile** (`textureSize` lowers; the warning is not a failure) |
+| `screen_effects_{8,10}bit{,_scale}{,_sops}_comp` (6) | 46, 49, 61, 65 | **compile** |
+| `update_lightmap_{8,10}bit_comp` | 49 | **compile** |
+| `skinning_comp`, `skinning_8_comp`, `mesh_interpolate_comp` | 5347 | refused by name: `AddressingModelPhysicalStorageBuffer64 not supported` |
+| `ray_debug_comp`, `update_lightmap_{8,10}bit_rt_comp` | 4472, 49 | refused by name: ACO has no `@bindless_image_store` |
+
+**A correction to your scanner**, which will matter if you act on its labels: the numbers it prints
+are right and four of the names are not. 35 is `SampleRateShading` (not ImageGatherExtended), 46 is
+`SampledBuffer` (not StorageImageWriteWithoutFormat, which is 56), 49 is `StorageImageExtendedFormats`
+(not GroupNonUniform, which is 61), and 61 is `GroupNonUniform` (not GroupNonUniformBallot, which is
+64). The two that matter for your worry list are the ones you were least worried about: nothing in
+your storage-image or subgroup set is missing, and the menu upscaler's `ImageQuery` lowers.
+
+### The archive
+
+Rebuilt on this host at the state of `5f7e910`:
+
+```
+build/driver/ps5/libps5vk.ps5.a   14 415 958 bytes
+sha256 6e12550bd241c1a0ce87f7ea8319c60747c18a023fc64f71b95a9fbbd63b76f9
+```
+
+Relink and the world pipelines should keep creating where `-13` used to be, your UI pass's
+`postprocess_frag` should compile and its second subpass should read its offscreen attachment -- with
+the x-scale defect above still in it, which is why this reply does not claim the frame. When it is
+fixed, this section gets an entry rather than a new number.

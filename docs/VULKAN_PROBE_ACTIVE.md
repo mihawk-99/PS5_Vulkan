@@ -8,65 +8,36 @@ _Updated: 2026-09-22 (late evening)_
 
 ## Now
 
-**The round's console run happened: 13 of 14, one open item.** `jobs/r8-lines/queue.txt`,
-`Klog_Logs/r9-spec.log`, pid 178: `v0-r9`, `v0-strip` and `v0-fragmentless` **PASS**, the
-standing cases PASS, **`v0-lines` FAIL** -- R8's own case on its first console run, and the
-round's one open item. R9 is committed; the archive is rebuilt and checked by content.
+**R10 (the port's subpass input, its refusal ask, and a capability audit): two of three landed and
+measured, one defect named.** Three commits: `f9131e5` (a shader the compiler cannot lower is
+refused, not fatal -- pre-check by addressing model and capability, plus a `SIGABRT`/`SIGTRAP` guard
+around the compile), `3ee2f96` (the subpass read through the input attachment's descriptor: one
+field in the fork's RADV call site, plus the driver binding it from the subpass), `5f7e910` (the
+console case and the harness's two-subpass mode, with the frame's own measurements).
 
-- **R9, specialization constants** (`fef4387`, console-proven): the fork's Mesa copy had a stub
-  for `vk_spec_info_to_nir_spirv` and no way to pass entries, so `pSpecializationInfo` was
-  refused outright -- what stopped vkQuake's world pipelines at `-13`.
-  `tooling/psbc/patch-specialization.py` (4 edits, metadata stays 14) and
-  `ps5vk_specialization_options()` close it; malformed entries are refused by name. Case
-  `v0-r9`: 3 of 3 constant sets drew the colour they select (`0xffff0000` / `0xffff4000` /
-  `0xffff80ff`) and 2 of 2 invalid sets were refused. Compiler half: `vk_v0_spec_test.c` 4/4,
-  40 / 48 / 48 bytes against a hand-written literal twin.
-- **R8, `VK_PRIMITIVE_TOPOLOGY_LINE_LIST`** (`6d000b7`): DI_PT_LINELIST 2 to the link, both
-  stages compiled with `primitive_type = 2` (the NGG vertex stage exports two vertices a
-  primitive), a line's draw records VGT_GS_OUT_PRIM_TYPE LINESTRIP (0x29b = 1), PA_SU_LINE_CNTL
-  8 and PA_SC_LINE_CNTL 0, cull bits cleared. Wide and multisampled lines, points, line strips,
-  fans, adjacency, patches and restart stay refused. Case `v0-lines` -- **FAIL, open**; keep the
-  port's `debug_lines` / `md5_debug` edits until it passes.
-- **R6, the strip** (`15878c3`): the "GPU wedge" was the harness aborting on a zero-size index
-  buffer, and `a6f43d7` linked the strip as DI_PT **5, the fan**; the strip is 6, so the port's
-  `warp` pipelines were created against the fan value. **Fragment-less** (`bfbfc32`) is RADV's
-  GFX10 no-export form, case `v0-fragmentless`; **R4** (`1414853`) refuses swapchain and
-  plane-surface creates by field, loader-gated, no frame. R7 (`358bde4`) stays console-proven:
-  pid 162, 6/6, `evidence/r7-compute/capture.json`. R2, R3 and R5 are closed.
+- **The refusal is done and console-seen.** `v0_capability` 14/14 loader, direct and PS5 link; the
+  guard's sentence appears in the round's own console log where the port's run had a dead title.
+- **The subpass read works and is not a permanent limit.** The port's `postprocess_frag` compiles
+  here (324 bytes, metadata set 0 binding 0 type 4 stride 32); on the console subpass 0's attachment
+  is right in its own memory (16 of 16) and subpass 1's fetch returns the writer's texels for the
+  first quarter-width (4 of 16). **Open**: past x = 960 the read returns band 0, i.e. the fetch
+  behaves as if the row-stored attachment were 960 texels wide -- `SQ_RSRC_IMG_WORD2`'s
+  `(extent.width - 1) >> 2`. A descriptor question for a row-stored image, measurable on the host
+  before another console cycle (docs/M5_PHASE_C.md, the R10 subpass entry).
+- **The audit** (a host sweep: each deployed shader's SPIR-V extracted from its C array, its own
+  descriptors declared from its decorations, then the patched probe CLI -- re-run after the patch):
+  of the port's deployed shaders
+  with capabilities beyond `Shader`, 15 compile and 6 do not -- the three 5347 ones (addressing
+  model) and the three 4472 ones (bindless store) -- both classes refused by name. The port's own
+  scanner mislabels 35, 46, 49 and 61; the reply carries the correction.
+- **Port handoff.** The archive is rebuilt at `5f7e910`: `build/driver/ps5/libps5vk.ps5.a`,
+  14 415 958 bytes, sha256 `6e12550b…`. `docs/REQUESTS_RESPONSE.md` has the R10 answer.
 
-**Host evidence, this round's run on this host.** check-driver PASS: 1620 checks, **284**
-identical golden comparisons (the previous session's 292 was a clean clone, which runs two extra
-PS5-link cases; `v0_topology` 35/35 and `v0_fragmentless` 9/9 direct, B6 24/24, C1 16/16),
-`v0_spec` 4/4 direct. lint 212 files, `make test` 31 OK, the three audits, migration (now
-covering the specialization patch), runner cases 206 records, psbc link, mip layout and the
-Vulkan runtime gate PASS. **`probe-packages` failed on the first full pass and passes now**: the
-two new sets were one `v0-spec|v0-spec-hardcoded)` case alternative and that check reads a
-builder off the build script's own case labels, so it saw two committed sets nothing could
-rebuild; one label each, 51 committed sets with 49 rebuilt and compared byte for byte. One
-failure: `c1_present` in loader mode only, 15 of 16 (*"a plane surface whose imageExtent the plane
-does not have is refused ... naming imageExtent"*), direct 16 of 16 with the same sentence in both
-logs -- **loader-environmental and pre-existing** (this round touches no plane-surface or
-swapchain code), recorded rather than fixed. A clean clone still differs only in
-`probes/v0-push/bindings.txt` (`pixel_user_sgpr_count` 4 against the committed 7, packages
-byte-identical); re-check that on the reference host.
-
-**Port handoff -- done on this host.** `build/driver/ps5/libps5vk.ps5.a` is rebuilt
-(14 374 298 bytes, sha256 `f3d749d6…`) and checked by content: `strings` finds `only triangle
-lists, triangle strips and line lists`, the two new specialization sentences are there, and
-`specialization constants are not supported` is **gone**. Relink the port against it. Then the
-port's `debug_lines` and `md5_debug` edits can retire, **pending `v0-lines` passing**; the world
-pipelines should create where `-13` used to be.
-
-**Next.** `v0-lines`: read the case's own lines in `Klog_Logs/r9-spec.log` first (`runner_test`
-result -1, detail `v0-lines`, line 2214). The line registers and the topology are already
-measured there, so the next step is the case's own comparison, not another console sweep; claim
-R8 by re-running `jobs/r8-lines/queue.txt` once it is green.
-
-**Parked.** MRT's four-attachment frame (counts 1 and 2 console-proven; the advertised maximum
-dies in Mesa's `vk_object_base_assert_valid` before the registers): the next action is a host
-dump of four rows, both mask words `0x08e`/`0x08f` and `CB_COLOR_CONTROL`, no console cycle.
-The CTS subset was not re-run this round (its build tree was not available); reporting did not
-change, which the inventory diff in the runner-cases gate confirms.
+**Open items from the rounds before this one.** **`v0-lines` FAILs on the console** (R8's case, its
+first run, `Klog_Logs/r9-spec.log`): read its own log lines before touching the driver. R9
+(`fef4387`) is console-proven (`v0-r9`, 13 of 14 that run) and its archive digest was
+`f3d749d6…`; R6's strip correction, the fragment-less case and R4's swapchain refusals are in
+`docs/M5_PHASE_C.md`. The port's `debug_lines` / `md5_debug` edits stay until `v0-lines` passes.
 
 ## Standing work
 
