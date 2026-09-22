@@ -299,6 +299,14 @@ struct ps5vk_triangle_input {
    const void *texel_buffer_data;
    uint32_t texel_buffer_bytes;
    VkFormat texel_buffer_format;
+   /* Whether the view asks for the buffer with VK_WHOLE_SIZE instead of the same
+    * bytes written out. Vulkan defines the sentinel as "from offset to the end of
+    * the buffer", the two forms name the same texels, and an application that
+    * writes the sentinel meets whichever refusal the literal reading produces --
+    * vkQuake's palette-octree view did (R3 of that port's requests,
+    * driver/ps5vk_buffer.c). The host test takes the explicit form and the console
+    * case the sentinel, so both are covered by one flag. */
+   bool texel_buffer_whole_size;
    /* The storage image the caller's pixel shader stores into (V0-formats'
     * descriptor-type rows), or VK_FORMAT_UNDEFINED for a program that stores
     * nothing. The harness creates a storage_image_width x storage_image_height
@@ -804,6 +812,7 @@ struct ps5vk_triangle {
     * the set the frame binds (V0-formats' descriptor-type rows). Zero handles
     * when the caller passed no texel buffer, and the driver's destroys ignore
     * zero, so a program that fetches none allocates nothing new. */
+   bool texel_buffer_whole_size;
    VkBuffer texel_buffer;
    VkDeviceMemory texel_buffer_memory;
    void *texel_buffer_mapped;

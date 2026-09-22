@@ -9958,6 +9958,7 @@ void run_texel_buffer_frames(const TestContext &test, TestOutcome &outcome, cons
         input.texel_buffer_data = texels.data();
         input.texel_buffer_bytes = (std::uint32_t)texels.size();
         input.texel_buffer_format = row.format;
+        input.texel_buffer_whole_size = true;
         if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
             return;
         ps5vk_triangle triangle{};

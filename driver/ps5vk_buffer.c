@@ -185,9 +185,23 @@ ps5vk_CreateBufferView(VkDevice _device, const VkBufferViewCreateInfo *pCreateIn
                           ? "VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT"
                           : "VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT");
    }
-   /* Valid usage: the view names bytes the buffer holds. */
-   if (pCreateInfo->range == 0 || pCreateInfo->offset >= buffer->vk.size ||
-       pCreateInfo->range > buffer->vk.size - pCreateInfo->offset) {
+   /* VK_WHOLE_SIZE means "from offset to the end of the buffer", not the
+    * sentinel value: Vulkan defines it that way and every other site in this
+    * driver resolves it (ps5vk_cmd_buffer.c, ps5vk_descriptor_set.c,
+    * ps5vk_draw.c). This one compared it literally, so a whole-buffer view of any
+    * buffer smaller than ~1.8e19 bytes was refused as out of bounds -- a
+    * vkQuake palette-octree view is what found it, and any application that
+    * writes VK_WHOLE_SIZE meets the same refusal (R3 of that port's requests).
+    * The resolved range is what the view keeps, so the texel-buffer descriptor
+    * gets a byte count rather than a sentinel. */
+   const VkDeviceSize range = pCreateInfo->range == VK_WHOLE_SIZE
+                                 ? buffer->vk.size - pCreateInfo->offset
+                                 : pCreateInfo->range;
+   /* Valid usage: the view names bytes the buffer holds. A whole-buffer view of
+    * an offset at the end therefore resolves to zero and is refused with the
+    * rest. */
+   if (pCreateInfo->offset >= buffer->vk.size || range == 0 ||
+       range > buffer->vk.size - pCreateInfo->offset) {
       return vk_errorf(device, VK_ERROR_UNKNOWN,
                        "vkCreateBufferView names %llu bytes from offset %llu of a buffer of %llu "
                        "bytes",
@@ -202,7 +216,7 @@ ps5vk_CreateBufferView(VkDevice _device, const VkBufferViewCreateInfo *pCreateIn
    view->buffer = buffer;
    view->format = pCreateInfo->format;
    view->offset = pCreateInfo->offset;
-   view->range = pCreateInfo->range;
+   view->range = range;
    *pView = ps5vk_buffer_view_to_handle(view);
    return VK_SUCCESS;
 }

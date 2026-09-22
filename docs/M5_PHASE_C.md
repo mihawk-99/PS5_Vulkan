@@ -7740,3 +7740,42 @@ is why its replay is the one the host half uses.
 
 Capability still unclaimed, refusal live, and the mask fix (`7660a4d`) stands on its own
 console evidence for counts 1 and 2.
+
+## 2026-09-22 — R3: vkCreateBufferView resolved every range but the sentinel
+
+**What moved.** `ps5vk_CreateBufferView` compared `pCreateInfo->range` literally against the
+buffer's size, so `VK_WHOLE_SIZE` -- which Vulkan defines as "from offset to the end of the
+buffer" -- was read as ~0ULL and refused as out of bounds. Three other sites in this driver
+already resolve the sentinel (`ps5vk_cmd_buffer.c`, `ps5vk_descriptor_set.c`,
+`ps5vk_draw.c`); this was the one that did not, and **every application that writes
+`VK_WHOLE_SIZE` met the refusal**, not just the one that reported it. The view now resolves the
+sentinel before the bounds check and **stores the resolved range**, so the texel-buffer
+descriptor gets a byte count rather than a sentinel value. `range == 0` (including a
+whole-buffer view whose offset is at the buffer's end) and an explicit range past the buffer
+are still refused, with the same sentence that names the range asked for, the offset and the
+buffer's size. The format check and its "no probe has proved a texel buffer for it" refusal
+are untouched, as asked.
+
+**The acceptance is both forms of one view.** `driver/tests/ps5vk_triangle.*` gained
+`texel_buffer_whole_size`, and the split is deliberate: the **console** cases now ask for the
+buffer with the sentinel (`input.texel_buffer_whole_size = true` in the shared frame function),
+so every row they walk -- the whole texel-buffer row table, RGBA8 among them, with the buffer
+created `UNIFORM_TEXEL_BUFFER | TRANSFER_DST` as the reporting application creates its palette
+octree -- proves the sentinel resolves; the **host** test keeps the same view written out as
+explicit bytes, so both forms stay exercised rather than one replacing the other.
+
+**Measured.** `v0-formats-texel-buffer` PASS with the sentinel: its 32 format rows each create
+a whole-buffer view and fetch their texel exactly (the case's own texel-for-texel
+assertions), and the standing list around it is **13 of 13** -- `Klog_Logs/v0-texel-whole.log`,
+`runner_summary` "13 of 13 queued tests passed". Host: `v0_texel_buffer` 9 of 9 loader and
+**43 of 43 direct** with the explicit form. `build/gates.sh` 11/11 PASS, `make lint` PASS.
+
+**The diagnostic offer, recorded rather than taken.** A refusal reaches an application only
+through a `VK_EXT_debug_utils` messenger, and an application that does not install one -- or is
+not built with it -- sees only the `VkResult`, which is why the reporting port's traces showed
+a bare `-13` and naming this one took a code read. Having a refusal also write its sentence to
+stderr when no messenger is installed would name every stop in every console run. It is not a
+one-line change: the driver's refusals are spread across `vk_errorf` sites and the draw-time
+funnel, so it belongs to the runtime's logging path rather than to any one call site, and it
+changes what every run prints. Recorded here as an open item with that scope, not as a
+half-done hook in one function.
