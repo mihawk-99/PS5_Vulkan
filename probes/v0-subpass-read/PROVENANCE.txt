@@ -8,10 +8,10 @@ pixel: -g -s fragment --raw --descriptor-binding 0:0:storage_image:1:0:32; write
 pixel binding metadata: {"array_size": 1, "binding": 0, "offset": 0, "set": 0, "stride": 32, "type": 4}
 program-checksum registers are unresolved, as in ps5-opengl's runtime packages
 6e3b120d5bfe1909da2ddeb8913be373d7e9cf290a62c4c3e3b4f4ac5432289a  shaders/m2/fullscreen.vert
-0b960251caae70c9586796e3b9f68883e12c0bda7dc93628838757d58ea18ef8  shaders/v0/subpass_read.frag
+1af5660738b2ef8741918d0ee2a8f2ffb913821b40ffb51160613ea4560cdb28  shaders/v0/subpass_read.frag
 ebc5c12b4c55b322bc1a61165e108bd3feb7b09d72f4d9a22b6f9d2a9c3143c9  build/shaders/v0-subpass-read/vertex.spv
-af10c4287e309d048b172d9b9bfaad73d0e02e979ff152e6b25fa9e991f86c8a  build/shaders/v0-subpass-read/pixel.spv
+a7785c09b79a5d2b434a6aec16578bc8d8674d2ddc2ecd6f6e4faaf7cf4a208f  build/shaders/v0-subpass-read/pixel.spv
 229cfec58ba3b610e6e46f57865637408ccc075b5815e31e543240452b39e3f9  build/shaders/v0-subpass-read/vertex.ngg.bin
 72352e4ebb049a5c7c17a74074cce90c3298f93a421d7536f42a908dc383300c  build/shaders/v0-subpass-read/vertex.hw.json
-4760cee2216e8a0e1b80efb5fd11767c9698e397bbbb383f899bd8d4783743dc  build/shaders/v0-subpass-read/pixel.raw.bin
-306c722a5f0d1385eb00bb4601544367dfafa017765ededeb9f0c7a6b27a0fad  build/shaders/v0-subpass-read/pixel.hw.json
+68b608779212a021c25b0fb20035e8e1ce9cadccefd3f1f5abc21f18fb968bd5  build/shaders/v0-subpass-read/pixel.raw.bin
+1b4054ff833a5109c5e1f4e6db4bbcf84621f5423c4126f4d414a0b47dabe691  build/shaders/v0-subpass-read/pixel.hw.json

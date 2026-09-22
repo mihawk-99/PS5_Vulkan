@@ -100,6 +100,7 @@ tests=(
     v0_fragmentless
     v0_spec
     v0_capability
+    v0_subpass
 )
 # Negative tests: name, and the host variable that breaks the rule it checks
 # unless the test sets it itself (b3_window).
@@ -515,6 +516,12 @@ run_test() {
         # R7 round 3's frame is the host half of the runner case v0-multiset-quake
         # and draws exactly its one frame, so its recording is compared with that
         # case's own console capture word for word.
+        # R10's two-subpass frame draws into one attachment and reads it in the
+        # next subpass, so its submission splits where the read follows the
+        # render: the replay is what gives the host that split's step boundary
+        # (driver/tests/vk_v0_subpass_test.c).
+        v0_subpass) replay=b4-headless
+            compare=() ;;
         v0_multiset_quake) replay=v0-multiset-quake
             compare=(compare-run "$multiset_quake_run" "$dump" --test v0-multiset-quake) ;;
         v0_query_full) replay=v0-query-full

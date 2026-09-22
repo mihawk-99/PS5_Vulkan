@@ -8140,6 +8140,184 @@ bool load_vulkan_shaders(const PackagePaths &packages,
     return loaded;
 }
 
+// R10's subpass input: a two-subpass render pass whose first subpass draws a
+// positional colour into attachment 0 and whose second subpass reads that
+// attachment as its own input attachment with `subpassLoad`, writing it into
+// attachment 1 -- the program's image, which this case reads back.
+//
+// The port's UI pass is exactly this shape (an offscreen colour buffer the
+// postprocess fragment shader reads with subpassLoad and writes to the
+// swapchain image), and the read is the one thing about it that no host run can
+// measure: the driver binds an input attachment from the subpass rather than
+// from an application's descriptor write, and the flush the read needs is the
+// colour-buffer barrier at the subpass boundary. What the frame says is
+// positional: the writer's colour is four vertical bands in R and four
+// horizontal bands in G, each an exact multiple of 1/255, so a read that came
+// from another attachment, another tile, a transposed coordinate or a stale row
+// lands in a band the writer never wrote -- and attachment 1's own clear word
+// (probes/v0-subpass-write uses no descriptors at all) cannot be mistaken for
+// any of them.
+void run_vulkan_subpass_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    // The writer's four bands, as the fragment shader computes them from
+    // gl_FragCoord: floor(x / 960) / 3 and floor(y / 540) / 3, both rounded to
+    // 8 bits by the RGBA8 target. B and A are the shader's constants.
+    static constexpr std::uint32_t kBands[4] = {0u, 85u, 170u, 255u};
+    static constexpr std::uint32_t kBlue = 128u;
+    // The middle of each band, so no sample sits on a boundary the writer and
+    // the reader could round differently.
+    static constexpr std::uint32_t kColumns[4] = {480u, 1440u, 2400u, 3360u};
+    static constexpr std::uint32_t kRows[4] = {270u, 810u, 1350u, 1890u};
+
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 2;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    // The probe itself: two subpasses over two colour attachments, the second
+    // reading the first as its input attachment (driver/tests/ps5vk_triangle.c).
+    input.subpass_input = true;
+    // No vertex bindings: both subpasses draw the m2 full-target triangle, whose
+    // vertex shader generates its own position, so the two probe sets carry the
+    // same vertex stage and differ in their fragment stage.
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    // The second set goes in the far half of the storage: load_vulkan_shaders
+    // takes two slots, and the first set already owns slots 0 and 1.
+    const PackagePaths reader = package_paths("v0-subpass-read");
+    if (!load_vulkan_shaders(reader, &g_vulkan_spirv[2], input.shaders[1], log))
+        return;
+
+    ps5vk_triangle triangle{};
+    ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+    unsigned frames = 0;
+    bool bands = false;
+    for (unsigned frame = 0; frame < 2 && status == PS5VK_TRIANGLE_OK; frame++)
+    {
+        // ONE_COMMAND_BUFFER is the grouping that records both draws in one
+        // command buffer -- and, for this probe, the one that puts the second
+        // pipeline's draw in the second subpass (record_body's CmdNextSubpass).
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_COMMAND_BUFFER);
+        if (status != PS5VK_TRIANGLE_OK)
+            break;
+        ++frames;
+        if (frame != 0 || triangle.target_bytes < kFramebufferBytes)
+            continue;
+        // The submission the frame recorded, and the tables it built, on the
+        // run that captures: what the two subpasses' draws programmed, which is
+        // what tells a read that saw nothing from a render that wrote nothing.
+        if (test.capture)
+        {
+            log_driver_submission(triangle.device, "v0-subpass", log);
+            log_driver_stages(triangle.device, log);
+            log_driver_regions(triangle.device, log);
+            ps5vk_debug_table tables[4]{};
+            const std::uint32_t table_count =
+                ps5vk_debug_descriptor_tables(triangle.device, tables, std::size(tables));
+            log.number("agc_subpass_table", "count", table_count);
+            for (std::uint32_t at = 0; at < table_count; ++at)
+            {
+                log.number("agc_subpass_table", "stage", tables[at].stage);
+                log.number("agc_subpass_table", "set", tables[at].set);
+                log.number("agc_subpass_table", "bytes", static_cast<long long>(tables[at].bytes));
+                log.hex("agc_subpass_table", "entry0_low",
+                        tables[at].words != nullptr && tables[at].bytes >= 4 ? tables[at].words[0]
+                                                                             : 0u);
+                log.hex("agc_subpass_table", "entry0_high",
+                        tables[at].words != nullptr && tables[at].bytes >= 8 ? tables[at].words[1]
+                                                                             : 0u);
+            }
+            ps5vk_debug_target targets[4]{};
+            const std::uint32_t target_count =
+                ps5vk_debug_colour_targets(triangle.device, targets, std::size(targets));
+            log.number("agc_subpass_target", "count", target_count);
+            for (std::uint32_t at = 0; at < target_count; ++at)
+            {
+                log.number("agc_subpass_target", "index", targets[at].index);
+                log.hex("agc_subpass_target", "base_offset", targets[at].base_offset);
+                log.hex("agc_subpass_target", "base_value", targets[at].base_value);
+            }
+        }
+        // The GPU wrote this image; read it only once its writes have landed
+        // (the flush every readback in this file does).
+        flush_gpu_data(const_cast<void *>(triangle.target), kFramebufferBytes);
+        const std::uint32_t *const words = static_cast<const std::uint32_t *>(triangle.target);
+        /* What subpass 0 wrote into attachment 0, read from its own mapping: the
+         * reader's output is compared with this as well as with the pattern, so a
+         * write that never landed and a read that lost part of the picture are
+         * different failures (R10). */
+        const std::uint32_t *const written =
+            triangle.subpass_mapped != nullptr && triangle.subpass_bytes >= kFramebufferBytes
+                ? static_cast<const std::uint32_t *>(triangle.subpass_mapped)
+                : nullptr;
+        if (written != nullptr)
+            flush_gpu_data(const_cast<void *>(triangle.subpass_mapped), kFramebufferBytes);
+        unsigned writer_matching = 0;
+        unsigned reader_matching = 0;
+        unsigned sampled = 0;
+        std::uint32_t first_wrong = 0;
+        unsigned wrong_x = 0;
+        unsigned wrong_y = 0;
+        for (const std::uint32_t y : kRows)
+        {
+            for (const std::uint32_t x : kColumns)
+            {
+                const std::uint32_t want =
+                    (255u << 24) | (kBlue << 16) | (kBands[y / 540u] << 8) | kBands[x / 960u];
+                const std::uint32_t got = words[std::size_t{y} * PS5VK_TRIANGLE_WIDTH + x];
+                const std::uint32_t source =
+                    written != nullptr ? written[std::size_t{y} * PS5VK_TRIANGLE_WIDTH + x] : want;
+                ++sampled;
+                if (source == want)
+                    ++writer_matching;
+                if (got == want)
+                    ++reader_matching;
+                else if (first_wrong == 0)
+                {
+                    first_wrong = got;
+                    wrong_x = x;
+                    wrong_y = y;
+                }
+            }
+        }
+        const bool wrote = written == nullptr || writer_matching == sampled;
+        bands = sampled != 0 && wrote && reader_matching == sampled;
+        log.hex("agc_subpass", "first_wrong", first_wrong);
+        log.number("agc_subpass", "wrong_x", wrong_x);
+        log.number("agc_subpass", "wrong_y", wrong_y);
+        log.number("agc_subpass", "writer_samples", writer_matching);
+        log.number("agc_subpass", "reader_samples", reader_matching);
+        log.number("agc_subpass", "of", sampled);
+        log.event("agc_subpass", bands ? "PASS" : "FAIL", bands ? 0 : -1,
+                  !wrote ? "subpass 0 did not draw the band pattern into its own attachment"
+                         : (bands ? "subpass 1 read subpass 0's attachment, band for band"
+                                  : "subpass 1 did not read subpass 0's attachment"));
+    }
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        outcome.stage_in_use = true;
+        log.event("agc_subpass", "FAIL", -1,
+                  "a submission did not complete; the program's objects stay allocated");
+        return;
+    }
+    if (status == PS5VK_TRIANGLE_OK && frames == 2)
+        log.event("agc_subpass", bands ? "PASS" : "FAIL", bands ? 0 : -1,
+                  bands ? "both frames of the two-subpass pass drew, and the second attachment "
+                          "holds the first's bands"
+                        : "the frames drew and the readback is not the writer's pattern");
+    else
+        log.event("agc_subpass", "FAIL", -1,
+                  status == PS5VK_TRIANGLE_FAILED
+                      ? "the two-subpass frame could not be recorded or submitted"
+                      : "a submission did not complete; the program's objects stay allocated");
+    ps5vk_triangle_finish(&triangle);
+    outcome.command_built = true;
+    outcome.passed = status == PS5VK_TRIANGLE_OK && frames == 2 && bands;
+}
+
 // Runs the Vulkan program with the package set's SPIR-V, one draw, and reads
 // its frame back: the solid frame, or the corner frame.
 void run_vulkan_frame(const TestContext &test, TestOutcome &outcome, bool corner, bool indirect,
@@ -24140,6 +24318,12 @@ constexpr RunnerTest kRunnerTests[] = {
 #ifdef AGC_VULKAN_DRIVER
     {"c7-clear", "m2", run_vulkan_image_clear},
 #endif
+    // R10: the two-subpass render pass whose second subpass reads the first's
+    // colour attachment as an input attachment and writes it out. The port's UI
+    // pass is this shape, and the read is the half no host run can measure
+    // (run_vulkan_subpass_frames, probes/v0-subpass-write and
+    // probes/v0-subpass-read).
+    {"v0-subpass", "v0-subpass-write", run_vulkan_subpass_frames},
     // Phase B8: two draws per frame in every grouping of command buffers and
     // submissions.
     {"b8-groups", "m2", run_vulkan_groups_frames},

@@ -1997,6 +1997,149 @@ create_render_pass(struct ps5vk_triangle *triangle, VkFormat format, VkAttachmen
    return CALL(triangle, CreateRenderPass)(triangle->device, &pass_info, NULL, pass);
 }
 
+/* R10's subpass-input probe: the second colour image the frame's render pass
+ * declares as attachment 0, which subpass 0 draws into and subpass 1 reads as
+ * its input attachment. Completely absent unless the caller asked for the
+ * probe, so every other frame's allocations and recording are exactly what
+ * they were. */
+static bool
+create_subpass_target(struct ps5vk_triangle *triangle, VkPhysicalDevice physical)
+{
+   if (!triangle->subpass_input)
+      return true;
+   if (triangle->output != PS5VK_TRIANGLE_OUTPUT_IMAGE)
+      return step(triangle, "subpass target", VK_ERROR_INITIALIZATION_FAILED,
+                  "the subpass-input probe reads back the program's image: attachment 1 is that "
+                  "image, which the display output has not got");
+   if (triangle->pipeline_count < 2)
+      return step(triangle, "subpass target", VK_ERROR_INITIALIZATION_FAILED,
+                  "the subpass-input probe draws subpass 0 with the first pipeline and subpass 1 "
+                  "with the second");
+   const VkImageCreateInfo image_info = {
+      .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+      .imageType = VK_IMAGE_TYPE_2D,
+      .format = triangle->format,
+      .extent = {PS5VK_TRIANGLE_WIDTH, PS5VK_TRIANGLE_HEIGHT, 1},
+      .mipLevels = 1,
+      .arrayLayers = 1,
+      .samples = VK_SAMPLE_COUNT_1_BIT,
+      .tiling = VK_IMAGE_TILING_OPTIMAL,
+      /* The colour attachment subpass 1 reads as an input attachment: the same
+       * two usages the driver's own image table answers for this format. */
+      .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT,
+      .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+      .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+   };
+   if (!step(triangle, "create_subpass_image",
+             CALL(triangle, CreateImage)(triangle->device, &image_info, NULL,
+                                         &triangle->subpass_image),
+             NULL))
+      return false;
+   VkMemoryRequirements requirements = {0};
+   CALL(triangle, GetImageMemoryRequirements)(triangle->device, triangle->subpass_image,
+                                              &requirements);
+   VkPhysicalDeviceMemoryProperties memory_properties;
+   CALL(triangle, GetPhysicalDeviceMemoryProperties)(physical, &memory_properties);
+   uint32_t memory_type = UINT32_MAX;
+   for (uint32_t index = 0; index < memory_properties.memoryTypeCount && memory_type == UINT32_MAX;
+        index++) {
+      if ((requirements.memoryTypeBits & (UINT32_C(1) << index)) &&
+          (memory_properties.memoryTypes[index].propertyFlags &
+           VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT))
+         memory_type = index;
+   }
+   const VkMemoryAllocateInfo allocation = {
+      .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+      .allocationSize = requirements.size,
+      .memoryTypeIndex = memory_type,
+   };
+   if (!step(triangle, "allocate_subpass_memory",
+             memory_type == UINT32_MAX
+                ? VK_ERROR_OUT_OF_DEVICE_MEMORY
+                : CALL(triangle, AllocateMemory)(triangle->device, &allocation, NULL,
+                                                 &triangle->subpass_memory),
+             NULL) ||
+       !step(triangle, "bind_subpass_memory",
+             CALL(triangle, BindImageMemory)(triangle->device, triangle->subpass_image,
+                                        triangle->subpass_memory, 0),
+             NULL))
+      return false;
+   const VkImageViewCreateInfo view_info = {
+      .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+      .image = triangle->subpass_image,
+      .viewType = VK_IMAGE_VIEW_TYPE_2D,
+      .format = triangle->format,
+      .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+   };
+   return step(triangle, "create_subpass_image_view",
+               CALL(triangle, CreateImageView)(triangle->device, &view_info, NULL,
+                                               &triangle->subpass_view),
+               NULL);
+}
+
+/* R10's render pass: two colour attachments and two subpasses -- subpass 0
+ * writes attachment 0, subpass 1 reads it as its input attachment and writes
+ * attachment 1. The pass the probe's frames use in place of the one-subpass
+ * pass every other frame records; nothing else about a frame changes. */
+static VkResult
+create_subpass_pass(struct ps5vk_triangle *triangle, VkRenderPass *pass)
+{
+   const VkAttachmentDescription attachments[2] = {
+      {.format = triangle->format,
+       .samples = VK_SAMPLE_COUNT_1_BIT,
+       .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+       .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+       .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+       .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+       .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+       .finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+      {.format = triangle->format,
+       .samples = VK_SAMPLE_COUNT_1_BIT,
+       .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+       .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+       .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+       .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+       .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+       .finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
+   };
+   const VkAttachmentReference written = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+   const VkAttachmentReference read = {0, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+   const VkAttachmentReference output = {1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+   const VkSubpassDescription subpasses[2] = {
+      {.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+       .colorAttachmentCount = 1,
+       .pColorAttachments = &written},
+      {.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+       .inputAttachmentCount = 1,
+       .pInputAttachments = &read,
+       .colorAttachmentCount = 1,
+       .pColorAttachments = &output},
+   };
+   /* Subpass 1 reads what subpass 0 wrote: the dependency an application
+    * declares for that, which the driver's own flush is what satisfies it --
+    * the subpass boundary is where the colour buffer is flushed and the
+    * submission splits for the draw that reads it (driver/ps5vk_draw.c). */
+   const VkSubpassDependency dependency = {
+      .srcSubpass = 0,
+      .dstSubpass = 1,
+      .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+      .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+      .dstAccessMask = VK_ACCESS_INPUT_ATTACHMENT_READ_BIT,
+      .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
+   };
+   const VkRenderPassCreateInfo pass_info = {
+      .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+      .attachmentCount = 2,
+      .pAttachments = attachments,
+      .subpassCount = 2,
+      .pSubpasses = subpasses,
+      .dependencyCount = 1,
+      .pDependencies = &dependency,
+   };
+   return CALL(triangle, CreateRenderPass)(triangle->device, &pass_info, NULL, pass);
+}
+
 /* Whether the caller's geometry is the m3-texture one a render-to-texture
  * frame needs: the two attributes the canary's vertex shader declares, at the
  * offsets of the 16-byte record, which is the layout the fill quad is written
@@ -2638,6 +2781,9 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
    triangle->output = input->output;
    /* Phase C4's render-to-texture case changes what a frame records and what
     * its sets name, so the program keeps it (input->texture_is_rendered). */
+   /* R10's subpass-input probe, which changes the frame's render pass and the
+    * attachments its framebuffers name (input->subpass_input). */
+   triangle->subpass_input = input->subpass_input;
    triangle->texture_is_rendered = input->texture_is_rendered;
    triangle->texture_tiled = input->texture_tiled;
    triangle->texture_upload = input->texture_upload;
@@ -2861,7 +3007,8 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
     * whose set has to name that image's view. Phase C5's depth attachment joins
     * it, before the render passes and framebuffers that name it, and Phase C7's
     * copied texture the same way: its view is what the frame samples. */
-   if (!create_rendered_texture(triangle, physical, input) ||
+   if (!create_subpass_target(triangle, physical) ||
+       !create_rendered_texture(triangle, physical, input) ||
        !create_copied_texture(triangle, physical, input) ||
        !create_resolve_target(triangle, physical, input) ||
        !create_depth_attachment(triangle, physical))
@@ -2881,8 +3028,10 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
    const VkImageLayout target_layout = display ? VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
                                               : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
    if (!step(triangle, "create_render_pass",
-             create_render_pass(triangle, triangle->format, input->load_op, target_layout,
-                                triangle->colour_attachment_count, &triangle->first_pass),
+             triangle->subpass_input
+                ? create_subpass_pass(triangle, &triangle->first_pass)
+                : create_render_pass(triangle, triangle->format, input->load_op, target_layout,
+                                     triangle->colour_attachment_count, &triangle->first_pass),
              "first") ||
        !step(triangle, "create_render_pass",
              create_render_pass(triangle, triangle->format, VK_ATTACHMENT_LOAD_OP_LOAD,
@@ -2909,16 +3058,27 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
        * view (Phase C5). A one-attachment frame keeps the view of the frame's own
        * image -- the display's per-image view, or the resolve destination's. */
       VkImageView framebuffer_views[PS5VK_TRIANGLE_MAX_TARGETS + 1];
-      for (uint32_t at = 0; at < triangle->colour_attachment_count; at++)
-         framebuffer_views[at] =
-            triangle->colour_attachment_count > 1
-               ? triangle->views[at]
-               : (triangle->resolve_output ? triangle->resolve_view : triangle->views[index]);
-      framebuffer_views[triangle->colour_attachment_count] = triangle->depth_view;
+      /* R10: the probe's framebuffer names the subpass target first, then the
+       * program's own image -- the two attachments the two-subpass pass
+       * declares. Every other frame's views are unchanged. */
+      uint32_t attachment_count = triangle->colour_attachment_count;
+      if (triangle->subpass_input) {
+         framebuffer_views[0] = triangle->subpass_view;
+         framebuffer_views[1] = triangle->resolve_output ? triangle->resolve_view
+                                                         : triangle->views[index];
+         attachment_count = 2;
+      } else {
+         for (uint32_t at = 0; at < triangle->colour_attachment_count; at++)
+            framebuffer_views[at] =
+               triangle->colour_attachment_count > 1
+                  ? triangle->views[at]
+                  : (triangle->resolve_output ? triangle->resolve_view : triangle->views[index]);
+      }
+      framebuffer_views[attachment_count] = triangle->depth_view;
       const VkFramebufferCreateInfo framebuffer_info = {
          .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
          .renderPass = triangle->first_pass,
-         .attachmentCount = triangle->colour_attachment_count + (triangle->depth ? 1u : 0u),
+         .attachmentCount = attachment_count + (triangle->depth ? 1u : 0u),
          .pAttachments = framebuffer_views,
          .width = PS5VK_TRIANGLE_WIDTH,
          .height = PS5VK_TRIANGLE_HEIGHT,
@@ -2952,6 +3112,33 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
       triangle->set_layouts[1] = triangle->set_layout;
       triangle->descriptor_sets[1] = triangle->descriptor_set;
       triangle->set_count = 2;
+   } else if (triangle->subpass_input) {
+      /* R10's probe: set 0 binding 0 is the subpass input attachment the second
+       * pipeline's fragment shader reads. Vulkan forbids writing a descriptor of
+       * this type -- the entry comes from the subpass, which is what the driver
+       * builds it from (driver/ps5vk_draw.c) -- but the *layout* is the
+       * application's, and it is what tells the driver's compiler that the
+       * shader's binding exists at all: without it the stage's metadata names no
+       * binding, no table is built, and the read fetches through an empty
+       * descriptor. The set itself is never bound and never written, which is
+       * what this type means. */
+      const VkDescriptorSetLayoutBinding input_attachment = {
+         .binding = 0,
+         .descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+         .descriptorCount = 1,
+         .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+      };
+      const VkDescriptorSetLayoutCreateInfo set_info = {
+         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+         .bindingCount = 1,
+         .pBindings = &input_attachment,
+      };
+      if (!step(triangle, "create_descriptor_set_layout",
+                CALL(triangle, CreateDescriptorSetLayout)(triangle->device, &set_info, NULL,
+                                                          &triangle->set_layout),
+                "set 0 binding 0 is an input attachment"))
+         return PS5VK_TRIANGLE_FAILED;
+      triangle->set_layouts[triangle->set_count++] = triangle->set_layout;
    } else if (input->two_descriptor_sets) {
       const VkDescriptorSetLayoutCreateInfo empty_set = {
          .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -3244,6 +3431,13 @@ record_body(struct ps5vk_triangle *triangle, VkCommandBuffer command, VkPipeline
                                             triangle->uniform_dynamic ? &dynamic_offset : NULL);
    }
    draw(triangle, command);
+   if (triangle->subpass_input && then != VK_NULL_HANDLE) {
+      /* R10: subpass 1. The next subpass is what puts the second pipeline's
+       * draws into the pass that reads attachment 0 as its input attachment,
+       * which is the whole point of the probe: the draw after this packet is
+       * the one whose shader reads what the draw before it wrote. */
+      CALL(triangle, CmdNextSubpass)(command, VK_SUBPASS_CONTENTS_INLINE);
+   }
    if (then != VK_NULL_HANDLE) {
       CALL(triangle, CmdBindPipeline)(command, VK_PIPELINE_BIND_POINT_GRAPHICS, then);
       if (triangle->set_count != 0) {
@@ -3842,6 +4036,14 @@ ps5vk_triangle_finish(struct ps5vk_triangle *triangle)
        * the case, and the driver's destroys and frees ignore zero. Its set went
        * with the texture's pool above. */
       CALL(triangle, DestroyFramebuffer)(device, triangle->rendered_framebuffer, NULL);
+      /* R10's subpass-input probe: the second colour attachment the frame's
+       * two-subpass pass declares, with its view and memory. All three are zero
+       * for a frame that did not ask for the probe. */
+      CALL(triangle, DestroyImageView)(device, triangle->subpass_view, NULL);
+      CALL(triangle, DestroyImage)(device, triangle->subpass_image, NULL);
+      if (triangle->subpass_mapped != NULL)
+         CALL(triangle, UnmapMemory)(device, triangle->subpass_memory);
+      CALL(triangle, FreeMemory)(device, triangle->subpass_memory, NULL);
       CALL(triangle, DestroyRenderPass)(device, triangle->rendered_pass, NULL);
       CALL(triangle, DestroyImageView)(device, triangle->rendered_view, NULL);
       CALL(triangle, DestroyImage)(device, triangle->rendered_image, NULL);

@@ -586,6 +586,14 @@ struct ps5vk_triangle_input {
     * same module with different entries here have to draw what those values say
     * (R9 of the port's requests; the case is v0-r9 in src/diagnostics.cpp). */
    const VkSpecializationInfo *pixel_specialization;
+   /* R10: whether the frame is the subpass-input probe. The render pass then
+    * has two colour attachments and two subpasses: subpass 0 draws into
+    * attachment 0 with the first pipeline, subpass 1 reads attachment 0 as its
+    * input attachment and writes attachment 1 -- the program's own image, which
+    * the caller reads back -- with the second pipeline. Both pipelines are the
+    * caller's, and both draws are the caller's geometry, which for this probe
+    * is the full-target triangle the m2 set declares. */
+   bool subpass_input;
 };
 
 
@@ -965,6 +973,17 @@ struct ps5vk_triangle {
    bool texture_blitted;
    bool texture_blit_scaled;
    bool texture_blit_linear;
+   /* R10: the frame's subpass-input probe state: the second colour image
+    * (attachment 0, which subpass 0 draws and subpass 1 reads) with its view
+    * and memory. Zero for every frame that did not ask for the probe. */
+   bool subpass_input;
+   VkImage subpass_image;
+   VkDeviceMemory subpass_memory;
+   VkImageView subpass_view;
+   /* The same image's mapped memory: what subpass 0 wrote, which a probe reads
+    * beside subpass 1's output (R10). */
+   void *subpass_mapped;
+   size_t subpass_bytes;
 };
 
 /* Creates every object into triangle. Unless the result is

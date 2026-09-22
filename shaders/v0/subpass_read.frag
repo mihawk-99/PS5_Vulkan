@@ -28,5 +28,12 @@ layout(location = 0) out vec4 color;
 
 void main()
 {
-    color = subpassLoad(input_colour);
+    const vec4 read = subpassLoad(input_colour);
+    // A read that returns nothing writes magenta instead of black, so the
+    // frame itself says which of the two happened: the writer's bands are never
+    // magenta (its blue channel is 128/255), and magenta is not the clear
+    // colour either (src/diagnostics.cpp, run_vulkan_subpass_frames). A driver
+    // whose read is broken then fails with a word that names the failure rather
+    // than with a black frame that a clear could also have produced.
+    color = (read.r + read.g + read.b + read.a) > 0.0 ? read : vec4(1.0, 0.0, 1.0, 1.0);
 }

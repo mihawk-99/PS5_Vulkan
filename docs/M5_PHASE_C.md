@@ -8280,3 +8280,41 @@ function of `gl_FragCoord` -- four vertical bands in R, four horizontal in G, so
 as a 32-byte entry). The console case that draws them through a two-subpass render pass is the next
 action, with the console run; until it passes, **nothing here is claimed** -- the compile-side
 measurement above is what is, and it is the port's own shader.
+
+### R10's subpass read, measured on the console: the mechanism works, the x scale does not
+
+Five console runs (pids in `Klog_Logs/r10-subpass.log`, queue `jobs/r10-subpass/queue.txt`) took the
+case from a dead title to a frame that draws both subpasses and reads. What each run measured:
+
+| run | what it showed |
+| --- | --- |
+| 1 | the shader compiled and the pipeline was created; the draw refused because the probe's pipeline layout named no input attachment at all |
+| 2 | with the layout declaring one, the *writer's* draw refused: the driver hands every layout binding to every stage and the compiler reports them all back, so a stage that never reads the binding still demanded an application write |
+| 3 | after narrowing each stage's metadata to the bindings its module declares: both subpasses draw, and **subpass 1 reads** -- `first_wrong 0xff800000`, `reader_samples 4 of 16` |
+| 4-5 | the case reads *both* attachments: `writer_samples 16 of 16` (subpass 0's own mapping holds the band pattern) and `reader_samples 4 of 16` |
+
+**What is proven.** The compiler patch, the draw-time synthesis, the subpass lookup, the descriptor
+table entry and the flush all work on the console: subpass 0's attachment is correct in its own
+memory, and subpass 1's draw fetched through the input attachment's descriptor -- 4 of 16 sampled
+texels are exactly the writer's, and they are the four in the first quarter-width (`x = 480`, all four
+rows). The descriptors are recorded in the case's capture: `entry0_low 0x2024000`, `entry0_high
+0xc3800000`, and the second subpass's colour target `CB_COLOR0_BASE 0x2004000` -- the read names the
+*other* image, as it must.
+
+**What is not.** Every texel past `x = 960` reads as band 0: the read behaves as if the attachment
+were 960 texels wide, which is `SQ_RSRC_IMG_WORD2`'s width field, `(extent.width - 1) >> 2`
+(ps5vk_draw.c, `ps5vk_write_image_descriptor`) -- 959 for a 3840-texel image. The writer's own
+mapping is *linear*, so this image is row-stored, and the sampled path's descriptors were only ever
+proven on tiled images (the m3 canary, C4's render-to-texture target). The next action is therefore a
+**descriptor question, not a subpass question**: what `WORD2`'s width field means for a row-stored
+image read by a fragment-stage fetch, and whether the row pitch belongs in `WORD4` (which the driver
+leaves zero, as the canary does). It is measurable on the host -- compile the two probe modules, write
+the descriptor for a 3840-wide row-stored image and compare with the recorded `0xc3800000` -- before
+another console cycle is spent.
+
+**Two other things this round put on the record.** `v0-subpass-write` and `v0-subpass-read` are
+committed probe sets; the reader writes magenta where its fetch returns nothing, so a broken read
+names itself instead of looking like a frame that was never drawn. And the harness gained a
+two-subpass mode (`input->subpass_input`) whose subpass-0 attachment is host-visible and mapped, which
+is what let the case separate "the writer did not draw it" from "the reader did not read it" -- a
+distinction the first three runs could not make.

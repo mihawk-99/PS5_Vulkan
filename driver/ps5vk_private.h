@@ -746,6 +746,9 @@ struct ps5vk_sampler {
  * (VkPhysicalDeviceLimits::maxPerStageDescriptorInputAttachments), and the
  * table is sized from the advertised number rather than from it. */
 #define PS5VK_MAX_INPUT_ATTACHMENTS 8
+/* Room for the bindings one shader declares: PSBC_MAX_DESCRIPTOR_BINDINGS is the
+ * compiler's own cap and no probe here declares more than a handful. */
+#define PS5VK_MAX_SPIRV_BINDINGS 32
 #define PS5VK_SPIRV_OP_EXECUTION_MODE 16
 #define PS5VK_SPIRV_EXECUTION_MODE_LOCAL_SIZE 17
 #define PS5VK_SPIRV_EXECUTION_MODEL_VERTEX 0
@@ -840,6 +843,17 @@ struct ps5vk_input_attachment
 uint32_t
 ps5vk_spirv_input_attachments(const uint32_t *words, size_t size, uint8_t stage,
                               struct ps5vk_input_attachment *out, uint32_t capacity);
+
+/* The (set, binding) pairs a module declares, from its own decorations: what a
+ * stage may legitimately build a table entry for. */
+struct ps5vk_spirv_binding
+{
+   uint8_t set;
+   uint8_t binding;
+};
+uint32_t
+ps5vk_spirv_bindings(const uint32_t *words, size_t size, struct ps5vk_spirv_binding *out,
+                     uint32_t capacity);
 
 /* R10: what this compiler has no path for, which a shader is refused for before
  * the compiler runs (ps5vk_pipeline.c). The graphics and compute paths both

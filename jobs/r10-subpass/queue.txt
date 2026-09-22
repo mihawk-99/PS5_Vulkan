@@ -1,0 +1,26 @@
+# PS5 Vulkan test runner job queue (PPSA99988): R10's subpass input, one run.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/r10-subpass/queue.txt
+#
+# m2-solid first is the capture's runner-built frame. v0-subpass is R10's own
+# case: a two-subpass render pass whose first subpass draws the positional band
+# pattern into attachment 0 and whose second subpass reads it with subpassLoad
+# and writes attachment 1, which the case reads back band for band -- the port's
+# UI pass shape, and the only place the read is executed. v0-capability is the
+# round's second ask in its console form: the same injected modules the host test
+# creates, through a pipeline on the console. The regression after them is the
+# set every round has kept green (docs/M5_PHASE_C.md, 2026-09-22).
+hold 60
+capture
+m2-solid
+v0-subpass
+v0-two-sets
+v0-separated-pair
+v0-push-constant
+c8-resolve
+v0-r9
+v0-lines
+v0-strip
+v0-fragmentless
+v0-cull
+v0-stencil
+exit

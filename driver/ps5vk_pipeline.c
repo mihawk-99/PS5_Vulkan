@@ -701,6 +701,69 @@ ps5vk_spirv_refusal(const uint32_t *words, size_t size, char *reason, size_t rea
  *
  * The scan is over the module the pipeline was created from, taken once at
  * creation because the application may destroy the module afterwards. */
+/* The bindings a module declares, as its own OpDecorate instructions name them:
+ * the pairs a stage's compiled table may hold. A layout binding the shader never
+ * reads is not one of them, and the draw must not demand an application write
+ * for it -- which is what an input attachment would need and never has (R10). */
+uint32_t
+ps5vk_spirv_bindings(const uint32_t *words, size_t size, struct ps5vk_spirv_binding *out,
+                     uint32_t capacity)
+{
+   const size_t count = size / sizeof(uint32_t);
+   if (words == NULL || count < PS5VK_SPIRV_HEADER_WORDS || words[0] != PS5VK_SPIRV_MAGIC)
+      return 0;
+   struct decorated
+   {
+      uint32_t id;
+      uint32_t set;
+      uint32_t binding;
+      bool have_set;
+      bool have_binding;
+   } slots[PS5VK_MAX_SPIRV_BINDINGS];
+   uint32_t seen = 0;
+   for (size_t at = PS5VK_SPIRV_HEADER_WORDS; at < count;) {
+      const uint32_t word_count = words[at] >> 16;
+      const uint32_t opcode = words[at] & 0xffff;
+      if (word_count == 0 || word_count > count - at)
+         break;
+      if (opcode == PS5VK_SPIRV_OP_DECORATE && word_count >= 4) {
+         const uint32_t decoration = words[at + 2];
+         if (decoration != PS5VK_SPIRV_DECORATION_DESCRIPTOR_SET &&
+             decoration != PS5VK_SPIRV_DECORATION_BINDING) {
+            at += word_count;
+            continue;
+         }
+         uint32_t slot = 0;
+         while (slot < seen && slots[slot].id != words[at + 1])
+            slot++;
+         if (slot == seen) {
+            if (seen == PS5VK_MAX_SPIRV_BINDINGS)
+               break;
+            slots[seen] = (struct decorated){.id = words[at + 1]};
+            slot = seen++;
+         }
+         if (decoration == PS5VK_SPIRV_DECORATION_DESCRIPTOR_SET) {
+            slots[slot].set = words[at + 3];
+            slots[slot].have_set = true;
+         } else {
+            slots[slot].binding = words[at + 3];
+            slots[slot].have_binding = true;
+         }
+      }
+      at += word_count;
+   }
+   uint32_t found = 0;
+   for (uint32_t slot = 0; slot < seen && found < capacity; slot++) {
+      if (!slots[slot].have_set || !slots[slot].have_binding)
+         continue;
+      out[found++] = (struct ps5vk_spirv_binding){
+         .set = (uint8_t)slots[slot].set,
+         .binding = (uint8_t)slots[slot].binding,
+      };
+   }
+   return found;
+}
+
 uint32_t
 ps5vk_spirv_input_attachments(const uint32_t *words, size_t size, uint8_t stage,
                               struct ps5vk_input_attachment *out, uint32_t capacity)
@@ -1866,9 +1929,22 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
       ps5vk_pipeline_free(device, pipeline, allocator);
       return result;
    }
-   /* R10: what the stages read as input attachments, taken from the modules
-    * while they are still the application's to destroy (ps5vk_draw.c binds
-    * those entries from the subpass, not from a descriptor write). */
+   /* R10: what the stages read, taken from the modules while they are still the
+    * application's to destroy.
+    *
+    * Two things come out of the same scan. The input-attachment bindings are the
+    * ones the draw fills from the subpass rather than from an application's
+    * write (Vulkan forbids a write of that type), with the shader's own
+    * InputAttachmentIndex saying which subpass input each one reads. And every
+    * stage's binding list is narrowed to the bindings the module itself
+    * declares: the driver hands the compiler every layout binding whose
+    * stageFlags name the stage, and the compiler reports them all back in its
+    * metadata, so a stage that never reads one would otherwise make the draw
+    * demand a write for a descriptor no instruction fetches -- which for an
+    * input attachment is a descriptor the application may not write at all.
+    *
+    * A stage whose module is NIR rather than SPIR-V (Mesa's meta stages) keeps
+    * its metadata exactly as the compiler wrote it. */
    const VkPipelineShaderStageCreateInfo *const stage_infos[PS5VK_PIPELINE_STAGE_COUNT] = {
       vertex, pixel};
    for (unsigned index = 0; index < PS5VK_PIPELINE_STAGE_COUNT; index++) {
@@ -1882,6 +1958,20 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
                                        pipeline->input_attachments +
                                           pipeline->input_attachment_count,
                                        room);
+      struct ps5vk_spirv_binding declared[PS5VK_MAX_SPIRV_BINDINGS];
+      const uint32_t declared_count = ps5vk_spirv_bindings(
+         module->words, module->size, declared, PS5VK_MAX_SPIRV_BINDINGS);
+      PsbcShaderMetadata *const metadata = &pipeline->stages[index].metadata;
+      uint32_t kept = 0;
+      for (uint32_t b = 0; b < metadata->descriptor_binding_count; b++) {
+         const PsbcDescriptorBinding *const binding = &metadata->descriptor_bindings[b];
+         bool used = false;
+         for (uint32_t d = 0; d < declared_count && !used; d++)
+            used = declared[d].set == binding->set && declared[d].binding == binding->binding;
+         if (used)
+            metadata->descriptor_bindings[kept++] = *binding;
+      }
+      metadata->descriptor_binding_count = kept;
    }
 #if DETECT_OS_LINUX
    ps5vk_pipeline_dump(pipeline);
