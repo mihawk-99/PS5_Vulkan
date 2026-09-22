@@ -718,3 +718,47 @@ attachment count, deletes the `colorAttachmentCount > 1` refusal in favour of on
 `VkPhysicalDeviceLimits.maxColorAttachments` read from the reported limits, and adds the
 probe: attachment counts 1, 2 and the maximum, each attachment a distinguishable value, every
 one read back, with R6's case in the battery. Nothing is claimed until that runs.
+
+## Step 1b, second pass — the two reads, both negative, and one new positive
+
+**Read 1: the clear path is general.** `ps5vk_CmdClearAttachments` hands the runtime's
+`vk_meta_rendering_info` to `vk_meta_clear_attachments` (`driver/ps5vk_draw.c`), and
+`cmd_buffer->render` records **every** attachment's format and write mask when the rendering
+begins, so the clear is not a single-target path. The inference it was meant to check
+therefore stands: attachment 1 reading zero -- with a coloured clear that also never reaches
+it -- is evidence about the *registers*, not about the clear.
+
+**Read 2: the consumer takes a count, not a fixed sixteen.**
+`sceAgcDcbSetCxRegistersIndirect(&command, cx, cx_count)` receives the whole block with
+`cx_count`, which `fixed` now computes from `colour_attachment_count * PS5VK_TARGET_REGISTER_COUNT`;
+the draw-packet budget (`PS5VK_DRAW_MAX_WORDS`) bounds the *packets*, not the context
+records, and does not change with the attachment count. So the producer and the consumer
+agree: rows 1..N are reserved, copied and consumed. The asymmetry the brief predicted
+between two halves of this change is **not** there.
+
+**One new positive: the offsets for targets 1..3 are confirmed by the device itself.** The
+console run that read attachment 1 as zero produced **no** "AGC's context defaults lack a
+colour target register" refusal, so `ps5vk_default_register()` found records at `0x327`,
+`0x336` and `0x345` in **AGC's own default table** -- which is a context-block layout, not a
+register-address list. That independently confirms what step 1a derived from
+`amdgfxregs.h`'s gfx103 rows: the context offsets of the second, third and fourth targets'
+`CB_COLORi_BASE` really are those dwords. (The host model's replay is what lacked them, and
+that is why it refused where the console did not.)
+
+**So the chain stands as: four of five links in hand, one unmeasured.** The shader requests
+four exports (`SPI_SHADER_COL_FORMAT 0x9999`, four live nibbles); the harness builds N images,
+views, attachments and a pass that names them; the driver fills N register rows from the
+device's own offsets; the stream reserves, copies and hands over N counted rows. What is
+still unverified is that those rows, once handed over, make the hardware write targets past
+the first -- the AGC/hardware semantics of `CB_COLOR_CONTROL`'s MODE, a per-`CB_COLORi_VIEW`
+field, or a requirement that the export word travel in the same block.
+
+**The measurement that settles it, and where it stopped.** The host model records the words
+the driver queues, so a frame drawn with the refusal lifted can be dumped
+(`PS5_HOST_SUBMISSION_DUMP`) and the target records decoded straight out of it -- no console
+cycle, seconds of work. The attempt ran out of this round's budget before producing the dump
+(the driver archive had not been rebuilt when the test linked, so the frame was still
+refused); the tree was restored to the committed state, and the parked
+`driver/tests/vk_v0_mrt_test.c` is where the assertions for the flipped expectation already
+live. That dump is the first step of the next attempt, and it decides between the three
+remaining shapes rather than guessing among them.
