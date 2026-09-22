@@ -113,8 +113,6 @@ static VkResult ps5vk_compute_pipeline_compile(struct ps5vk_device *device,
    if (module == NULL)
       return vk_errorf(device, VK_ERROR_UNKNOWN,
                          "a compute stage without a shader module is not supported");
-   if (info->stage.pSpecializationInfo && info->stage.pSpecializationInfo->mapEntryCount != 0)
-      return vk_errorf(device, VK_ERROR_UNKNOWN, "specialization constants are not supported");
    if (!ps5vk_spirv_has_entry_point(module, PS5VK_SPIRV_EXECUTION_MODEL_COMPUTE,
                                      info->stage.pName))
       return vk_errorf(device, VK_ERROR_UNKNOWN,
@@ -130,6 +128,12 @@ static VkResult ps5vk_compute_pipeline_compile(struct ps5vk_device *device,
    };
    VkResult result =
       ps5vk_descriptor_options(device, layout, VK_SHADER_STAGE_COMPUTE_BIT, &options);
+   /* R9: the stage's specialization constants, as a graphics stage's
+    * (ps5vk_specialization_options). A workgroup size a constant sets is not
+    * what the module's LocalSize says, and the check below refuses that by name. */
+   if (result == VK_SUCCESS)
+      result = ps5vk_specialization_options(device, info->stage.pSpecializationInfo, "compute",
+                                            &options);
    if (result != VK_SUCCESS)
       return result;
 

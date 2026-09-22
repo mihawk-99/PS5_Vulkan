@@ -1,0 +1,17 @@
+PS5 Vulkan v0-spec shader packages, built by tools/build-probe-shaders.sh v0-spec.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
+vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32_float:0:0:16:4 --vertex-attribute 1:r32g32_float:0:8:16:4; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2; writer --allow-unresolved
+no descriptors and no specialization entries in the package: the constants are the pipeline's, applied when it compiles the module (driver/tests/vk_v0_spec_test.c)
+vertex attributes: location 0 r32g32_float offset 0, location 1 r32g32_float offset 8, stride 16, binding 0
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+1198986662ca2c7c6271e56a695471395491351bf6970795f6e4306ae3593cf0  shaders/m3/texture.vert
+746dc6b5fac46d7ed10c0eda33fe2922abbce6c9950c515f2f3dad3625a7fe0d  shaders/v0/spec.frag
+26a020c3fe92d88b23c73ea10711b41b2d4b8f9225d4ce6bba6feabc66fe13ea  build/shaders/v0-spec/vertex.spv
+5f1102f4030d30618de367f17a30e395c883a919c4114e9d24e8ec8fdb5d772e  build/shaders/v0-spec/pixel.spv
+9797d9dc72fab55a72b118538a98ef6cf9f474810034021ab2d2a3083a9cf0f3  build/shaders/v0-spec/vertex.ngg.bin
+a1f0fde09355aeed62ff8dfaf9c4f02791666a7f319916b61bf465f6250340e5  build/shaders/v0-spec/vertex.hw.json
+c0fe3beab763638b15533165dc789b971d0bcdef84566b78af363d93e90a1ab9  build/shaders/v0-spec/pixel.raw.bin
+b3ca5942ad40fde928ad9e2f0f8447a0241b324327b02f349309e00677110fbb  build/shaders/v0-spec/pixel.hw.json

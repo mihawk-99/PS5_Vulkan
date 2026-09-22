@@ -273,6 +273,31 @@ v0-multiset)
         --descriptor-binding 0:0:uniform_buffer:1:0:16
         --descriptor-binding 1:0:combined_image_sampler:1:0:48)
     ;;
+v0-spec)
+    # R9's specialization-constant probe: one module whose output colour is chosen
+    # by two constants (a bool and an int), and the same expression with one set of
+    # values written as literals, so a compile of the two has to agree. No
+    # descriptors and no vertex inputs beyond the m3 quad's, so the stock compiler
+    # serves both. One label each, not `v0-spec|v0-spec-hardcoded`: the
+    # probe-packages check reads a builder off this file's own case labels, and an
+    # alternative after a `|` is not one.
+    vertex_source=shaders/m3/texture.vert
+    pixel_source=shaders/v0/spec.frag
+    output=probes/v0-spec
+    vertex_flags=(--address32-hi 2
+        --vertex-attribute 0:r32g32_float:0:0:16:4
+        --vertex-attribute 1:r32g32_float:0:8:16:4)
+    pixel_flags=(--address32-hi 2)
+    ;;
+v0-spec-hardcoded)
+    vertex_source=shaders/m3/texture.vert
+    pixel_source=shaders/v0/spec_hardcoded.frag
+    output=probes/v0-spec-hardcoded
+    vertex_flags=(--address32-hi 2
+        --vertex-attribute 0:r32g32_float:0:0:16:4
+        --vertex-attribute 1:r32g32_float:0:8:16:4)
+    pixel_flags=(--address32-hi 2)
+    ;;
 v0-multiset-quake)
     # R7's console shape: vkQuake's collapsed texture sets -- three combined
     # image samplers at set 0's bindings 0, 1 and 2 -- and the frame's uniform
@@ -1026,6 +1051,16 @@ elif set_name == "v0-separated-pair":
                 ("pixel_set0_binding0_stride", 48),
                 ("pixel_set1_binding0_offset", 0),
                 ("pixel_set1_binding0_stride", 48)]
+elif set_name in ("v0-spec", "v0-spec-hardcoded"):
+    if pixel.get("descriptor_bindings"):
+        fail("pixel stage unexpectedly declares descriptor bindings")
+    notes.append("no descriptors and no specialization entries in the package: the "
+                 "constants are the pipeline's, applied when it compiles the module "
+                 "(driver/tests/vk_v0_spec_test.c)")
+    bindings = [("address32_hi", expected_hi),
+                *vertex_input("vertex attributes: location 0 r32g32_float offset 0, "
+                              "location 1 r32g32_float offset 8, stride 16, binding 0"),
+                ("pixel_user_sgpr_count", pixel["user_sgpr_count"])]
 elif set_name == "m3-vertex":
     if pixel.get("descriptor_bindings"):
         fail("pixel stage unexpectedly declares descriptor bindings")

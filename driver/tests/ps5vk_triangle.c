@@ -2480,7 +2480,10 @@ create_pipeline(struct ps5vk_triangle *triangle, uint32_t index,
       {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
        .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = triangle->vertex[index], .pName = "main"},
       {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-       .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = triangle->pixel[index], .pName = "main"},
+       .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+       .module = triangle->pixel[index],
+       .pName = "main",
+       .pSpecializationInfo = input->pixel_specialization},
    };
    /* The caller's shaders fetch their vertices through one binding, which the
     * driver builds its vertex-buffer table from (driver/ps5vk_pipeline.c);

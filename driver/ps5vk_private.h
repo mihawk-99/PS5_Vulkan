@@ -768,6 +768,15 @@ VkResult
 ps5vk_descriptor_options(struct ps5vk_device *device, const struct vk_pipeline_layout *layout,
                          VkShaderStageFlags stage_bit, PsbcCompileOptions *options);
 
+/* R9: a stage's VkSpecializationInfo into the compiler options, which carry it to
+ * spirv_to_nir (tooling/psbc/patch-specialization.py); a NULL or empty one
+ * specialises nothing. Valid usage is checked here and refused by name, because
+ * an entry outside the data would be read past its end (ps5vk_pipeline.c). The
+ * options point at the application's arrays, which outlive the compile. */
+VkResult
+ps5vk_specialization_options(struct ps5vk_device *device, const VkSpecializationInfo *info,
+                             const char *stage_name, PsbcCompileOptions *options);
+
 /* Whether the command buffer has recorded a write to the buffer range: the
  * indirect draw and dispatch read their parameters when they are recorded, so
  * one whose parameters the same command buffer writes is refused

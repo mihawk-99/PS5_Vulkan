@@ -140,6 +140,13 @@ python3 "$root/tooling/psbc/patch-push-constant-location.py" "$tree"
 # docs/M5_PHASE_C.md, R7.
 python3 "$root/tooling/psbc/patch-descriptor-sets.py" "$tree"
 
+# Specialization constants: the compiler is RADV's front end, which already
+# applies a stage's VkSpecializationInfo in spirv_to_nir, but the standalone path
+# had no option to carry one and stubbed the conversion to NULL. The patch adds the
+# option, points the stage at it and restores Mesa's conversion; docs/M5_PHASE_C.md,
+# R9 of the vkQuake port's requests.
+python3 "$root/tooling/psbc/patch-specialization.py" "$tree"
+
 # libpsbc_support.ps5.a completes the archive for titles that link only the
 # compiler: ps5-opengl's C package writer (identical to the Python writer for
 # every probe package, A2), S3TC (ps5-opengl leaves it out because its Mesa

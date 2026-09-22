@@ -18322,6 +18322,145 @@ void run_vulkan_line_frames(const TestContext &test, TestOutcome &outcome) noexc
                              : "a line frame is not what its rectangles or its culled twin draw");
 }
 
+// R9 of the port's requests: specialization constants, core Vulkan 1.0. One module
+// whose output colour is chosen by two constants (a bool and an int) is built into
+// four pipelines with different VkSpecializationInfo, and each frame is read back
+// and compared **exactly** -- so the readback says which set of values arrived
+// rather than merely that two frames differ. Two more frames carry information the
+// specification calls invalid and have to be refused by name instead of compiled
+// with the shader's defaults.
+//
+// The values are whole 255ths (64 and 128) so an exact comparison is meaningful.
+constexpr std::uint32_t kSpecDefaultColour = 0xffff0000u;   /* R 0, G 0, B 255, A 255 */
+constexpr std::uint32_t kSpecLevel1Colour = 0xffff4000u;    /* R 0, G 64, B 255, A 255 */
+constexpr std::uint32_t kSpecRedLevel2Colour = 0xffff80ffu; /* R 255, G 128, B 255, A 255 */
+
+static ps5vk_triangle_shaders g_spec_shaders{};
+
+void run_vulkan_spec_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32_SFLOAT, 8},
+    };
+    // tint_red is the shader's own default (false); level is not, so each set here
+    // is a different constant's value arriving.
+    const VkBool32 red_true[2] = {VK_TRUE, 2};
+    const VkBool32 level_one[2] = {VK_FALSE, 1};
+    const VkBool32 malformed_values[2] = {VK_FALSE, 1};
+    const VkSpecializationMapEntry two_entries[2] = {
+        {.constantID = 0, .offset = 0, .size = sizeof(VkBool32)},
+        {.constantID = 1, .offset = sizeof(VkBool32), .size = sizeof(int32_t)},
+    };
+    // An entry that reads past the data blob, and the same entries with no map:
+    // both are invalid usage and both have to be refused rather than defaulted.
+    const VkSpecializationMapEntry past_data[2] = {
+        {.constantID = 0, .offset = 0, .size = sizeof(VkBool32)},
+        {.constantID = 1, .offset = 8, .size = sizeof(int32_t)},
+    };
+    struct Frame
+    {
+        const char *name;
+        const VkSpecializationInfo *info;
+        std::uint32_t expected;
+    };
+    const VkSpecializationInfo defaults_info = {0, nullptr, 0, nullptr};
+    const VkSpecializationInfo level_one_info = {2, two_entries, sizeof(level_one), level_one};
+    const VkSpecializationInfo red_level_two_info = {2, two_entries, sizeof(red_true), red_true};
+    const VkSpecializationInfo past_data_info = {2, past_data, sizeof(malformed_values),
+                                                 malformed_values};
+    const VkSpecializationInfo no_map_info = {2, nullptr, sizeof(malformed_values),
+                                              malformed_values};
+    const Frame frames[5] = {
+        {"defaults", &defaults_info, kSpecDefaultColour},
+        {"level 1", &level_one_info, kSpecLevel1Colour},
+        {"red, level 2", &red_level_two_info, kSpecRedLevel2Colour},
+        {"an entry past pData", &past_data_info, 0},
+        {"entries with no map", &no_map_info, 0},
+    };
+    unsigned matched = 0;
+    unsigned refused = 0;
+    for (const Frame &frame : frames)
+    {
+        const bool expect_refusal = frame.expected == 0;
+        log.event("agc_spec", "INFO", 0, frame.name);
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], g_spec_shaders, log))
+            return;
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        input.shaders[0] = g_spec_shaders;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = kAddressVertices;
+        input.vertex_count = kSquareVertexCount;
+        input.vertex_stride = kTextureVertexStride;
+        input.index_data = kIndices;
+        input.index_count = kIndexCount;
+        input.attribute_count = 2;
+        input.attributes[0] = attributes[0];
+        input.attributes[1] = attributes[1];
+        input.pixel_specialization = frame.info;
+        ps5vk_triangle triangle{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (expect_refusal)
+        {
+            const bool was_refused = status != PS5VK_TRIANGLE_OK;
+            refused += was_refused ? 1u : 0u;
+            log.event("agc_spec", was_refused ? "PASS" : "FAIL", was_refused ? 0 : -1,
+                      was_refused ? "the pipeline was refused rather than compiled with the "
+                                    "shader's defaults"
+                                  : "a pipeline with invalid specialization data was created");
+        }
+        else if (status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes)
+        {
+            flush_gpu_data(const_cast<void *>(triangle.target), kFramebufferBytes);
+            const auto *const words = static_cast<const std::uint32_t *>(triangle.target);
+            const FramebufferView view{words, kTiledRgba8Layout};
+            const std::uint32_t got = view.word(kOutputWidth / 2, kOutputHeight / 2);
+            char field[64]{};
+            std::snprintf(field, sizeof(field), "colour_%s", frame.name);
+            log.hex("agc_spec", field, got);
+            const bool same = got == frame.expected;
+            matched += same ? 1u : 0u;
+            log.event("agc_spec", same ? "PASS" : "FAIL", same ? 0 : -1,
+                      same ? "the frame holds the colour these values select"
+                           : "the frame does not hold the colour these values select");
+        }
+        else
+        {
+            log.event("agc_spec", "FAIL", -1, "the frame could not be recorded or submitted");
+        }
+        if (test.capture && status == PS5VK_TRIANGLE_OK)
+        {
+            log_driver_submission(triangle.device, frame.name, log);
+            log_driver_stages(triangle.device, log);
+        }
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            log.event("agc_spec", "FAIL", -1,
+                      "a submission did not complete; the program's objects stay allocated");
+            return;
+        }
+        ps5vk_triangle_finish(&triangle);
+    }
+    const bool passed = matched == 3 && refused == 2;
+    char detail[192]{};
+    std::snprintf(detail, sizeof(detail),
+                  "%u of 3 constants' sets drew the colour they select and %u of 2 invalid sets "
+                  "were refused",
+                  matched, refused);
+    log.event("agc_spec", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
+    outcome.command_built = true;
+    outcome.passed = passed;
+}
+
 // R4's residual gap (PS5_VULKAN_REQUESTS.md, R4; docs/REQUESTS_RESPONSE.md): the
 // colour clear, read back with nothing drawn over it. The stencil plane has had a
 // case of this shape since R3; the colour target has not -- and it is the shape
@@ -23864,6 +24003,10 @@ constexpr RunnerTest kRunnerTests[] = {
     // image, set 1 binding 0 a bare sampler -- accepted when the frame it draws is
     // texel for texel the combined form's (run_vulkan_separated_pair_frames).
     {"v0-separated-pair", "v0-separated-pair", run_vulkan_separated_pair_frames},
+    // R9 of the port's requests: one module, four pipelines built from different
+    // VkSpecializationInfo, each frame's colour read back exactly, and two invalid
+    // sets refused by name (run_vulkan_spec_frames).
+    {"v0-r9", "v0-spec", run_vulkan_spec_frames},
     // R7 step 1b: the four colour attachments the device advertises, drawn
     // through 1, 2 and the advertised maximum counts with a distinct value in
     // each and every one read back (run_vulkan_mrt_frames).

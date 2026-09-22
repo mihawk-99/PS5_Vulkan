@@ -581,6 +581,11 @@ struct ps5vk_triangle_input {
     * hardware alternating the winding, so a strip of a quad's four vertices is the
     * two triangles a list of its six indices draws (R6 of the port's requests). */
    VkPrimitiveTopology primitive_topology;
+   /* The fragment stage's specialization constants, or NULL for a stage that takes
+    * the shader's own defaults. The values are the pipeline's, so two frames of the
+    * same module with different entries here have to draw what those values say
+    * (R9 of the port's requests; the case is v0-r9 in src/diagnostics.cpp). */
+   const VkSpecializationInfo *pixel_specialization;
 };
 
 

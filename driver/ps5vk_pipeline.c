@@ -30,8 +30,7 @@
  * package can be checked. What these probes have not proven is refused with VK_ERROR_UNKNOWN
  * and a logged reason: other topologies, multisampling, instanced vertex
  * input, descriptor sets past the four this driver advertises, descriptor types
- * without a proven table entry, specialization constants and pipelines without
- * a vertex and a fragment stage.
+ * without a proven table entry, and pipelines without a vertex stage.
  */
 
 #include "ps5vk_private.h"
@@ -183,6 +182,50 @@ ps5vk_pipeline_free(struct ps5vk_device *device, struct ps5vk_pipeline *pipeline
    ps5vk_direct_mapping_destroy(&pipeline->shaders.stage);
    mtx_destroy(&pipeline->shaders.lock);
    vk_object_free(&device->vk, allocator, pipeline);
+}
+
+/* R9: specialization constants, core Vulkan 1.0. The compiler is RADV's front
+ * end, whose spirv_to_nir applies a stage's VkSpecializationInfo by SpecId; the
+ * options carry it there (tooling/psbc/patch-specialization.py). The compiler's
+ * entry is VkSpecializationMapEntry's own layout, so the application's array is
+ * handed over as it is. There is no pipeline cache yet (the cache is a zero-byte
+ * stub, ps5vk_pipeline_cache.c): when one stores compiled stages, the constants'
+ * values belong in its key, as RADV hashes them (radv_shader.c). */
+_Static_assert(sizeof(PsbcSpecializationEntry) == sizeof(VkSpecializationMapEntry) &&
+                  offsetof(PsbcSpecializationEntry, constant_id) ==
+                     offsetof(VkSpecializationMapEntry, constantID) &&
+                  offsetof(PsbcSpecializationEntry, offset) ==
+                     offsetof(VkSpecializationMapEntry, offset) &&
+                  offsetof(PsbcSpecializationEntry, size) ==
+                     offsetof(VkSpecializationMapEntry, size),
+               "the compiler's specialization entry is VkSpecializationMapEntry");
+
+VkResult
+ps5vk_specialization_options(struct ps5vk_device *device, const VkSpecializationInfo *info,
+                             const char *stage_name, PsbcCompileOptions *options)
+{
+   if (info == NULL || info->mapEntryCount == 0)
+      return VK_SUCCESS;
+   /* Valid usage: every entry's value lies inside pData (offset + size <=
+    * dataSize), and pData is present when dataSize is not 0. */
+   if (info->pMapEntries == NULL || (info->dataSize != 0 && info->pData == NULL))
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "%s stage: pSpecializationInfo names %u entries without their map or data",
+                       stage_name, info->mapEntryCount);
+   for (uint32_t i = 0; i < info->mapEntryCount; i++) {
+      const VkSpecializationMapEntry *const entry = &info->pMapEntries[i];
+      if (entry->offset > info->dataSize || entry->size > info->dataSize - entry->offset)
+         return vk_errorf(device, VK_ERROR_UNKNOWN,
+                          "%s stage: specialization constant %u reads %zu bytes at offset %u, past "
+                          "the %zu bytes of pData",
+                          stage_name, entry->constantID, entry->size, entry->offset,
+                          info->dataSize);
+   }
+   options->specialization_entry_count = info->mapEntryCount;
+   options->specialization_entries = (const PsbcSpecializationEntry *)info->pMapEntries;
+   options->specialization_data_size = info->dataSize;
+   options->specialization_data = info->pData;
+   return VK_SUCCESS;
 }
 
 /* The descriptor bindings every set the stage reads uses, into the compiler
@@ -617,8 +660,6 @@ ps5vk_compile_stage(struct ps5vk_device *device, const VkPipelineShaderStageCrea
    if (stage && !module && !nir_info)
       return vk_errorf(device, VK_ERROR_UNKNOWN,
                        "shader stages without a shader module are not supported");
-   if (stage && stage->pSpecializationInfo && stage->pSpecializationInfo->mapEntryCount != 0)
-      return vk_errorf(device, VK_ERROR_UNKNOWN, "specialization constants are not supported");
    if (stage && !nir_info && !ps5vk_spirv_has_entry_point(module,
                                                  vertex ? PS5VK_SPIRV_EXECUTION_MODEL_VERTEX
                                                         : PS5VK_SPIRV_EXECUTION_MODEL_FRAGMENT,
@@ -626,6 +667,16 @@ ps5vk_compile_stage(struct ps5vk_device *device, const VkPipelineShaderStageCrea
       return vk_errorf(device, VK_ERROR_UNKNOWN,
                        "%s stage: not well-formed SPIR-V with an entry point \"%s\"", stage_name,
                        stage->pName);
+
+   /* R9: the stage's own specialization constants. Mesa's meta stages are NIR,
+    * which has none to apply. */
+   PsbcCompileOptions stage_options = *options;
+   if (stage && !nir_info) {
+      const VkResult specialized = ps5vk_specialization_options(
+         device, stage->pSpecializationInfo, stage_name, &stage_options);
+      if (specialized != VK_SUCCESS)
+         return specialized;
+   }
 
    /* Lowering runs outside the compiler lock: it touches only this clone. */
    struct nir_shader *const nir =
@@ -645,7 +696,7 @@ ps5vk_compile_stage(struct ps5vk_device *device, const VkPipelineShaderStageCrea
     * 2026-09-20). */
    const uint32_t *const words = module ? module->words : NULL;
    const size_t size = module ? module->size : 0;
-   const PsbcResult result = ps5vk_compile_shader_deep(nir, words, size, options, &output);
+   const PsbcResult result = ps5vk_compile_shader_deep(nir, words, size, &stage_options, &output);
    const int written = result == PSBC_RESULT_OK
                           ? ps5_agc_package_build(&output, PS5VK_ESGS_RING_ITEM_SIZE,
                                                   &package->data, &package->size)

@@ -8116,3 +8116,59 @@ surface does not allow while the first holds VideoOut -- imageUsage with TRANSFE
 `VK_ERROR_UNKNOWN` and a message naming its field, and the C1 streams stay identical to the
 golden. Nothing here draws, so it needs no console run: the refusal is the driver's own
 reporting.
+
+## 2026-09-22 — R9: specialization constants, proved by four frames and two refusals
+
+**What moved.** The compiler gained `tooling/psbc/patch-specialization.py` (four edits: a
+`PsbcSpecializationEntry` with `VkSpecializationMapEntry`'s layout and four options appended to
+`PsbcCompileOptions`; validation and `stage->spec_info` before the main lowering, reset after;
+and Mesa's real `vk_spec_info_to_nir_spirv` in place of the stub, renamed in the driver's copy so
+the runtime keeps its own). RADV's existing `spirv_to_nir` path applies the values from there.
+The driver gained `ps5vk_specialization_options()` -- a static assertion that the two entry
+layouts match, a refusal by name for a malformed `VkSpecializationInfo`, and the application's
+arrays passed through -- called from `ps5vk_compile_stage` on a *copy* of the options and
+specializing SPIR-V stages only, never Mesa's NIR meta stages, and from `ps5vk_compute.c` the
+same way.
+
+**The acceptance, measured.** `v0-r9` builds one module (`probes/v0-spec`: a `constant_id` bool
+selecting the red channel and a `constant_id` int selecting green) into five pipelines and reads
+each frame back **exactly**. `Klog_Logs/r9-spec.log`:
+
+```
+colour_defaults 0xffff0000, colour_level 1 0xffff4000, colour_red, level 2 0xffff80ff
+"3 of 3 constants' sets drew the colour they select and 2 of 2 invalid sets were refused"
+```
+
+The three words are the constants' values in the readback's byte order (R 0/0/255, G 0/64/128,
+B 255), so the readback says *which* set arrived rather than merely that two frames differ. The
+two invalid sets -- an entry reading past `pData`, and entries with no map -- were **refused
+rather than compiled with the shader's defaults**. The compiler half is
+`driver/tests/vk_v0_spec_test.c`: the same module compiled with no entries, with those values,
+and with `probes/v0-spec-hardcoded`'s literals gives 40, 48 and 48 bytes of machine code -- the
+specialized stage differs from the default and equals the literal one, 4 of 4 checks.
+
+**This round's single console run** (`jobs/r8-lines/queue.txt`, 14 cases): `v0-r9` PASS,
+`v0-strip` PASS (the strip's link value is 6, not the fan's 5, and the old "GPU wedge" was the
+harness aborting on a zero-size index buffer), `v0-fragmentless` PASS, the standing cases PASS,
+**`v0-lines` FAIL** -- R8's own case, its first console run, and the round's one open item.
+
+**Host gates.** lint PASS (212 files), `make test` 31 OK, the three audits PASS, migration PASS,
+migration now covering the new patch, `check-runner-cases.sh` PASS (206 records, inventory
+unchanged), `check-driver.sh` 1620 checks with **284** identical golden comparisons. One failure:
+`c1_present` loader mode, 15 of 16 -- *"a plane surface whose imageExtent the plane does not have
+is refused ... naming imageExtent"* -- while the **direct** build passes 16 of 16 and the driver's
+sentence is in the log in both modes. It is loader-environmental and pre-existing: this commit
+touches no plane-surface or swapchain code, and the previous session's host run was on a clone.
+Recorded rather than fixed under this commit.
+
+**One gate this round found by not running it.** `probe-packages` -- part of `build/gates.sh` and
+of `check-driver.sh` -- failed on the first full pass: *"`v0-spec` committed but neither rebuilt
+nor excepted"*. The new sets were written as one case alternative,
+`v0-spec|v0-spec-hardcoded)`, and the check reads a set's builder off this file's own case labels
+(`^\K[a-z0-9-]+(?=\))`), so an alternative after a `|` is not a label and neither set had a
+builder as far as the coverage arithmetic was concerned. The build script now has one label each
+(the comment beside them says why), and the check is PASS: **51 committed sets, 49 rebuilt and
+compared byte for byte**, `v0-spec` and `v0-spec-hardcoded` among them, with `c8-sampleid` and
+`shaders` the two named exceptions. Worth recording as itself: the packages were correct the whole
+time and the gate was right to fail -- what it caught was a set that nothing in the tree could
+rebuild, which is exactly the drift it exists to prevent.

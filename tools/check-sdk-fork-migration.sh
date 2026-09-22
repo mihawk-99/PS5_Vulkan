@@ -15,8 +15,8 @@
 #     assembled tree is the psbc_patch.patched_tree the manifest records
 #     (tooling/sdk/assemble-psbc-fork.sh does the work and fails loudly);
 #   - patch-fragment-inputs.py, patch-descriptor-types.py,
-#     patch-vertex-formats.py, patch-push-constant-location.py and
-#     patch-descriptor-sets.py hold against that tree;
+#     patch-vertex-formats.py, patch-push-constant-location.py,
+#     patch-descriptor-sets.py and patch-specialization.py hold against that tree;
 #   - patch-compute-metadata.py is gone: the fork's own schema carries the
 #     compute fields, with compute_lds_bytes in place of compute_lds_size
 #     (tools/build-psbc-ps5.sh records the reasoning).
@@ -35,7 +35,7 @@ echo "== this project's compiler patches against the fork's tree"
 status=0
 for script in patch-fragment-inputs patch-aco-min-waves patch-descriptor-types \
               patch-vertex-formats patch-push-constant-location \
-              patch-descriptor-sets; do
+              patch-descriptor-sets patch-specialization; do
     if out=$(python3 "$root/tooling/psbc/$script.py" "$work" 2>&1); then
         printf '   %-24s holds: %s\n' "$script" "$(printf '%s' "$out" | tail -n 1)"
     else
