@@ -114,7 +114,11 @@ pass does not retire a golden either. Both sets of evidence are kept.
   application uses it.
 - Do not fix a CTS failure by weakening the test, hardcoding an expected output,
   special-casing a test name, or detecting CTS workloads.
-- Do not conflate harness and port failures with driver failures.
+- Do not conflate harness and port failures with driver failures. One case already has that
+  label with its evidence: `dEQP-VK.api.info.extension_core_versions` fails for every
+  extension including the loader's own, and four candidate inputs -- this driver's instance
+  version, the loader's, this driver's device version (measured, not assumed) and the
+  check's own comparison -- have been eliminated (`docs/M5_PHASE_C.md`, CTS round 12).
 - Do not trust final framebuffer output alone: check memory visibility,
   availability bits, query semantics, object lifetime and synchronization
   ordering.

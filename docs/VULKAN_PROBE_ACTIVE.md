@@ -120,8 +120,11 @@ passed / **4 failed**. Then the atomic bit for the integer twins,
 earned by a new probe that atomically adds per fragment and checks the count
 (`v0-formats-texel-buffer-atomic` PASS, digest `28d073e9…`). `dEQP-VK.api.info.*` is now
 **2542 passed / 2 failed**. The rest: the compressed-format set (every BC, ETC2 and ASTC
-format reports `0x0` today, so it is a real format-table gap), CTS's `getUsedApiVersion()`
-source, and the console payload (`docs/M5_PHASE_C.md`, rounds 6 to 11).
+format reports `0x0` today, so it is a real format-table gap), and the console payload.
+`extension_core_versions` is no longer counted as driver work: it fails for every extension
+including the loader's own, and four candidate inputs were eliminated -- the last by
+measurement -- so it carries the **HARNESS/PORT** label for the run's manifest
+(`docs/M5_PHASE_C.md`, rounds 6 to 12).
 
 **An upstream AGC source was checked against this driver** (2026-09-21). The
 static-recompilation project's published tile-equation table agrees, texel for texel, with

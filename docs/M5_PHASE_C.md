@@ -7151,3 +7151,43 @@ bits across rounds 7 to 9, and these two). What is left in the group is the
 compressed-format set -- no cheap fix: every BC, ETC2 and ASTC format reports `0x0` today,
 so it is a real format-table gap -- and `extension_core_versions`, whose cause is narrowed
 but not yet found.
+
+## 2026-09-21 — round 12: the version case is a harness finding, with four candidates eliminated
+
+`dEQP-VK.api.info.extension_core_versions` is one of the two failures left in the group, and
+this round's work is to say what it *is*. The case asks, for every extension the
+implementation reports, whether the version in use supports that extension's required core
+version -- and it fails for **every** one of them:
+
+```
+Required core version for VK_KHR_surface not met (1.0)
+Required core version for VK_KHR_swapchain not met (1.0)
+Required core version for VK_KHR_display not met (1.0)
+...
+Required core version for VK_KHR_portability_enumeration not met (1.0)
+Required core version for VK_LUNARG_direct_driver_loading not met (1.0)
+```
+
+Two of those extensions are the **loader's**, not this driver's, which already says the
+check's input is not ours. The CTS source then says where it comes from:
+`determineDeviceVersions` (`external/vulkancts/modules/vulkan/vktTestCase.cpp:189`) reads each
+physical device's `apiVersion` and the context reports that as the version in use, and the
+comparison is `isApiVersionSupported(used, VK_MAKE_API_VERSION(0, 1, 0, 0))`
+(`vkApiVersion.cpp`), whose predecessor graph does reach 1.0 from 1.1, 1.2 **and** 1.3.
+
+Four candidates are now eliminated, three by reading and one by a controlled experiment:
+
+| candidate | how it was eliminated |
+| --- | --- |
+| the driver's instance version | answered `0x400000` when called directly on the built `libvulkan_ps5vk.so` |
+| the loader's instance version | CTS's own graph accepts 1.3, so its answer would pass the check |
+| the driver's **device** version | **measured**: with `PS5VK_DEVICE_API_VERSION` temporarily set to `VK_API_VERSION_1_3` and the driver rebuilt, the case still fails (the change was reverted and the driver rebuilt again) |
+| the check's own logic | `isApiVersionSupported` reaches 1.0 from every version CTS can have chosen, so a used version of 1.0, 1.1, 1.2 or 1.3 all pass it |
+
+What remains is a value none of those paths produces -- which makes this a **HARNESS/PORT**
+result in the four-way classification `docs/CTS.md` already defines, not a driver failure,
+and the honest thing is to label it as one rather than to keep guessing at it. Two things
+follow: the manifest that selects cases for a run records this case with that label and the
+evidence above, and a future round can pin it down by instrumenting the CTS side of the
+version query rather than this driver. Nothing in the driver is changed by this round, and no
+capability is claimed or unclaimed because of it.
