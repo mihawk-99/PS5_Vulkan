@@ -7056,3 +7056,36 @@ the moment the bits landed. It now asserts the opposite for that format (both te
 features, which the console proved) and uses `R32G32B32_SFLOAT`, which reports
 `VERTEX_BUFFER` alone, as the negative. Every one of the three was a place where the
 repository already knew the answer, which is the point of keeping them.
+
+## 2026-09-21 — round 9: R32_SFLOAT's vertex bit, and the CTS case closes
+
+The last of the three buffer bits the CTS requires for `R32_SFLOAT`, and the one round 8
+deliberately left unclaimed because nothing behind it had been proved. This round put the
+proof first: `ps5vk_vertex_formats` gained its row (`PSBC_VERTEX_FORMAT_R32_FLOAT`, a word
+the compiler has had since the vertex-formats patch), the case's table gained a row in the
+float family's set, and only then did the feature row claim the bit.
+
+The row's numbers are exact: the vertex buffer holds `0x3E800000` (0.25), the attribute is
+`R32_SFLOAT` with a four-byte stride, and Vulkan's fill rule gives the three components the
+format does not have 0, 0 and 1 -- so the frame holds `(0.25, 0, 0, 1)` and the readback is
+`{0x40, 0x00, 0x00, 0xff}`, the same answer `R8_UNORM`'s row gets from its single byte.
+
+**Console proof** (pid 111, title digest `7e8ac5ea…`, `Klog_Logs/v0-target-float-vertex.log`,
+queue `jobs/v0-target-float-vertex/queue.txt`): `v0-vertex-formats` PASS with its eighteen
+rows, `v0-formats` (the audit mirror) PASS, `m2-solid` PASS, 735 PASS records. The
+inventory's row now reads `optimal 0xdc83, buffer 0x58` -- all three required bits.
+
+**The CTS case is closed.** `dEQP-VK.api.info.*` went from 2539 passed / 5 failed to **2540
+passed / 4 failed**: `format_properties.r32_sfloat` passes, so one of the five original
+failures is finished, three rounds after it was found (the colour-attachment bit in round 7,
+the two texel-buffer bits in round 8, the vertex bit here). What remains in that group:
+`STORAGE_TEXEL_BUFFER_ATOMIC_BIT` for `r32_uint`/`r32_sint`, the compressed-format set, and
+`extension_core_versions`.
+
+**Two of this repository's guards caught mistakes on the way**, both worth the ink: the
+queue named the probe *set* (`v0-vertex-bytes-float`) instead of the runner *case*
+(`v0-vertex-formats`), which `tests/test_tools.py`'s "every queue case is a runner case"
+test caught before the console did -- and the console's own queue parser then rejected the
+first run with "unknown test name", so no round was lost to a battery that proved nothing;
+and the audit mirror's `v0-formats` case refused the new bit until its expectation table
+carried it too.

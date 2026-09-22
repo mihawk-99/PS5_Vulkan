@@ -113,9 +113,10 @@ hunt for CTS's `getUsedApiVersion()` continues). And `R32_SFLOAT` gained the
 colour-attachment bit the specification requires, with a new probe set and runner case
 proved on the console (`v0-targets-float` PASS, digest `1ac8b831…`), then its two
 texel-buffer bits with both cases' rows proved the same way (digest `c1f75ff6…`, 17 of 17
-uniform and 8 of 8 storage). Its `VERTEX_BUFFER` bit is deliberately **unclaimed**: the
-format is not in the driver's vertex-format table, so no probe fetches it as an attribute,
-and the CTS case names that one bit instead of three. The rest:
+uniform and 8 of 8 storage). Its `VERTEX_BUFFER` bit followed in round 9, claimed
+only once the driver's vertex-format table and the v0-vertex-formats case could fetch one
+(digest `7e8ac5ea…`) -- which **closed that CTS case**: `dEQP-VK.api.info.*` is now 2540
+passed / **4 failed**. The rest:
 `STORAGE_TEXEL_BUFFER_ATOMIC_BIT` for R32_UINT/SINT, a compressed-format set (every BC,
 ETC2 and ASTC format reports `0x0` today), CTS's `getUsedApiVersion()` source, and the
 console payload (`docs/M5_PHASE_C.md`, rounds 6 to 8).

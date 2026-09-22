@@ -744,7 +744,7 @@
       "optimal": "0xcc83"
     },
     "VK_FORMAT_R32_SFLOAT": {
-      "buffer": "0x18",
+      "buffer": "0x58",
       "linear": "0x0",
       "optimal": "0xdc83"
     },

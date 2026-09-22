@@ -14012,7 +14012,8 @@ constexpr FormatQuery kFormatQueries[] = {
      * its 32_R export (runs/v0-target-float, docs/M5_PHASE_C.md round 7). */
     {VK_FORMAT_R32_SFLOAT, "R32_SFLOAT",
      KSAMPLED | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT,
-     VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT | VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT},
+     VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT | VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT |
+         VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT},
     {VK_FORMAT_D16_UNORM, "D16_UNORM",
      VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
          VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
@@ -20519,7 +20520,7 @@ struct VertexFormatRow
     std::uint8_t expected[4];
 };
 
-constexpr std::array<VertexFormatRow, 17> kVertexFormatRows = {{
+constexpr std::array<VertexFormatRow, 18> kVertexFormatRows = {{
     {VK_FORMAT_R32_UINT, "R32_UINT", "v0-vertex-bytes-uint", 4, {0x40u}, {0x40, 0x00, 0x00, 0x01}},
     {VK_FORMAT_R32G32_UINT,
      "R32G32_UINT",
@@ -20545,6 +20546,17 @@ constexpr std::array<VertexFormatRow, 17> kVertexFormatRows = {{
      16,
      {0xffffffc0u, 0x00000040u, 0xffffffe0u, 0xffffff80u},
      {0x40, 0xc0, 0x60, 0x00}},
+    /* The single-channel 32-bit float vertex attribute, whose VERTEX_BUFFER bit
+     * the CTS requires for R32_SFLOAT. 0x3E800000 is 0.25, and Vulkan's fill
+     * rule gives the three components the format does not have 0, 0 and 1, so
+     * the frame holds (0.25, 0, 0, 1) -- the readback R8_UNORM's row gets from
+     * its own single byte. */
+    {VK_FORMAT_R32_SFLOAT,
+     "R32_SFLOAT",
+     "v0-vertex-bytes-float",
+     4,
+     {0x3e800000u},
+     {0x40, 0x00, 0x00, 0xff}},
     {VK_FORMAT_R8G8B8A8_UNORM,
      "R8G8B8A8_UNORM",
      "v0-vertex-bytes-float",

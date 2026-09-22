@@ -79,6 +79,12 @@ static const struct {
     * fragment's alpha. */
    {VK_FORMAT_R32G32B32_SINT, PSBC_VERTEX_FORMAT_R32G32B32_SINT},
    {VK_FORMAT_R32G32B32_UINT, PSBC_VERTEX_FORMAT_R32G32B32_UINT},
+   /* The single-channel 32-bit float, whose VERTEX_BUFFER bit the CTS requires
+    * for R32_SFLOAT (dEQP-VK.api.info.format_properties.r32_sfloat). The console
+    * probe is the runner's v0-vertex-bytes-float case, whose row writes 0.25 as
+    * 0x3E800000 and reads the four components Vulkan's fill rule gives an
+    * attribute whose format has one (docs/M5_PHASE_C.md, CTS round 9). */
+   {VK_FORMAT_R32_SFLOAT, PSBC_VERTEX_FORMAT_R32_FLOAT},
    /* Rung round 3: the nine rows docs/V0_FORMATS_AUDIT.md leaves probe-reachable
     * whose type a PsbcVertexFormat names, so a VkFormat the compiler has no word
     * for stays out of this table and the assert below keeps it that way. The two

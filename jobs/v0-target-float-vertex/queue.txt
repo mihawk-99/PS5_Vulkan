@@ -1,0 +1,17 @@
+# PS5 Vulkan test runner job queue (PPSA99988): R32_SFLOAT as a vertex attribute.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-target-float-vertex/queue.txt
+#
+# The last of the three buffer bits the CTS requires for R32_SFLOAT
+# (dEQP-VK.api.info.format_properties.r32_sfloat) is VERTEX_BUFFER, and it is
+# claimed only because a probe now fetches one: the driver's vertex-format table
+# gained the row (PSBC_VERTEX_FORMAT_R32_FLOAT) and the v0-vertex-bytes-float
+# case gained a row that writes 0.25 as 0x3E800000 and reads back the four
+# components Vulkan's fill rule gives an attribute whose format has one. The
+# other two bits were proved in round 8; v0-formats is the mirror that has to
+# keep agreeing, and m2-solid is the standing control.
+hold 60
+capture
+v0-vertex-formats
+v0-formats
+m2-solid
+exit
