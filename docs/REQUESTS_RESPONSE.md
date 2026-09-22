@@ -653,3 +653,68 @@ targets changes exactly that arithmetic. The refusal past the limit names
 
 **State**: not started. The next commit is the draw path's per-attachment programming, the
 probe, and the console run.
+
+## Step 1a — the per-target register table, derived and validated (`134e956`)
+
+**What moved.** `ps5vk_target_offsets` was sixteen offsets for one colour target. It is now
+sixteen rows by four columns, one column per colour attachment, and every function that fills
+target registers names the attachment whose row it fills (`ps5vk_default_target_registers`,
+`ps5vk_target_registers`); `PS5VK_MAX_COLOR_TARGETS` (4) has one owner and two readers — the
+driver reports it as `maxColorAttachments` and programs up to it — so the number the device
+advertises and the number the draw honours cannot drift. The draw still programs one target
+(its callers pass 0), so this commit claims no capability: it is the table and the plumbing
+the loop needs.
+
+**The two open questions, settled from the header** (`.deps/.../amdgfxregs.h`, `(address -
+0x28000)/4`, the arithmetic the table's own comment documents):
+
+1. **gfx103 confirmed.** The header carries gfx9/gfx10/gfx103/gfx11/gfx115 under the same
+   names and their addresses differ; taking only the rows whose generation comment covers
+   gfx103 reproduces **all sixteen** of the entries the table already carried for target 0,
+   dword for dword. That is the validation: the reader agrees with the table where the table
+   is known good, so its answers for targets 1-3 are trustworthy. The comments are a small
+   language -- `<= gfx9, >= gfx10` covers *everything*, and two earlier readings of it got
+   that wrong, once by prefix and once by treating a clause list as a single range.
+2. **`_ATTRIB2` and `_ATTRIB3` located**: `0x3b0..0x3b3` and `0x3b8..0x3bb`, per-target
+   stride **1**, with the fields eight dwords apart. They are not derivable from the
+   fifteen-dword stride the first ten registers use.
+
+The finished table, as the code carries it:
+
+```
+field            t0     t1     t2     t3     stride
+BASE             0x318  0x327  0x336  0x345  15     BASE_EXT        0x390  0x391  0x392  0x393  1
+VIEW             0x31b  0x32a  0x339  0x348  15     CMASK_BASE_EXT  0x398  0x399  0x39a  0x39b  1
+INFO             0x31c  0x32b  0x33a  0x349  15     FMASK_BASE_EXT  0x3a0  0x3a1  0x3a2  0x3a3  1
+ATTRIB           0x31d  0x32c  0x33b  0x34a  15     DCC_BASE_EXT    0x3a8  0x3a9  0x3aa  0x3ab  1
+DCC_CONTROL      0x31e  0x32d  0x33c  0x34b  15     ATTRIB2         0x3b0  0x3b1  0x3b2  0x3b3  1
+CMASK            0x31f  0x32e  0x33d  0x34c  15     ATTRIB3         0x3b8  0x3b9  0x3ba  0x3bb  1
+FMASK            0x321  0x330  0x33f  0x34e  15
+CLEAR_WORD0      0x323  0x332  0x341  0x350  15
+CLEAR_WORD1      0x324  0x333  0x342  0x351  15
+DCC_BASE         0x325  0x334  0x343  0x352  15
+```
+
+**A trap the change created and caught before committing.** The context stream's copy was
+`memcpy(cx, cmd_buffer->target_registers, sizeof(cmd_buffer->target_registers))` while the
+reservation above it stayed `PS5VK_TARGET_REGISTER_COUNT` records. With a row per target,
+that `sizeof` is four rows and the copy would have written three of them past the space
+reserved -- the exact arithmetic R6's heap corruption lived in, and silent by construction.
+It is `sizeof(cmd_buffer->target_registers[0])` now, with the comment saying why and naming
+the loop that will multiply the reservation and the copy together.
+
+**Evidence**: `tools/check-driver.sh` PASS (every test, three modes, every `compare-run` case
+identical to its golden -- so row 0 is byte-for-byte the offsets the frames already ran with);
+`build/gates.sh` PASS; `make lint` PASS; the standing list **12 of 12** on the console (`Klog_Logs/standing-list.log`,
+run_start pid 115 -- the first draft of this line said 142, and the log is what says
+otherwise; the console's run counter restarted since the earlier cycles), driver sha256
+`134e9564…`. The only FAILs in that log are
+the two refusals the harness expects.
+
+**Gap left open, with its mechanism: the draw's per-attachment programming.** The next commit
+makes the begin-rendering path loop over the rendering's attachments (fill row *i*, track
+attachment *i* in the target dynarray), multiplies the stream reservation and the copy by the
+attachment count, deletes the `colorAttachmentCount > 1` refusal in favour of one naming
+`VkPhysicalDeviceLimits.maxColorAttachments` read from the reported limits, and adds the
+probe: attachment counts 1, 2 and the maximum, each attachment a distinguishable value, every
+one read back, with R6's case in the battery. Nothing is claimed until that runs.

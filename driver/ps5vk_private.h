@@ -226,8 +226,14 @@ struct ps5vk_agc_register {
    uint32_t value;
 };
 
-/* The 16 CB_COLOR0 registers of a colour target (ps5vk_draw.c). */
+/* The 16 CB_COLORi_* registers of one colour target (ps5vk_draw.c). */
 #define PS5VK_TARGET_REGISTER_COUNT 16
+
+/* The colour attachments this driver binds: **four**, which is the number it
+ * advertises (VkPhysicalDeviceLimits.maxColorAttachments, ps5vk_physical_device.c)
+ * and the specification's floor. One owner, two readers: the driver reports this
+ * number and programs up to it, so the two cannot drift. */
+#define PS5VK_MAX_COLOR_TARGETS 4
 
 /* The 16 DB_* registers of a depth target and the DB_DEPTH_CONTROL word a draw
  * sets from its pipeline's depth state (ps5vk_draw.c, Phase C5). */
@@ -496,7 +502,11 @@ struct ps5vk_cmd_buffer {
     * registers. */
    bool rendering;
    VkExtent2D target_extent;
-   struct ps5vk_agc_register target_registers[PS5VK_TARGET_REGISTER_COUNT];
+   /* One row per colour attachment the rendering declares, in attachment order:
+    * the draw copies as many rows into its context stream as the rendering has
+    * attachments (ps5vk_draw.c). */
+   struct ps5vk_agc_register target_registers[PS5VK_MAX_COLOR_TARGETS]
+                                           [PS5VK_TARGET_REGISTER_COUNT];
    /* The rasterizer registers a four-sample target needs, and how many of them
     * this rendering has: zero for a one-sample one (Phase C8). */
    uint32_t multisample_count;

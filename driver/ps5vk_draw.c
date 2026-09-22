@@ -207,26 +207,41 @@
  * block's record count at 0x20 (the layout the test runner reads). */
 #define PS5VK_DEFAULTS_COUNT_OFFSET 0x20
 
-/* gfx103 context register offsets: (address - 0x28000) / 4. */
-static const uint16_t ps5vk_target_offsets[PS5VK_TARGET_REGISTER_COUNT] = {
-   0x318, /* CB_COLOR0_BASE */
-   0x31b, /* CB_COLOR0_VIEW */
-   0x31c, /* CB_COLOR0_INFO */
-   0x31d, /* CB_COLOR0_ATTRIB */
-   0x31e, /* CB_COLOR0_DCC_CONTROL */
-   0x31f, /* CB_COLOR0_CMASK */
-   0x321, /* CB_COLOR0_FMASK */
-   0x323, /* CB_COLOR0_CLEAR_WORD0 */
-   0x324, /* CB_COLOR0_CLEAR_WORD1 */
-   0x325, /* CB_COLOR0_DCC_BASE */
-   0x390, /* CB_COLOR0_BASE_EXT */
-   0x398, /* CB_COLOR0_CMASK_BASE_EXT */
-   0x3a0, /* CB_COLOR0_FMASK_BASE_EXT */
-   0x3a8, /* CB_COLOR0_DCC_BASE_EXT */
-   0x3b0, /* CB_COLOR0_ATTRIB2 */
-   0x3b8, /* CB_COLOR0_ATTRIB3 */
+/* gfx103 context register offsets: (address - 0x28000) / 4, one row per register
+ * and one column per colour attachment, in attachment order. Derived from
+ * amdgfxregs.h's gfx103 rows -- the header carries gfx9, gfx10, gfx103, gfx11 and
+ * gfx115 under the same names, and its generation comments are a small language
+ * ("<= gfx9, >= gfx10" covers everything, which two earlier readings of it got
+ * wrong) -- and validated: row 0 reproduces, dword for dword, the sixteen
+ * entries this table carried when it held one target (0x318 .. 0x3b8).
+ *
+ * Two per-target strides, and they are not the same one:
+ *   - the ten registers from CB_COLORi_BASE to CB_COLORi_DCC_BASE stride by **15**
+ *     dwords (0x318, 0x327, 0x336, 0x345);
+ *   - the six from CB_COLORi_BASE_EXT to CB_COLORi_ATTRIB3 stride by **1** dword,
+ *     with the fields eight dwords apart (0x390 .. 0x393, 0x398 .. 0x39b, ...).
+ * A table built as "target 0 plus one stride" would be right for one family and
+ * silently wrong for the other: writing target 1's INFO 15 dwords off lands in
+ * another register and produces a plausible picture with corrupted state, not an
+ * error (docs/REQUESTS_RESPONSE.md, step 1). */
+static const uint16_t ps5vk_target_offsets[PS5VK_TARGET_REGISTER_COUNT][PS5VK_MAX_COLOR_TARGETS] = {
+   [0] = {0x318, 0x327, 0x336, 0x345},  /* CB_COLORi_BASE */
+   [1] = {0x31b, 0x32a, 0x339, 0x348},  /* CB_COLORi_VIEW */
+   [2] = {0x31c, 0x32b, 0x33a, 0x349},  /* CB_COLORi_INFO */
+   [3] = {0x31d, 0x32c, 0x33b, 0x34a},  /* CB_COLORi_ATTRIB */
+   [4] = {0x31e, 0x32d, 0x33c, 0x34b},  /* CB_COLORi_DCC_CONTROL */
+   [5] = {0x31f, 0x32e, 0x33d, 0x34c},  /* CB_COLORi_CMASK */
+   [6] = {0x321, 0x330, 0x33f, 0x34e},  /* CB_COLORi_FMASK */
+   [7] = {0x323, 0x332, 0x341, 0x350},  /* CB_COLORi_CLEAR_WORD0 */
+   [8] = {0x324, 0x333, 0x342, 0x351},  /* CB_COLORi_CLEAR_WORD1 */
+   [9] = {0x325, 0x334, 0x343, 0x352},  /* CB_COLORi_DCC_BASE */
+   [10] = {0x390, 0x391, 0x392, 0x393}, /* CB_COLORi_BASE_EXT */
+   [11] = {0x398, 0x399, 0x39a, 0x39b}, /* CB_COLORi_CMASK_BASE_EXT */
+   [12] = {0x3a0, 0x3a1, 0x3a2, 0x3a3}, /* CB_COLORi_FMASK_BASE_EXT */
+   [13] = {0x3a8, 0x3a9, 0x3aa, 0x3ab}, /* CB_COLORi_DCC_BASE_EXT */
+   [14] = {0x3b0, 0x3b1, 0x3b2, 0x3b3}, /* CB_COLORi_ATTRIB2 */
+   [15] = {0x3b8, 0x3b9, 0x3ba, 0x3bb}, /* CB_COLORi_ATTRIB3 */
 };
-
 /* The AGC context default of a register, when AGC has one. */
 static bool
 ps5vk_default_register(uint16_t offset, uint32_t *value)
@@ -252,10 +267,12 @@ ps5vk_default_register(uint16_t offset, uint32_t *value)
  * still programs a target (vk_meta's depth clear is the pass that needs this).
  * False when a default is missing. */
 static bool
-ps5vk_default_target_registers(struct ps5vk_agc_register *records)
+ps5vk_default_target_registers(struct ps5vk_agc_register *records, uint32_t target)
 {
+   assert(target < PS5VK_MAX_COLOR_TARGETS);
    for (unsigned index = 0; index < PS5VK_TARGET_REGISTER_COUNT; index++) {
-      records[index] = (struct ps5vk_agc_register){.offset = ps5vk_target_offsets[index]};
+      records[index] = (struct ps5vk_agc_register){
+         .offset = ps5vk_target_offsets[index][target]};
       if (!ps5vk_default_register(records[index].offset, &records[index].value))
          return false;
    }
@@ -411,9 +428,9 @@ ps5vk_stencil_registers(const struct vk_dynamic_graphics_state *dynamic,
 static bool
 ps5vk_target_registers(uint64_t address, VkExtent2D extent,
                        const struct ps5vk_colour_format *colour, VkSampleCountFlagBits samples,
-                       struct ps5vk_agc_register *records)
+                       struct ps5vk_agc_register *records, uint32_t target)
 {
-   if (!ps5vk_default_target_registers(records))
+   if (!ps5vk_default_target_registers(records, target))
       return false;
    records[0].value = (uint32_t)(address >> 8);
    records[1].value &= 0xfc001fffu;
@@ -749,7 +766,7 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
        * from their creation. */
       assert(image->address != 0);
       if (!ps5vk_target_registers(image->address, extent, colour_format, image->vk.samples,
-                                  cmd_buffer->target_registers)) {
+                                  cmd_buffer->target_registers[0], 0)) {
          ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                                  "AGC's context defaults lack a colour target register");
          return;
@@ -766,7 +783,7 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
       *target = (struct ps5vk_render_target){(void *)(uintptr_t)image->address,
                                              (size_t)image->size, image->video,
                                              image->buffer_index};
-   } else if (ps5vk_default_target_registers(cmd_buffer->target_registers)) {
+   } else if (ps5vk_default_target_registers(cmd_buffer->target_registers[0], 0)) {
       /* Nothing writes colour, but every draw's table still programs a target:
        * AGC's own defaults, which the M2-M4 frames ran with. */
       cmd_buffer->multisample_count = 0;
@@ -904,7 +921,7 @@ ps5vk_cmd_buffer_inherit(struct ps5vk_cmd_buffer *cmd_buffer,
       }
       if (!ps5vk_target_registers(colour->address, extent,
                                   ps5vk_find_colour_format(colour_format), colour->vk.samples,
-                                  cmd_buffer->target_registers)) {
+                                  cmd_buffer->target_registers[0], 0)) {
          ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                                  "AGC's context defaults lack a colour target register");
          return false;
@@ -921,7 +938,7 @@ ps5vk_cmd_buffer_inherit(struct ps5vk_cmd_buffer *cmd_buffer,
       *target = (struct ps5vk_render_target){(void *)(uintptr_t)colour->address,
                                              (size_t)colour->size, colour->video,
                                              colour->buffer_index};
-   } else if (!ps5vk_default_target_registers(cmd_buffer->target_registers)) {
+   } else if (!ps5vk_default_target_registers(cmd_buffer->target_registers[0], 0)) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                               "AGC's context defaults lack a colour target register");
       return false;
@@ -1879,7 +1896,13 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
    if (!cx || !sh)
       return;
 
-   memcpy(cx, cmd_buffer->target_registers, sizeof(cmd_buffer->target_registers));
+   /* One attachment's row: `fixed` reserves PS5VK_TARGET_REGISTER_COUNT records
+    * above, and the memcpy's size has to be the row's, not the table's -- with a
+    * row per target, sizeof(cmd_buffer->target_registers) is four rows and would
+    * write three of them past what this stream reserved (the arithmetic R6's heap
+    * corruption lived in). The draw's loop over the rendering's attachments is
+    * what multiplies the reservation and this copy together. */
+   memcpy(cx, cmd_buffer->target_registers[0], sizeof(cmd_buffer->target_registers[0]));
    if (msaa_count != 0)
       memcpy(cx + PS5VK_TARGET_REGISTER_COUNT, cmd_buffer->multisample_registers,
              msaa_count * sizeof(*cx));
