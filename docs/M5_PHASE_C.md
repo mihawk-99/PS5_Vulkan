@@ -7560,3 +7560,34 @@ harness's blit path (the src offsets' x pair swapped) and a LINEAR minification 
 run through the per-format blit case, which would let the row claim both again with evidence
 of its own. The correction was chosen over the re-capture because the claim and its evidence
 have to agree first; the re-capture is what lets the claim return.
+
+## 2026-09-21 — Step 0: the MBOIT input attachments are behind a macro, and conditional
+
+The question was whether a world shader references set 3. The grep that answered it before
+searched `.vert`/`.frag` only, and the declaration lives in an **include** and behind a
+**macro**, so both had to be read together:
+
+```
+world.frag:4    #extension GL_GOOGLE_include_directive : enable
+world.frag:36   #include "world_common.inc"
+world.frag:38   #if MBOIT
+world.frag:39   #define MBOIT_INPUT_SET 3
+world.frag:40   #include "mboit.inc"
+mboit.inc:5     #if MBOIT_COMPOSITE
+mboit.inc:15    layout (input_attachment_index = 0, set = MBOIT_INPUT_SET, binding = 0) uniform MBOIT_SUBPASS_INPUT mboit_b0_input;
+mboit.inc:16    layout (input_attachment_index = 1, set = MBOIT_INPUT_SET, binding = 1) uniform MBOIT_SUBPASS_INPUT mboit_moments0_input;
+```
+
+So **yes, a world-shader include declares input attachments** -- and the honest refinement is
+that both guards have to hold: `#if MBOIT` (world.frag) *and* `#if MBOIT_COMPOSITE`
+(mboit.inc). The default world pipeline and the MBOIT moment pass (which writes `out_b0` and
+`out_moments0` instead) declare none. Input attachments are therefore on the critical path for
+the **MBOIT composite variant**, not for the world draw itself -- the same boundary the
+application side is deciding about -- and the capability is owed either way.
+
+**One thing this read changed about how step 2 must be written.** The same semantic binding
+sits at a different set index per shader family: `alias.frag:42-43` defaults
+`MBOIT_INPUT_SET` to **3**, `basic.frag:27` defines it as **1**, and `world.frag` defines it
+as 3. Any driver code that recognised the input-attachment set by its index would be shaped
+around one family's present choice; the descriptor type, its stride and its write path are
+what the driver has to key on instead.
