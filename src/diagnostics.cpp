@@ -9807,7 +9807,7 @@ void fill_texel_buffer(const TexelBufferFormat &row, std::uint8_t *texels) noexc
 
 // The format's texel as the driver reports it, so a case's table says which
 // format each row is: the same reading the audit's row table uses.
-std::array<TexelBufferFormat, 16> texel_buffer_float_formats() noexcept
+std::array<TexelBufferFormat, 17> texel_buffer_float_formats() noexcept
 {
     return {{
         {VK_FORMAT_R8_UNORM, TexelClass::Unorm8, 1, 1},
@@ -9826,6 +9826,11 @@ std::array<TexelBufferFormat, 16> texel_buffer_float_formats() noexcept
         {VK_FORMAT_R32G32B32A32_SFLOAT, TexelClass::Float32, 16, 4},
         {VK_FORMAT_A2B10G10R10_UNORM_PACK32, TexelClass::Unorm10, 4, 4},
         {VK_FORMAT_B10G11R11_UFLOAT_PACK32, TexelClass::Ufloat11, 4, 4},
+        /* The single-channel 32-bit float, whose buffer bits the CTS requires
+         * for R32_SFLOAT (dEQP-VK.api.info.format_properties.r32_sfloat). It is
+         * the row the storage-image family already carried; what the console
+         * confirms here is the fetch through a uniform texel buffer. */
+        {VK_FORMAT_R32_SFLOAT, TexelClass::Float32, 4, 1},
     }};
 }
 
@@ -10021,7 +10026,7 @@ void run_texel_buffer_frames(const TestContext &test, TestOutcome &outcome, cons
 
 void run_vulkan_texel_buffer_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
-    const std::array<TexelBufferFormat, 16> formats = texel_buffer_float_formats();
+    const std::array<TexelBufferFormat, 17> formats = texel_buffer_float_formats();
     run_texel_buffer_frames(test, outcome, "agc_v0_formats_texel_buffer", formats.data(),
                             formats.size());
 }
@@ -10057,7 +10062,7 @@ void run_vulkan_texel_buffer_sint_frames(const TestContext &test, TestOutcome &o
 // VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT on, in the three classes the stored
 // value's type needs: float and normalised in the first table, integers in the
 // other two.
-std::array<TexelBufferFormat, 7> texel_buffer_store_float_formats() noexcept
+std::array<TexelBufferFormat, 8> texel_buffer_store_float_formats() noexcept
 {
     return {{
         {VK_FORMAT_R8G8B8A8_UNORM, TexelClass::Unorm8, 4, 4},
@@ -10067,6 +10072,9 @@ std::array<TexelBufferFormat, 7> texel_buffer_store_float_formats() noexcept
         {VK_FORMAT_R16G16B16A16_SFLOAT, TexelClass::Float16, 8, 4},
         {VK_FORMAT_R32G32_SFLOAT, TexelClass::Float32, 8, 2},
         {VK_FORMAT_R32G32B32A32_SFLOAT, TexelClass::Float32, 16, 4},
+        /* The same single-channel row through a storage texel buffer, the
+         * storage half of the same CTS requirement. */
+        {VK_FORMAT_R32_SFLOAT, TexelClass::Float32, 4, 1},
     }};
 }
 
@@ -10266,7 +10274,7 @@ void run_texel_buffer_store_frames(const TestContext &test, TestOutcome &outcome
 
 void run_vulkan_texel_buffer_store_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
-    const std::array<TexelBufferFormat, 7> formats = texel_buffer_store_float_formats();
+    const std::array<TexelBufferFormat, 8> formats = texel_buffer_store_float_formats();
     run_texel_buffer_store_frames(test, outcome, "agc_v0_formats_texel_buffer_store",
                                   formats.data(), formats.size());
 }
@@ -14003,7 +14011,8 @@ constexpr FormatQuery kFormatQueries[] = {
      * the CTS requires for R32_SFLOAT; the console proved the hardware encodes
      * its 32_R export (runs/v0-target-float, docs/M5_PHASE_C.md round 7). */
     {VK_FORMAT_R32_SFLOAT, "R32_SFLOAT",
-     KSAMPLED | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT, 0},
+     KSAMPLED | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT,
+     VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT | VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT},
     {VK_FORMAT_D16_UNORM, "D16_UNORM",
      VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
          VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |

@@ -806,8 +806,13 @@ class FormatAuditTests(unittest.TestCase):
         entries = [entry for entry in re.findall(r"\{VK_FORMAT_[A-Z0-9_]+,(.*?)\},\n", image, re.S)
                    if "VK_FORMAT_FEATURE_" in entry]
         proved_bits = {
-            "VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT": 37,  # round 5, pid 130
-            "VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT": 19,  # round 6, pid 135
+            # The first counts came from the batteries that closed each family
+            # (rounds 5 and 6). R32_SFLOAT joined both in CTS round 8: the rows
+            # were added to the two texel-buffer cases and the console proved
+            # them together (pid 109, title digest c1f75ff6..., the
+            # v0-target-float-buffer battery).
+            "VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT": 38,  # round 5 (37), CTS round 8 (+1)
+            "VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT": 20,  # round 6 (19), CTS round 8 (+1)
             "VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT": 16,  # round 7, pid 161
             "VK_FORMAT_FEATURE_STORAGE_IMAGE_ATOMIC_BIT": 2,  # round 9
         }

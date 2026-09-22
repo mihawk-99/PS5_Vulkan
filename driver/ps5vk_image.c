@@ -215,7 +215,16 @@ static const struct ps5vk_format ps5vk_formats[] = {
        VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT |
        VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
        VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT,
-    0, 22 /* 32_FLOAT */, PS5VK_FORMAT_SWIZZLE_R001},
+    /* The CTS requires three buffer bits for R32_SFLOAT
+     * (dEQP-VK.api.info.format_properties.r32_sfloat). The two texel-buffer ones
+     * are here because the console proved them: the uniform case's row and the
+     * storage case's row were added with these bits (docs/M5_PHASE_C.md round 8).
+     * VERTEX_BUFFER is not here yet and the CTS still asks for it: R32_SFLOAT is
+     * not in ps5vk_vertex_formats at all, so no probe fetches one as an attribute,
+     * and a bit without that probe would be a claim with nothing behind it. */
+    VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT |
+       VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT,
+    22 /* 32_FLOAT */, PS5VK_FORMAT_SWIZZLE_R001},
    {VK_FORMAT_R32G32_SFLOAT,
     VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
        VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT |

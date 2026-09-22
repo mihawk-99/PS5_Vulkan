@@ -263,8 +263,8 @@ off rather than guessing. The families, with what closes each:
 | `BLIT_DST`, `BLIT_SRC`, `SAMPLED_IMAGE`, `SAMPLED_IMAGE_FILTER_LINEAR`, `COLOR_ATTACHMENT`, `COLOR_ATTACHMENT_BLEND` | `A8B8G8R8_SRGB_PACK32` | **closed** by round 17: the console applies the sRGB curve to the first three *fetched* components, and this format's Vulkan layout puts red last, where the curve cannot reach it. The driver stores its texels in the R, G, B, A order its `R8G8B8A8_SRGB` twin has (`ps5vk_format.storage_reversed`) and swaps the four bytes at every boundary where an application's bytes meet the image's -- the uploads, the readbacks and the two blit directions -- so the fetch, the blits, the transfers and the attachment pair are that twin's own paths | nothing: all six features are proved, one console frame each (round 17, pid 235) |
 | `COLOR_ATTACHMENT`, `COLOR_ATTACHMENT_BLEND` | the `R16_*`/`R16G16_*`/`R16G16B16A16_*` families, `R32_SFLOAT`, `R32G32_SFLOAT`, `R32G32B32A32_SFLOAT`, the packed 16-bit forms and the integer families | a colour target needs the AGC `CB_COLOR0_INFO` format word **and** the pixel shader compiled for that export format (M4 step 2's rule); the four-byte UNORM, sRGB and ten-bit forms are recorded now, with blending, and the single-channel 32-bit float target R32_SFLOAT is recorded too -- the CTS requires its colour-attachment bit (`dEQP-VK.api.info.format_properties.r32_sfloat`) and the console proved the 32_R export encodes 0.75 as 0x3F400000 (runs/v0-target-float, docs/M5_PHASE_C.md round 7); a format whose texel is not four bytes needs its own tiled map | the format word from ps5-opengl, the export format from Mesa's `ac_choose_spi_color_formats`, then the M4 blend canary's readback per format |
 | `DEPTH_STENCIL_ATTACHMENT` | `D24_UNORM_S8_UINT` and `D32_SFLOAT_S8_UINT`, named by the table's second `must:` clause, which requires the feature of **at least one** of them | the clause needs a stencil path: every depth draw programs `DB_STENCIL_INFO` disabled (`0x20000180`), no stencil state and no stencil clear is programmed, and neither stencil format has a `DB_Z_INFO`/`DB_STENCIL_INFO` word recorded | a runner probe of the DB stencil registers and the two formats' words -- ps5-opengl 0.3.0's hardware-run `append_depth_target_state` is the offset reference -- then the C5-style readback per format; `D16_UNORM`, the rest of this row, is closed (round 15) |
-| `UNIFORM_TEXEL_BUFFER` | the thirty-seven rows that wanted it | **closed** by blocker round 5: `PSBC_DESCRIPTOR_UNIFORM_TEXEL_BUFFER` gives the compiler the binding, and the driver writes the V# a `texelFetch` on a `samplerBuffer` reads (docs/BLOCKERS.md, the descriptor types) | nothing: every row that wanted the bit reports it, one console frame a format |
-| `STORAGE_TEXEL_BUFFER` | the nineteen rows that wanted it | **closed** by blocker round 6: `PSBC_DESCRIPTOR_STORAGE_TEXEL_BUFFER` gives the compiler the binding and the driver writes the same V# the uniform fetch reads, which an `imageStore` on an `imageBuffer` writes through (docs/BLOCKERS.md, the descriptor types) | nothing: every row that wanted the bit reports it, one console frame a format, its texels read back out of the buffer's own memory |
+| `UNIFORM_TEXEL_BUFFER` | the thirty-eight rows that wanted it | **closed** by blocker round 5: `PSBC_DESCRIPTOR_UNIFORM_TEXEL_BUFFER` gives the compiler the binding, and the driver writes the V# a `texelFetch` on a `samplerBuffer` reads (docs/BLOCKERS.md, the descriptor types) | nothing: every row that wanted the bit reports it, one console frame a format |
+| `STORAGE_TEXEL_BUFFER` | the twenty rows that wanted it | **closed** by blocker round 6: `PSBC_DESCRIPTOR_STORAGE_TEXEL_BUFFER` gives the compiler the binding and the driver writes the same V# the uniform fetch reads, which an `imageStore` on an `imageBuffer` writes through (docs/BLOCKERS.md, the descriptor types) | nothing: every row that wanted the bit reports it, one console frame a format, its texels read back out of the buffer's own memory |
 | `STORAGE_IMAGE` | the sixteen rows that wanted it | **closed** by blocker round 7: the compiler names the type, the driver writes its 32-byte entry as the sampled image descriptor without the sampler, and an `imageStore` on a `writeonly image2D` writes through it (docs/BLOCKERS.md, the descriptor types) | nothing: every row that wanted the bit reports it, one console frame a format, the image's own memory read back |
 | `STORAGE_IMAGE_ATOMIC` | `R32_SINT`, `R32_UINT` | **closed** by blocker round 9: the compiler lowers `imageAtomicAdd` to `image_atomic_add ... storage:image` against the 32-byte entry round 7 proved, so the probe needed nothing but the claim | nothing: both rows report the bit, one console frame a format, the counts read out of the image's own memory |
 
@@ -392,7 +392,12 @@ the table entirely with it: `VK_FORMAT_R8G8B8A8_SRGB` had nothing else missing.
 The three rows that still want the bit are the hardware-blocked sRGB pair and
 `R16G16B16A16_UINT`, which has no entry to write a texel shape from.
 
-The 37 `UNIFORM_TEXEL_BUFFER` features these rows carried are **closed**:
+The 38 `UNIFORM_TEXEL_BUFFER` features these rows carried are **closed**:
+
+R32_SFLOAT is the row CTS round 8 added: the CTS requires the bit for it
+(`dEQP-VK.api.info.format_properties.r32_sfloat`) and the console confirmed the
+fetch -- 17 of 17 uniform texel buffers in `v0-formats-texel-buffer`, pid 109,
+title digest `c1f75ff6...`
 blocker round 5 gave the compiler the descriptor type
 (`tooling/psbc/patch-descriptor-types.py`, `PSBC_DESCRIPTOR_UNIFORM_TEXEL_BUFFER`
 with its 16-byte entry) and the driver the V# a `texelFetch` on a `samplerBuffer`
@@ -410,7 +415,10 @@ one 38400 of 38400 checked pixels, `v0-formats` 54 of 54 after the mirror moved
 and `m2-solid`, 1411 PASS records and no FAIL. Eighteen rows left the table
 entirely with it.
 
-The 19 `STORAGE_TEXEL_BUFFER` features these rows carried are **closed**:
+The 20 `STORAGE_TEXEL_BUFFER` features these rows carried are **closed**:
+
+R32_SFLOAT is the same round's storage half: 8 of 8 storage texel buffers in
+`v0-formats-texel-buffer-store`, same run
 blocker round 6 gave the compiler the storage descriptor type
 (`PSBC_DESCRIPTOR_STORAGE_TEXEL_BUFFER`, the same 16-byte entry) and the driver
 the same V# the uniform fetch reads, which an `imageStore` on an `imageBuffer`

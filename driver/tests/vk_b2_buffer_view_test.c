@@ -10,7 +10,7 @@
  * texel-buffer feature the buffer's usage asks for. Blocker round 5 proved the
  * uniform half of it, so R8G8B8A8_UNORM now reports
  * VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT and a view of it is created; a
- * format the device reports no texel-buffer feature for (R32_SFLOAT, whose
+ * format the device reports no texel-buffer feature for (R32G32B32_SFLOAT, whose
  * buffer features are empty) still refuses by name with that reason -- the same
  * answer as "this device samples no texel buffer", reached through the format
  * table rather than by the command having no path.
@@ -53,10 +53,21 @@ main(void)
    check((properties.bufferFeatures & VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT) != 0,
          "R8G8B8A8_UNORM reports UNIFORM_TEXEL_BUFFER, which is what a view of it needs");
    memset(&properties, 0, sizeof(properties));
+   /* R32_SFLOAT is the format the CTS requires these bits for
+    * (dEQP-VK.api.info.format_properties.r32_sfloat), and the console proved both
+    * texel-buffer halves of it (docs/M5_PHASE_C.md, CTS rounds 7 and 8): it is now
+    * a positive case, and the negative one is R32G32B32_SFLOAT, which reports
+    * VERTEX_BUFFER alone. */
    VK_FUNCTION(instance, GetPhysicalDeviceFormatProperties)
    (physical, VK_FORMAT_R32_SFLOAT, &properties);
+   check((properties.bufferFeatures & texel) == texel,
+         "R32_SFLOAT reports both texel-buffer features, which the console proved");
+   memset(&properties, 0, sizeof(properties));
+   VK_FUNCTION(instance, GetPhysicalDeviceFormatProperties)
+   (physical, VK_FORMAT_R32G32B32_SFLOAT, &properties);
    check((properties.bufferFeatures & texel) == 0,
-         "R32_SFLOAT reports no texel-buffer feature, which is what a view is refused for");
+         "R32G32B32_SFLOAT reports no texel-buffer feature, which is what a view is "
+         "refused for");
 
    const VkBufferCreateInfo buffer_info = {
       .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -84,7 +95,7 @@ main(void)
       VK_FUNCTION(instance, DestroyBufferView)(device, view, NULL);
 
       VkBufferViewCreateInfo refused = view_info;
-      refused.format = VK_FORMAT_R32_SFLOAT;
+      refused.format = VK_FORMAT_R32G32B32_SFLOAT;
       view = VK_NULL_HANDLE;
       check(VK_FUNCTION(instance, CreateBufferView)(device, &refused, NULL, &view) ==
                VK_ERROR_UNKNOWN &&

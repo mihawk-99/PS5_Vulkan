@@ -7001,3 +7001,58 @@ still unidentified, but two candidates are now eliminated with evidence -- the d
 answer (`0x400000`, called directly on the built shared object) and the loader's answer
 (which CTS's version graph would accept, since `1.3 <- 1.2 <- 1.1 <- 1.0`). That hunt
 continues in its own round rather than blocking this one.
+
+## 2026-09-21 — round 8: R32_SFLOAT's texel-buffer bits, proved, and one bit left unclaimed
+
+Round 7 moved the CTS's `r32_sfloat` failure from its tiling half to its buffer half: the
+required-features row also demands `UNIFORM_TEXEL_BUFFER`, `STORAGE_TEXEL_BUFFER` and
+`VERTEX_BUFFER` for that format. This round took the two the console can prove.
+
+**What the probes already covered** decided the shape: the uniform texel-buffer case walks
+16 float formats and the storage one 7, and neither carried `R32_SFLOAT` -- the
+single-channel 32-bit float was in the *storage image* family's table only, which is a
+different bit. Both tables gained the row (`TexelClass::Float32`, four bytes, one channel),
+which the existing shaders fetch and store without any change to them.
+
+**The console proof** (pid 109, title digest `c1f75ff6…`,
+`Klog_Logs/v0-target-float-buffer.log`, queue `jobs/v0-target-float-buffer/queue.txt`):
+`v0-formats-texel-buffer` PASS ("17 of 17 uniform texel buffers fetched the four levels
+their view holds"), `v0-formats-texel-buffer-store` PASS ("8 of 8 storage texel buffers
+stored the four levels their frame drew"), with `v0-formats` (the audit mirror) and
+`m2-solid` green beside them, 996 PASS records. The driver's row then gained exactly the
+two bits those cases prove and no more.
+
+**The third bit is deliberately not claimed.** `VERTEX_BUFFER` is also required for
+`R32_SFLOAT`, and adding it would have made the CTS case pass -- but `R32_SFLOAT` is not in
+`ps5vk_vertex_formats` at all, so no probe fetches one as an attribute, and a bit with
+nothing behind it is exactly what this repository's rules forbid. The claim was reverted
+and the row's comment says why; the CTS case therefore still fails, now naming one bit
+instead of three. The next round adds the vertex-format row, the probe and the bit
+together.
+
+**Two of the repository's own guards caught mistakes in this round, which is worth
+recording as much as the result:**
+
+* the format-audit test refuses a bit carried by more format entries than the console has
+  proved rows for -- `38 != 37 : VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT ... and 37
+  console rows were proved for it` -- so the counts and the audit's prose now carry the new
+  row *and the battery that proved it* (pid 109, digest `c1f75ff6…`);
+* `driver/ps5vk_image.c` is not a clang-formatted file, and running `clang-format -i` over
+  it produced 120 hunks that broke three gates at once (`mip-layout` parsed "10 of 0 chain
+  entries", `audit-commands` and `test` failed with it). The file was restored and the edit
+  re-applied by hand: one hunk, eleven lines. The lesson is in the mechanics, not the
+  intent -- format the region you changed, never the file.
+
+**Measured after the round**: `dEQP-VK.api.info.*` is 2539/3886 passed, **5 failed**,
+1342 not supported -- the same count as before, because the third bit was left unclaimed,
+but two of the five now name a single missing bit each (`STORAGE_TEXEL_BUFFER_ATOMIC_BIT`
+for `r32_uint`/`r32_sint`, `VERTEX_BUFFER` for `r32_sfloat`), and the inventory's
+`R32_SFLOAT` row reads `optimal 0xdc83, buffer 0x18` -- exactly what the console proved.
+
+**Three guards, not two.** Besides the format-audit count and the formatting churn above,
+the driver's own `b2_buffer_view` test used `R32_SFLOAT` as its *negative* example -- the
+format whose missing texel-buffer feature is what refuses a view by name -- so it failed
+the moment the bits landed. It now asserts the opposite for that format (both texel-buffer
+features, which the console proved) and uses `R32G32B32_SFLOAT`, which reports
+`VERTEX_BUFFER` alone, as the negative. Every one of the three was a place where the
+repository already knew the answer, which is the point of keeping them.

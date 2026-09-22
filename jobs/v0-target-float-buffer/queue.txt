@@ -1,0 +1,19 @@
+# PS5 Vulkan test runner job queue (PPSA99988): R32_SFLOAT as a texel buffer.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-target-float-buffer/queue.txt
+#
+# The CTS requires three buffer bits for R32_SFLOAT
+# (dEQP-VK.api.info.format_properties.r32_sfloat): VERTEX_BUFFER,
+# UNIFORM_TEXEL_BUFFER and STORAGE_TEXEL_BUFFER. The two texel-buffer halves are
+# what the console can confirm today, so both cases grew an R32_SFLOAT row --
+# a single four-byte texel carrying the level in its only channel -- and this
+# queue runs them with the format mirror (v0-formats) and the standing control
+# (m2-solid). The vertex-buffer bit needs a probe of its own: R32_SFLOAT is not
+# in the driver's vertex-format table at all, so it stays unadvertised until a
+# case fetches one as an attribute.
+hold 60
+capture
+v0-formats-texel-buffer
+v0-formats-texel-buffer-store
+v0-formats
+m2-solid
+exit
