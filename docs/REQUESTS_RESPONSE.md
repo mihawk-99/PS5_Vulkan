@@ -762,3 +762,57 @@ refused); the tree was restored to the committed state, and the parked
 `driver/tests/vk_v0_mrt_test.c` is where the assertions for the flipped expectation already
 live. That dump is the first step of the next attempt, and it decides between the three
 remaining shapes rather than guessing among them.
+
+## Step 1b, third pass — the dump answered, and the register field it pointed at
+
+**The dump was made, with its precondition checked.** The host model records the words the
+driver queues, so the frame was drawn with the refusal lifted **after verifying the artifact**
+(the refusal string absent from the archive the test would link) and the run's rows were read
+straight out of the test's own report:
+
+```
+attachment 0: CB_COLOR_BASE offset 0x318 value 0x2004000, its mapping 0x2004000
+attachment 1: CB_COLOR_BASE offset 0x327 value 0x2024000, its mapping 0x2024000
+PASS each attachment's row names its own CB_COLORi_BASE register
+PASS each attachment's row carries that attachment's own address
+```
+
+**That is the first branch of the decision tree: the producer and the stream are right, and
+the fault is downstream.** Rows present, correctly offset (0x318 then 0x327 -- the column
+step 1a derived), each carrying its own attachment's address.
+
+**The downstream fault was then found by reading, not guessing.** `CB_COLORi_BASE_EXT`'s
+field is `S_028E40_BASE_256B` -- bits 0-7 of the address's bits 40-47, the half
+`CB_COLORi_BASE`'s 32 bits (`address >> 8`) cannot hold, the same split the depth target
+already programs (`ps5vk_depth_registers`, `DB_Z_READ_BASE_HIGH`). The driver left that
+register at AGC's default, which describes **target 0**, so a rendering into a second
+attachment wrote at an address made of one target's low half and another's high half -- an
+address belonging to neither image. It now programs `(address >> 40) & 0xff` per target.
+
+**What that changed on the console, measured:** the title no longer wedges after the probe's
+frame (the earlier battery stalls -- killed by PID, twice -- were this fault), and the run
+continues through all three attachment counts. The readbacks still do not match, and **this
+round cannot say which attachment or which word**, because the probe's own instrument was
+the next thing wrong: it stopped logging at the first mismatch and reported "the rendering
+neither drew nor was refused" where it meant "attachment 1 holds the wrong word". Every
+attachment is now logged **before** any is judged, so the next run names the value.
+
+**Two artefacts worth recording.** The probe's package carries the exports the shader asks
+for: `SPI_SHADER_COL_FORMAT 0x9999`, four live nibbles at the legacy 32_ABGR export. And the
+last console measurement was made against a build whose refusal was lifted while the source's
+refusal was still present-but-disabled (`if (false && ...)`): the string grep found in the
+source and the absence of it in the binary were consistent, not a stale artifact -- but it is
+worth saying that the *first* reading of those two numbers was "the deploy is stale", and it
+was wrong. `strings` on the built library is the check that settles it either way.
+
+**Capability still unclaimed, refusal live again**: the writes past the first attachment do
+not land yet, so a rendering into more than one is refused by name and `v0-mrt` measures the
+interim. The host half `driver/tests/vk_v0_mrt_test.c` runs again -- against the replay of the
+probe's *own* console capture, because its shader's register tables need that stage mapping --
+and its two row assertions pass.
+
+**Gap left open, with its blast radius and its next measurement.** The per-attachment writes.
+Blast radius: MRT applications get a named refusal instead of a wrong frame. Next: one console
+cycle with the instrument-fixed probe, which names the attachment and the word; then whichever
+of `CB_COLOR_CONTROL`'s MODE, a per-`CB_COLORi_VIEW`/`ATTRIB2`/`ATTRIB3` field, or a
+per-target `CMASK`/`FMASK` word the values point at.

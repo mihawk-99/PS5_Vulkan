@@ -325,3 +325,43 @@ echo "== Compressed tiles, from AddrLib's own format table"
 for spec in "bc1 64kb_r_x" "bc3 64kb_r_x" "bc7 64kb_r_x"; do
     "$output" compressed $spec | sed 's/^/   /'
 done
+
+# And the claim those numbers carry: a compressed format's tile is the row of its
+# *block size*, with the coordinates in 4x4 blocks -- BC1's eight-byte block tile
+# is the eight-byte element row, BC3's and BC7's sixteen-byte ones are the
+# sixteen-byte row. That is what lets a driver map for a compressed format reuse
+# a row this repository already measured and proved instead of inventing one
+# (docs/M5_PHASE_C.md, CTS rounds 13 and 14), so it is checked here rather than
+# asserted in prose.
+python3 - "$output" <<'PY'
+import re
+import subprocess
+import sys
+
+oracle = sys.argv[1]
+
+
+def tile(args):
+    out = subprocess.run([oracle] + args, capture_output=True, text=True).stdout
+    found = re.search(r"tile (\d+)x(\d+)", out)
+    return (int(found.group(1)), int(found.group(2))) if found else None
+
+
+def compressed(format_name):
+    out = subprocess.run([oracle, "compressed", format_name, "64kb_r_x"],
+                         capture_output=True, text=True).stdout
+    found = re.search(r"block (\d+)x(\d+) texels", out)
+    return (int(found.group(1)), int(found.group(2))) if found else None
+
+
+rows = {size: tile(["swizzle", str(size), "1", "64kb_r_x"]) for size in (8, 16)}
+pairs = [("bc1", 8), ("bc2", 16), ("bc3", 16), ("bc4", 8), ("bc5", 16), ("bc6", 16), ("bc7", 16)]
+bad = 0
+for format_name, block in pairs:
+    got, want = compressed(format_name), rows[block]
+    ok = got is not None and got == want
+    bad += 0 if ok else 1
+    print(f"   {format_name}: {block}-byte blocks -> tile {got}, the {block}-byte row is {want}"
+          f"{' OK' if ok else ' MISMATCH'}")
+raise SystemExit(1 if bad else 0)
+PY

@@ -95,6 +95,7 @@ tests=(
     psbc_multiset
     v0_multiset_draw
     v0_multiset_quake
+    v0_mrt
 )
 # Negative tests: name, and the host variable that breaks the rule it checks
 # unless the test sets it itself (b3_window).
@@ -168,7 +169,7 @@ instancing_run="$root/golden/c2-instancing/run-1.json"
 # attachment the probe fills itself, so only a capture of that run holds the
 # addresses (golden/c7-mip-tiled, the runner's c7-mip-tiled test).
 tiled_mip_run="$root/golden/c7-mip-tiled/run-1.json"
-if want b7_draw || want b8_groups || want c2_indirect || want v0_multiset_draw; then
+if want b7_draw || want b8_groups || want c2_indirect || want v0_multiset_draw || want v0_mrt; then
     python3 "$root/tools/golden.py" replay "$draw_golden" "$work/b4-headless.replay"
 fi
 # R7 round 3's two-set frame runs against the console capture it is the host
@@ -182,6 +183,16 @@ fi
 # part of what a replay carries -- another frame's replay is sized for another
 # shader and refuses this one ("a created shader's register tables are out of
 # bounds", measured with b4-headless).
+# R7 step 1b's MRT frames draw against the replay of their own console capture:
+# the probe's shader writes four outputs, and the register tables a shader needs
+# are part of what a replay carries, so another frame's replay refuses it.
+# The capture must hold a runner-built frame too (it carries the context register
+# table a replay takes its defaults from), which is why jobs/v0-mrt's queue names
+# m2-solid *before* the probe: the probe's own multi-attachment frame wedges the
+# title after it has drawn.
+mrt_run="$root/golden/v0-mrt/run-1.json"
+want v0_mrt &&
+    python3 "$root/tools/golden.py" replay "$mrt_run" "$work/v0-mrt.replay"
 multiset_quake_run="$root/golden/v0-multiset-quake/run-1.json"
 want v0_multiset_quake &&
     python3 "$root/tools/golden.py" replay "$multiset_quake_run" "$work/v0-multiset-quake.replay"
@@ -478,6 +489,8 @@ run_test() {
         # R7 round 3's frame is the host half of the runner case v0-multiset-quake
         # and draws exactly its one frame, so its recording is compared with that
         # case's own console capture word for word.
+        v0_mrt) replay=v0-mrt
+            compare=() ;;
         v0_multiset_quake) replay=v0-multiset-quake
             compare=(compare-run "$multiset_quake_run" "$dump" --test v0-multiset-quake) ;;
         v0_query_full) replay=v0-query-full

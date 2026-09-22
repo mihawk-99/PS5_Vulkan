@@ -1,16 +1,5 @@
-# R7 step 1b's battery: the MRT probe -- 1, 2 and the device's advertised
-# maximum colour attachments, a distinct value in each, every one read back --
-# with the standing regression list around it. R6's case (v0-two-passes) is in
-# the standing list because the colour-target dynarray is where R6's heap
-# corruption lived and more attachments changes exactly that arithmetic.
-#
-# m2-solid is one of the standing cases and is also what a driver case's golden
-# needs to be replayable: a driver capture carries no context register table and
-# tools/golden.py replay takes one from a runner-built frame of the same capture.
 hold 60
 capture
-v0-mrt
-v0-two-passes
-c8-resolve
 m2-solid
+v0-mrt
 exit

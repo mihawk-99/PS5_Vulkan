@@ -17630,7 +17630,11 @@ void run_vulkan_mrt_frames(const TestContext &test, TestOutcome &outcome) noexce
         /* One attachment draws; more are refused, and the driver's sentence
          * reaches this log through the debug messenger the runner installs. */
         bool matched = counts[at] == 1 ? status == PS5VK_TRIANGLE_OK : refused;
-        for (unsigned index = 0; index < counts[at] && matched; index++)
+        /* Every attachment is logged before any of them is judged: a probe that
+         * stops at the first mismatch reports "it neither drew nor was refused"
+         * where it means "attachment 1 holds the wrong word", and this round spent
+         * a console cycle on exactly that (2026-09-21). */
+        for (unsigned index = 0; index < counts[at]; index++)
         {
             const void *const mapping = triangle.target_mappings[index];
             const std::size_t bytes = triangle.target_memory_bytes[index];
@@ -17654,9 +17658,9 @@ void run_vulkan_mrt_frames(const TestContext &test, TestOutcome &outcome) noexce
                   counts[at] == 1
                       ? (matched ? "the frame's one attachment holds its own output"
                                  : "the frame's one attachment does not hold its output")
-                      : (matched ? "the rendering was refused by name, which is the state the "
+                      : (refused ? "the rendering was refused by name, which is the state the "
                                    "per-attachment writes are in (ps5vk_draw.c, step 1b)"
-                                 : "the rendering neither drew nor was refused"));
+                                 : "an attachment does not hold the output its location writes"));
         if (status == PS5VK_TRIANGLE_IN_FLIGHT)
         {
             outcome.stage_in_use = true;

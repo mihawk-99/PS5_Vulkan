@@ -448,6 +448,17 @@ ps5vk_target_registers(uint64_t address, VkExtent2D extent,
    if (!ps5vk_default_target_registers(records, target))
       return false;
    records[0].value = (uint32_t)(address >> 8);
+   /* CB_COLORi_BASE_EXT's BASE_256B (bits 0-7) is the address's bits 40-47, the
+    * half CB_COLORi_BASE's 32 bits cannot hold -- the same split the depth target
+    * programs (ps5vk_depth_registers, DB_Z_READ_BASE_HIGH). It is per *target*,
+    * because it is per address: a target that inherited another's high word would
+    * be written at an address made of one target's low half and another's high
+    * half, which belongs to neither image. The console showed exactly that --
+    * attachment 1 reading zero with a coloured clear that never reached it, and
+    * the title wedging after the frame -- and the host dump is what ruled the
+    * producer out: the rows were right, offsets 0x318 and 0x327 with each
+    * attachment's own low word (R7 step 1b). */
+   records[10].value = (records[10].value & ~0xffu) | (uint32_t)((address >> 40) & 0xffu);
    records[1].value &= 0xfc001fffu;
    /* CB_COLOR0_INFO: the format's data format, number type and component order,
     * with the three bits the number type decides. AGC's default word carries
