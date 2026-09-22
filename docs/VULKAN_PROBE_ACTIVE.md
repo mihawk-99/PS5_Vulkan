@@ -17,18 +17,25 @@ from vkQuake's source, so each was re-checked at HEAD before anything was writte
   the command buffer's state, a by-name refusal of a non-zero `depthBiasClamp`, push
   constants declared through the pointer form and written by the draw, and a colour clear
   read back with nothing over it. Details and run digests: `docs/M5_PHASE_C.md`.
-- **R7 is confirmed, the route is chosen, and Round 1 of four is done**: the two-set
-  refusal happens at the *draw*, and route (b) -- multi-set within the advertised four --
-  is chosen. Round 1 removed the compiler wrapper's single-set assumption (one layout per
-  set, per-set tables sized per set, a pointer per set in the metadata, a total slot
-  budget), with `probes/v0-multiset` (two sets that differ in kind) and the host test
+- **R7 is confirmed, the route is chosen, and Rounds 1 and 2 of four are done**: the
+  two-set refusal happens at the *draw*, and route (b) -- multi-set within the advertised
+  four -- is chosen. Round 1 removed the compiler wrapper's single-set assumption (one
+  layout per set, per-set tables sized per set, a pointer per set in the metadata, a total
+  slot budget), with `probes/v0-multiset` (two sets that differ in kind) and the host test
   `psbc_multiset` proving it: set 0's pointer at user-data dword 2, set 1's at 3, and both
-  new bounds refusing. **Round 2** is the driver's per-set tables, per-set
-  `vkCmdBindDescriptorSets` and its "more than the four advertised" refusal; **Round 3**
-  the console case that shows a value arriving from set 1 and a command buffer that
-  submits; **Round 4** the fallout. The round also corrected a stale artifact: the shipped
-  `probes/v0-push` package had been written by a probe CLI built *before* the R9 compiler
-  fix (R9's own conclusion is unaffected).
+  new bounds refusing. Round 2 is the **driver** half: one table per set, each sized from
+  that set's own bindings, one user-data pointer per set written into the dword the
+  metadata names for it, `ps5vk_debug_descriptor_tables` to read both back, and the
+  set-count refusal replaced by the advertised limit where it is reached. Its gates: host
+  test `v0_multiset_draw` 12 of 12 direct (set 0 dword 2 -> the 16-byte uniform descriptor,
+  set 1 dword 3 -> the 48-byte image sampler of the 64x64 texture), `check-driver.sh` PASS,
+  `build/gates.sh` PASS, and 10 of 10 console cases (the standing nine plus `v0-two-sets`,
+  whose expectation flipped from "refused" to "draws"). **Round 3** is the console case
+  that shows a value arriving from set 1 (set 0 with three combined image samplers, set 1
+  with one buffer binding -- vkQuake's shape) and a command buffer that submits; **Round
+  4** the fallout, the whole regression list and the docs. Round 1 also corrected a stale
+  artifact: the shipped `probes/v0-push` package had been written by a probe CLI built
+  *before* the R9 compiler fix (R9's own conclusion is unaffected).
 - **R4's coverage note is answered by correcting our own claim**: the runner *does*
   install a `VK_EXT_debug_utils` messenger and forwards every refusal to the log; the
   gap was that a frame expecting a refusal passed no report. Fixed, and one sweep now

@@ -7224,3 +7224,93 @@ shape is on the record before any driver change depends on it.
 
 No capability is claimed by this round: the compressed formats still report `0x0`, and the
 CTS case still fails. What changed is that the next round starts from a measurement.
+
+## 2026-09-21 — R7, Round 2: one table per set, one pointer per set, and the debug API that says so
+
+Round 1 made the compiler build one descriptor-set layout per set. Round 2 is the driver
+side: `driver/ps5vk_draw.c` no longer builds one set-0 table for a whole stage. For every
+stage it now walks `set = 0 .. PS5VK_DESCRIPTOR_SET_COUNT - 1`, skips the sets
+`descriptor_sets_valid[set]` says the stage does not read, and for each set it does read
+builds **its own** table: the table's size is that set's own bindings' extent, the
+offset-collision check compares only bindings of the same set (two sets' tables both start
+at entry zero, which is not a collision), and the pointer goes into
+`descriptor_sets_user_data_dword[set]` — the dword the metadata names **for that set**.
+`descriptor_set0_valid` / `descriptor_set0_user_data_dword` are no longer read by the draw
+path; the v14 mirror fields stay for readers built against the old prefix. A metadata
+binding whose set is past the advertised four would be dropped by that loop rather than
+refused, so it is refused before it, by name.
+
+Three refusals moved with it. `ps5vk_descriptor_options` and
+`ps5vk_CmdBindDescriptorSets` already named the advertised limit
+(`VkPhysicalDeviceLimits.maxBoundDescriptorSets`) instead of the old constant;
+`ps5vk_draw_refusal`'s loop **refusing any layout that declares a set past 0 is gone**,
+because a layout's set *count* is no longer something this driver has to refuse: every set
+it advertises has a table, and a set past them is refused exactly where it is reached — a
+binding a stage reads (the compiler options), a bind of such a set (the bind path), or a
+stage's metadata naming one (the table builder). A layout that declares more sets than that,
+none of which a shader reads, needs no table and draws. The ten `ps5vk_sampled_image`
+refusals name the binding's own set now rather than "set 0", which a texture in set 1 made
+a lie.
+
+**The debug API for the tables** is `ps5vk_debug_descriptor_tables`
+(`driver/ps5vk_debug.h`, implemented beside the others in `ps5vk_cmd_buffer.c`): one
+`ps5vk_debug_table` per table the last draw built — the stage, the set, the user-data dword
+the pointer went into, the pointer as programmed, the table itself as the draw allocated it
+(the ABI's is one dword in this driver's 32-bit-pointer build, so the words are handed over
+separately) and its size in bytes. The count is reset at the start of every draw, so a probe
+reads the frame's last one. What it costs is `PS5VK_PIPELINE_STAGE_COUNT *
+PS5VK_DESCRIPTOR_SET_COUNT` records in the device, not a second table.
+
+**The host gate is `v0_multiset_draw`** (`driver/tests/vk_v0_multiset_draw_test.c`, one line
+in `tools/check-driver.sh`'s list and one `case` entry giving it the b4-headless replay). It
+draws `probes/v0-multiset` — the one program whose single fragment stage reads **both**
+sets: the colour from the uniform block at set 0, binding 0 and the scale from the combined
+image sampler at set 1, binding 0 — and asserts what the draw reports: two tables, sets 0 and
+1, two different tables, two different user-data dwords, each table's pointer equal to the
+address its dword carries, and each table's first entry the shape of **its own** set's
+binding. Measured: **12 of 12 checks direct**, loader PASS, PS5 link PASS. The two entries:
+
+```
+(table 0: stage 1 set 0 dword 2 address 0002c100 words 0x20002c100 bytes 256)
+(table 1: stage 1 set 1 dword 3 address 0002c200 words 0x20002c200 bytes 256)
+(stage 1: set 0 dword 2 -> 00008000 00100002 00000001 0004dfac,
+          set 1 dword 3 -> 020000c0 c3800000 800fc00f 90000fac)
+```
+
+Set 0's entry is the 16-byte uniform descriptor: the block's address, stride 16 in word 1's
+high half, one element, `PS5VK_UNIFORM_BUFFER_FLAGS`. Set 1's is the 48-byte combined image
+sampler of the 64x64 scale texture: word 2 is `800fc00f` — width minus one in the low bits,
+height minus one from bit 14 — with the image's format word and the sampler's address and
+filter words behind it. A driver with one table, or one pointer, cannot produce that pair.
+
+**The console cycle** is `jobs/r7-round2/queue.txt`: the standing nine cases plus
+`v0-two-sets`, whose expectation this round changes. That case's probe declares two set
+layouts (both empty, so no binding reaches the shaders and the set *count* is the only thing
+under test); it used to assert that the draw was refused, and it now asserts that creation
+and the draw both succeed, which is R7's acceptance (src/diagnostics.cpp,
+`run_vulkan_two_sets_frames`). Run pid 127, `Klog_Logs/r7-round2.log`, driver sha256
+`d04fcad4…`, deployed eboot sha256 `11d4bed4…`: `runner_summary` reports **10 of 10 queued
+tests passed**, `v0-push-constant` among them — R9's push-constant binding lives in the same
+metadata struct and its table is still the one set 0 gets.
+
+**A build finding, recorded because it produced a wrong binary.** Editing
+`driver/ps5vk_debug.h` (a new field in a struct the device holds an array of) rebuilt
+*only* the source that had changed: the driver build tracks each `.c`'s mtime, not the
+headers it includes, so `ps5vk_cmd_buffer.o` and `ps5vk_device.o` kept the old struct
+layout while the test linked against the new one. The symptom is not a build error — the
+first table read correctly and the second reported a NULL pointer and zero bytes, because
+the records are copied by a stale object with a stale `sizeof`. `Makefile` does catch a
+stale *archive* (`libps5vk.ps5.a` older than a source, which is how the app build stopped
+the deploy), but nothing catches a stale object *inside* one. The round's gates ran against
+a forced full rebuild (`find driver -name '*.c' -exec touch {} +`); the fix — a header
+digest that forces the recompile — is not in this round.
+
+**Gap left open.** No console case yet *proves* the "more than the four advertised" refusal:
+the sentence exists at three places (compiler options, the bind path, the table builder) and
+the host gate's second refusal test is the wrapper's own cap, but the runner has no probe
+that reaches four sets and asks for a fifth. The two-set case proves acceptance, not
+refusal. Round 3's case (set 0 with three combined image samplers, set 1 with one buffer
+binding — vkQuake's collapsed sets) is what proves the mechanism with real content; the
+refusal probe should follow it. The AGC package-writer's single-pointer gap stays in
+`docs/REQUESTS_RESPONSE.md`'s named-gaps list, where Round 1 put it, rather than in a source
+comment.

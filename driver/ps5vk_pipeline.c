@@ -29,9 +29,9 @@
  * driver yet (ps5vk_draw_refusal), while creation still succeeds, so every
  * package can be checked. What these probes have not proven is refused with VK_ERROR_UNKNOWN
  * and a logged reason: other topologies, multisampling, instanced vertex
- * input, descriptor sets other than 0, descriptor types without a proven
- * table entry, specialization constants and pipelines without a vertex and
- * a fragment stage.
+ * input, descriptor sets past the four this driver advertises, descriptor types
+ * without a proven table entry, specialization constants and pipelines without
+ * a vertex and a fragment stage.
  */
 
 #include "ps5vk_private.h"
@@ -185,7 +185,12 @@ ps5vk_pipeline_free(struct ps5vk_device *device, struct ps5vk_pipeline *pipeline
    vk_object_free(&device->vk, allocator, pipeline);
 }
 
-/* Descriptor bindings of set 0 used by stage_bit, into the compiler options. */
+/* The descriptor bindings every set the stage reads uses, into the compiler
+ * options: one entry per binding, each carrying its own set, and the compiler
+ * builds one table per set from them (tooling/psbc/patch-descriptor-sets.py).
+ * The driver's own layout offsets are per set -- ps5vk_descriptor_set_layout
+ * starts each set's table at zero -- so each set's entries are sized from that
+ * set's own bindings, which is what the compiler requires. */
 VkResult
 ps5vk_descriptor_options(struct ps5vk_device *device, const struct vk_pipeline_layout *layout,
                          VkShaderStageFlags stage_bit, PsbcCompileOptions *options)
@@ -199,19 +204,21 @@ ps5vk_descriptor_options(struct ps5vk_device *device, const struct vk_pipeline_l
          const struct ps5vk_descriptor_binding *const binding = &set_layout->bindings[index];
          if (binding->count == 0 || !(binding->stages & stage_bit))
             continue;
-         if (set != 0)
+         if (set >= PS5VK_DESCRIPTOR_SET_COUNT)
             return vk_errorf(device, VK_ERROR_UNKNOWN,
-                             "descriptor set %u: only set 0 is supported", set);
+                             "descriptor set %u: more than the %u sets this driver advertises "
+                             "(VkPhysicalDeviceLimits.maxBoundDescriptorSets)",
+                             set, PS5VK_DESCRIPTOR_SET_COUNT);
          if (binding->stride == 0)
             return vk_errorf(device, VK_ERROR_UNKNOWN,
-                             "set 0 binding %u: descriptor type %d has no proven table entry",
-                             index, binding->type);
+                             "set %u binding %u: descriptor type %d has no proven table entry",
+                             set, index, binding->type);
          if (options->descriptor_binding_count == PSBC_MAX_DESCRIPTOR_BINDINGS)
             return vk_errorf(device, VK_ERROR_UNKNOWN, "more than %d descriptor bindings",
                              PSBC_MAX_DESCRIPTOR_BINDINGS);
          options->descriptor_bindings[options->descriptor_binding_count++] =
             (PsbcDescriptorBinding){
-               .set = 0,
+               .set = (uint8_t)set,
                .binding = (uint8_t)index,
                /* A dynamic uniform buffer is a uniform buffer to the
                 * compiler: the offset is the application's and never part of
@@ -944,13 +951,15 @@ ps5vk_draw_refusal(const VkGraphicsPipelineCreateInfo *info,
    const VkPipelineDepthStencilStateCreateInfo *const depth = info->pDepthStencilState;
    const VkPipelineColorBlendStateCreateInfo *const blend = info->pColorBlendState;
    const VkPipelineViewportStateCreateInfo *const viewport = info->pViewportState;
-   /* Set 0's bindings are encoded from the set the application bound (Phase C3,
-    * ps5vk_draw.c); a stage's table holds one set, so a layout that declares
-    * more than that is refused here rather than at the draw. */
-   for (uint32_t set = 1; layout && set < layout->set_count; set++) {
-      if (layout->set_layouts[set])
-         return "drawing with descriptor sets beyond set 0 is not supported yet";
-   }
+   /* R7: every set the stage reads has its own table and its own user-data
+    * pointer (ps5vk_draw.c), so a layout's *set count* is no longer a reason to
+    * refuse a draw. The limit that still exists is the number of sets this
+    * driver advertises, and it is named where it is reached: a binding a stage
+    * reads in a set past it is refused when the compiler options are built
+    * (ps5vk_descriptor_options), a bind of such a set when the set is bound
+    * (ps5vk_CmdBindDescriptorSets), and a stage's metadata that names one when
+    * the table would be built (ps5vk_draw.c). A layout that declares more sets
+    * than that, none of which a shader reads, needs no table and draws. */
    for (uint32_t index = 0; info->pDynamicState && index < info->pDynamicState->dynamicStateCount;
         index++) {
       const VkDynamicState state = info->pDynamicState->pDynamicStates[index];

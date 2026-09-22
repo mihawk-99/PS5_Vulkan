@@ -514,8 +514,10 @@ struct ps5vk_triangle_input {
    uint32_t first_draw_indices;
    /* R7: the pipeline layout declares two descriptor set layouts -- both empty,
     * so no binding reaches the shaders and the frame is a valid pipeline whose
-    * *set count* is the thing under test. This driver's stages read one set-0
-    * table, so a layout that declares more is refused at the draw by name. False
+    * *set count* is the thing under test. R7 gives every set its own table, so a
+    * layout that declares two of them draws; a binding a stage reads in a set
+    * past the four this driver advertises is refused by name where the compiler
+    * options are built (driver/ps5vk_pipeline.c, ps5vk_descriptor_options). False
     * is the one-set (or no-set) layout every earlier frame ran. Appended at the
     * end for the same reason as target_format. */
    bool two_descriptor_sets;

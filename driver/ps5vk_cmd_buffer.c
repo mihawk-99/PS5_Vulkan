@@ -444,6 +444,19 @@ ps5vk_debug_push_constant_user_data(VkDevice _device, uint32_t *stage, uint32_t 
 }
 
 uint32_t
+ps5vk_debug_descriptor_tables(VkDevice _device, ps5vk_debug_table *tables, uint32_t capacity)
+{
+   VK_FROM_HANDLE(ps5vk_device, device, _device);
+   const uint32_t count = device != NULL ? device->descriptor_table_count : 0;
+   if (tables == NULL || capacity == 0)
+      return count;
+   const uint32_t copied = MIN2(count, capacity);
+   for (uint32_t at = 0; at < copied; at++)
+      tables[at] = device->descriptor_tables[at];
+   return count;
+}
+
+uint32_t
 ps5vk_debug_table_chunks(VkDevice _device, ps5vk_debug_stage *chunks, uint32_t capacity)
 {
    VK_FROM_HANDLE(ps5vk_device, device, _device);

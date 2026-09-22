@@ -414,8 +414,9 @@ ps5vk_CmdBindDescriptorSets2KHR(VkCommandBuffer commandBuffer,
       const uint32_t index = info->firstSet + i;
       if (index >= PS5VK_DESCRIPTOR_SET_COUNT) {
          ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                                 "descriptor set %u is beyond the %u this driver binds; sets past "
-                                 "0 are D1 (docs/M5_REFERENCE.md)", index,
+                                 "descriptor set %u: more than the %u sets this driver advertises "
+                                 "(VkPhysicalDeviceLimits.maxBoundDescriptorSets; "
+                                 "PS5VK_DESCRIPTOR_SET_COUNT, ps5vk_private.h)", index,
                                  PS5VK_DESCRIPTOR_SET_COUNT);
          return;
       }

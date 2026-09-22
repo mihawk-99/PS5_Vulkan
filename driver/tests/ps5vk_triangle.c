@@ -2525,9 +2525,9 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
     * before Phase C4; the texture's set is then the second one, and set 0 when
     * it is the only set -- where the probe sets that sample declare their
     * combined image sampler (probes/m3-texture/bindings.txt). A caller that
-    * supplies both is refused by the driver, whose stages read one set-0 table
-    * (driver/ps5vk_draw.c): the refusal names set 1. No descriptors at all
-    * leaves the layout exactly as it was before Phase C3. */
+    * supplies both gets two sets with a table each, which is R7's own case
+    * (driver/ps5vk_draw.c). No descriptors at all leaves the layout exactly as
+    * it was before Phase C3. */
    /* R7: two empty set layouts, so the frame's pipeline is valid and its set
     * count is the only thing the draw can refuse. No descriptors are written and
     * none are bound: a *pipeline* that declares more than one set is refused

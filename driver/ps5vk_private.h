@@ -38,6 +38,7 @@
 #include "vk_queue.h"
 #include "vk_sync.h"
 
+#include "ps5vk_debug.h"
 #include "psbc_compile.h"
 #include "ps5vk_entrypoints.h"
 
@@ -422,12 +423,30 @@ struct ps5vk_vertex_buffer {
    uint64_t size;
 };
 
-/* The descriptor sets this driver binds: set 0 only, and one uniform buffer or
- * one combined image sampler per binding (Phases C3 and C4). More sets than
- * one are D1. */
-#define PS5VK_DESCRIPTOR_SET_COUNT 1
+/* The descriptor sets this driver binds: **four**, which is the number it
+ * advertises (VkPhysicalDeviceLimits.maxBoundDescriptorSets,
+ * ps5vk_physical_device.c), and it advertises exactly what it binds.
+ *
+ * Three caps exist and they are a deliberate split, not a disagreement to be
+ * reconciled: the compiler wrapper caps a *program* at eight sets
+ * (PSBC_MAX_DESCRIPTOR_SETS, tooling/psbc/patch-descriptor-sets.py), the
+ * compiler core at thirty-two (MAX_SETS, radv_constants.h), and the driver at
+ * the specification's floor of four. R7 made the mechanism general on the
+ * compiler side while the driver stayed at that floor, so an application that
+ * one day needs more than four sets is a driver change -- widen this constant
+ * and the tables it sizes -- and not another compiler project. Do not "fix" the
+ * difference by narrowing the wrapper or by widening this past what is proved:
+ * more than four is refused by name (ps5vk_CmdBindDescriptorSets,
+ * ps5vk_draw.c). */
+#define PS5VK_DESCRIPTOR_SET_COUNT 4
 
 struct ps5vk_descriptor_set;
+
+enum ps5vk_pipeline_stage {
+   PS5VK_PIPELINE_STAGE_VERTEX,
+   PS5VK_PIPELINE_STAGE_PIXEL,
+   PS5VK_PIPELINE_STAGE_COUNT,
+};
 
 /* A command buffer (ps5vk_cmd_buffer.c, ps5vk_draw.c). */
 /* One chunk of register tables: room for about 200 draws' tables
@@ -587,6 +606,12 @@ struct ps5vk_device {
    uint32_t push_constant_user_data_stage;
    uint32_t push_constant_user_data_low;
    uint32_t push_constant_user_data_high;
+   /* The tables the last draw built, one entry per set each stage read, with
+    * the dword each pointer was written to (R7, ps5vk_debug_descriptor_tables).
+    * The count is reset at the start of every draw, so a probe reads the frame's
+    * last one. */
+   uint32_t descriptor_table_count;
+   ps5vk_debug_table descriptor_tables[PS5VK_PIPELINE_STAGE_COUNT * PS5VK_DESCRIPTOR_SET_COUNT];
    /* The pipelines whose stage mapping exists, newest first: what
     * ps5vk_debug_pipeline_stages reports to the runner's capture. */
    struct ps5vk_pipeline *stages;
@@ -995,12 +1020,6 @@ struct ps5vk_shader_package {
    uint8_t *data;
    size_t size;
    PsbcShaderMetadata metadata;
-};
-
-enum ps5vk_pipeline_stage {
-   PS5VK_PIPELINE_STAGE_VERTEX,
-   PS5VK_PIPELINE_STAGE_PIXEL,
-   PS5VK_PIPELINE_STAGE_COUNT,
 };
 
 /* The stage workspace of a pipeline's AGC shader objects, as the test runner

@@ -76,6 +76,30 @@ void
 ps5vk_debug_push_constant_user_data(VkDevice device, uint32_t *stage, uint32_t *dword,
                                     uint32_t *low, uint32_t *high);
 
+/* One descriptor table the last draw built (R7): the stage that reads it, the
+ * set it belongs to, the user-data dword its pointer was written to, the pointer
+ * as programmed and the table's size in bytes. */
+typedef struct ps5vk_debug_table {
+   uint32_t stage;
+   uint32_t set;
+   uint32_t user_data_dword;
+   uint32_t address_low;
+   uint32_t address_high;
+   /* The table itself, as the draw allocated it: the words a caller reads
+    * instead of the address the ABI carries, which is one dword in this
+    * driver's 32-bit-pointer build. */
+   const uint32_t *words;
+   size_t bytes;
+} ps5vk_debug_table;
+
+/* The tables the last draw built, in the order it built them, up to capacity;
+ * returns how many there are. One per set each stage read, because a set's table
+ * is sized from that set's own bindings and its pointer is its own user-data
+ * dword: a probe asserts both sets' pointers and contents from this rather than
+ * inferring them from pixels (R7, docs/M5_PHASE_C.md). */
+uint32_t
+ps5vk_debug_descriptor_tables(VkDevice device, ps5vk_debug_table *tables, uint32_t capacity);
+
 /* The device's live bound buffers, newest first, up to capacity; returns how
  * many there are. A submission names their addresses -- an index buffer's
  * INDEX_BASE, a vertex-buffer table's first record -- so a capture that

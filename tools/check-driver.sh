@@ -93,6 +93,7 @@ tests=(
     v0_cube
     v0_texel_buffer
     psbc_multiset
+    v0_multiset_draw
 )
 # Negative tests: name, and the host variable that breaks the rule it checks
 # unless the test sets it itself (b3_window).
@@ -166,7 +167,7 @@ instancing_run="$root/golden/c2-instancing/run-1.json"
 # attachment the probe fills itself, so only a capture of that run holds the
 # addresses (golden/c7-mip-tiled, the runner's c7-mip-tiled test).
 tiled_mip_run="$root/golden/c7-mip-tiled/run-1.json"
-if want b7_draw || want b8_groups || want c2_indirect; then
+if want b7_draw || want b8_groups || want c2_indirect || want v0_multiset_draw; then
     python3 "$root/tools/golden.py" replay "$draw_golden" "$work/b4-headless.replay"
 fi
 # The C5 depth test runs against the console's own c5-depth run, like every
@@ -453,6 +454,11 @@ run_test() {
         c5_depth_bias) replay=v0-depth-bias
             compare=() ;;
         v0_push_constant) replay=v0-push-constant
+            compare=() ;;
+        # R7's two-set frame draws against the same plain colour-target frame the
+        # B7 draw does: what it needs from a replay is AGC's register defaults,
+        # and its own pipelines and tables are what the test asserts.
+        v0_multiset_draw) replay=b4-headless
             compare=() ;;
         v0_query_full) replay=v0-query-full
             compare=(compare-run "$query_run" "$dump" --test v0-query-full) ;;

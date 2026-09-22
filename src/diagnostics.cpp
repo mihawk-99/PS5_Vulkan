@@ -17159,14 +17159,17 @@ void run_vulkan_push_constant_frames(const TestContext &test, TestOutcome &outco
 }
 
 // R7 (PS5_VULKAN_REQUESTSv2.md): the descriptor-set count. vkQuake's world and
-// md5 pipeline layouts declare five set layouts and this driver's stages read one
-// set-0 table, so ps5vk_draw_refusal refuses a layout that declares more. The
-// probe is the request's own and shares R8's shape: a pipeline layout with two set
+// md5 pipeline layouts declare five set layouts, and before R7 this driver's stages
+// read one set-0 table and refused any layout that declared more. R7 gives every
+// set its own table, sized from that set's own bindings, and its own user-data
+// pointer (driver/ps5vk_draw.c, ps5vk_debug_descriptor_tables), so this probe is
+// the request's acceptance rather than its refusal: a pipeline layout with two set
 // layouts (both empty, so no binding reaches the shaders and the *count* is the
-// only thing under test) and a graphics pipeline against it. The pipeline is
-// created; the *draw* is refused, by name, and the harness's debug messenger
-// carries the sentence into this log -- which is what R4's coverage note asked for
-// and what the round that closed that item could not yet show.
+// only thing under test) and a graphics pipeline against it, created and drawn
+// with nothing refused. What the sets *carry* is the two-set host gate
+// (driver/tests/vk_v0_multiset_draw_test.c) and this request's own case, and a
+// binding a stage reads in a set past the four this driver advertises is still
+// refused by name where the compiler options are built (ps5vk_descriptor_options).
 void run_vulkan_two_sets_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
     JsonLog &log = test.log;
@@ -17200,15 +17203,17 @@ void run_vulkan_two_sets_frames(const TestContext &test, TestOutcome &outcome) n
                   "a submission did not complete; the program's objects stay allocated");
         return;
     }
-    // What the request expects: creation succeeds (the refusal is the draw's) and
-    // the draw is refused, which is the state the request predicted.
-    const bool passed = created == PS5VK_TRIANGLE_OK && drawn != PS5VK_TRIANGLE_OK;
+    // What R7 makes of it: the layout and its pipeline are created and the draw
+    // runs, because two sets are what the driver serves now. Before R7 the draw
+    // was refused here, by name, and that refusal is what this case used to
+    // measure.
+    const bool passed = created == PS5VK_TRIANGLE_OK && drawn == PS5VK_TRIANGLE_OK;
     log.number("agc_two_sets", "created", created == PS5VK_TRIANGLE_OK ? 1u : 0u);
     log.number("agc_two_sets", "drawn", drawn == PS5VK_TRIANGLE_OK ? 1u : 0u);
     char detail[176]{};
     std::snprintf(detail, sizeof(detail),
-                  "the two-set layout was %s and its draw was %s, which is the refusal the "
-                  "request predicted",
+                  "the two-set layout was %s and its draw was %s, which is what R7's per-set "
+                  "tables serve",
                   created == PS5VK_TRIANGLE_OK ? "created" : "refused at creation",
                   drawn == PS5VK_TRIANGLE_OK ? "accepted" : "refused");
     outcome.command_built = true;
@@ -22494,8 +22499,8 @@ constexpr RunnerTest kRunnerTests[] = {
     // R4's residual: the colour clear read back with nothing drawn over it, and a
     // drawn control frame (run_vulkan_colour_clear_frames).
     {"v0-colour-clear", "m2", run_vulkan_colour_clear_frames},
-    // R7: a pipeline layout with two descriptor set layouts, whose draw this
-    // driver refuses by name (run_vulkan_two_sets_frames).
+    // R7: a pipeline layout with two descriptor set layouts, which this driver
+    // used to refuse and now draws (run_vulkan_two_sets_frames).
     {"v0-two-sets", "m2", run_vulkan_two_sets_frames},
     // R9: push constants, the path every vkQuake pipeline layout depends on: two
     // draws whose fragment output comes from vkCmdPushConstants, one value each,
