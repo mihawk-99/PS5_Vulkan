@@ -93,14 +93,33 @@ host_cflags="$(print_cflags "$host_mak") -fPIC"
 # under _XOPEN_SOURCE=700.
 ps5_cflags=${ps5_cflags//-D_XOPEN_SOURCE=700/}
 
+# The headers this build consumes, hashed: the driver's own, the generated entry
+# points, and the runtime's and the compiler's installed trees. The Makefile
+# names the driver's as prerequisites (driver/Makefile), which covers an edit
+# there; nothing covers a change to the *installed* headers, and an object built
+# against an older copy of one is a mixed layout -- R7 round 2's symptom was not
+# a build error but a table reported with a NULL pointer and zero bytes
+# (docs/M5_PHASE_C.md). So the digest joins the flags below: any change discards
+# every object for that target, which is what a header's layout means.
+header_digest() {
+    { find "$root/driver" -name '*.h' -print0
+      find "$work/generated" -name '*.h' -print0 2>/dev/null
+      find "$runtime/include" -name '*.h' -print0 2>/dev/null
+      find "$psbc_include" -name '*.h' -print0 2>/dev/null
+    } | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | cut -c1-16
+}
+headers=$(header_digest)
+
 build_archive() {
     local target=$1 archive=$2 cc=$3 ar=$4 cflags=$5
     local log="$work/build-$target.log"
-    # make does not track flags: objects built with other flags are discarded.
+    # make does not track flags, and only the Makefile's own prerequisites track
+    # a header: objects built with other flags or another header set are
+    # discarded.
     local flags="$work/$target/flags"
-    if [[ ! -f $flags || $(cat "$flags") != "$cc $cflags" ]]; then
+    if [[ ! -f $flags || $(cat "$flags") != "$cc $cflags headers $headers" ]]; then
         rm -f "$work/$target"/*.o "$work/$target"/*.a
-        printf '%s\n' "$cc $cflags" > "$flags"
+        printf '%s\n' "$cc $cflags headers $headers" > "$flags"
     fi
     if ! make -k -C "$tree" -f "$root/driver/Makefile" -j"$(nproc)" DRIVER="$root/driver" \
             GENERATED="$work/generated" RUNTIME="$runtime" PSBC_INCLUDE="$psbc_include" \
