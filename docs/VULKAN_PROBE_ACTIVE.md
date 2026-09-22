@@ -4,50 +4,63 @@ Volatile by design. Keep this file under about 120 lines. Specifications are in
 `docs/VULKAN_PROBE_PLAN.md`; measurements are in `docs/M5_PHASE_C.md` and
 `docs/HARDWARE_FINDINGS.md`.
 
-_Updated: 2026-09-22 (evening)_
+_Updated: 2026-09-22 (late evening)_
 
 ## Now
 
-**Round of 2026-09-22 (port requests R8, R6, R4 and the fragment-less pipeline): implemented
-and host-gated, nothing claimed.** No console run this round -- the session that did the work
-could not reach the console -- so every capability below waits on one run of
-`jobs/r8-lines/queue.txt`. Phase-log entries: `docs/M5_PHASE_C.md`, 2026-09-22.
+**The round's console run happened: 13 of 14, one open item.** `jobs/r8-lines/queue.txt`,
+`Klog_Logs/r9-spec.log`, pid 178: `v0-r9`, `v0-strip` and `v0-fragmentless` **PASS**, the
+standing cases PASS, **`v0-lines` FAIL** -- R8's own case on its first console run, and the
+round's one open item. R9 is committed; the archive is rebuilt and checked by content.
 
+- **R9, specialization constants** (`fef4387`, console-proven): the fork's Mesa copy had a stub
+  for `vk_spec_info_to_nir_spirv` and no way to pass entries, so `pSpecializationInfo` was
+  refused outright -- what stopped vkQuake's world pipelines at `-13`.
+  `tooling/psbc/patch-specialization.py` (4 edits, metadata stays 14) and
+  `ps5vk_specialization_options()` close it; malformed entries are refused by name. Case
+  `v0-r9`: 3 of 3 constant sets drew the colour they select (`0xffff0000` / `0xffff4000` /
+  `0xffff80ff`) and 2 of 2 invalid sets were refused. Compiler half: `vk_v0_spec_test.c` 4/4,
+  40 / 48 / 48 bytes against a hand-written literal twin.
 - **R8, `VK_PRIMITIVE_TOPOLOGY_LINE_LIST`** (`6d000b7`): DI_PT_LINELIST 2 to the link, both
   stages compiled with `primitive_type = 2` (the NGG vertex stage exports two vertices a
-  primitive), and a line's draw records VGT_GS_OUT_PRIM_TYPE LINESTRIP (0x29b = 1),
-  PA_SU_LINE_CNTL 8 (width 1.0) and PA_SC_LINE_CNTL 0, all sourced from the register database,
-  RADV and ps5-opengl. Cull bits cleared for lines. Wide and multisampled lines, points, line
-  strips, fans, adjacency, patches and restart stay refused. Case `v0-lines`.
-- **R6, the strip** (`15878c3`): the parked "GPU wedge" was the harness aborting on a
-  zero-size index buffer before any frame recorded (`Klog_Logs/r6-strip.log`: "abort is called"
-  after the vertex buffer mapped; reproduced on the host), and `a6f43d7` linked the strip as
-  DI_PT **5, the fan**; the strip is 6. Both fixed, `v0-strip` rewritten and re-registered.
-  The port's `warp` strip pipelines were created against the fan value.
-- **Fragment-less pipelines** (`bfbfc32`): the draft read again (the empty shader is `s_endpgm`
-  alone with colour and Z formats zero, RADV's GFX10 no-export form) and kept; case
-  `v0-fragmentless`, host test `v0_fragmentless`, B6's vertex-only checks.
-- **R4** (`1414853`): swapchain and plane-surface creates refuse by field with
-  `VK_ERROR_UNKNOWN` instead of asserting; host-gated in C1 present, needs no console run.
+  primitive), a line's draw records VGT_GS_OUT_PRIM_TYPE LINESTRIP (0x29b = 1), PA_SU_LINE_CNTL
+  8 and PA_SC_LINE_CNTL 0, cull bits cleared. Wide and multisampled lines, points, line strips,
+  fans, adjacency, patches and restart stay refused. Case `v0-lines` -- **FAIL, open**; keep the
+  port's `debug_lines` / `md5_debug` edits until it passes.
+- **R6, the strip** (`15878c3`): the "GPU wedge" was the harness aborting on a zero-size index
+  buffer, and `a6f43d7` linked the strip as DI_PT **5, the fan**; the strip is 6, so the port's
+  `warp` pipelines were created against the fan value. **Fragment-less** (`bfbfc32`) is RADV's
+  GFX10 no-export form, case `v0-fragmentless`; **R4** (`1414853`) refuses swapchain and
+  plane-surface creates by field, loader-gated, no frame. R7 (`358bde4`) stays console-proven:
+  pid 162, 6/6, `evidence/r7-compute/capture.json`. R2, R3 and R5 are closed.
 
-**Before this round.** R7 (`358bde4`, compute shares the draw path's descriptor tables) is
-console-proven: pid 162, 6/6, `evidence/r7-compute/capture.json`. R2, R3 and R5 are closed.
+**Host evidence, this round's run on this host.** check-driver PASS: 1620 checks, **284**
+identical golden comparisons (the previous session's 292 was a clean clone, which runs two extra
+PS5-link cases; `v0_topology` 35/35 and `v0_fragmentless` 9/9 direct, B6 24/24, C1 16/16),
+`v0_spec` 4/4 direct. lint 212 files, `make test` 31 OK, the three audits, migration (now
+covering the specialization patch), runner cases 206 records, psbc link, mip layout and the
+Vulkan runtime gate PASS. **`probe-packages` failed on the first full pass and passes now**: the
+two new sets were one `v0-spec|v0-spec-hardcoded)` case alternative and that check reads a
+builder off the build script's own case labels, so it saw two committed sets nothing could
+rebuild; one label each, 51 committed sets with 49 rebuilt and compared byte for byte. One
+failure: `c1_present` in loader mode only, 15 of 16 (*"a plane surface whose imageExtent the plane
+does not have is refused ... naming imageExtent"*), direct 16 of 16 with the same sentence in both
+logs -- **loader-environmental and pre-existing** (this round touches no plane-surface or
+swapchain code), recorded rather than fixed. A clean clone still differs only in
+`probes/v0-push/bindings.txt` (`pixel_user_sgpr_count` 4 against the committed 7, packages
+byte-identical); re-check that on the reference host.
 
-**Host evidence.** check-driver PASS with 292 identical golden comparisons (new tests
-`v0_topology` 35/35 and `v0_fragmentless` 9/9 direct, B6 24/24, C1 16/16); lint, unit tests,
-runner cases (inventory unchanged), the three audits, migration, mip layout, psbc link and the
-Vulkan runtime gate PASS. Built in a clean clone with clang 18.1.3 (the host's archive is clang
-22.1.8); `probe-packages` differs there only in `probes/v0-push/bindings.txt`
-(`pixel_user_sgpr_count` 4 against the committed 7, packages byte-identical) at `a6f43d7` as
-well, so it is that environment's and not this round's -- re-check on the reference host.
+**Port handoff -- done on this host.** `build/driver/ps5/libps5vk.ps5.a` is rebuilt
+(14 374 298 bytes, sha256 `f3d749d6…`) and checked by content: `strings` finds `only triangle
+lists, triangle strips and line lists`, the two new specialization sentences are there, and
+`specialization constants are not supported` is **gone**. Relink the port against it. Then the
+port's `debug_lines` and `md5_debug` edits can retire, **pending `v0-lines` passing**; the world
+pipelines should create where `-13` used to be.
 
-**Port handoff.** `build/driver/ps5/libps5vk.ps5.a` on the reference host predates these
-commits: rebuild it (`tools/build-driver.sh`) before the port relinks, and check its content --
-`strings` must find `only triangle lists, triangle strips and line lists`. Then the port's
-`debug_lines` and `md5_debug` edits can retire, pending `v0-lines` passing on the console.
-
-**Next.** One console run of `jobs/r8-lines/queue.txt`, capture with
-`python3 tools/ps5_console.py klog`; record pids, goldens and the three verdicts, then claim.
+**Next.** `v0-lines`: read the case's own lines in `Klog_Logs/r9-spec.log` first (`runner_test`
+result -1, detail `v0-lines`, line 2214). The line registers and the topology are already
+measured there, so the next step is the case's own comparison, not another console sweep; claim
+R8 by re-running `jobs/r8-lines/queue.txt` once it is green.
 
 **Parked.** MRT's four-attachment frame (counts 1 and 2 console-proven; the advertised maximum
 dies in Mesa's `vk_object_base_assert_valid` before the registers): the next action is a host
@@ -57,10 +70,13 @@ change, which the inventory diff in the runner-cases gate confirms.
 
 ## Standing work
 
-- Graphics R7 rounds 1-4, R8 dynamic depth bias, R9 push pointers, and the R4
-  clear/refusal coverage are recorded in `docs/M5_PHASE_C.md`; the first R1-R6
-  request batch is in `docs/REQUESTS_RESPONSE.md`. The advertised-set-limit probe
-  and vulkan-runtime header dependencies remain follow-ups from graphics R7.
+- Graphics R7 rounds 1-4, R8 dynamic depth bias, the first batch's R9 (push
+  pointers), and the R4 clear/refusal coverage are in `docs/M5_PHASE_C.md`; the
+  first R1-R6 batch is in `docs/REQUESTS_RESPONSE.md`. **The port's letters
+  restart per batch** -- this round's R9 is specialization constants, last
+  round's was push constants -- so cite the commit, not the letter. Follow-ups
+  from graphics R7: the advertised-set-limit probe and vulkan-runtime header
+  dependencies.
 - Anisotropy at the reported maximum is accepted as a no-op, proved by
   `v0-sampler-anisotropy` with zero differences. `samplerAnisotropy` stays FALSE.
 - Rung 1.0 audit counts remain: commands 137 (90 driver, 47 runtime, 0 gap);

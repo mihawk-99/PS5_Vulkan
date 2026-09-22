@@ -906,3 +906,77 @@ wrong extent or plane.
 
 **The archive.** Rebuild `build/driver/ps5/libps5vk.ps5.a` on the reference host before
 relinking; the one there predates these commits.
+
+## 2026-09-22 — R9: specialization constants, and the `-13` the port stopped on
+
+**The refusal that could stop a world pipeline was ours.** `ps5vk_compile_stage` (and its
+compute counterpart) carried
+
+```c
+if (stage && stage->pSpecializationInfo && stage->pSpecializationInfo->mapEntryCount != 0)
+   return vk_errorf(device, VK_ERROR_UNKNOWN, "specialization constants are not supported");
+```
+
+so every pipeline stage that named a non-empty `VkSpecializationInfo` was refused. That is a
+Vulkan 1.0 core feature, which this driver advertises, so the refusal was a gap rather than a
+boundary. It is gone; the sentence is not in the rebuilt archive.
+
+**One caveat, because the port's log alone cannot settle it.** `-13` is `VK_ERROR_UNKNOWN`, the
+code *every* refusal in this driver returns, and vkQuake prints the code and not the sentence, so
+nothing captured here names `pSpecializationInfo` as the world pipeline's cause. It is the likely
+one -- this was the only refusal a world draw's stages could reach that this batch changed, and
+the code that returned it is exactly `VK_ERROR_UNKNOWN` -- but it is an inference, and the port's
+next run is the check. If it stops again, the world-pipeline message is what the next request
+should carry; there is no reason for a second round of guessing. The probe below builds five
+pipelines from one module for the same reason: the feature is measured here, not assumed from
+the port's symptom.
+
+**What was actually missing, and where.** The driver was never the blocker: RADV's
+`spirv_to_nir` applies specialization values already. The fork of the AGC shader compiler under
+`tooling/psbc/` had a *stub* in its Mesa copy of `vk_spec_info_to_nir_spirv` and no way for a
+caller to pass the entries, so an application's `constant_id` values had nowhere to arrive.
+`tooling/psbc/patch-specialization.py` (four edits, metadata version stays 14) adds
+`PsbcSpecializationEntry` with `VkSpecializationMapEntry`'s own layout and four fields to
+`PsbcCompileOptions`, validates them, sets `stage->spec_info` before the main lowering and
+resets it after, and installs Mesa's real `vk_spec_info_to_nir_spirv` (renamed in the driver's
+copy, so the runtime keeps its own symbol). The driver's half is
+`ps5vk_specialization_options()`: a static assertion that the two entry layouts match, a refusal
+**by name** for a malformed `VkSpecializationInfo`, and the application's arrays handed over --
+called from `ps5vk_compile_stage` on a copy of the options and specializing SPIR-V stages only,
+never Mesa's meta stages, and from the compute path the same way.
+
+**Measured, not inferred** (`v0-r9`, `probes/v0-spec`, `Klog_Logs/r9-spec.log`, pid 178). One
+module -- a `constant_id` bool selecting the red channel and a `constant_id` int selecting green
+(passing 1 gives 64/255, passing 2 gives 128/255) -- built into five pipelines, every frame read
+back exactly:
+
+| set | readback | what it proves |
+| --- | --- | --- |
+| none | `0xffff0000` | the shader's own default is what compiles |
+| `level = 1` | `0xffff4000` | one constant of two changed, and only its channel |
+| `tint_red` + `level = 2` | `0xffff80ff` | both constants took, in one stage |
+
+`"3 of 3 constants' sets drew the colour they select and 2 of 2 invalid sets were refused"`.
+The words are the constants' *values* in the readback's byte order (R 0/0/255, G 0/64/128,
+B 255), so each frame says **which** set arrived rather than merely that two frames differ. The
+two invalid sets -- an entry reading past `pData`, and entries with no map -- were refused rather
+than silently compiled with the shader's defaults. The compiler-side half is
+`driver/tests/vk_v0_spec_test.c`: the same module with no entries, with those values, and with a
+hand-written twin of the literals gives 40, 48 and 48 bytes of machine code, 4 of 4 checks.
+
+**For the port.** Nothing to change: recreate the world pipelines and they create. `constant_id`
+values now reach the shader; before, a pipeline that named them did not exist at all. The one
+behaviour to know is that a malformed `VkSpecializationInfo` is refused with
+`VK_ERROR_UNKNOWN` and a sentence naming the stage and the entry (this is validation Vulkan asks
+for), so a wrong `offset`/`size` in the application's own map entries is reported rather than
+ignored.
+
+**Honest limits.** Specialization is applied to stages the driver compiles from SPIR-V. Mesa's
+own NIR meta stages (blit, clear, resolve, the empty fragment stage) are compiled without
+entries, which is correct -- nothing hands them a `VkSpecializationInfo`. The map entries are
+read once, at pipeline creation, as Vulkan requires (`vkCreate*Pipelines` copies what it needs;
+the application may free `pData` afterwards). There is **no pipeline cache** yet -- its shim is a
+zero-byte stub -- so two pipelines from one module with different values are two compiles, which
+is also why this cannot be silently wrong today; when a cache lands, the constants' values belong
+in its key, as RADV hashes them. That is written beside the helper, not left for the cache's
+author to rediscover.
