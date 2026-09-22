@@ -448,17 +448,6 @@ ps5vk_target_registers(uint64_t address, VkExtent2D extent,
    if (!ps5vk_default_target_registers(records, target))
       return false;
    records[0].value = (uint32_t)(address >> 8);
-   /* CB_COLORi_BASE_EXT's BASE_256B (bits 0-7) is the address's bits 40-47, the
-    * half CB_COLORi_BASE's 32 bits cannot hold -- the same split the depth target
-    * programs (ps5vk_depth_registers, DB_Z_READ_BASE_HIGH). It is per *target*,
-    * because it is per address: a target that inherited another's high word would
-    * be written at an address made of one target's low half and another's high
-    * half, which belongs to neither image. The console showed exactly that --
-    * attachment 1 reading zero with a coloured clear that never reached it, and
-    * the title wedging after the frame -- and the host dump is what ruled the
-    * producer out: the rows were right, offsets 0x318 and 0x327 with each
-    * attachment's own low word (R7 step 1b). */
-   records[10].value = (records[10].value & ~0xffu) | (uint32_t)((address >> 40) & 0xffu);
    records[1].value &= 0xfc001fffu;
    /* CB_COLOR0_INFO: the format's data format, number type and component order,
     * with the three bits the number type decides. AGC's default word carries
@@ -494,7 +483,13 @@ ps5vk_target_registers(uint64_t address, VkExtent2D extent,
    records[5].value = 0;
    records[6].value = 0;
    records[9].value = 0;
-   records[10].value = (records[10].value & 0xffffff00u) | (uint32_t)(address >> 40);
+   /* BASE_EXT's BASE_256B is the address's bits 40-47, eight bits: the half
+    * CB_COLORi_BASE's 32 bits cannot hold (the depth target programs the same
+    * split as DB_Z_READ_BASE_HIGH). It is per target because it is per address,
+    * and this write was already per target -- an earlier round mistook it for the
+    * cause of attachment 1 staying zero and added a duplicate; the cause was the
+    * write masks below (R7 step 1b, corrected). */
+   records[10].value = (records[10].value & 0xffffff00u) | ((uint32_t)(address >> 40) & 0xffu);
    records[11].value &= 0xffffff00u;
    records[12].value &= 0xffffff00u;
    records[13].value &= 0xffffff00u;
@@ -1933,6 +1928,17 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
    /* A pipeline that writes no colour zeroes the masks after every other record
     * has set them: the linked context and the viewport registers carry RGBA
     * (Phase C5; vk_meta's depth clear is the pipeline that asks for none). */
+   /* CB_TARGET_MASK (0x08e) and CB_SHADER_MASK (0x08f) carry one *per-target*
+    * nibble each: TARGETn_ENABLE and OUTPUTn_ENABLE, four bits at 4n
+    * (R_028238/R_02823C). The viewport block below programs 0xf, which enables
+    * target 0's RGBA and nothing for the other targets -- the single-attachment
+    * default -- so a rendering into more than one attachment has to override both
+    * words with every attachment's own mask. Programming attachment 0's mask for a
+    * two-attachment rendering masks the second target's writes off in hardware
+    * whatever its address is, which is what the console read as attachment 1
+    * holding zero through both the draw and vk_meta's clear (that clear is a draw
+    * through these registers too). The vkQuake port project named the register.
+    * zero mask_count means the default word already says it. */
    const uint32_t mask_count = pipeline->colour_write_mask == 0xfu ? 0u : 2u;
    /* A four-sample rendering's rasterizer registers come right after the colour
     * target's, so a one-sample draw records exactly the words it recorded before

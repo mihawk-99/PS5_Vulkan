@@ -1279,13 +1279,25 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
    if (!pipeline)
       return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
    pipeline->spi_shader_col_format = exports;
-   /* The colour write mask a draw has to program: the first attachment's, which
-    * Vulkan requires to be present and the same for all of them here (the draw
-    * refuses anything but RGBA or none, ps5vk_draw_refusal). */
-   pipeline->colour_write_mask =
-      info->pColorBlendState != NULL && info->pColorBlendState->attachmentCount > 0
-         ? (uint32_t)info->pColorBlendState->pAttachments[0].colorWriteMask
-         : 0xfu;
+   /* The colour write masks a draw programs, as one word: Vulkan gives **each**
+    * attachment its own VkPipelineColorBlendAttachmentState::colorWriteMask, and
+    * the two registers that carry them are per-target nibble fields --
+    * CB_TARGET_MASK's TARGETn_ENABLE and CB_SHADER_MASK's OUTPUTn_ENABLE, four
+    * bits each at 4n (R_028238, R_02823C). This used to be attachment 0's mask
+    * alone on the assumption that the rest are the same, which holds for one
+    * attachment and masks every other target's writes off for a rendering into
+    * more than one (R7 step 1b, found by the vkQuake port project reading the
+    * register database). A pipeline with no blend state writes RGBA to the first
+    * attachment, which is the word a single-attachment draw has always had. */
+   pipeline->colour_write_mask = 0;
+   const uint32_t blend_attachments =
+      info->pColorBlendState != NULL ? info->pColorBlendState->attachmentCount : 0;
+   for (uint32_t at = 0; at < PS5VK_MAX_COLOR_TARGETS; at++) {
+      const uint32_t mask = at < blend_attachments
+                               ? (uint32_t)info->pColorBlendState->pAttachments[at].colorWriteMask
+                               : (at == 0 ? 0xfu : 0u);
+      pipeline->colour_write_mask |= (mask & 0xfu) << (4 * at);
+   }
    /* The word a blending draw records, 0 for one that does not blend. A state
     * this driver cannot program has already set draw_refusal below, so the word
     * only has to be safe here. A state that reads the blend constants takes

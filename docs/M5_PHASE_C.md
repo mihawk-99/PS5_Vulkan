@@ -7652,3 +7652,48 @@ differently for targets past the first), whether the `SPI_SHADER_COL_FORMAT` wor
 accompany them in the same stream for the exports to be live, and whether `CB_COLOR_CONTROL`'s
 MODE or a per-target `CB_COLORi_VIEW` field gates the writes. The instrument for all three is
 the same: the `v0-mrt` case, whose per-attachment words say which one moved.
+
+## 2026-09-21 — R7 step 1b: the write masks were the cause, and my BASE_EXT diagnosis was wrong
+
+**The cause, named by the vkQuake port project from this repository's own register database.**
+`CB_TARGET_MASK` (context `0x08e`) and `CB_SHADER_MASK` (`0x08f`) carry **one nibble per
+target** -- `S_028238_TARGETn_ENABLE` and `S_02823C_OUTPUTn_ENABLE`, four bits at `4n` -- and
+the driver programmed `pipeline->colour_write_mask` in both. That field was
+`pColorBlendState->pAttachments[0].colorWriteMask`, i.e. **attachment 0's mask alone**, on the
+assumption the rest are the same. They need not be, and Vulkan gives every attachment its own
+`colorWriteMask`; `0xf` at `0x08e` enables target 0's RGBA and **nothing** for targets 1..N.
+So a rendering into more than one colour attachment had its writes past the first masked off in
+hardware *whatever their addresses were* -- which is exactly what the console read, through
+the draw **and** through `vk_meta`'s clear, because that clear is a draw through the same two
+registers. The pipeline now builds one word from every attachment's own mask
+(`ps5vk_pipeline.c`), and the draw programs it (`ps5vk_draw.c`), count-aware, with the
+viewport block's `0xf` remaining the single-attachment default.
+
+**Measured on the console** (run `Klog_Logs/v0-mrt.log`, pid 125, with the refusal lifted
+locally so the frame could draw):
+
+```
+1 attachment : attachment_0_of_1 = 0xff0000ff                      (location 0's output)
+2 attachments: attachment_0_of_2 = 0xff0000ff, attachment_1_of_2 = 0xff00ff00
+               (location 0's and location 1's output, each in its own target)
+```
+
+The two-attachment frame's line was a FAIL only because the case still carried the interim
+expectation it was written with; both attachments hold **their own** output, which is the
+acceptance this step was missing.
+
+**A correction to my own last commit.** I recorded `CB_COLORi_BASE_EXT` as the cause and added
+a write for it -- but the EXT group below already programmed that register **per target**
+(`records[10]`, next to `records[11]`/`[12]`'s field clears), so my line was a duplicate of the
+same byte and the diagnosis behind it was wrong. The port project spotted the duplicate; it is
+gone, the existing write now masks the field to its eight bits (`S_028E40_BASE_256B`), and the
+comment says the earlier reading was wrong rather than leaving it standing. The wedge that
+stopped two batteries and looked like a faulting address was the masked-off writes.
+
+**Gap left open: the four-attachment frame.** Counts 1 and 2 draw correctly; the run that
+measured them stopped on the advertised-maximum frame, so **the capability stays unclaimed and
+the refusal stays live**. Blast radius: MRT applications still get a named refusal instead of a
+wrong frame. Next measurement: one console cycle on the four-attachment frame with the probe's
+per-attachment words, which will say whether more than two targets need something the mask and
+the offsets do not provide (the `CB_COLORi_VIEW`/`ATTRIB2`/`ATTRIB3` fields and the exports are
+the remaining candidates, and the values will point at one).
