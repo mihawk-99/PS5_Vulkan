@@ -7191,3 +7191,36 @@ follow: the manifest that selects cases for a run records this case with that la
 evidence above, and a future round can pin it down by instrumenting the CTS side of the
 version query rather than this driver. Nothing in the driver is changed by this round, and no
 capability is claimed or unclaimed because of it.
+
+## 2026-09-21 — round 13: the compressed tile is asked of AddrLib, not guessed
+
+The last format failure is the compressed set: the CTS requires one of BC, ETC2 or ASTC to
+carry all five of `SAMPLED_IMAGE`, `BLIT_SRC`, `SAMPLED_IMAGE_FILTER_LINEAR`,
+`TRANSFER_SRC` and `TRANSFER_DST` for **every** format in that family, and every one of the
+43 compressed formats this driver reports today carries `0x0`. Nothing about that is
+reporting work -- it is a format-table gap -- so this round established the shape the work
+would be written from instead of starting with a guess.
+
+The mip-layout oracle already derives the driver's four-byte maps from AddrLib, one element
+size at a time. A compressed format's element is a **4x4 texel block**, so its swizzle row
+comes from AddrLib's own *format* table rather than from a bytes-per-pixel number, and the
+oracle now has a `compressed <format> [mode]` query that asks for exactly that. Measured on
+the pinned library:
+
+| format | element | 64 KiB tile (macro-block) | in texels | coordinate query |
+| --- | --- | --- | --- | --- |
+| BC1 | 8 bytes | 128x64 blocks | 512x256 | **refused** |
+| BC3 | 16 bytes | 64x64 blocks | 256x256 | answered |
+| BC7 | 16 bytes | 64x64 blocks | 256x256 | answered |
+
+The block counts are the consistency check: 128x64x8 = 64 KiB, 64x64x16 = 64 KiB. Three
+things this settles, and one it does not: a compressed tile has its own row (so a driver map
+for BC cannot reuse the four-byte one); the tile extents follow from the block size, not from
+the pixel format's channel count; and the `64kb_r_x` mode answers coordinates for the
+16-byte blocks -- while for BC1's 4 bits per pixel the coordinate query is refused, which is
+the next round's first question (whether the hardware's sampled-BC mode takes a different
+swizzle mode or a different bits-per-pixel convention). The gate prints all of it, so the
+shape is on the record before any driver change depends on it.
+
+No capability is claimed by this round: the compressed formats still report `0x0`, and the
+CTS case still fails. What changed is that the next round starts from a measurement.

@@ -315,3 +315,13 @@ PY
 # address library's generated equations). That check also names the equations
 # for the modes nothing here has measured, which is what a probe would extend.
 python3 "$root/tools/check-tile-equations.py"
+
+# A compressed format's tile is its own, and no probe has walked one: the CTS
+# requires one of the BC, ETC2 or ASTC sets in full (docs/M5_PHASE_C.md, CTS
+# round 12), so the shape a driver map for it would be written from is asked of
+# AddrLib here rather than guessed -- the element is a 4x4 texel block, so the
+# row comes from the format rather than from a bytes-per-pixel number.
+echo "== Compressed tiles, from AddrLib's own format table"
+for spec in "bc1 64kb_r_x" "bc3 64kb_r_x" "bc7 64kb_r_x"; do
+    "$output" compressed $spec | sed 's/^/   /'
+done

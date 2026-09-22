@@ -120,7 +120,9 @@ passed / **4 failed**. Then the atomic bit for the integer twins,
 earned by a new probe that atomically adds per fragment and checks the count
 (`v0-formats-texel-buffer-atomic` PASS, digest `28d073e9…`). `dEQP-VK.api.info.*` is now
 **2542 passed / 2 failed**. The rest: the compressed-format set (every BC, ETC2 and ASTC
-format reports `0x0` today, so it is a real format-table gap), and the console payload.
+format reports `0x0` today, so it is a real format-table gap -- the mip-layout oracle now
+asks AddrLib for a compressed tile's own row, which is where that work starts), and the
+console payload.
 `extension_core_versions` is no longer counted as driver work: it fails for every extension
 including the loader's own, and four candidate inputs were eliminated -- the last by
 measurement -- so it carries the **HARNESS/PORT** label for the run's manifest

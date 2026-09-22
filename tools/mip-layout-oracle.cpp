@@ -260,6 +260,108 @@ coordOffset(ADDR_HANDLE lib, AddrSwizzleMode mode, unsigned bpe, unsigned sample
                            derivationFlags(depth), offset);
 }
 
+/* --- a compressed surface, asked for by format rather than by element size ---
+ *
+ * The rows above are 4-byte elements, which is what this driver measured. A
+ * compressed format's tile is its own: the element is a 4x4 texel block, so the
+ * swizzle row comes from AddrLib's *format* rather than from a bytes-per-pixel
+ * number, and no probe has walked one yet. This prints what the address library
+ * says for a format, which is what a driver map and its probe would be written
+ * from (docs/M5_PHASE_C.md, CTS rounds 12 and 13).
+ */
+struct CompressedFormat
+{
+    const char *name;
+    AddrFormat format;
+    unsigned bpp; /* bits per *pixel*: a 4x4 block is sixteen times this */
+    unsigned blockBytes;
+};
+
+static const CompressedFormat kCompressedFormats[] = {
+    {"bc1", ADDR_FMT_BC1, 64u / 16u, 8u},
+    {"bc2", ADDR_FMT_BC2, 128u / 16u, 16u},
+    {"bc3", ADDR_FMT_BC3, 128u / 16u, 16u},
+    {"bc4", ADDR_FMT_BC4, 64u / 16u, 8u},
+    {"bc5", ADDR_FMT_BC5, 128u / 16u, 16u},
+    {"bc6", ADDR_FMT_BC6, 128u / 16u, 16u},
+    {"bc7", ADDR_FMT_BC7, 128u / 16u, 16u},
+};
+
+static void
+printCompressed(ADDR_HANDLE lib, const CompressedFormat &entry, AddrSwizzleMode mode,
+                const char *modeName)
+{
+    ADDR2_COMPUTE_SURFACE_INFO_INPUT info;
+    ADDR2_MIP_INFO mip[2];
+    ADDR2_COMPUTE_SURFACE_INFO_OUTPUT out;
+    std::memset(&info, 0, sizeof(info));
+    std::memset(mip, 0, sizeof(mip));
+    std::memset(&out, 0, sizeof(out));
+    info.size = sizeof(info);
+    info.swizzleMode = mode;
+    info.resourceType = ADDR_RSRC_TEX_2D;
+    info.format = entry.format;
+    info.bpp = entry.bpp;
+    info.width = 4096;
+    info.height = 4096;
+    info.numSlices = 1;
+    info.numMipLevels = 1;
+    info.numSamples = 1;
+    info.numFrags = 1;
+    info.flags.color = 1;
+    info.flags.texture = 1;
+    info.flags.needEquation = 1;
+    info.flags.allowExtEquation = 1;
+    out.size = sizeof(out);
+    out.pMipInfo = mip;
+    if (Addr2ComputeSurfaceInfo(lib, &info, &out) != ADDR_OK) {
+        std::printf("/* %s %s: AddrLib refused the shape */\n", entry.name, modeName);
+        return;
+    }
+    std::printf("/* %s %s: block %ux%u texels, pitch %u blocks, slices %u */\n", entry.name,
+                modeName, out.blockWidth, out.blockHeight, out.pitch, out.numSlices);
+
+    /* The byte offset of a few blocks, which is what a map is checked against:
+     * a 4x4 texel block's own corner, at the centres X/Y of a 2x2 block patch. */
+    const unsigned side = out.blockWidth >= 4 ? out.blockWidth / 2u : 4u;
+    for (unsigned blockY = 0; blockY < 2; ++blockY) {
+        for (unsigned blockX = 0; blockX < 2; ++blockX) {
+            ADDR2_COMPUTE_SURFACE_ADDRFROMCOORD_INPUT coord;
+            ADDR2_COMPUTE_SURFACE_ADDRFROMCOORD_OUTPUT addr;
+            std::memset(&coord, 0, sizeof(coord));
+            std::memset(&addr, 0, sizeof(addr));
+            coord.size = sizeof(coord);
+            coord.x = blockX * side;
+            coord.y = blockY * side;
+            coord.slice = 0;
+            coord.sample = 0;
+            coord.mipId = 0;
+            coord.swizzleMode = mode;
+            coord.resourceType = ADDR_RSRC_TEX_2D;
+            /* The coordinate query takes bits per pixel rather than a format, which
+             * is how Mesa calls it for a compressed surface: the block a pixel is in
+             * follows from the bpp. */
+            coord.bpp = entry.bpp;
+            coord.unalignedWidth = 4096;
+            coord.unalignedHeight = 4096;
+            coord.numSlices = 1;
+            coord.numMipLevels = 1;
+            coord.numSamples = 1;
+            coord.numFrags = 1;
+            coord.pitchInElement = out.pitch;
+            coord.flags.color = 1;
+            coord.flags.texture = 1;
+            coord.flags.needEquation = 1;
+            coord.flags.allowExtEquation = 1;
+            addr.size = sizeof(addr);
+            if (Addr2ComputeSurfaceAddrFromCoord(lib, &coord, &addr) != ADDR_OK)
+                continue;
+            std::printf("   block (%u, %u) at %llu (0x%llx)\n", blockX, blockY, addr.addr,
+                        addr.addr);
+        }
+    }
+}
+
 /* The tile AddrLib builds for a mode and element size: its block extents and
  * the pitch of a surface one tile wide. False when AddrLib refuses the shape. */
 static bool
@@ -687,6 +789,33 @@ main(int argc, char **argv)
             else
                 printSwizzle(map, name);
         }
+        AddrDestroy(create_out.hLib);
+        return 0;
+    }
+    if (argc >= 3 && std::strcmp(argv[1], "compressed") == 0) {
+        const char *const formatName = argv[2];
+        const char *const modeName = argc >= 4 ? argv[3] : "64kb_s";
+        AddrSwizzleMode mode = ADDR_SW_64KB_S;
+        if (std::strcmp(modeName, "64kb_r_x") == 0 || std::strcmp(modeName, "target") == 0)
+            mode = ADDR_SW_64KB_R_X;
+        else if (std::strcmp(modeName, "64kb_z_x") == 0 || std::strcmp(modeName, "depth") == 0)
+            mode = ADDR_SW_64KB_Z_X;
+        else if (std::strcmp(modeName, "64kb_s") != 0 && std::strcmp(modeName, "colour") != 0) {
+            std::fprintf(stderr, "unknown mode: %s\n", modeName);
+            AddrDestroy(create_out.hLib);
+            return 2;
+        }
+        const CompressedFormat *chosen = nullptr;
+        for (const CompressedFormat &entry : kCompressedFormats)
+            if (std::strcmp(entry.name, formatName) == 0)
+                chosen = &entry;
+        if (chosen == nullptr) {
+            std::fprintf(stderr, "unknown compressed format: %s\n", formatName);
+            AddrDestroy(create_out.hLib);
+            return 2;
+        }
+        std::printf("/* %s: %u bytes a 4x4 block */\n", chosen->name, chosen->blockBytes);
+        printCompressed(create_out.hLib, *chosen, mode, modeName);
         AddrDestroy(create_out.hLib);
         return 0;
     }
