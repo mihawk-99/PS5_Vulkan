@@ -99,6 +99,10 @@ enum ps5vk_triangle_output {
  * maxPushConstantsSize, which the driver reports as 128. */
 #define PS5VK_TRIANGLE_MAX_PUSH_CONSTANTS 128
 
+/* The images R7's vkQuake shape samples: one per combined image sampler at set
+ * 0's bindings 0, 1 and 2. */
+#define PS5VK_TRIANGLE_MULTISET_TEXTURES 3
+
 struct ps5vk_triangle_input {
    ps5vk_get_instance_proc_addr get_instance_proc_addr;
    /* One or two pipelines; a frame's second draw uses the second, or the
@@ -521,6 +525,19 @@ struct ps5vk_triangle_input {
     * is the one-set (or no-set) layout every earlier frame ran. Appended at the
     * end for the same reason as target_format. */
    bool two_descriptor_sets;
+   /* R7's vkQuake shape: three combined image samplers at **set 0**'s bindings 0,
+    * 1 and 2 -- vkQuake's collapsed texture sets -- and the caller's uniform
+    * block at **set 1**'s binding 0, which is the layout its world and md5
+    * pipelines declare. texture_data is binding 0, texture_data_second binding 1
+    * and texture_data_third binding 2, each texture_width x texture_height
+    * RGBA8 texels that the *caller* copies into the mapped image memory the
+    * frame reports in multiset_mappings and flushes itself (the console's
+    * clflush, src/diagnostics.cpp); uniform_data holds the block set 1 names.
+    * False keeps the layout every earlier phase uses, where the uniform is set 0
+    * and the one texture set 1 when both are present. */
+   bool textures_in_first_set;
+   const void *texture_data_second;
+   const void *texture_data_third;
 };
 
 
@@ -731,6 +748,20 @@ struct ps5vk_triangle {
    VkBuffer texture_staging_buffer;
    VkDeviceMemory texture_staging_memory;
    void *texture_staging_mapped;
+   /* R7's vkQuake shape (input->textures_in_first_set): the three sampled images
+    * set 0's bindings 0, 1 and 2 name, their views, the one set that names them
+    * -- and the mappings the caller fills the texels through, with each image's
+    * mapped size. The uniform block's set is the same create_uniform builds for
+    * every other frame's set 0 and this shape places at index 1. Zero handles
+    * when the caller asked for another layout. */
+   VkImage multiset_images[PS5VK_TRIANGLE_MULTISET_TEXTURES];
+   VkDeviceMemory multiset_memories[PS5VK_TRIANGLE_MULTISET_TEXTURES];
+   void *multiset_mappings[PS5VK_TRIANGLE_MULTISET_TEXTURES];
+   size_t multiset_bytes[PS5VK_TRIANGLE_MULTISET_TEXTURES];
+   VkImageView multiset_views[PS5VK_TRIANGLE_MULTISET_TEXTURES];
+   VkDescriptorSetLayout multiset_set_layout;
+   VkDescriptorPool multiset_pool;
+   VkDescriptorSet multiset_set;
    /* The uniform texel buffer a frame's pixel shader fetches from, its view and
     * the set the frame binds (V0-formats' descriptor-type rows). Zero handles
     * when the caller passed no texel buffer, and the driver's destroys ignore

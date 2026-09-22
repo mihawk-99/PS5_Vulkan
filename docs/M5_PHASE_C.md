@@ -7314,3 +7314,72 @@ binding — vkQuake's collapsed sets) is what proves the mechanism with real con
 refusal probe should follow it. The AGC package-writer's single-pointer gap stays in
 `docs/REQUESTS_RESPONSE.md`'s named-gaps list, where Round 1 put it, rather than in a source
 comment.
+
+## 2026-09-21 — R7, Round 3: vkQuake's shape, read out of both sets
+
+Rounds 1 and 2 made the compiler and the driver build one table per set. Round 3 is the
+shape the request exists for, and it is the one an application has: **vkQuake's collapsed
+texture sets**. Its world and md5 pipeline layouts declare five descriptor sets; the
+texture sets collapse into one set of **three combined image samplers at set 0, bindings 0,
+1 and 2**, and the frame's uniform block lives in the **next** set. A driver that keeps one
+table per stage cannot hold a three-binding image set and a second set's uniform entry at
+once, and one that writes a single user-data pointer leaves one of the two sets reading an
+unwritten SGPR -- which this hardware reads as zero.
+
+**The probe** is `probes/v0-multiset-quake` (`shaders/v0/multiset_quake.frag`, added to
+`tools/build-probe-shaders.sh` with its own `bindings.txt` emitter). The fragment stage
+takes one channel from each of set 0's three bindings and multiplies it by set 1's block:
+
+```glsl
+color = tint_block.tint * vec4(texture(red_image, uv).r,
+                               texture(green_image, uv).g,
+                               texture(blue_image, uv).b, 1.0);
+```
+
+The emitter asserts what the compiler made of that shape and records it: set 0's bindings 0,
+1 and 2 at **offsets 0, 48 and 96** -- one table, three 48-byte entries -- and set 1's
+binding 0 at its **own zero**, a 16-byte uniform entry, with `pixel_user_sgpr_count 4` and
+set 0's pointer at dword 2. The CLI prints set 0's pointer dword alone, so set 1's is the
+metadata array's, which `driver/tests/vk_psbc_multiset_test.c` reads; the file says so
+rather than inventing a field.
+
+**The harness mode** is `input.textures_in_first_set` (`driver/tests/ps5vk_triangle.c`):
+three images, their views and the one set that names all three at set 0, with the block
+`create_uniform` builds -- which every other frame binds at set 0 -- placed at **index 1** of
+the same pipeline layout. The three images' texels are the *caller's*: each memory is mapped
+and reported through `multiset_mappings`, because a 64-texel RGBA8 row is exactly the
+256-byte row this driver pads to, and the console runner writes and `clflush`es it itself.
+That keeps this frame out of the copy-and-split machinery an upload would need, which is what
+a frame about descriptor sets wants.
+
+**The console case** is `v0-multiset-quake` (`src/diagnostics.cpp`,
+`run_vulkan_multiset_quake_frames`), with `jobs/v0-multiset-quake/queue.txt`. The three
+images are solid red, green and blue and the block's green is 64/255, a value no single
+wrong binding produces: a stage whose set-1 pointer was never written reads zeros and the
+frame is black (R9), a lost set-0 binding drops its channel, and two sets sharing one table
+read the block out of an image descriptor. Run **pid 128**, `Klog_Logs/v0-multiset-quake.log`,
+`runner_summary`: **1 of 1 queued test passed**, and the frame measured
+
+```
+"field":"pixel","value":"0xffff40ff"   red 255, green 64, blue 255
+```
+
+-- one channel from each of set 0's three bindings and the value set 1's block carries, in
+one word. The golden is `golden/v0-multiset-quake/`: `run-1.json` (the driver run the case
+captured, with its two pipeline stages) and `v0-multiset-quake-1.json` (the submission, 86
+words, label "multiset-quake"), extracted with `tools/golden.py extract`.
+
+**The same shape is asserted on the host**, in `driver/tests/vk_v0_multiset_draw_test.c`,
+whose second frame draws this probe through the harness mode and reads the driver's own
+report back (`ps5vk_debug_descriptor_tables`): **23 of 23 checks direct**, loader PASS, PS5
+link PASS. Set 0's table is three 48-byte image entries one after another -- each carrying
+the 64x64 extent the case's images have -- set 1's is the 16-byte uniform entry of the
+frame's block, and the two pointers are the two dwords (2 and 3) the metadata names.
+
+**Gap left open.** The golden is captured but no gate consumes it yet: the case is a *runner*
+case, so its frame is the console's, and the PC half that runs its recording is the host test
+above. Wiring the golden into a gate means either a `compare-run` against the display
+driver's own host build, or a `drawing_cases` entry in `tools/check-runner-cases.sh` that
+compares against this case's own frame rather than b4-headless. Round 4's fallout list is
+where that belongs. Round 2's stale-object build finding is still unfixed, too: a header
+change still recompiles only the sources that changed.

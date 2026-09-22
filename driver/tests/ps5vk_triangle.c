@@ -832,10 +832,183 @@ texture_texel_bytes(VkFormat format)
    }
 }
 
+/* R7's vkQuake shape: three sampled images at set 0's bindings 0, 1 and 2, one
+ * descriptor set that names all three, and the samplers the frame's fragment
+ * stage samples them through. The uniform block's set is not built here: it is
+ * create_uniform's, which every other frame binds at set 0 and this shape places
+ * at set 1 (ps5vk_triangle_create).
+ *
+ * The texels are the caller's: each image's memory is mapped and reported
+ * through multiset_mappings, because a 64-texel RGBA8 row is exactly the
+ * 256-byte row this driver pads to and the caller -- the console runner -- can
+ * write and clflush it itself. That keeps this shape's uploads out of the
+ * copy-and-split machinery create_texture uses, which is what a frame that is
+ * about descriptor sets and not about uploads wants. */
+static bool
+create_multiset_textures(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
+                         const struct ps5vk_triangle_input *input)
+{
+   if (!input->textures_in_first_set)
+      return true;
+   const void *const texels[PS5VK_TRIANGLE_MULTISET_TEXTURES] = {
+      input->texture_data, input->texture_data_second, input->texture_data_third};
+   for (unsigned index = 0; index < PS5VK_TRIANGLE_MULTISET_TEXTURES; index++) {
+      if (texels[index] == NULL)
+         return step(triangle, "multiset texture", VK_ERROR_INITIALIZATION_FAILED,
+                     "the vkQuake shape needs three textures");
+   }
+   if (input->texture_width == 0 || input->texture_height == 0 ||
+       input->texture_format != VK_FORMAT_R8G8B8A8_UNORM)
+      return step(triangle, "multiset texture", VK_ERROR_FORMAT_NOT_SUPPORTED,
+                  "three 64-texel-wide RGBA8 images, the row this driver records");
+   VkPhysicalDeviceMemoryProperties memory_properties;
+   CALL(triangle, GetPhysicalDeviceMemoryProperties)(physical, &memory_properties);
+   for (unsigned index = 0; index < PS5VK_TRIANGLE_MULTISET_TEXTURES; index++) {
+      const VkImageCreateInfo image_info = {
+         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+         .imageType = VK_IMAGE_TYPE_2D,
+         .format = input->texture_format,
+         .extent = {input->texture_width, input->texture_height, 1},
+         .mipLevels = 1,
+         .arrayLayers = 1,
+         .samples = VK_SAMPLE_COUNT_1_BIT,
+         .tiling = VK_IMAGE_TILING_OPTIMAL,
+         .usage = VK_IMAGE_USAGE_SAMPLED_BIT,
+         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+      };
+      char detail[96];
+      snprintf(detail, sizeof(detail), "image %u of %u, %ux%u RGBA8", index + 1,
+               (unsigned)PS5VK_TRIANGLE_MULTISET_TEXTURES, input->texture_width,
+               input->texture_height);
+      if (!step(triangle, "create_multiset_image",
+                CALL(triangle, CreateImage)(triangle->device, &image_info, NULL,
+                                            &triangle->multiset_images[index]),
+                detail))
+         return false;
+      VkMemoryRequirements requirements;
+      CALL(triangle, GetImageMemoryRequirements)(triangle->device, triangle->multiset_images[index],
+                                                 &requirements);
+      uint32_t memory_type = UINT32_MAX;
+      for (uint32_t type = 0; type < memory_properties.memoryTypeCount && memory_type == UINT32_MAX;
+           type++) {
+         if ((requirements.memoryTypeBits & (UINT32_C(1) << type)) &&
+             (memory_properties.memoryTypes[type].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
+            memory_type = type;
+      }
+      const VkMemoryAllocateInfo allocate_info = {
+         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+         .allocationSize = requirements.size,
+         .memoryTypeIndex = memory_type,
+      };
+      if (memory_type == UINT32_MAX ||
+          !step(triangle, "allocate_multiset_memory",
+                CALL(triangle, AllocateMemory)(triangle->device, &allocate_info, NULL,
+                                               &triangle->multiset_memories[index]),
+                NULL) ||
+          !step(triangle, "bind_multiset_memory",
+                CALL(triangle, BindImageMemory)(triangle->device, triangle->multiset_images[index],
+                                                triangle->multiset_memories[index], 0),
+                NULL) ||
+          !step(triangle, "map_multiset_memory",
+                CALL(triangle, MapMemory)(triangle->device, triangle->multiset_memories[index], 0,
+                                          VK_WHOLE_SIZE, 0, &triangle->multiset_mappings[index]),
+                NULL))
+         return false;
+      triangle->multiset_bytes[index] = (size_t)requirements.size;
+      triangle->texture_extent = (VkExtent2D){input->texture_width, input->texture_height};
+      const VkImageViewCreateInfo view_info = {
+         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+         .image = triangle->multiset_images[index],
+         .viewType = VK_IMAGE_VIEW_TYPE_2D,
+         .format = input->texture_format,
+         .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+      };
+      if (!step(triangle, "create_multiset_view",
+                CALL(triangle, CreateImageView)(triangle->device, &view_info, NULL,
+                                                &triangle->multiset_views[index]),
+                NULL))
+         return false;
+   }
+   /* One set layout with three image-sampler bindings and one set that names
+    * them: the table the driver has to size from this set's own bindings. */
+   VkDescriptorSetLayoutBinding bindings[PS5VK_TRIANGLE_MULTISET_TEXTURES];
+   for (unsigned index = 0; index < PS5VK_TRIANGLE_MULTISET_TEXTURES; index++) {
+      bindings[index] = (VkDescriptorSetLayoutBinding){
+         .binding = index,
+         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+         .descriptorCount = 1,
+         .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+      };
+   }
+   const VkDescriptorSetLayoutCreateInfo set_info = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      .bindingCount = PS5VK_TRIANGLE_MULTISET_TEXTURES,
+      .pBindings = bindings,
+   };
+   if (!step(triangle, "create_multiset_set_layout",
+             CALL(triangle, CreateDescriptorSetLayout)(triangle->device, &set_info, NULL,
+                                                       &triangle->multiset_set_layout),
+             "three combined image samplers at set 0, bindings 0, 1 and 2") ||
+       !create_texture_samplers(triangle))
+      return false;
+   const VkDescriptorPoolSize pool_size = {
+      .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      .descriptorCount = PS5VK_TRIANGLE_MULTISET_TEXTURES,
+   };
+   const VkDescriptorPoolCreateInfo pool_info = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+      .maxSets = 1,
+      .poolSizeCount = 1,
+      .pPoolSizes = &pool_size,
+   };
+   if (!step(triangle, "create_multiset_pool",
+             CALL(triangle, CreateDescriptorPool)(triangle->device, &pool_info, NULL,
+                                                  &triangle->multiset_pool),
+             NULL))
+      return false;
+   const VkDescriptorSetAllocateInfo allocate_set = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+      .descriptorPool = triangle->multiset_pool,
+      .descriptorSetCount = 1,
+      .pSetLayouts = &triangle->multiset_set_layout,
+   };
+   if (!step(triangle, "allocate_multiset_set",
+             CALL(triangle, AllocateDescriptorSets)(triangle->device, &allocate_set,
+                                                    &triangle->multiset_set),
+             NULL))
+      return false;
+   VkDescriptorImageInfo images[PS5VK_TRIANGLE_MULTISET_TEXTURES];
+   VkWriteDescriptorSet writes[PS5VK_TRIANGLE_MULTISET_TEXTURES];
+   for (unsigned index = 0; index < PS5VK_TRIANGLE_MULTISET_TEXTURES; index++) {
+      images[index] = (VkDescriptorImageInfo){
+         .sampler = triangle->texture_samplers[PS5VK_TRIANGLE_SAMPLER_NEAREST],
+         .imageView = triangle->multiset_views[index],
+         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      };
+      writes[index] = (VkWriteDescriptorSet){
+         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+         .dstSet = triangle->multiset_set,
+         .dstBinding = index,
+         .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+         .pImageInfo = &images[index],
+      };
+   }
+   CALL(triangle, UpdateDescriptorSets)(triangle->device, PS5VK_TRIANGLE_MULTISET_TEXTURES, writes,
+                                        0, NULL);
+   return true;
+}
+
 static bool
 create_texture(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
                const struct ps5vk_triangle_input *input)
 {
+   /* R7's vkQuake shape builds its own three images and their set
+    * (create_multiset_textures); this path's one texture and one set would be a
+    * fourth binding and a second set layout nothing asked for. */
+   if (input->textures_in_first_set)
+      return true;
    if (input->texture_data == NULL) {
       /* A caller that samples nothing must record and submit exactly what it
        * recorded before Phase C4: no image, no set, no copy and no descriptor
@@ -2470,6 +2643,7 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
     * uniform texel buffer instead (V0-formats' descriptor-type rows) gets its
     * buffer, view and set here, in the same one set at 0. */
    if (!create_texture(triangle, physical, input) ||
+       !create_multiset_textures(triangle, physical, input) ||
        !create_texel_buffer(triangle, physical, input) ||
        !create_storage_image(triangle, physical, input))
       return PS5VK_TRIANGLE_FAILED;
@@ -2532,7 +2706,16 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
     * count is the only thing the draw can refuse. No descriptors are written and
     * none are bound: a *pipeline* that declares more than one set is refused
     * when it is drawn (driver/ps5vk_pipeline.c, ps5vk_draw_refusal). */
-   if (input->two_descriptor_sets) {
+   if (triangle->multiset_set_layout != VK_NULL_HANDLE) {
+      /* R7's vkQuake shape: three textures at set 0 and the block the set
+       * create_uniform built is set 1 -- the order vkQuake's world and md5
+       * pipeline layouts have, which is what needs one table per set. */
+      triangle->set_layouts[0] = triangle->multiset_set_layout;
+      triangle->descriptor_sets[0] = triangle->multiset_set;
+      triangle->set_layouts[1] = triangle->set_layout;
+      triangle->descriptor_sets[1] = triangle->descriptor_set;
+      triangle->set_count = 2;
+   } else if (input->two_descriptor_sets) {
       const VkDescriptorSetLayoutCreateInfo empty_set = {
          .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
          .bindingCount = 0,
@@ -3344,6 +3527,18 @@ ps5vk_triangle_finish(struct ps5vk_triangle *triangle)
        * that the pipeline layout that named them is gone. The image memory was
        * mapped by create_texture, as the staging buffer below was, so both are
        * unmapped here. */
+      /* R7's vkQuake shape: its three images, their views, their mappings and
+       * the set that names them. Zero handles when the caller asked for another
+       * layout, and the driver's destroys and frees ignore zero. */
+      CALL(triangle, DestroyDescriptorPool)(device, triangle->multiset_pool, NULL);
+      CALL(triangle, DestroyDescriptorSetLayout)(device, triangle->multiset_set_layout, NULL);
+      for (unsigned index = 0; index < PS5VK_TRIANGLE_MULTISET_TEXTURES; index++) {
+         CALL(triangle, DestroyImageView)(device, triangle->multiset_views[index], NULL);
+         if (triangle->multiset_mappings[index] != NULL)
+            CALL(triangle, UnmapMemory)(device, triangle->multiset_memories[index]);
+         CALL(triangle, DestroyImage)(device, triangle->multiset_images[index], NULL);
+         CALL(triangle, FreeMemory)(device, triangle->multiset_memories[index], NULL);
+      }
       CALL(triangle, DestroyDescriptorPool)(device, triangle->texture_pool, NULL);
       CALL(triangle, DestroyDescriptorSetLayout)(device, triangle->texture_set_layout, NULL);
       for (unsigned index = 0; index < PS5VK_TRIANGLE_TEXTURE_SAMPLERS; index++)

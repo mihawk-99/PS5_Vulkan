@@ -17,7 +17,7 @@ from vkQuake's source, so each was re-checked at HEAD before anything was writte
   the command buffer's state, a by-name refusal of a non-zero `depthBiasClamp`, push
   constants declared through the pointer form and written by the draw, and a colour clear
   read back with nothing over it. Details and run digests: `docs/M5_PHASE_C.md`.
-- **R7 is confirmed, the route is chosen, and Rounds 1 and 2 of four are done**: the
+- **R7 is confirmed, the route is chosen, and Rounds 1 to 3 of four are done**: the
   two-set refusal happens at the *draw*, and route (b) -- multi-set within the advertised
   four -- is chosen. Round 1 removed the compiler wrapper's single-set assumption (one
   layout per set, per-set tables sized per set, a pointer per set in the metadata, a total
@@ -30,10 +30,18 @@ from vkQuake's source, so each was re-checked at HEAD before anything was writte
   test `v0_multiset_draw` 12 of 12 direct (set 0 dword 2 -> the 16-byte uniform descriptor,
   set 1 dword 3 -> the 48-byte image sampler of the 64x64 texture), `check-driver.sh` PASS,
   `build/gates.sh` PASS, and 10 of 10 console cases (the standing nine plus `v0-two-sets`,
-  whose expectation flipped from "refused" to "draws"). **Round 3** is the console case
-  that shows a value arriving from set 1 (set 0 with three combined image samplers, set 1
-  with one buffer binding -- vkQuake's shape) and a command buffer that submits; **Round
-  4** the fallout, the whole regression list and the docs. Round 1 also corrected a stale
+  whose expectation flipped from "refused" to "draws"). Round 3 is the shape the request
+  exists for: `probes/v0-multiset-quake` -- three combined image samplers at set 0's
+  bindings 0, 1 and 2 (vkQuake's collapsed texture sets) and the frame's block at set 1's
+  binding 0 -- the harness mode that builds and binds it, the console case
+  `v0-multiset-quake`, its golden and its queue. Its readback is one word that names the
+  whole mechanism at once: **255/64/255**, one channel from each of set 0's three
+  bindings and the value set 1's block carries, where a stage reading an unwritten
+  pointer would be black (R9). The same shape is asserted on the host
+  (`driver/tests/vk_v0_multiset_draw_test.c`, 23 of 23 checks direct: set 0's table is
+  three 48-byte image entries one after another, set 1's the 16-byte uniform entry).
+  **Round 4** is the fallout, the whole regression list, the golden re-capture and the
+  docs. Round 1 also corrected a stale
   artifact: the shipped `probes/v0-push` package had been written by a probe CLI built
   *before* the R9 compiler fix (R9's own conclusion is unaffected).
 - **R4's coverage note is answered by correcting our own claim**: the runner *does*

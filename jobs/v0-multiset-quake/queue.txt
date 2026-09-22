@@ -1,0 +1,10 @@
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-multiset-quake/queue.txt
+# R7 Round 3's case: vkQuake's collapsed texture sets. Three combined image
+# samplers at set 0's bindings 0, 1 and 2 and the frame's uniform block at set
+# 1's binding 0, with the fragment stage reading one channel from each set and
+# the readback holding all of them (src/diagnostics.cpp,
+# run_vulkan_multiset_quake_frames).
+hold 60
+capture
+v0-multiset-quake
+exit

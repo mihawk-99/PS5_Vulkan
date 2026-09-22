@@ -273,6 +273,30 @@ v0-multiset)
         --descriptor-binding 0:0:uniform_buffer:1:0:16
         --descriptor-binding 1:0:combined_image_sampler:1:0:48)
     ;;
+v0-multiset-quake)
+    # R7's console shape: vkQuake's collapsed texture sets -- three combined
+    # image samplers at set 0's bindings 0, 1 and 2 -- and the frame's uniform
+    # block at set 1's binding 0. The one table per stage this driver used to
+    # build cannot hold both a three-binding image set and a second set's
+    # uniform entry, so the program is the acceptance the request asks for: two
+    # tables, two user-data pointers, one value from each set visible in the
+    # frame (shaders/v0/multiset_quake.frag). The geometry is the m3-texture
+    # quad, so one vertex buffer and three textures serve the draw.
+    vertex_source=shaders/m3/texture.vert
+    pixel_source=shaders/v0/multiset_quake.frag
+    output=probes/v0-multiset-quake
+    # Like v0-multiset: the per-set layout is this repository's compiler patch,
+    # so this set needs the probe CLI from tools/build-psbc-cli.sh.
+    pixel_compiler="$root/build/host/opengnm-psbc-probe"
+    vertex_flags=(--address32-hi 2
+        --vertex-attribute 0:r32g32_float:0:0:16:4
+        --vertex-attribute 1:r32g32_float:0:8:16:4)
+    pixel_flags=(--address32-hi 2
+        --descriptor-binding 0:0:combined_image_sampler:1:0:48
+        --descriptor-binding 0:1:combined_image_sampler:1:48:48
+        --descriptor-binding 0:2:combined_image_sampler:1:96:48
+        --descriptor-binding 1:0:uniform_buffer:1:0:16)
+    ;;
 v0-stencil-setup)
     # Round 12's stencil path: the pass that writes the stencil plane. The
     # geometry is the m4-depth vertex layout (position and colour, 28-byte
@@ -868,6 +892,41 @@ elif set_name == "v0-multiset":
                 ("pixel_set0_binding0_stride", 16),
                 ("pixel_set1_binding0_offset", 0),
                 ("pixel_set1_binding0_stride", 48)]
+elif set_name == "v0-multiset-quake":
+    # R7's console shape. Set 0 holds three image samplers at 0, 48 and 96 --
+    # one table, three bindings, each entry written from its own descriptor --
+    # and set 1 one 16-byte uniform entry starting at its own zero, which is
+    # what "each set's table is sized from that set's own bindings" means.
+    declared = pixel.get("descriptor_bindings") or []
+    expected = [(0, 0, 0, 48), (0, 1, 48, 48), (0, 2, 96, 48), (1, 0, 0, 16)]
+    got = [(b.get("set"), b.get("binding"), b.get("offset"), b.get("stride"))
+           for b in declared]
+    if sorted(got) != sorted(expected):
+        fail(f"pixel bindings {got!r}, expected set 0 bindings 0, 1, 2 (48-byte image "
+             f"samplers at 0, 48 and 96) and set 1 binding 0 (a 16-byte uniform)")
+    if vertex.get("descriptor_bindings"):
+        fail("vertex stage unexpectedly declares descriptor bindings")
+    for binding in declared:
+        notes.append(f"pixel binding metadata: {json.dumps(binding, sort_keys=True)}")
+    # The CLI prints set 0's pointer dword alone; set 1's is the array the
+    # metadata carries, which driver/tests/vk_psbc_multiset_test.c reads for the
+    # two-set probe. What this file records for set 1 is its table's shape.
+    notes.append("set 1's user-data dword is the metadata array's, asserted by "
+                 "driver/tests/vk_psbc_multiset_test.c")
+    bindings = [("address32_hi", expected_hi),
+                *vertex_input("vertex attributes: location 0 r32g32_float offset 0, "
+                              "location 1 r32g32_float offset 8, stride 16, binding 0"),
+                ("pixel_user_sgpr_count", pixel["user_sgpr_count"]),
+                ("pixel_descriptor_set0_dword",
+                 dword(pixel, "descriptor_set0_user_data_dword", "pixel")),
+                ("pixel_set0_binding0_offset", 0),
+                ("pixel_set0_binding0_stride", 48),
+                ("pixel_set0_binding1_offset", 48),
+                ("pixel_set0_binding1_stride", 48),
+                ("pixel_set0_binding2_offset", 96),
+                ("pixel_set0_binding2_stride", 48),
+                ("pixel_set1_binding0_offset", 0),
+                ("pixel_set1_binding0_stride", 16)]
 elif set_name == "m3-vertex":
     if pixel.get("descriptor_bindings"):
         fail("pixel stage unexpectedly declares descriptor bindings")

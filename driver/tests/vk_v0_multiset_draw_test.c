@@ -21,6 +21,13 @@
  * (src/diagnostics.cpp): this half asserts the pointers and the entries a
  * readback could only infer, which is what R9's push-constant test does for its
  * own block.
+ *
+ * The second frame is the shape this request exists for: vkQuake's collapsed
+ * texture sets (probes/v0-multiset-quake, three combined image samplers at set
+ * 0, bindings 0, 1 and 2) with the frame's uniform block at set 1, binding 0.
+ * Its set 0 table is three 48-byte entries one after another and its set 1 table
+ * the 16-byte uniform entry, which is "each table sized from that set's own
+ * bindings" in the shape the application has.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -86,6 +93,9 @@ read_spirv(const char *probes, const char *set, const char *stage, size_t *bytes
  * two stages' worth of sets in the debug API's report. */
 #define V0M_UNIFORM_STRIDE 16
 #define V0M_MAX_TABLES 8
+/* A combined image sampler's table entry, in dwords: the 48 bytes the compiler
+ * reads for one (driver/ps5vk_draw.c). */
+#define V0M_IMAGE_ENTRY_WORDS 12
 
 static float kVertices[4 * 4];
 static uint16_t kIndices[6];
@@ -140,6 +150,43 @@ image_entry(const uint32_t *entry, VkExtent2D extent)
    const uint32_t height = extent.height - 1u;
    return (entry[2] & 0x3fffu) == width && ((entry[2] >> 14) & 0xffffu) == height &&
           entry[8] != 0 && entry[10] != 0;
+}
+
+/* R7's report itself: one table per set the stage reads, each with its own
+ * user-data dword and its own pointer. Both frames below start here. */
+static void
+check_two_tables(struct ps5vk_triangle *triangle, ps5vk_debug_table tables[V0M_MAX_TABLES],
+                 const ps5vk_debug_table **set0_out, const ps5vk_debug_table **set1_out)
+{
+   *set0_out = NULL;
+   *set1_out = NULL;
+   const uint32_t count = ps5vk_debug_descriptor_tables(triangle->device, tables, V0M_MAX_TABLES);
+   check(count == 2, "the draw built one table per set the stage reads");
+   if (count != 2)
+      return;
+   const ps5vk_debug_table *const set0 = tables[0].set == 0 ? &tables[0] : &tables[1];
+   const ps5vk_debug_table *const set1 = tables[0].set == 1 ? &tables[0] : &tables[1];
+   check(set0->set == 0 && set1->set == 1, "the two tables are set 0's and set 1's");
+   for (unsigned at = 0; at < count; at++)
+      printf("  (table %u: stage %u set %u dword %u address %08x words %p bytes %zu)\n", at,
+             (unsigned)tables[at].stage, (unsigned)tables[at].set,
+             (unsigned)tables[at].user_data_dword, tables[at].address_low,
+             (const void *)tables[at].words, tables[at].bytes);
+   check(set0->user_data_dword != set1->user_data_dword,
+         "each set's pointer has a user-data dword of its own");
+   check(set0->words != NULL && set1->words != NULL && set0->words != set1->words &&
+            set0->address_low != set1->address_low,
+         "the two sets' tables are two different tables");
+   check(set0->stage == set1->stage,
+         "both tables belong to the one stage that reads descriptors");
+   /* The pointer in the ABI is the table the draw allocated: one dword in the
+    * 32-bit-pointer build these programs compile for, as R9's push-constant test
+    * reads its own (ps5vk_debug.h). */
+   check((uint32_t)(uintptr_t)set0->words == set0->address_low &&
+            (uint32_t)(uintptr_t)set1->words == set1->address_low,
+         "each set's table is the pointer its user-data dword carries");
+   *set0_out = set0;
+   *set1_out = set1;
 }
 #endif
 
@@ -201,31 +248,10 @@ main(void)
          /* R7's mechanism, one table per set: the draw reports what it built,
           * the dword each pointer went into and the pointer itself. */
          ps5vk_debug_table tables[V0M_MAX_TABLES] = {{0}};
-         const uint32_t count = ps5vk_debug_descriptor_tables(
-            triangle.device, tables, V0M_MAX_TABLES);
-         check(count == 2, "the draw built one table per set the stage reads");
-         if (count == 2) {
-            const ps5vk_debug_table *set0 = tables[0].set == 0 ? &tables[0] : &tables[1];
-            const ps5vk_debug_table *set1 = tables[0].set == 1 ? &tables[0] : &tables[1];
-            check(set0->set == 0 && set1->set == 1, "the two tables are set 0's and set 1's");
-            for (unsigned at = 0; at < count; at++)
-               printf("  (table %u: stage %u set %u dword %u address %08x words %p bytes %zu)\n", at,
-                      (unsigned)tables[at].stage, (unsigned)tables[at].set,
-                      (unsigned)tables[at].user_data_dword, tables[at].address_low,
-                      (const void *)tables[at].words, tables[at].bytes);
-            check(set0->user_data_dword != set1->user_data_dword,
-                  "each set's pointer has a user-data dword of its own");
-            check(set0->words != NULL && set1->words != NULL && set0->words != set1->words &&
-                     set0->address_low != set1->address_low,
-                  "the two sets' tables are two different tables");
-            /* The pointer in the ABI is the table the draw allocated: one dword
-             * in the 32-bit-pointer build these programs compile for, as R9's
-             * push-constant test reads its own (ps5vk_debug.h). */
-            check((uint32_t)(uintptr_t)set0->words == set0->address_low &&
-                     (uint32_t)(uintptr_t)set1->words == set1->address_low,
-                  "each set's table is the pointer its user-data dword carries");
-            check(set0->stage == set1->stage,
-                  "both tables belong to the one stage that reads descriptors");
+         const ps5vk_debug_table *set0 = NULL;
+         const ps5vk_debug_table *set1 = NULL;
+         check_two_tables(&triangle, tables, &set0, &set1);
+         if (set0 != NULL) {
             /* The entries, each the shape of its own set's binding: a driver
              * that sized one table for both sets, or wrote one set's entry into
              * the other's, fails here. */
@@ -245,6 +271,105 @@ main(void)
       }
       if (status != PS5VK_TRIANGLE_IN_FLIGHT)
          ps5vk_triangle_finish(&triangle);
+   }
+
+   /* R7's console shape, on the host: set 0 holds three combined image samplers
+    * -- so its table is three 48-byte entries, one after another -- and set 1 the
+    * 16-byte uniform entry the frame's block is written into. This is the table a
+    * frame of vkQuake's shape asks for, and the one a driver that sized a single
+    * table for the stage, or wrote one set's entry into the other's, cannot
+    * produce. */
+   {
+      size_t quake_vertex_bytes = 0;
+      size_t quake_pixel_bytes = 0;
+#if defined(__linux__)
+      uint32_t *const quake_vertex =
+         probes ? read_spirv(probes, "v0-multiset-quake", "vertex", &quake_vertex_bytes) : NULL;
+      uint32_t *const quake_pixel =
+         probes ? read_spirv(probes, "v0-multiset-quake", "pixel", &quake_pixel_bytes) : NULL;
+      check(quake_vertex && quake_pixel, "PS5VK_PROBES holds the v0-multiset-quake SPIR-V");
+#else
+      uint32_t *const quake_vertex = NULL;
+      uint32_t *const quake_pixel = NULL;
+#endif
+      if (quake_vertex && quake_pixel) {
+         static uint8_t quake_texels[V0M_TEXTURE_WIDTH * V0M_TEXTURE_HEIGHT * 4];
+         for (unsigned at = 0; at < sizeof(quake_texels); at += 4) {
+            quake_texels[at] = 0xff;
+            quake_texels[at + 1] = 0xff;
+            quake_texels[at + 2] = 0xff;
+            quake_texels[at + 3] = 0xff;
+         }
+         struct steps quake_steps = {0};
+         const struct ps5vk_triangle_report quake_report = {&quake_steps, record_step};
+         const VkVertexInputAttributeDescription quake_attributes[2] = {
+            {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+            {1, 0, VK_FORMAT_R32G32_SFLOAT, 8},
+         };
+         struct ps5vk_triangle_input input = {0};
+         input.get_instance_proc_addr = GET_PROC;
+         input.pipeline_count = 1;
+         input.shaders[0] = (struct ps5vk_triangle_shaders){quake_vertex, quake_vertex_bytes,
+                                                           quake_pixel, quake_pixel_bytes};
+         input.load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+         input.report = &quake_report;
+         input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+         input.vertex_data = kVertices;
+         input.vertex_count = 4;
+         input.vertex_stride = V0M_VERTEX_STRIDE;
+         input.index_data = kIndices;
+         input.index_count = 6;
+         input.attribute_count = 2;
+         input.attributes[0] = quake_attributes[0];
+         input.attributes[1] = quake_attributes[1];
+         /* The textures are set 0's three bindings and this block is set 1's. */
+         input.uniform_data = kColour;
+         input.uniform_bytes = (uint32_t)sizeof(kColour);
+         input.uniform_stages = VK_SHADER_STAGE_FRAGMENT_BIT;
+         input.texture_data = quake_texels;
+         input.texture_data_second = quake_texels;
+         input.texture_data_third = quake_texels;
+         input.texture_width = V0M_TEXTURE_WIDTH;
+         input.texture_height = V0M_TEXTURE_HEIGHT;
+         input.texture_format = VK_FORMAT_R8G8B8A8_UNORM;
+         input.textures_in_first_set = true;
+         struct ps5vk_triangle quake = {0};
+         enum ps5vk_triangle_status status = ps5vk_triangle_create(&quake, &input);
+         if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&quake, PS5VK_TRIANGLE_ONE_DRAW);
+         check(status == PS5VK_TRIANGLE_OK,
+               "the vkQuake-shaped frame records, submits and signals its fence");
+         check(quake_steps.failed == NULL,
+               "no step of the vkQuake shape's create or draw failed before the fence");
+         if (quake_steps.failed != NULL)
+            printf("  (first failed step: %s, result %d: %s)\n", quake_steps.failed,
+                   quake_steps.result, quake_steps.detail != NULL ? quake_steps.detail : "");
+#if defined(PS5VK_TEST_DIRECT)
+         if (status == PS5VK_TRIANGLE_OK) {
+            ps5vk_debug_table tables[V0M_MAX_TABLES] = {{0}};
+            const ps5vk_debug_table *set0 = NULL;
+            const ps5vk_debug_table *set1 = NULL;
+            check_two_tables(&quake, tables, &set0, &set1);
+            if (set0 != NULL) {
+               bool three_entries = true;
+               for (unsigned at = 0; at < 3; at++)
+                  three_entries = three_entries &&
+                                  image_entry(set0->words + at * V0M_IMAGE_ENTRY_WORDS,
+                                              quake.texture_extent);
+               check(three_entries,
+                     "set 0's table holds three image samplers, one entry after another");
+               check(uniform_entry(set1->words, (uint32_t)sizeof(kColour)),
+                     "set 1's table holds the 16-byte uniform descriptor of the frame's block");
+            }
+         }
+#endif
+         if (status != PS5VK_TRIANGLE_IN_FLIGHT)
+            ps5vk_triangle_finish(&quake);
+      }
+      free(quake_vertex);
+      free(quake_pixel);
+      (void)quake_vertex_bytes;
+      (void)quake_pixel_bytes;
    }
 
    free(vertex);

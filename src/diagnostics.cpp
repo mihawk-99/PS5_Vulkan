@@ -17222,6 +17222,136 @@ void run_vulkan_two_sets_frames(const TestContext &test, TestOutcome &outcome) n
     ps5vk_triangle_finish(&triangle);
 }
 
+// R7 (PS5_VULKAN_REQUESTSv2.md): the shape the request exists for. vkQuake's
+// world and md5 pipeline layouts declare five descriptor sets, and its texture
+// sets collapse into one set of three combined image samplers at set 0, bindings
+// 0, 1 and 2, with the frame's uniform block in the next set. Before R7 this
+// driver's stages read one set-0 table and refused the rest; this frame is what
+// proves its replacement on the console -- two tables, one user-data pointer
+// each, and a fragment stage that reads a value out of *both* sets.
+//
+// The program is probes/v0-multiset-quake, whose fragment shader takes one
+// channel from each of set 0's three bindings and multiplies it by set 1's
+// block:
+//
+//   color = tint * vec4(red_image.r, green_image.g, blue_image.b, 1.0)
+//
+// so the readback is one word that names every part of the mechanism at once.
+// The three images are solid red, green and blue and the block's green is
+// 64/255, a value no single wrong binding produces: a driver that never wrote
+// set 1's pointer leaves the stage reading an unwritten SGPR -- zero, as R9
+// measured -- and the frame is black; one that lost a set-0 binding drops that
+// channel; and one that gave the two sets the same table reads the block out of
+// an image descriptor rather than out of the frame's own memory.
+constexpr unsigned kQuakeTextureSize = 64;
+constexpr std::size_t kQuakeTextureBytes = kQuakeTextureSize * kQuakeTextureSize * 4;
+// RGBA8 in memory, one word per texel: red, green and blue.
+constexpr std::uint32_t kQuakeTexels[3] = {0xff0000ffu, 0xff00ff00u, 0xffff0000u};
+// The block set 1 names: its green is the channel the readback has to find.
+constexpr float kQuakeTint[4] = {1.0f, 64.0f / 255.0f, 1.0f, 1.0f};
+
+void run_vulkan_multiset_quake_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32_SFLOAT, 8},
+    };
+    static std::array<std::uint32_t, kQuakeTextureSize * kQuakeTextureSize> images[3];
+    for (unsigned index = 0; index < 3; index++)
+        images[index].fill(kQuakeTexels[index]);
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    input.vertex_data = kAddressVertices;
+    input.vertex_count = kSquareVertexCount;
+    input.vertex_stride = kTextureVertexStride;
+    input.index_data = kIndices;
+    input.index_count = kIndexCount;
+    input.attribute_count = 2;
+    input.attributes[0] = attributes[0];
+    input.attributes[1] = attributes[1];
+    // Set 0's three bindings and set 1's one, in the order vkQuake's layouts
+    // have them: the texture sets first, the frame's block second.
+    input.texture_data = images[0].data();
+    input.texture_data_second = images[1].data();
+    input.texture_data_third = images[2].data();
+    input.texture_width = kQuakeTextureSize;
+    input.texture_height = kQuakeTextureSize;
+    input.texture_format = VK_FORMAT_R8G8B8A8_UNORM;
+    input.textures_in_first_set = true;
+    input.uniform_data = kQuakeTint;
+    input.uniform_bytes = (std::uint32_t)sizeof(kQuakeTint);
+    input.uniform_stages = VK_SHADER_STAGE_FRAGMENT_BIT;
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    ps5vk_triangle triangle{};
+    ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+    // This shape's images are the caller's to fill -- the frame is about the two
+    // sets, not about an upload -- so the texels go into the mapped image memory
+    // the harness reports and are flushed for the GPU.
+    if (status == PS5VK_TRIANGLE_OK)
+        for (unsigned index = 0; index < 3; index++)
+        {
+            std::memcpy(triangle.multiset_mappings[index], images[index].data(),
+                        kQuakeTextureBytes);
+            flush_gpu_data(triangle.multiset_mappings[index], kQuakeTextureBytes);
+        }
+    if (status == PS5VK_TRIANGLE_OK)
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+    if (test.capture && status == PS5VK_TRIANGLE_OK)
+    {
+        log_driver_submission(triangle.device, "multiset-quake", log);
+        log_driver_stages(triangle.device, log);
+    }
+    bool passed = false;
+    if (status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes)
+    {
+        flush_gpu_data(const_cast<void *>(triangle.target), kFramebufferBytes);
+        const auto *const words = static_cast<const std::uint32_t *>(triangle.target);
+        const FramebufferView view{words, kTiledRgba8Layout};
+        const std::uint32_t pixel = view.word(kOutputWidth / 2, kOutputHeight / 2);
+        const std::uint8_t red = (std::uint8_t)(pixel & 0xffu);
+        const std::uint8_t green = (std::uint8_t)((pixel >> 8) & 0xffu);
+        const std::uint8_t blue = (std::uint8_t)((pixel >> 16) & 0xffu);
+        // Two either way: the block's green is a float of 64/255, and the fetch
+        // and the UNORM conversion are the hardware's (the sampler-address case
+        // measures the same way). What matters is that it is neither 0 -- set
+        // 1's pointer never reaching the stage -- nor 255, which is what a
+        // set-0 binding's own channel would leave there.
+        const auto close = [](std::uint8_t got, unsigned want)
+        { return got + 2 >= want && want + 2 >= got; };
+        passed = close(red, 255) && close(green, 64) && close(blue, 255);
+        log.hex("agc_multiset_quake", "pixel", pixel);
+        log.number("agc_multiset_quake", "red", red);
+        log.number("agc_multiset_quake", "green", green);
+        log.number("agc_multiset_quake", "blue", blue);
+        log.event("agc_multiset_quake", passed ? "PASS" : "FAIL", passed ? 0 : -1,
+                  passed ? "the frame holds 255/64/255: one channel from each of set 0's three "
+                           "bindings and the value set 1's block carries"
+                         : "the frame does not hold the word set 0's three bindings and set 1's "
+                           "block produce together");
+    }
+    else
+    {
+        log.event("agc_multiset_quake", "FAIL", -1, "the frame could not be recorded or submitted");
+    }
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        outcome.stage_in_use = true;
+        log.event("agc_multiset_quake", "FAIL", -1,
+                  "a submission did not complete; the program's objects stay allocated");
+        return;
+    }
+    outcome.command_built = true;
+    outcome.passed = passed;
+    ps5vk_triangle_finish(&triangle);
+}
+
 // R4's residual gap (PS5_VULKAN_REQUESTS.md, R4; docs/REQUESTS_RESPONSE.md): the
 // colour clear, read back with nothing drawn over it. The stencil plane has had a
 // case of this shape since R3; the colour target has not -- and it is the shape
@@ -22502,6 +22632,11 @@ constexpr RunnerTest kRunnerTests[] = {
     // R7: a pipeline layout with two descriptor set layouts, which this driver
     // used to refuse and now draws (run_vulkan_two_sets_frames).
     {"v0-two-sets", "m2", run_vulkan_two_sets_frames},
+    // R7: the shape the request exists for -- three combined image samplers at
+    // set 0 and the frame's block at set 1, vkQuake's collapsed texture sets --
+    // with a frame whose every value is read out of one of the two sets
+    // (run_vulkan_multiset_quake_frames).
+    {"v0-multiset-quake", "v0-multiset-quake", run_vulkan_multiset_quake_frames},
     // R9: push constants, the path every vkQuake pipeline layout depends on: two
     // draws whose fragment output comes from vkCmdPushConstants, one value each,
     // read back (run_vulkan_push_constant_frames).
