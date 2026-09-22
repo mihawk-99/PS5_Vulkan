@@ -816,3 +816,54 @@ Blast radius: MRT applications get a named refusal instead of a wrong frame. Nex
 cycle with the instrument-fixed probe, which names the attachment and the word; then whichever
 of `CB_COLOR_CONTROL`'s MODE, a per-`CB_COLORi_VIEW`/`ATTRIB2`/`ATTRIB3` field, or a
 per-target `CMASK`/`FMASK` word the values point at.
+
+## R2 — reconnaissance, and it is smaller than my own notes assumed
+
+**The compiler does not need a new descriptor type for the separated form.**
+`legacy_texture_bindings_valid` (`build/sdk-fork/assembled/libpsbc/psbc_compile.c:2062`) walks
+every `nir_tex_instr` and, for **each half** of a texture instruction, requires a binding whose
+type is `PSBC_DESCRIPTOR_COMBINED_IMAGE_SAMPLER` at
+`key = sampler ? tex->sampler_index : tex->texture_index`:
+
+```c
+unsigned key = sampler ? tex->sampler_index : tex->texture_index;
+found |= !binding->set && binding->binding == key &&
+         binding->type == PSBC_DESCRIPTOR_COMBINED_IMAGE_SAMPLER;
+```
+
+So a `texture2D` at one binding and a `sampler` at another are already expressible: tell the
+compiler **combined** at both indices, at the 48-byte stride the driver already writes. Each
+entry is then a complete combined descriptor of which the instruction reads its own half -- the
+image words from the `SAMPLED_IMAGE` binding's entry, the sampler words from the `SAMPLER`
+binding's entry -- which is what makes the acceptance ("the separated frame is texel-for-texel
+the combined frame") the right test rather than a new-type test.
+
+**What that leaves, all driver-side:**
+
+1. `ps5vk_descriptor_stride` (`driver/ps5vk_descriptor_set_layout.c`): `SAMPLER` and
+   `SAMPLED_IMAGE` → the combined 48-byte entry, `INPUT_ATTACHMENT` → the 32-byte image
+   descriptor (the same shape `STORAGE_IMAGE` already has: an input attachment read is a fetch
+   of an image, and the *reads* stay their own conversation with subpasses).
+2. `ps5vk_descriptor_options` (`driver/ps5vk_pipeline.c`): report those three to the compiler as
+   the types it already has (`COMBINED_IMAGE_SAMPLER` for the first two,
+   `STORAGE_IMAGE`'s 32-byte form for the third), so the layout a Vulkan application writes is
+   one the compiler accepts. The check that refuses a binding whose stride is 0 stays: it is
+   what reports the next absent type by name.
+3. The write path (`driver/ps5vk_descriptor_set.c`, `driver/ps5vk_draw.c`): a `SAMPLER` write
+   fills its entry's sampler words, a `SAMPLED_IMAGE` write fills the image words and a default
+   sampler beside them (Vulkan's own default sampler state for the half the instruction does not
+   read), and an `INPUT_ATTACHMENT` write fills the image words alone.
+4. The probe: the port's GUI shape -- set 0 binding 0 `SAMPLED_IMAGE`, set 1 binding 0
+   `SAMPLER`, fragment stage, one texture, nearest -- and **one extra frame through a single
+   `COMBINED_IMAGE_SAMPLER`** of the same texture, compared texel for texel. A frame that merely
+   draws is not evidence here; the identity is.
+
+**The ordering the port asked for is kept**: the separated pair first as one mechanism, then
+`INPUT_ATTACHMENT` as a type (which is what unblocks its `basic_alphatest` pipeline, since the
+check walks the layout rather than the shader's used bindings), with subpass reads and MRT each
+their own rounds.
+
+**Gap left open at this record's writing**: none of 1-4 is implemented yet. The next action is
+the driver table and the write path, then the probe's two frames on the console -- and the
+compiler question this reconnaissance settled is the one that could have made R2 a compiler
+project, so it is recorded before the code rather than after it.
