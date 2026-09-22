@@ -709,6 +709,23 @@ ps5vk_format_usage(const struct ps5vk_format *format)
     * carry it refuses the usage by name like every other one. */
    if (features & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT)
       usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+   /* The specification's Format Feature Dependent Image Usage Flags table
+    * (formats-v1.4.354.adoc, the copy in .deps/native/vulkan-docs):
+    * VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT requires
+    * VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT **or**
+    * VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT. So a format an attachment
+    * can be is one an input attachment may name, and the clause is about the
+    * feature bits rather than about any application's usage set: every format
+    * this table carries an attachment bit for must answer the usage.
+    *
+    * What this does *not* do is read one: the descriptor type, its stride, its
+    * write path and subpass reads are R2 and unchanged, so an image created with
+    * the usage is created and its input-attachment uses are still refused where a
+    * descriptor or a subpass would need them. Refusing the *image* refused
+    * something the specification requires the driver to allow. */
+   if (features & (VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+                   VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT))
+      usage |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
    return usage;
 }
 

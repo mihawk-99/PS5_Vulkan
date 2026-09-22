@@ -1,6 +1,6 @@
 hold 60
 capture
-v0-formats-texel-buffer
+device-report
 m2-solid
 v0-cull
 v0-depth-bias
@@ -13,4 +13,5 @@ v0-push-constant
 v0-multiset-quake
 v0-two-sets
 c8-resolve
+v0-formats-texel-buffer
 exit

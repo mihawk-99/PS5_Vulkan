@@ -7779,3 +7779,38 @@ one-line change: the driver's refusals are spread across `vk_errorf` sites and t
 funnel, so it belongs to the runtime's logging path rather than to any one call site, and it
 changes what every run prints. Recorded here as an open item with that scope, not as a
 half-done hook in one function.
+
+## 2026-09-22 — R5: an attachment format is one an input attachment may name
+
+**The clause, and it is the specification's own.** `ps5vk_format_usage` mapped six usages from
+a format's feature bits and had no `INPUT_ATTACHMENT` clause, so `ps5vk_image_supported`
+refused any image whose usage named it -- and `vkGetPhysicalDeviceImageFormatProperties2`
+answered the same. The Format Feature Dependent Image Usage Flags table
+(`.deps/native/vulkan-docs/formats-v1.4.354.adoc`, verified in the vendored copy) requires
+`VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT` for any format carrying
+`VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT` **or**
+`VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT`, so **every format this table carries an
+attachment bit for** must answer the usage: the clause is about the feature bits, not about one
+application's usage set, and it is written that way in the driver.
+
+**What it does not do, deliberately.** No descriptor type, no stride, no write path, no subpass
+read: input attachments as a *capability* remain R2, unchanged. An image created with the usage
+is created; a descriptor or a subpass that would read one is still refused where it is asked
+for. Refusing the *image* refused something the specification requires the driver to allow.
+
+**The acceptance, both halves.** `driver/tests/vk_b3_image_test.c` gained the combination as an
+**accepted query** and as a **created image** -- `R8G8B8A8_UNORM`, 2D, optimal, one sample,
+`COLOR_ATTACHMENT | INPUT_ATTACHMENT | SAMPLED | STORAGE`, the shape an offscreen colour buffer
+names -- with the same memory requirements as the colour attachment without it (32 MiB at 2 MiB
+alignment: the usage is part of the image an application may ask for and does not change how it
+is stored). 23 of 23 checks pass in both host modes.
+
+**The reporting changed, and the tree says so.** `conformance_inventory/device_report.json`
+gained **41 rows** of `|2d-optimal-input` combinations for the attachment formats -- the
+inventory drift gate refused to let that pass silently, which is the third time this session a
+gate has caught a consequence of a change before a console run could. Regenerated in the same
+commit.
+
+**Measured on the console**: `device-report` (the case whose report is the inventory) and the
+standing list, **14 of 14** -- `Klog_Logs/r5-input-usage.log`, `runner_summary` "14 of 14 queued
+tests passed". `build/gates.sh` 11/11 PASS, `make lint` PASS.

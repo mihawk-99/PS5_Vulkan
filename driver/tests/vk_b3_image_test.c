@@ -113,6 +113,19 @@ check_formats(void)
                                     VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 0, &ip);
    check(result == VK_SUCCESS && ip.sampleCounts == (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT),
          "a D32 depth attachment is supported with 1 and 4 samples");
+   /* The specification's Format Feature Dependent Image Usage Flags table (the
+    * copy in .deps/native/vulkan-docs) requires VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT
+    * of any format carrying COLOR_ATTACHMENT or DEPTH_STENCIL_ATTACHMENT, so the
+    * query has to answer for the combination an offscreen colour buffer names
+    * (R5 of the port's requests). */
+   result = image_format_properties(VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TYPE_2D,
+                                    VK_IMAGE_TILING_OPTIMAL,
+                                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                       VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT |
+                                       VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+                                    0, &ip);
+   check(result == VK_SUCCESS,
+         "an RGBA8 colour buffer may also name the input-attachment usage");
 
    const struct {
       VkFormat format;
@@ -237,6 +250,15 @@ check_storage(void)
    check(expect_storage(VK_FORMAT_D32_SFLOAT, 3840, 2160, 1, 1, VK_SAMPLE_COUNT_1_BIT,
                         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 0x2000000, 2 * MIB),
          "a 3840x2160 D32 depth attachment needs the runner's 32 MiB at 2 MiB alignment");
+   /* The same colour buffer with the input-attachment usage the table requires of
+    * it: the usage is part of the image an application may ask for, and it does
+    * not change what the image costs or how it is stored (R5). */
+   check(expect_storage(VK_FORMAT_R8G8B8A8_UNORM, 3840, 2160, 1, 1, VK_SAMPLE_COUNT_1_BIT,
+                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                           VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                           VK_IMAGE_USAGE_STORAGE_BIT,
+                        0x2000000, 2 * MIB),
+         "the same target carrying the input-attachment usage is the same 32 MiB");
    /* One tile, rounded up to 2 MiB. */
    check(expect_storage(VK_FORMAT_R8G8B8A8_UNORM, 16, 16, 1, 1, VK_SAMPLE_COUNT_1_BIT,
                         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, 2 * MIB, 2 * MIB),
