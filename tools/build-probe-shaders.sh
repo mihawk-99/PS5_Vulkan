@@ -350,6 +350,27 @@ v0-texel-buffer-store)
     pixel_flags=(--address32-hi 2 --descriptor-binding 0:0:storage_texel_buffer:1:0:16)
     pixel_compiler="$root/build/host/opengnm-psbc-probe"
     ;;
+v0-texel-buffer-atomic-uint)
+    # R32_UINT's storage-texel-buffer *atomic* bit, which the CTS requires: the
+    # store probe's uimageBuffer, written with imageAtomicAdd instead of
+    # imageStore, so a fragment adds one to its band's texel and the buffer's
+    # texels must hold their band's fragment count (driver/ps5vk_image.c).
+    vertex_source=shaders/m2/fullscreen.vert
+    pixel_source=shaders/v0/texel_buffer_atomic_uint.frag
+    output=probes/v0-texel-buffer-atomic-uint
+    vertex_flags=(--address32-hi 2)
+    pixel_flags=(--address32-hi 2 --descriptor-binding 0:0:storage_texel_buffer:1:0:16)
+    pixel_compiler="$root/build/host/opengnm-psbc-probe"
+    ;;
+v0-texel-buffer-atomic-sint)
+    # The signed twin, whose atomic adds a positive one to an iimageBuffer.
+    vertex_source=shaders/m2/fullscreen.vert
+    pixel_source=shaders/v0/texel_buffer_atomic_sint.frag
+    output=probes/v0-texel-buffer-atomic-sint
+    vertex_flags=(--address32-hi 2)
+    pixel_flags=(--address32-hi 2 --descriptor-binding 0:0:storage_texel_buffer:1:0:16)
+    pixel_compiler="$root/build/host/opengnm-psbc-probe"
+    ;;
 v0-texel-buffer-store-uint)
     vertex_source=shaders/m2/fullscreen.vert
     pixel_source=shaders/v0/texel_buffer_store_uint.frag

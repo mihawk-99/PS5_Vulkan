@@ -1,0 +1,18 @@
+# PS5 Vulkan test runner job queue (PPSA99988): atomic storage texel buffers.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-texel-buffer-atomic/queue.txt
+#
+# The CTS requires VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_ATOMIC_BIT for R32_UINT
+# and R32_SINT (dEQP-VK.api.info.format_properties.r32_uint and .r32_sint). This
+# case is what earns the claim: the store probe's uimageBuffer and iimageBuffer,
+# written with imageAtomicAdd instead of imageStore, so each fragment of a
+# 960-pixel band adds one to that band's texel and the four texels must hold
+# their band's fragment count. v0-formats-texel-buffer-store is the non-atomic
+# sibling that has to keep passing, v0-formats is the mirror, and m2-solid is
+# the standing control.
+hold 60
+capture
+v0-formats-texel-buffer-atomic
+v0-formats-texel-buffer-store
+v0-formats
+m2-solid
+exit

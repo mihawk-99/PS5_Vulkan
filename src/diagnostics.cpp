@@ -10272,6 +10272,123 @@ void run_texel_buffer_store_frames(const TestContext &test, TestOutcome &outcome
     log.event(event, outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1, detail);
 }
 
+// R32_UINT's and R32_SINT's storage-texel-buffer *atomic* bit, which the CTS
+// requires for both (dEQP-VK.api.info.format_properties.r32_uint and .r32_sint).
+// The CTS asks for the bit because the specification's required-feature table
+// gives it to those formats; this case is what earns it here, and nothing less
+// would: the store case's machinery writes with imageStore, which says nothing
+// about an atomic read-modify-write.
+//
+// The shader is the store probe's uimageBuffer (and its iimageBuffer twin) with
+// imageAtomicAdd in place of imageStore, so every fragment of a 960-pixel band
+// adds one to that band's texel. The expectation is therefore a count -- the
+// band's fragment count, which this file computes from the target's own
+// dimensions rather than assuming -- and the wrong outcomes are all
+// distinguishable: an unwritten texel is zero, a non-atomic store leaves one, and
+// a wrong index leaves a band's count in another texel.
+static std::uint32_t texel_buffer_band_fragments(std::uint32_t band) noexcept
+{
+    // The shaders index with int(gl_FragCoord.x) / 960.
+    constexpr std::uint32_t kBandWidth = 960;
+    const std::uint32_t begin = band * kBandWidth;
+    if (begin >= kOutputWidth)
+        return 0;
+    return std::min(kOutputWidth - begin, kBandWidth) * kOutputHeight;
+}
+
+bool check_texel_buffer_atomic_counts(const void *const stored, const char *const label,
+                                      JsonLog &log) noexcept
+{
+    const auto *const words = static_cast<const std::uint32_t *>(stored);
+    std::uint32_t matching = 0;
+    for (std::uint32_t index = 0; index < kTexelBufferTexels; ++index)
+    {
+        const std::uint32_t want = texel_buffer_band_fragments(index);
+        std::uint32_t have = 0;
+        std::memcpy(&have, words + index, sizeof(have));
+        const bool same = have == want;
+        matching += same ? 1u : 0u;
+        if (!same)
+        {
+            log.number("agc_texel_buffer_atomic", "texel", index);
+            log.number("agc_texel_buffer_atomic", "texel_value", have);
+            log.number("agc_texel_buffer_atomic", "expected_value", want);
+        }
+    }
+    log.number("agc_texel_buffer_atomic", "matching", matching);
+    log.number("agc_texel_buffer_atomic", "of", kTexelBufferTexels);
+    log.event("agc_texel_buffer_atomic", matching == kTexelBufferTexels ? "PASS" : "FAIL",
+              matching == kTexelBufferTexels ? 0 : -1, label);
+    return matching == kTexelBufferTexels;
+}
+
+void run_vulkan_texel_buffer_atomic_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const std::array<TexelBufferFormat, 2> rows = {{
+        {VK_FORMAT_R32_UINT, TexelClass::Uint32, 4, 1},
+        {VK_FORMAT_R32_SINT, TexelClass::Sint32, 4, 1},
+    }};
+    unsigned added = 0;
+    for (const TexelBufferFormat &row : rows)
+    {
+        std::vector<std::uint8_t> texels((std::size_t)kTexelBufferTexels * row.texel_bytes, 0);
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.texel_buffer_data = texels.data();
+        input.texel_buffer_bytes = (std::uint32_t)texels.size();
+        input.texel_buffer_format = row.format;
+        input.texel_buffer_storage = true;
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+            return;
+        ps5vk_triangle triangle{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (status == PS5VK_TRIANGLE_OK && test.capture)
+        {
+            log_driver_submission(triangle.device, "atomic texel buffer", log);
+            log_driver_stages(triangle.device, log);
+        }
+        char label[176]{};
+        std::snprintf(label, sizeof(label),
+                      "format %u's four texels hold their band's fragment count",
+                      (unsigned)row.format);
+        const bool ok = status == PS5VK_TRIANGLE_OK && triangle.texel_buffer_mapped != nullptr &&
+                        check_texel_buffer_atomic_counts(triangle.texel_buffer_mapped, label, log);
+        if (ok)
+            ++added;
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            log.event("agc_v0_texel_buffer_atomic", "FAIL", -1,
+                      "a submission did not complete; the program's objects stay allocated");
+            return;
+        }
+        ps5vk_triangle_finish(&triangle);
+        if (status == PS5VK_TRIANGLE_FAILED)
+        {
+            log.event("agc_v0_texel_buffer_atomic", "FAIL", -1,
+                      "a format's frame could not be recorded or submitted");
+            outcome.command_built = false;
+            return;
+        }
+    }
+    outcome.command_built = true;
+    outcome.passed = added == rows.size();
+    char detail[192]{};
+    std::snprintf(detail, sizeof(detail),
+                  "%u of %zu atomic storage texel buffers hold their band's fragment count", added,
+                  rows.size());
+    log.event("agc_v0_texel_buffer_atomic", outcome.passed ? "PASS" : "FAIL",
+              outcome.passed ? 0 : -1, detail);
+}
+
 void run_vulkan_texel_buffer_store_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
     const std::array<TexelBufferFormat, 8> formats = texel_buffer_store_float_formats();
@@ -14111,7 +14228,8 @@ constexpr FormatQuery kFormatQueries[] = {
      kIntegerFetchFeatures | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
          VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_ATOMIC_BIT,
      VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT | VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT |
-         VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT},
+         VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT |
+         VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_ATOMIC_BIT},
     {VK_FORMAT_R32G32_UINT, "R32G32_UINT",
      kIntegerFetchFeatures | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
          VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT,
@@ -14159,7 +14277,8 @@ constexpr FormatQuery kFormatQueries[] = {
      kIntegerFetchFeatures | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
          VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_ATOMIC_BIT,
      VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT | VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT |
-         VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT},
+         VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT |
+         VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_ATOMIC_BIT},
     {VK_FORMAT_R32G32_SINT, "R32G32_SINT",
      kIntegerFetchFeatures | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
          VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT,
@@ -22259,6 +22378,10 @@ constexpr RunnerTest kRunnerTests[] = {
      run_vulkan_texel_buffer_store_uint_frames},
     {"v0-formats-texel-buffer-store-sint", "v0-texel-buffer-store-sint",
      run_vulkan_texel_buffer_store_sint_frames},
+    // R32_UINT's and R32_SINT's atomic bit, which the CTS requires and only an
+    // atomic read-modify-write can earn (run_vulkan_texel_buffer_atomic_frames).
+    {"v0-formats-texel-buffer-atomic", "v0-texel-buffer-atomic-uint",
+     run_vulkan_texel_buffer_atomic_frames},
     // Blocker round 7: their VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT, stored through
     // a 32-byte storage image descriptor and read back out of the image's own
     // memory (run_vulkan_storage_image_frames and its two typed twins).

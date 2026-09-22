@@ -116,10 +116,12 @@ texel-buffer bits with both cases' rows proved the same way (digest `c1f75ff6…
 uniform and 8 of 8 storage). Its `VERTEX_BUFFER` bit followed in round 9, claimed
 only once the driver's vertex-format table and the v0-vertex-formats case could fetch one
 (digest `7e8ac5ea…`) -- which **closed that CTS case**: `dEQP-VK.api.info.*` is now 2540
-passed / **4 failed**. The rest:
-`STORAGE_TEXEL_BUFFER_ATOMIC_BIT` for R32_UINT/SINT, a compressed-format set (every BC,
-ETC2 and ASTC format reports `0x0` today), CTS's `getUsedApiVersion()` source, and the
-console payload (`docs/M5_PHASE_C.md`, rounds 6 to 8).
+passed / **4 failed**. Then the atomic bit for the integer twins,
+earned by a new probe that atomically adds per fragment and checks the count
+(`v0-formats-texel-buffer-atomic` PASS, digest `28d073e9…`). `dEQP-VK.api.info.*` is now
+**2542 passed / 2 failed**. The rest: the compressed-format set (every BC, ETC2 and ASTC
+format reports `0x0` today, so it is a real format-table gap), CTS's `getUsedApiVersion()`
+source, and the console payload (`docs/M5_PHASE_C.md`, rounds 6 to 11).
 
 **An upstream AGC source was checked against this driver** (2026-09-21). The
 static-recompilation project's published tile-equation table agrees, texel for texel, with

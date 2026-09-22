@@ -339,9 +339,15 @@ static const struct ps5vk_format ps5vk_formats[] = {
        VK_FORMAT_FEATURE_TRANSFER_DST_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT |
        VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT |
        VK_FORMAT_FEATURE_STORAGE_IMAGE_ATOMIC_BIT,
+    /* The CTS requires the atomic bit for this format
+     * (dEQP-VK.api.info.format_properties.r32_uint and .r32_sint), and the console
+     * proved it: imageAtomicAdd through the same imageBuffer the store probe
+     * writes, its texels holding their band's fragment count
+     * (docs/M5_PHASE_C.md, CTS round 11). */
     VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT |
        VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT |
-       VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT,
+       VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT |
+       VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_ATOMIC_BIT,
     21 /* 32_SINT */, PS5VK_FORMAT_SWIZZLE_R001},
    {VK_FORMAT_R32G32_SINT,
     VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
@@ -386,9 +392,15 @@ static const struct ps5vk_format ps5vk_formats[] = {
        VK_FORMAT_FEATURE_TRANSFER_DST_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT |
        VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT |
        VK_FORMAT_FEATURE_STORAGE_IMAGE_ATOMIC_BIT,
+    /* The CTS requires the atomic bit for this format
+     * (dEQP-VK.api.info.format_properties.r32_uint and .r32_sint), and the console
+     * proved it: imageAtomicAdd through the same imageBuffer the store probe
+     * writes, its texels holding their band's fragment count
+     * (docs/M5_PHASE_C.md, CTS round 11). */
     VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT |
        VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT |
-       VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT,
+       VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT |
+       VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_ATOMIC_BIT,
     20 /* 32_UINT */, PS5VK_FORMAT_SWIZZLE_R001},
    {VK_FORMAT_R32G32_UINT,
     VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |

@@ -749,12 +749,12 @@
       "optimal": "0xdc83"
     },
     "VK_FORMAT_R32_SINT": {
-      "buffer": "0x58",
+      "buffer": "0x78",
       "linear": "0x0",
       "optimal": "0xcc87"
     },
     "VK_FORMAT_R32_UINT": {
-      "buffer": "0x58",
+      "buffer": "0x78",
       "linear": "0x0",
       "optimal": "0xcc87"
     },

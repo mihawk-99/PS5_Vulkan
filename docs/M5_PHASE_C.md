@@ -7118,3 +7118,36 @@ the six trees and **fails** if one loses its marker or if the marker stops setti
 `DisableFormat: true`, and its `--check` output now says how many files are under the policy
 and how many trees are disabled by marker (22 and 6 today). Deleting a marker is therefore
 a gate failure, not a silent reopening of the landmine.
+
+## 2026-09-21 — round 11: the atomic bit, earned by a probe that says what a store cannot
+
+The two remaining format failures were `STORAGE_TEXEL_BUFFER_ATOMIC_BIT` for `R32_UINT` and
+`R32_SINT` -- the CTS requires it for both, and unlike the previous rounds this one could
+not be settled by a table row: the store case writes with `imageStore`, which says nothing
+about an atomic read-modify-write.
+
+**The probe** is a new case, `v0-formats-texel-buffer-atomic`, with two new probe sets: the
+store probe's `uimageBuffer` (and its `iimageBuffer` twin) with `imageAtomicAdd` in place of
+`imageStore`, so every fragment of a 960-pixel band adds one to that band's texel. Its
+expectation is a **count** -- the band's fragment count, computed in `src/diagnostics.cpp`
+from the target's own dimensions rather than assumed -- and the three wrong answers are all
+distinguishable: an unwritten texel is zero, a non-atomic store leaves one, and a wrong
+index leaves a band's count in another texel. GLSL's own rules produced the first finding:
+an atomic image is read as well as written, so it cannot be `writeonly`, and the language
+then *requires* a format qualifier (`layout(r32ui)` / `layout(r32i)`) -- glslang refused the
+first draft with exactly that sentence.
+
+**Console proof** (pid 116, title digest `28d073e9…`, `Klog_Logs/v0-texel-buffer-atomic.log`,
+queue `jobs/v0-texel-buffer-atomic/queue.txt`): `v0-formats-texel-buffer-atomic` PASS -- "2 of
+2 atomic storage texel buffers hold their band's fragment count", each format's four texels
+matching -- with `v0-formats-texel-buffer-store` (the non-atomic sibling), `v0-formats` and
+`m2-solid` green beside it, 486 PASS records. Only then did both format rows claim the bit:
+`bufferFeatures` reads `0x78` for each, where it read `0x58`.
+
+**The CTS group is nearly finished.** `dEQP-VK.api.info.*` went from 2540 passed / 4 failed
+to **2542 passed / 2 failed**: `format_properties.r32_uint` and `.r32_sint` pass, so four of
+the five original failures are closed (the version word in round 6, `r32_sfloat`'s three
+bits across rounds 7 to 9, and these two). What is left in the group is the
+compressed-format set -- no cheap fix: every BC, ETC2 and ASTC format reports `0x0` today,
+so it is a real format-table gap -- and `extension_core_versions`, whose cause is narrowed
+but not yet found.
