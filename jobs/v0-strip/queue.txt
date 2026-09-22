@@ -1,3 +1,13 @@
+# PS5 Vulkan test runner job queue (PPSA99988): R6's triangle strip.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-strip/queue.txt
+#
+# v0-strip draws seven frames, smallest first: a strip of three vertices and the
+# same three as a list, the full-target quad as a strip and as its one-winding
+# list, both culled, and the raw-order list culled -- each read back whole and
+# hashed. Its first run aborted the title in the harness before any frame
+# recorded (a zero-size index buffer, Klog_Logs/r6-strip.log); this run is the
+# first to reach the draw (docs/M5_PHASE_C.md). m2-solid first is the capture's
+# runner-built frame; the cases after v0-strip are the regression behind it.
 hold 60
 capture
 m2-solid

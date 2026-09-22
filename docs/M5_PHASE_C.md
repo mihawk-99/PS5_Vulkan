@@ -7958,3 +7958,56 @@ work are interleaved in the same files (`ps5vk_pipeline.c`, `ps5vk_private.h`), 
 was active in this tree while both were uncommitted, and a hunk-level split of one file between
 two authors was the larger risk. They land in one commit whose message keeps the two threads
 separate, and this note is the record of the deviation rather than a silent merge.
+
+## 2026-09-22 — the strip "wedge" was the harness aborting, and R6 linked the strip as a fan
+
+**What the parked run actually shows.** `Klog_Logs/r6-strip.log` is not a GPU hang. After
+`agc_strip INFO "strip, no culling"` the frame creates its image and its 96-byte vertex buffer,
+maps the buffer, and the next line is the kernel's `# reason: abort is called(system)` for
+`eboot.bin`: the title aborted before anything was recorded or submitted, and the battery was
+killed because the title was gone. The host reproduces it exactly: the same frame through
+`runner_host_driver` stops on Mesa's `vk_buffer_init: Assertion 'pCreateInfo->size > 0'`. The
+harness's non-indexed path created an **index buffer of size 0** (invalid usage; the console
+build keeps Mesa's assertions). Behind it was a second harness defect that the abort hid:
+`draw()` tested the index count alone, so a frame with vertices and no indices took the
+vertex-less branch -- three generated vertices, no vertex buffer bound -- whatever its declared
+count. The earlier record ("a strip draw through this path hangs the GPU") is withdrawn: no
+strip was ever drawn.
+
+**And a driver defect the frame would have met.** `a6f43d7` linked the strip as DI_PT **5**.
+AMD's enumeration (`V_030908_DI_PT_TRIFAN 5`, `V_030908_DI_PT_TRISTRIP 6` in the vendored
+`amdgfxregs.h`), ps5-opengl's own link call (`ps5_agc_native_runtime.c`,
+`ps5_agc_gate2_set_draw_state`: `case 5: /* TRIFAN */`, `case 6: /* TRISTRIP */`, the value
+passed to `sceAgcLinkShaders`) and opengnm's `GNM_PT_TRIFAN = 0x5` agree: 5 is the **fan**. The
+list's link leaves `0x242 = 4` (VGT_PRIMITIVE_TYPE) among its uniform records
+(`golden/c1-triangle`'s stage image), which is how the value reaches the hardware. The port's
+`warp` pipelines were created against the fan value; a three-vertex frame cannot tell a fan
+from a strip, the quad can.
+
+**Fixed, in one commit, because none of it draws without the rest.**
+
+- `ps5vk_pipeline.c`: `ps5vk_link_primitive_type()` maps the topology once (list and
+  META_RECT_LIST 4, strip **6**, anything else 0 and refused by name as before); the pipeline
+  keeps that value for the link. `ps5vk_debug_pipeline_primitive_type()` returns it, because the
+  PC model replays the link's outputs rather than computing them.
+- `driver/tests/ps5vk_triangle.c`: no index buffer for a frame without indices (staged and
+  unstaged), indices need both data and a count or neither, and the vertex-less draw is taken
+  only when the frame has no vertices.
+- `driver/tests/vk_v0_topology_test.c` (check-driver, against the `v0-cull` replay, which has the
+  m3-vertex stage mapping): four frames -- a strip of three, the same three as a list, the quad
+  as a strip, the quad as an indexed list -- each records, submits and signals, links as 6, 4, 6,
+  4, and draws what it declared (the submission's last DRAW_INDEX_AUTO carries 3, 3, 4; the
+  indexed frame's DRAW_INDEX_2 carries 6). 13/13 in the direct build.
+- `run_vulkan_strip_frames` is rewritten and **registered** (`v0-strip`, m3-vertex set): seven
+  frames, smallest first, each vertex the same colour so a frame is its coverage alone, each read
+  back whole and hashed (`summarise_frame`): three vertices as a strip and as a list (identical,
+  neither empty nor full), the quad as a strip and as its one-winding list `0,1,2, 1,3,2`
+  (identical, full), both back-face culled (identical), and the list in the strip's raw order
+  `0,1,2, 1,2,3` culled -- one triangle of each winding, so exactly one survives, which the
+  culled strip's frame must not equal. The old case's culled pair expected the strip to differ
+  from the one-winding list, which a correct strip never does.
+
+**Host.** All seven frames record and submit through the host runner against the `v0-cull`
+replay (their pixels are empty there, as every drawing case's are); check-driver PASS with 292
+identical golden comparisons. **Unclaimed**: the strip is proved when a console run of
+`jobs/v0-strip` passes; until then the mapping is implemented and the record says so.

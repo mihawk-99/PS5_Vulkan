@@ -694,10 +694,16 @@ ps5vk_pipeline_dump(const struct ps5vk_pipeline *pipeline)
 #define PS5VK_PACKAGE_MIN_HEADER_BYTES 96
 /* Stage workspace regions start on 4 KiB boundaries (link_shader_packages). */
 #define PS5VK_STAGE_REGION_ALIGNMENT 0x1000
-/* The link's primitive types (AMD's DI_PT_* enumeration, which AGC's
- * sceAgcLinkShaders takes): the list and the strip. */
+/* The link's primitive types: AMD's DI_PT_* enumeration, VGT_PRIMITIVE_TYPE's
+ * values (R_030908 in amdgfxregs.h), which AGC's sceAgcLinkShaders takes and
+ * writes into that register -- the list's link leaves 0x242 = 4 among its
+ * uniform records (golden/c1-triangle's stage image). ps5-opengl hands the
+ * link the same enumeration (ps5_agc_native_runtime.c,
+ * ps5_agc_gate2_set_draw_state: 5 TRIFAN, 6 TRISTRIP), and so does opengnm's
+ * gnm_types.h (GNM_PT_TRIFAN = 0x5). R6 first passed 5 for the strip, which is
+ * the *fan*: the strip is 6. */
 #define PS5VK_LINK_TRIANGLE_LIST 4
-#define PS5VK_LINK_TRIANGLE_STRIP 5
+#define PS5VK_LINK_TRIANGLE_STRIP 6
 /* A shader object's context and SH table pointers and their record counts,
  * with the bounds the runner accepts (emit_linked_shader_state). */
 #define PS5VK_SHADER_CX_TABLE_OFFSET 24
@@ -914,6 +920,15 @@ ps5vk_debug_pipeline_stages(VkDevice _device, ps5vk_debug_stage *stages, uint32_
       };
    }
    return count;
+}
+
+uint32_t
+ps5vk_debug_pipeline_primitive_type(VkPipeline _pipeline)
+{
+   VK_FROM_HANDLE(ps5vk_pipeline, pipeline, _pipeline);
+   return pipeline != NULL && pipeline->bind_point == VK_PIPELINE_BIND_POINT_GRAPHICS
+             ? pipeline->link_primitive_type
+             : 0;
 }
 
 VkResult
@@ -1194,6 +1209,21 @@ ps5vk_push_constant_options(const struct vk_pipeline_layout *layout, PsbcCompile
    };
 }
 
+/* The primitive type a topology is linked as, or 0 for one this driver does not
+ * map. Mesa's META_RECT_LIST vertices already hold two triangles per rectangle,
+ * so they are a list here, as they are in nvk (vk_to_nv9097_primitive_topology). */
+static uint32_t
+ps5vk_link_primitive_type(VkPrimitiveTopology topology)
+{
+   /* Not a switch: META_RECT_LIST is Mesa's value outside the enumeration. */
+   if (topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST ||
+       topology == VK_PRIMITIVE_TOPOLOGY_META_RECT_LIST_MESA)
+      return PS5VK_LINK_TRIANGLE_LIST;
+   if (topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP)
+      return PS5VK_LINK_TRIANGLE_STRIP;
+   return 0;
+}
+
 static VkResult
 ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipelineCreateInfo *info,
                                const VkAllocationCallbacks *allocator, VkPipeline *out_pipeline)
@@ -1209,9 +1239,6 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
    }
    if (!vertex)
       return vk_errorf(device, VK_ERROR_UNKNOWN, "a vertex stage is required");
-   /* Mesa's meta draws use a rectangle topology whose vertex buffer already
-    * holds two triangles per rectangle, so it is a triangle list here, as it
-    * is in nvk (vk_to_nv9097_primitive_topology). */
    /* The topologies this driver links: a triangle list (which is what Mesa's
     * META_RECT_LIST vertices already are, as in nvk) and a triangle strip, which
     * is core Vulkan 1.0 with no feature bit gating it and what a tessellated mesh
@@ -1224,10 +1251,8 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
    const VkPrimitiveTopology topology =
       info->pInputAssemblyState != NULL ? info->pInputAssemblyState->topology
                                         : VK_PRIMITIVE_TOPOLOGY_MAX_ENUM;
-   if ((topology != VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST &&
-        topology != VK_PRIMITIVE_TOPOLOGY_META_RECT_LIST_MESA &&
-        topology != VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP) ||
-       info->pInputAssemblyState->primitiveRestartEnable)
+   const uint32_t link_primitive_type = ps5vk_link_primitive_type(topology);
+   if (link_primitive_type == 0 || info->pInputAssemblyState->primitiveRestartEnable)
       return vk_errorf(device, VK_ERROR_UNKNOWN,
                        "only triangle lists and strips without primitive restart are supported");
    /* One sample or four (C8): the colour target's register block carries the
@@ -1297,13 +1322,9 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
    if (!pipeline)
       return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
    pipeline->spi_shader_col_format = exports;
-   /* What the link is told: the strip's own DI_PT value, so the hardware alternates
-    * the winding the way the specification defines it, and a list's otherwise. */
-   pipeline->link_primitive_type =
-      info->pInputAssemblyState != NULL &&
-            info->pInputAssemblyState->topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP
-         ? PS5VK_LINK_TRIANGLE_STRIP
-         : PS5VK_LINK_TRIANGLE_LIST;
+   /* What the link is told: the topology's own DI_PT value, so the hardware
+    * alternates a strip's winding the way the specification defines it. */
+   pipeline->link_primitive_type = link_primitive_type;
    /* The colour write masks a draw programs, as one word: Vulkan gives **each**
     * attachment its own VkPipelineColorBlendAttachmentState::colorWriteMask, and
     * the two registers that carry them are per-target nibble fields --

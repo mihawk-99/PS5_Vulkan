@@ -505,9 +505,17 @@ create_geometry(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
                   "indexed draws need vertex data, a vertex count and a stride");
    /* Indices are optional: a frame with vertices and none draws them with
     * VkCmdDraw, which is the shape a triangle strip is (input.primitive_topology),
-    * and then it has no index buffer to create. */
+    * and then it has no index buffer to create -- a VkBuffer of size 0 is invalid
+    * usage, and Mesa's vk_buffer_init asserts on it. R6's first strip frame
+    * created one anyway, and that assertion is the console's "abort is called"
+    * after its vertex buffer was mapped (Klog_Logs/r6-strip.log): the title
+    * aborted before the frame recorded anything, which is the "wedge" the
+    * battery had to be killed for. */
+   if ((input->index_count == 0) != (input->index_data == NULL))
+      return step(triangle, "vertex geometry", VK_ERROR_INITIALIZATION_FAILED,
+                  "indices need both data and a count, or neither");
    triangle->vertex_count = input->vertex_count;
-   triangle->index_count = input->index_data != NULL ? input->index_count : 0u;
+   triangle->index_count = input->index_count;
    const VkDeviceSize vertex_bytes = (VkDeviceSize)input->vertex_count * input->vertex_stride;
    /* 16-bit indices, two bytes each. */
    const VkDeviceSize index_bytes = (VkDeviceSize)triangle->index_count * 2;
@@ -523,15 +531,17 @@ create_geometry(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
                          &triangle->staging_mapped))
          return false;
       memcpy(triangle->staging_mapped, input->vertex_data, (size_t)vertex_bytes);
-      memcpy((char *)triangle->staging_mapped + (size_t)vertex_bytes, input->index_data,
-             (size_t)index_bytes);
+      if (index_bytes != 0)
+         memcpy((char *)triangle->staging_mapped + (size_t)vertex_bytes, input->index_data,
+                (size_t)index_bytes);
       if (!create_buffer(triangle, physical, vertex_bytes,
                          VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                          "vertex", NULL, &triangle->vertex_buffer, &triangle->vertex_memory,
                          NULL) ||
-          !create_buffer(triangle, physical, index_bytes,
-                         VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                         "index", NULL, &triangle->index_buffer, &triangle->index_memory, NULL))
+          (index_bytes != 0 &&
+           !create_buffer(triangle, physical, index_bytes,
+                          VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                          "index", NULL, &triangle->index_buffer, &triangle->index_memory, NULL)))
          return false;
       triangle->staged = true;
       triangle->vertex_bytes = vertex_bytes;
@@ -539,13 +549,12 @@ create_geometry(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
    } else if (!create_buffer(triangle, physical, vertex_bytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                              "vertex", input->vertex_data, &triangle->vertex_buffer,
                              &triangle->vertex_memory, &triangle->vertex_mapped) ||
-              !create_buffer(triangle, physical, index_bytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                             "index", input->index_data, &triangle->index_buffer,
-                             &triangle->index_memory, &triangle->index_mapped)) {
+              (index_bytes != 0 &&
+               !create_buffer(triangle, physical, index_bytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                              "index", input->index_data, &triangle->index_buffer,
+                              &triangle->index_memory, &triangle->index_mapped))) {
       return false;
    }
-   /* The draws of a frame record these indices, two bytes each. */
-   triangle->index_count = input->index_count;
    return true;
 }
 
@@ -3077,7 +3086,13 @@ draw(struct ps5vk_triangle *triangle, VkCommandBuffer command)
    }
    triangle->draws_recorded++;
    const uint32_t instances = triangle->instance_count != 0 ? triangle->instance_count : 1u;
-   if (triangle->index_count == 0) {
+   /* No vertex buffer at all: the three vertices the B7/B8/C1 sets generate from
+    * gl_VertexIndex. A frame with vertices and no indices is *not* this draw --
+    * it binds its buffer and draws its own count below. R6's first strip frame
+    * took this branch, because it tested the index count alone: it drew three
+    * vertices where it declared four, through a pipeline whose vertex input reads
+    * binding 0, with no buffer bound (docs/M5_PHASE_C.md, the strip wedge). */
+   if (triangle->index_count == 0 && triangle->vertex_count == 0) {
       if (!triangle->indirect) {
          CALL(triangle, CmdDraw)(command, 3, instances, 0, 0);
          return;
@@ -3445,8 +3460,9 @@ record_uploads(struct ps5vk_triangle *triangle, VkCommandBuffer command)
       };
       CALL(triangle, CmdCopyBuffer)(command, triangle->staging_buffer, triangle->vertex_buffer, 1,
                                     &vertex_region);
-      CALL(triangle, CmdCopyBuffer)(command, triangle->staging_buffer, triangle->index_buffer, 1,
-                                    &index_region);
+      if (triangle->index_bytes != 0)
+         CALL(triangle, CmdCopyBuffer)(command, triangle->staging_buffer, triangle->index_buffer,
+                                       1, &index_region);
    }
    if (triangle->texture_image != VK_NULL_HANDLE &&
        (!triangle->texture_tiled || triangle->texture_upload)) {

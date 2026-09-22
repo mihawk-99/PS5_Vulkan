@@ -96,6 +96,7 @@ tests=(
     psbc_multiset
     v0_multiset_draw
     v0_multiset_quake
+    v0_topology
 )
 # Negative tests: name, and the host variable that breaks the rule it checks
 # unless the test sets it itself (b3_window).
@@ -193,6 +194,12 @@ fi
 mrt_run="$root/golden/v0-mrt/run-1.json"
 want v0_mrt &&
     python3 "$root/tools/golden.py" replay "$mrt_run" "$work/v0-mrt.replay"
+# The topologies draw the m3-vertex set through the harness, as v0-cull's frames
+# do, so that case's capture holds the stage mapping and the allocations their
+# replay hands out; its frames are not compared, the words are the gate.
+cull_run="$root/golden/v0-cull/run-1.json"
+want v0_topology &&
+    python3 "$root/tools/golden.py" replay "$cull_run" "$work/v0-cull.replay" --test v0-cull
 multiset_quake_run="$root/golden/v0-multiset-quake/run-1.json"
 want v0_multiset_quake &&
     python3 "$root/tools/golden.py" replay "$multiset_quake_run" "$work/v0-multiset-quake.replay"
@@ -491,6 +498,10 @@ run_test() {
         # does; what it needs from a replay is AGC's register defaults, and its
         # own pipelines and tables are what the test asserts.
         v0_multiset_draw) replay=b4-headless
+            compare=() ;;
+        # The topologies' frames: what they assert is what each pipeline is linked
+        # as and what its submission draws (driver/tests/vk_v0_topology_test.c).
+        v0_topology) replay=v0-cull
             compare=() ;;
         # R7 round 3's frame is the host half of the runner case v0-multiset-quake
         # and draws exactly its one frame, so its recording is compared with that

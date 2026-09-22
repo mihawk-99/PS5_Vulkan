@@ -17843,6 +17843,42 @@ void run_vulkan_separated_pair_frames(const TestContext &test, TestOutcome &outc
     outcome.passed = passed;
 }
 
+// What a frame drew, over every pixel of the target: how many pixels hold
+// something other than the pass's clear word, the first such word, and a hash of
+// the whole frame in row order. Two frames whose summaries agree drew the same
+// picture word for word -- which is how the topology cases compare a frame with
+// the frame that is supposed to be its equal, without holding both targets.
+struct FrameSummary
+{
+    std::uint64_t hash = 0;
+    std::uint32_t drawn = 0;
+    std::uint32_t first_drawn = 0;
+};
+
+FrameSummary summarise_frame(const void *target, std::uint32_t clear_word) noexcept
+{
+    FrameSummary summary{};
+    flush_gpu_data(const_cast<void *>(target), kFramebufferBytes);
+    const FramebufferView view{static_cast<const std::uint32_t *>(target), kTiledRgba8Layout};
+    std::uint64_t hash = 0xcbf29ce484222325ull;
+    for (std::uint32_t y = 0; y < kOutputHeight; ++y)
+    {
+        for (std::uint32_t x = 0; x < kOutputWidth; ++x)
+        {
+            const std::uint32_t word = view.word(x, y);
+            if (word != clear_word)
+            {
+                if (summary.drawn == 0)
+                    summary.first_drawn = word;
+                ++summary.drawn;
+            }
+            hash = (hash ^ word) * 0x100000001b3ull;
+        }
+    }
+    summary.hash = hash;
+    return summary;
+}
+
 // R6 of the port's requests: the triangle strip, which is core Vulkan 1.0 with no
 // feature bit gating it and what a tessellated mesh is built as -- two vertices per
 // row with consecutive rows sharing an edge, which a list cannot express without
@@ -17850,16 +17886,29 @@ void run_vulkan_separated_pair_frames(const TestContext &test, TestOutcome &outc
 // refused the topology by name.
 //
 // The topology reaches the hardware through the *link* (sceAgcLinkShaders takes
-// AMD's DI_PT_* primitive type), so a strip is not a draw-time register: the
-// hardware alternates the winding of the strip's second and later triangles itself,
-// which is why the front-face and cull state the driver programs is untouched.
+// AMD's DI_PT_* primitive type and writes it into VGT_PRIMITIVE_TYPE), so a strip
+// is not a draw-time register: the hardware alternates the winding of the strip's
+// second and later triangles itself, which is why the front-face and cull state
+// the driver programs is untouched.
 //
-// The acceptance is an identity and its converse. A quad's four vertices as a strip
-// are the two triangles a list of its six indices draws, so the two frames must be
-// **identical texel for texel**. With back-face culling on, a list of the same six
-// indices keeps only one of the two triangles while the strip keeps both -- so the
-// same comparison must now *differ*, which is what proves the alternation is the
-// hardware's and not a coincidence of the vertex order.
+// The case's first run never reached a draw: the harness created a zero-size index
+// buffer for the non-indexed frame and the title aborted on Mesa's assertion
+// (Klog_Logs/r6-strip.log, "abort is called" after the vertex buffer mapped). It
+// was recorded as a GPU wedge. Every vertex here has the same colour, so a frame is
+// its coverage alone and two frames with the same triangles are equal word for word
+// whatever order the hardware visits their vertices in. Seven frames, smallest
+// first, so a failure names the first frame it reached:
+//
+//   0  one triangle's three vertices as a strip       } identical: the smallest
+//   1  the same three vertices as a list              } strip there is
+//   2  a full-target quad's four vertices as a strip  } identical: the strip's
+//   3  the quad's two triangles as a list, one winding} second triangle
+//   4  frame 2 with back faces culled                 } identical: the hardware
+//   5  frame 3 with back faces culled                 } turned the second one over
+//   6  the quad's vertices in the strip's raw order as a list, back faces culled:
+//      one triangle of each winding, so exactly one survives, which frame 4 must
+//      differ from -- the alternation, not a coincidence of the vertex order.
+constexpr unsigned kStripFrames = 7;
 
 static ps5vk_triangle_shaders g_strip_shaders{};
 
@@ -17867,33 +17916,58 @@ void run_vulkan_strip_frames(const TestContext &test, TestOutcome &outcome) noex
 {
     JsonLog &log = test.log;
     const ps5vk_triangle_report report{&log, log_vulkan_step};
+    // The m3-vertex set's layout, which the case's vertex buffer is built for and
+    // its compile options declare: location 0 R32G32_SFLOAT at offset 0, location 1
+    // R32G32B32A32_SFLOAT at offset 8, one binding of 24-byte records
+    // (probes/m3-vertex/compile.txt).
     const VkVertexInputAttributeDescription attributes[2] = {
         {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
         {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8},
     };
-    // A quad whose four vertices make the two triangles a strip of them draws, and
-    // the same quad as the six indices a list needs. The four vertices are the m3
-    // vertex layout's (position and colour), so the m3 probes' shader draws them.
+    static_assert(kVertexStride == 6 * sizeof(float), "a record is a position and a colour");
+    constexpr float kRed = kSquareRed / 255.0f;
+    // The quad in a strip's order, and its first three vertices are the triangle.
     static const float vertices[4][6] = {
-        {-1.0f, -1.0f, 1.0f, 0.0f, 0.0f, 1.0f},
-        {-1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f},
-        {1.0f, -1.0f, 0.0f, 0.0f, 1.0f, 1.0f},
-        {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f},
+        {-1.0f, -1.0f, kRed, 1.0f, 0.25f, 1.0f},
+        {-1.0f, 1.0f, kRed, 1.0f, 0.25f, 1.0f},
+        {1.0f, -1.0f, kRed, 1.0f, 0.25f, 1.0f},
+        {1.0f, 1.0f, kRed, 1.0f, 0.25f, 1.0f},
     };
-    static const std::uint16_t list_indices[6] = {0, 1, 2, 1, 3, 2};
-    bool drew[4] = {false, false, false, false};
-    std::uint32_t frames[4] = {0, 0, 0, 0};
-    for (unsigned at = 0; at < 4; at++)
+    // The list a correct strip of the quad is: its second triangle with the order
+    // turned over, so both triangles face the same way. The strip's raw order is
+    // the list that does not turn it over.
+    static const std::uint16_t consistent[6] = {0, 1, 2, 1, 3, 2};
+    static const std::uint16_t raw_order[6] = {0, 1, 2, 1, 2, 3};
+    struct Frame
     {
-        // 0: the strip, no culling. 1: the list, no culling -- identical frames.
-        // 2: the strip, back-face culling. 3: the list, back-face culling -- the
-        // list loses a triangle, so this pair has to differ.
-        const bool strip = (at % 2) == 0;
-        const bool culled = at >= 2;
-        char label[64]{};
-        std::snprintf(label, sizeof(label), "%s, %s", strip ? "strip" : "list",
-                      culled ? "back-face culled" : "no culling");
-        log.event("agc_strip", "INFO", 0, label);
+        const char *name;
+        VkPrimitiveTopology topology;
+        std::uint32_t vertex_count;
+        const std::uint16_t *indices;
+        VkCullModeFlags cull;
+    };
+    static const Frame kFrames[kStripFrames] = {
+        {"three vertices, strip", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, 3, nullptr,
+         VK_CULL_MODE_NONE},
+        {"three vertices, list", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 3, nullptr,
+         VK_CULL_MODE_NONE},
+        {"quad, strip", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, 4, nullptr, VK_CULL_MODE_NONE},
+        {"quad, list, one winding", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 4, consistent,
+         VK_CULL_MODE_NONE},
+        {"quad, strip, back faces culled", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, 4, nullptr,
+         VK_CULL_MODE_BACK_BIT},
+        {"quad, list, one winding, back faces culled", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 4,
+         consistent, VK_CULL_MODE_BACK_BIT},
+        {"quad, list in the strip's raw order, back faces culled",
+         VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 4, raw_order, VK_CULL_MODE_BACK_BIT},
+    };
+    // The pass's clear, the word v0-cull measured.
+    const std::uint32_t clear_word = 0xffff8040u;
+    FrameSummary frames[kStripFrames]{};
+    for (unsigned at = 0; at < kStripFrames; at++)
+    {
+        const Frame &frame = kFrames[at];
+        log.event("agc_strip", "INFO", 0, frame.name);
         if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], g_strip_shaders, log))
             return;
         ps5vk_triangle_input input{};
@@ -17904,32 +17978,31 @@ void run_vulkan_strip_frames(const TestContext &test, TestOutcome &outcome) noex
         input.report = &report;
         input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
         input.vertex_data = vertices;
-        input.vertex_count = 4;
-        input.vertex_stride = 24;
-        input.index_data = strip ? NULL : list_indices;
-        input.index_count = strip ? 0u : 6u;
+        input.vertex_count = frame.vertex_count;
+        input.vertex_stride = kVertexStride;
+        input.index_data = frame.indices;
+        input.index_count = frame.indices != nullptr ? 6u : 0u;
         input.attribute_count = 2;
         input.attributes[0] = attributes[0];
         input.attributes[1] = attributes[1];
-        input.primitive_topology =
-            strip ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-        input.rasterization_cull_mode = culled ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE;
-        ps5vk_triangle frame{};
-        ps5vk_triangle_status status = ps5vk_triangle_create(&frame, &input);
+        input.primitive_topology = frame.topology;
+        input.rasterization_cull_mode = frame.cull;
+        ps5vk_triangle triangle{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
         if (status == PS5VK_TRIANGLE_OK)
-            status = ps5vk_triangle_draw(&frame, PS5VK_TRIANGLE_ONE_DRAW);
-        drew[at] = status == PS5VK_TRIANGLE_OK && frame.target_bytes >= kFramebufferBytes;
-        if (test.capture && drew[at])
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        const bool drew = status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes;
+        if (test.capture && drew)
         {
-            log_driver_submission(frame.device, label, log);
-            log_driver_stages(frame.device, log);
+            log_driver_submission(triangle.device, frame.name, log);
+            log_driver_stages(triangle.device, log);
         }
-        if (drew[at])
+        if (drew)
         {
-            flush_gpu_data(const_cast<void *>(frame.target), kFramebufferBytes);
-            const auto *const words = static_cast<const std::uint32_t *>(frame.target);
-            const FramebufferView view{words, kTiledRgba8Layout};
-            frames[at] = view.word(kOutputWidth / 2, kOutputHeight / 2);
+            frames[at] = summarise_frame(triangle.target, clear_word);
+            log.number("agc_strip_frame", "drawn", frames[at].drawn);
+            log.hex("agc_strip_frame", "first_drawn_word", frames[at].first_drawn);
+            log.hex("agc_strip_frame", "frame_fnv1a64", frames[at].hash);
         }
         if (status == PS5VK_TRIANGLE_IN_FLIGHT)
         {
@@ -17938,25 +18011,34 @@ void run_vulkan_strip_frames(const TestContext &test, TestOutcome &outcome) noex
                       "a submission did not complete; the program's objects stay allocated");
             return;
         }
-        ps5vk_triangle_finish(&frame);
+        ps5vk_triangle_finish(&triangle);
+        if (!drew)
+        {
+            outcome.command_built = false;
+            log.event("agc_strip", "FAIL", -1, "a frame could not be recorded or submitted");
+            return;
+        }
     }
-    log.number("agc_strip", "strip_frame", frames[0]);
-    log.number("agc_strip", "list_frame", frames[1]);
-    log.number("agc_strip", "culled_strip_frame", frames[2]);
-    log.number("agc_strip", "culled_list_frame", frames[3]);
-    const bool all_drew = drew[0] && drew[1] && drew[2] && drew[3];
-    const bool identical = all_drew && frames[0] == frames[1] && frames[0] != 0;
-    const bool alternates = all_drew && frames[2] != frames[3];
-    const bool passed = identical && alternates;
-    char detail[224]{};
-    std::snprintf(detail, sizeof(detail),
-                  "the strip's frame %s the list's%s, and with back-face culling the pair %s",
-                  identical ? "is" : "is not", identical ? " word for word" : "",
-                  alternates ? "differs, which is the strip's alternating winding"
-                             : "did not differ, so the alternation is not being applied");
-    log.event("agc_strip", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
+    const std::uint32_t total = kOutputWidth * kOutputHeight;
+    const auto same = [&frames](unsigned a, unsigned b)
+    { return frames[a].hash == frames[b].hash && frames[a].drawn == frames[b].drawn; };
+    const bool smallest = same(0, 1) && frames[0].drawn != 0 && frames[0].drawn < total;
+    const bool quad = same(2, 3) && frames[2].drawn == total;
+    const bool culled = same(4, 5);
+    const bool alternates = !same(4, 6) && frames[6].drawn != 0 && frames[6].drawn < total;
+    log.event("agc_strip_smallest", smallest ? "PASS" : "FAIL", smallest ? 0 : -1,
+              "three vertices draw the same triangle as a strip and as a list");
+    log.event("agc_strip_quad", quad ? "PASS" : "FAIL", quad ? 0 : -1,
+              "the quad's strip covers the target exactly as its two listed triangles do");
+    log.event("agc_strip_culled", culled ? "PASS" : "FAIL", culled ? 0 : -1,
+              "culled, the strip keeps what the one-winding list keeps");
+    log.event("agc_strip_alternates", alternates ? "PASS" : "FAIL", alternates ? 0 : -1,
+              "culled, the raw-order list keeps one triangle, which the strip's frame is not");
     outcome.command_built = true;
-    outcome.passed = passed;
+    outcome.passed = smallest && quad && culled && alternates;
+    log.event("agc_strip", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1,
+              outcome.passed ? "the strip draws what its list draws, and alternates its winding"
+                             : "a strip frame is not the frame its list draws");
 }
 
 // R4's residual gap (PS5_VULKAN_REQUESTS.md, R4; docs/REQUESTS_RESPONSE.md): the
@@ -23236,6 +23318,10 @@ constexpr RunnerTest kRunnerTests[] = {
     // R1: cull none, cull back, cull front and rasterizer discard, one frame
     // each over the same quad, read back in pixels (run_vulkan_cull_frames).
     {"v0-cull", "m3-vertex", run_vulkan_cull_frames},
+    // R6: the triangle strip against the list it must equal -- three vertices, a
+    // quad, the quad culled -- and the raw-order list it must not equal, one frame
+    // each (run_vulkan_strip_frames).
+    {"v0-strip", "m3-vertex", run_vulkan_strip_frames},
     // R5: the same four-sample resolve twice, once into a destination declared
     // TRANSFER_DST and SAMPLED (refused, by name) and once into the same frame
     // with COLOR_ATTACHMENT added, which is the workaround

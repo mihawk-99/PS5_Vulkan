@@ -55,6 +55,13 @@ typedef struct ps5vk_debug_stage {
 uint32_t
 ps5vk_debug_pipeline_stages(VkDevice device, ps5vk_debug_stage *stages, uint32_t capacity);
 
+/* The primitive type a graphics pipeline hands sceAgcLinkShaders -- AMD's DI_PT_*
+ * value, VGT_PRIMITIVE_TYPE's (ps5vk_pipeline.c) -- or 0 for no pipeline or a
+ * compute one. The PC model replays the link's outputs rather than computing
+ * them, so this is where a host check reads what the console's link is told. */
+uint32_t
+ps5vk_debug_pipeline_primitive_type(VkPipeline pipeline);
+
 /* The command buffers' GPU-visible table chunks, newest first, up to
  * capacity; returns how many there are. The register tables a submission
  * names live in these, so a capture of the words is only comparable with a
