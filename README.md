@@ -55,6 +55,23 @@ toolchain.
   30-second watch recording zero refusals
   ([evidence](evidence/fragment-inputs/),
   [findings](docs/HARDWARE_FINDINGS.md)).
+- ✅ **A shader the compiler cannot lower is refused, not fatal.** The console's
+  own failure was a title gone minutes into start-up: the fork's SPIR-V front end
+  or its ACO printed one line and raised. The driver now reads a module's
+  addressing model and declared capabilities before the compiler runs and refuses
+  the ones it has no path for by name, and a `SIGABRT`/`SIGTRAP` guard behind
+  that turns any other raise into a `VkResult` — proven by
+  [`driver/tests/vk_v0_capability_test.c`](driver/tests/vk_v0_capability_test.c)
+  on the host and by the round's console run, which shows the sentence where a
+  title used to die (both recorded in
+  [`docs/M5_PHASE_C.md`](docs/M5_PHASE_C.md)).
+- ✅ **Push constants and specialization constants reach a shader.** Both are core
+  Vulkan 1.0 and both arrived through the compiler fork rather than around it. A
+  push-constant block is uploaded per draw, and the two halves of the target hold
+  the two values (`v0-push-constant`); one module built with different
+  specialization values draws the colour each set selects, read back word for
+  word, with a hand-written literal twin as the compiler's own control (the
+  `v0-r9` case).
 - ✅ **The advertised set is audited, command by command.** All 137 required
   Vulkan 1.0 commands are accounted for: **90 in the driver, 47 in Mesa's
   runtime, 0 refused, 0 gap**, and six extensions are exposed, each after a
@@ -105,6 +122,22 @@ toolchain.
   mip chain, a multi-sample colour copy or blit (the resolve owns that), a
   subset of array layers, a scaled blit whose format has no recorded decode, a
   filtered blit, and a clear whose format or aspect is not the recorded one.
+- ❌ **An input attachment read is half-proven.** A two-subpass render pass whose
+  second subpass reads the first's colour attachment as its input attachment
+  compiles, draws and reads on the console — but only the first quarter-width of
+  the picture comes back: past 960 texels the fetch behaves as if the row-stored
+  attachment were that wide, which is one descriptor field
+  (`SQ_RSRC_IMG_WORD2`) and not the subpass machinery. The open item, with the
+  measurement, is in [`docs/M5_PHASE_C.md`](docs/M5_PHASE_C.md).
+- ❌ **Line-list rendering does not draw right.** The topology is linked,
+  compiled and programmed (DI_PT_LINELIST, the line's own registers), yet the
+  console case's segments do not match the rectangles they must cover: a core
+  1.0 topology is not yet correct on hardware, which is a defect in the drawing
+  rather than in what the device reports (the `v0-lines` case).
+- ❌ **Buffer device address is not advertised.** Shaders that need it —
+  physical storage buffer addresses, `buffer_reference`, and the bindless image
+  store that comes with them — are refused by name rather than compiled into a
+  fault, which is how six of a game port's kernels currently stop.
 - ❌ **A title cannot load a graphics module at run time.** Every `dlopen` and
   `sceKernelLoadStartModule` of a repository-built `.so` is refused by the
   console, so the driver is delivered *linked* into the title; the untried route
@@ -112,8 +145,11 @@ toolchain.
 - ❌ **Occlusion queries are coarse.** One `ZPASS_DONE` count is 16 samples, so
   `occlusionQueryPrecise` is reported false.
 - ❌ **Real applications are barely exercised.** RetroArch runs through the
-  driver; emulators, game ports and other frontends are untried, and each one is
-  a new source of findings — and of work.
+  driver, and a **vkQuake port** is the second: it creates its 267 pipelines and
+  compiles its 528 shaders on the console, and each capability it still needs is
+  its own measured round
+  ([`docs/REQUESTS_RESPONSE.md`](docs/REQUESTS_RESPONSE.md)). Emulators and other
+  frontends are untried, and each one is a new source of findings — and of work.
 
 ### The ladder
 
@@ -130,7 +166,7 @@ toolchain.
 | — | The console SIGFPE at `jobs/aco-min` | ✅ fixed: the runner's sampled-format table ran a row it never filled in |
 | Rung 1.1–1.4 | One commit a rung, each gated by a CTS subset | ❌ |
 | Phase E1 | CTS-style semantic validation against the advertised set | ❌ recipe written |
-| Real applications | RetroArch ✅ · emulators and other frontends ❌ | ❌ in progress |
+| Real applications | RetroArch ✅ · a vkQuake port 🔄 · emulators and other frontends ❌ | 🔄 in progress |
 
 ## What this is — and what it is not
 
@@ -239,6 +275,21 @@ assumption. The evidence for every one is in
   beside it, and `DB_STENCIL_INFO` carries that swizzle with the tile-stencil
   bit — which is what makes a `D24_UNORM_S8_UINT` or `D32_SFLOAT_S8_UINT`
   attachment work.
+- The shader compiler of the SDK fork is RADV's front end over a **different
+  ACO**, and the difference is where a title dies: upstream's call site lowers
+  `subpassLoad` to the tile coordinate intrinsic this ACO has no case for, so the
+  *descriptor* form of the same pass is what compiles here, and an application's
+  input attachment is bound from its subpass rather than from a descriptor write
+  (which Vulkan forbids for that type).
+- A stage's descriptor metadata is the caller's declaration **as the compiler
+  echoes it back**, not what the shader reads: a layout binding the stage never
+  fetches still arrives in its metadata, so the table the driver builds has to be
+  narrowed to the bindings the module itself declares — otherwise the draw
+  demands an application write for a descriptor no instruction uses.
+- A raise inside the compiler is a dead title, because `vkCreate*Pipelines` has
+  no result to return from inside it. Turning `SIGABRT`/`SIGTRAP` into a refusal on
+  the thread that compiles is what lets a title survive a shader it cannot
+  compile, and it is the backstop behind every named capability refusal.
 
 ## Repository layout
 
@@ -248,7 +299,7 @@ assumption. The evidence for every one is in
 | [`src/`](src/) | The probe application: the case table, the AGC canaries, and the diagnostics that produce the structured records |
 | [`host/`](host/) | Host-side shims for the PC replay (the AGC host model and the runner host) |
 | [`probes/`](probes/), [`shaders/`](shaders/) | GLSL sources and their compiled AGC shader packages, one set per probe canary |
-| [`jobs/`](jobs/) | Job queues — one directory per probe battery, 46 of them |
+| [`jobs/`](jobs/) | Job queues — one directory per probe battery, 110 of them |
 | [`golden/`](golden/) | Golden command streams extracted from console runs |
 | [`evidence/`](evidence/) | Captured evidence for app-level findings |
 | [`docs/`](docs/) | The plan, the phase logs, the audit tables and the hardware findings |
@@ -358,7 +409,7 @@ python3 tools/ps5_console.py battery PPSA99988 jobs/format-items/queue.txt \
 ```
 
 A queue is a small text file — `capture`, `hold <vblanks>`, the case names,
-`m2-solid` as the canary, `exit` — and [`jobs/`](jobs/) holds 78 examples, one per
+`m2-solid` as the canary, `exit` — and [`jobs/`](jobs/) holds 110 examples, one per
 battery, each with the run it belongs to in its comments. The
 battery exits `0` when the run ended and passed, `3` when the run never ended,
 and `2` when no run arrived. To watch a run you launch yourself, use
@@ -375,6 +426,7 @@ definition of "verified":
 tools/check-driver.sh          # driver: loader, host, PS5 link and negative arms
 tools/check-runner-cases.sh    # the runner's cases on the PC, against golden streams
 tools/check-mip-layout.sh      # tile maps against AddrLib, the oracle
+tools/check-probe-packages.sh  # every committed probe package rebuilds to itself
 tools/check-psbc-link.sh       # the shader-compiler link, the SDK tree it comes from
 tools/check-vulkan-runtime.sh  # the runtime link
 make test                      # host unit and integration tests, including the audits
@@ -425,6 +477,7 @@ Details: [configuration](docs/CONFIGURATION.md),
 | [`docs/CTS.md`](docs/CTS.md) | The conformance-subset recipe that gates a version rise |
 | [`docs/V0_FORMATS_AUDIT.md`](docs/V0_FORMATS_AUDIT.md) | Required format support, row by row -- and the record that none is missing |
 | [`docs/BLOCKERS.md`](docs/BLOCKERS.md) | The mechanism log: each blocker, the round that closed it, and what it cost |
+| [`docs/REQUESTS_RESPONSE.md`](docs/REQUESTS_RESPONSE.md) | The game port's capability requests (R1…R10) and this side's answers, measurement by measurement |
 | [`docs/NATIVE_TOOLING.md`](docs/NATIVE_TOOLING.md) · [`docs/TESTING.md`](docs/TESTING.md) · [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Build, test and console workflows |
 | [`AGENTS.md`](AGENTS.md) | The repository's own working rules: read order, volatility contract, caching rules |
 
