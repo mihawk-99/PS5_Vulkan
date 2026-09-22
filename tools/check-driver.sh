@@ -99,6 +99,7 @@ tests=(
     v0_topology
     v0_fragmentless
     v0_spec
+    v0_capability
 )
 # Negative tests: name, and the host variable that breaks the rule it checks
 # unless the test sets it itself (b3_window).

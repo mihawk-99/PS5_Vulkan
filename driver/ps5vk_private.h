@@ -728,17 +728,24 @@ struct ps5vk_sampler {
    uint32_t address_word;
 };
 
-/* SPIR-V's header, OpEntryPoint, OpExecutionMode and the execution models,
- * which the entry-point and local-size checks read (ps5vk_pipeline.c,
- * ps5vk_compute.c). */
+/* SPIR-V's header, OpMemoryModel, OpCapability, OpEntryPoint, OpExecutionMode
+ * and the execution models, which the capability refusal, the entry-point and
+ * the local-size checks read (ps5vk_pipeline.c, ps5vk_compute.c). */
 #define PS5VK_SPIRV_MAGIC 0x07230203u
 #define PS5VK_SPIRV_HEADER_WORDS 5
+#define PS5VK_SPIRV_OP_MEMORY_MODEL 14
 #define PS5VK_SPIRV_OP_ENTRY_POINT 15
+#define PS5VK_SPIRV_OP_CAPABILITY 17
 #define PS5VK_SPIRV_OP_EXECUTION_MODE 16
 #define PS5VK_SPIRV_EXECUTION_MODE_LOCAL_SIZE 17
 #define PS5VK_SPIRV_EXECUTION_MODEL_VERTEX 0
 #define PS5VK_SPIRV_EXECUTION_MODEL_FRAGMENT 4
 #define PS5VK_SPIRV_EXECUTION_MODEL_COMPUTE 5
+
+/* Room for a shader's declared capability list in a refusal's sentence: the
+ * most any deployed shader declares is four, and each name and number is under
+ * forty bytes (ps5vk_pipeline.c, R10). */
+#define PS5VK_CAPABILITY_LIST_BYTES 256
 
 /* The compiler and AGC's shader creation are serialised by one mutex, which the
  * graphics and compute paths share (ps5vk_pipeline.c, ps5vk_compute.c). */
@@ -748,10 +755,13 @@ void
 ps5vk_compile_mutex_init(void);
 
 /* One compile, run on a thread of this repository's own with a stack the
- * application's thread size cannot shrink (ps5vk_pipeline.c). */
+ * application's thread size cannot shrink (ps5vk_pipeline.c). aborted, when it
+ * is not NULL, comes back true when the compiler raised instead of returning --
+ * a shader it cannot lower (R10). */
 PsbcResult
 ps5vk_compile_shader_deep(struct nir_shader *nir, const uint32_t *words, size_t size,
-                          const PsbcCompileOptions *options, PsbcShaderOutput *output);
+                          const PsbcCompileOptions *options, PsbcShaderOutput *output,
+                          bool *aborted);
 
 #define PS5VK_MAX_USER_DATA 16
 bool
@@ -804,6 +814,18 @@ struct ps5vk_shader_module {
 bool
 ps5vk_spirv_has_entry_point(const struct ps5vk_shader_module *module, uint32_t model,
                             const char *name);
+
+/* R10: what this compiler has no path for, which a shader is refused for before
+ * the compiler runs (ps5vk_pipeline.c). The graphics and compute paths both
+ * call ps5vk_spirv_refusal and write its reason into their refusal;
+ * ps5vk_spirv_capability_list fills in the declared set for a refusal that
+ * cannot name the one thing at fault. */
+bool
+ps5vk_spirv_refusal(const uint32_t *words, size_t size, char *reason, size_t reason_size);
+const char *
+ps5vk_capability_name(uint32_t value);
+void
+ps5vk_spirv_capability_list(const uint32_t *words, size_t size, char *out, size_t out_size);
 
 /* A query pool: one direct-memory mapping the GPU writes counters into and the
  * CPU reads them from, two eight-byte counters per query. An occlusion query

@@ -38,6 +38,8 @@
 
 #include <assert.h>
 #include <pthread.h>
+#include <setjmp.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -553,6 +555,179 @@ ps5vk_spirv_has_entry_point(const struct ps5vk_shader_module *module, uint32_t m
    return found;
 }
 
+/* R10: what this compiler has no path for, refused by name before it runs. A
+ * shader that asks for one of these used to reach the compiler, which printed
+ * its own error and then killed the process -- on the console, minutes into a
+ * title's start-up, with no VkResult and nothing the application could act on.
+ *
+ * Every entry is measured on the host against this same compiler, with the
+ * shaders named, rather than inferred from a capability's name: the audit of
+ * the 67 shaders a vkQuake port deploys (docs/M5_PHASE_C.md, R10) and the
+ * negative probe `driver/tests/vk_v0_capability_test.c`.
+ *
+ * The two checks are the two shapes the failures actually have, not the two
+ * capabilities they happen to declare:
+ *
+ * - The **addressing model**, because that is what the front end rejects:
+ *   "AddressingModelPhysicalStorageBuffer64 not supported"
+ *   (spirv_to_nir.c's OpMemoryModel case), which is where the port's
+ *   skinning, mesh-interpolate and lightmap readers stop. Declaring
+ *   PhysicalStorageBufferAddresses without that model compiles -- measured --
+ *   so a refusal on the declaration alone would refuse a shader that works.
+ * - The one capability this compiler has no lowering for anywhere:
+ *   PhysicalStorageBufferAddressesEXT, which the port's ray-debug and
+ *   lightmap kernels declare and whose ACO has no case for the
+ *   `@bindless_image_store` they reach.
+ *
+ * What is *not* here matters as much. The capabilities a vkQuake port deploys
+ * beyond Shader are SampleRateShading (35), InputAttachment (40), SampledBuffer
+ * (46), StorageImageExtendedFormats (49), ImageQuery (50), GroupNonUniform
+ * (61) and GroupNonUniformShuffle (65) -- and every one of those but
+ * InputAttachment is lowered by this compiler, measured the same way, so
+ * refusing them would refuse working shaders. (The values are the SPIR-V
+ * specification's; a capability list that numbers them by neighbour is how the
+ * port's own scanner came to call 46 a storage-image write.)
+ *
+ * The upgrade path, when another case appears: the front end already knows
+ * (`spirv_to_nir.c`'s `supported_capabilities`), so a compiler entry point that
+ * answered the question would replace this table rather than duplicate it. */
+#define PS5VK_SPIRV_ADDRESSING_MODEL_PHYSICAL_STORAGE_BUFFER_64 5348u
+
+struct ps5vk_refused_capability
+{
+   uint32_t value;
+   const char *name;
+   const char *reason;
+};
+
+static const struct ps5vk_refused_capability ps5vk_refused_capabilities[] = {
+   {4472, "PhysicalStorageBufferAddressesEXT",
+    "buffer device address is not advertised by this physical device, and this compiler's ACO has "
+    "no case for the bindless image store the shaders that use it reach"},
+};
+
+/* The names of the capabilities this driver knows, for the sentences below. A
+ * capability outside the list is named by its number alone rather than guessed
+ * at. */
+static const struct ps5vk_refused_capability ps5vk_known_capabilities[] = {
+   {1, "Shader", ""},
+   {25, "ImageGatherExtended", ""},
+   {35, "SampleRateShading", ""},
+   {40, "InputAttachment", ""},
+   {46, "SampledBuffer", ""},
+   {49, "StorageImageExtendedFormats", ""},
+   {50, "ImageQuery", ""},
+   {61, "GroupNonUniform", ""},
+   {64, "GroupNonUniformBallot", ""},
+   {65, "GroupNonUniformShuffle", ""},
+   {4472, "PhysicalStorageBufferAddressesEXT", ""},
+   {5347, "PhysicalStorageBufferAddresses", ""},
+};
+
+static const struct ps5vk_refused_capability *
+ps5vk_capability_in(const struct ps5vk_refused_capability *table, size_t count, uint32_t value)
+{
+   for (size_t at = 0; at < count; at++) {
+      if (table[at].value == value)
+         return &table[at];
+   }
+   return NULL;
+}
+
+const char *
+ps5vk_capability_name(uint32_t value)
+{
+   const struct ps5vk_refused_capability *const known =
+      ps5vk_capability_in(ps5vk_known_capabilities,
+                          sizeof(ps5vk_known_capabilities) / sizeof(ps5vk_known_capabilities[0]),
+                          value);
+   return known != NULL ? known->name : NULL;
+}
+
+/* Whether this driver refuses the module before compiling it, and why, into
+ * reason: one sentence naming the limit, the way every other refusal in this
+ * driver does. False, with reason untouched, for a module that is not SPIR-V at
+ * all -- ps5vk_spirv_has_entry_point refuses those by name first. */
+bool
+ps5vk_spirv_refusal(const uint32_t *words, size_t size, char *reason, size_t reason_size)
+{
+   const size_t count = size / sizeof(uint32_t);
+   if (words == NULL || count < PS5VK_SPIRV_HEADER_WORDS || words[0] != PS5VK_SPIRV_MAGIC)
+      return false;
+   for (size_t at = PS5VK_SPIRV_HEADER_WORDS; at < count;) {
+      const uint32_t word_count = words[at] >> 16;
+      const uint32_t opcode = words[at] & 0xffff;
+      if (word_count == 0 || word_count > count - at)
+         return false;
+      /* OpMemoryModel: addressing model, memory model. */
+      if (opcode == PS5VK_SPIRV_OP_MEMORY_MODEL && word_count >= 3 &&
+          words[at + 1] == PS5VK_SPIRV_ADDRESSING_MODEL_PHYSICAL_STORAGE_BUFFER_64) {
+         snprintf(reason, reason_size,
+                  "the shader's addressing model is PhysicalStorageBuffer64 (%u), which this "
+                  "compiler's SPIR-V front end rejects (\"AddressingModelPhysicalStorageBuffer64 "
+                  "not supported\") and which the buffer device address this device does not "
+                  "advertise would need",
+                  PS5VK_SPIRV_ADDRESSING_MODEL_PHYSICAL_STORAGE_BUFFER_64);
+         return true;
+      }
+      /* OpCapability: one capability. */
+      if (opcode == PS5VK_SPIRV_OP_CAPABILITY && word_count >= 2) {
+         const uint32_t value = words[at + 1];
+         const struct ps5vk_refused_capability *const refused =
+            ps5vk_capability_in(ps5vk_refused_capabilities,
+                                sizeof(ps5vk_refused_capabilities) /
+                                   sizeof(ps5vk_refused_capabilities[0]),
+                                value);
+         if (refused != NULL) {
+            snprintf(reason, reason_size, "the shader declares SpvCapability%s (%u), which this "
+                                          "driver does not support: %s",
+                     refused->name, value, refused->reason);
+            return true;
+         }
+      }
+      at += word_count;
+   }
+   return false;
+}
+
+/* Every capability the module declares, named where this driver knows the name
+ * and numbered where it does not, into out: "SpvCapabilityShader,
+ * SpvCapabilityInputAttachment (40)". It is what a refusal that cannot say
+ * *which* capability is at fault says instead, so the log still names what the
+ * shader asked the compiler for. */
+void
+ps5vk_spirv_capability_list(const uint32_t *words, size_t size, char *out, size_t out_size)
+{
+   const size_t count = size / sizeof(uint32_t);
+   size_t used = 0;
+   out[0] = '\0';
+   if (words == NULL || count < PS5VK_SPIRV_HEADER_WORDS || words[0] != PS5VK_SPIRV_MAGIC) {
+      snprintf(out, out_size, "no capabilities (not SPIR-V)");
+      return;
+   }
+   for (size_t at = PS5VK_SPIRV_HEADER_WORDS; at < count;) {
+      const uint32_t word_count = words[at] >> 16;
+      const uint32_t opcode = words[at] & 0xffff;
+      if (word_count == 0 || word_count > count - at)
+         break;
+      if (opcode == PS5VK_SPIRV_OP_CAPABILITY && word_count >= 2) {
+         const uint32_t value = words[at + 1];
+         const char *const name = ps5vk_capability_name(value);
+         const int written = name != NULL
+                                ? snprintf(out + used, out_size - used, "%sSpvCapability%s (%u)",
+                                           used != 0 ? ", " : "", name, value)
+                                : snprintf(out + used, out_size - used, "%scapability %u",
+                                           used != 0 ? ", " : "", value);
+         if (written < 0 || (size_t)written >= out_size - used)
+            break;
+         used += (size_t)written;
+      }
+      at += word_count;
+   }
+   if (used == 0)
+      snprintf(out, out_size, "no capabilities");
+}
+
 /* The compiler recurses deeply -- NIR passes over big shaders, then ACO's
  * optimizer, register allocation and scheduler -- and an application's own
  * thread may carry a stack too small for it. The stack is allocated here and
@@ -577,7 +752,37 @@ struct ps5vk_compile_call
    const PsbcCompileOptions *options;
    PsbcShaderOutput *output;
    PsbcResult result;
+   /* R10: the compiler trapped or aborted on this shader rather than returning
+    * a result (see ps5vk_compile_worker). */
+   bool aborted;
 };
+
+/* R10: a shader the compiler cannot lower has to come back as a VkResult.
+ * `unreachable()` and `vtn_fail` in the ACO and SPIR-V front ends print their
+ * own message and then raise, so a title that meets one dies minutes into
+ * start-up having been told nothing it can act on -- and `vkCreatePipelines`
+ * has no result to return. The raise happens on the thread that compiles
+ * (ps5vk_compile_shader_deep's own, or the caller's when a thread cannot be
+ * created), so the guard lives in that thread's frame and turns the signal into
+ * a result the caller turns into a refusal.
+ *
+ * The ceiling, stated where it is: the aborted compile's allocations are leaked
+ * -- the compiler's arenas are in whatever state the raise left them -- and the
+ * driver does not retry the shader. A title that meets one gets an error for
+ * that pipeline and keeps running; it does not get the memory back. Only these
+ * two signals are caught: a real segmentation fault in the compiler is still a
+ * crash this driver has to be fixed for, not something to report as the
+ * shader's fault. */
+static sigjmp_buf ps5vk_compile_jump;
+static volatile sig_atomic_t ps5vk_compile_raised;
+
+static void
+ps5vk_compile_signal(int signo)
+{
+   (void)signo;
+   ps5vk_compile_raised = 1;
+   siglongjmp(ps5vk_compile_jump, 1);
+}
 
 static void *
 ps5vk_compile_worker(void *argument)
@@ -590,9 +795,33 @@ ps5vk_compile_worker(void *argument)
    printf("[ps5vk] compile start: nir=%p words=%p\n", (void *)call->nir,
           (const void *)call->words);
    fflush(stdout);
-   call->result = call->nir ? psbc_compile_nir(call->nir, call->options, call->output)
-                            : psbc_compile_shader(call->words, call->size, call->options,
-                                                  call->output);
+   struct sigaction action, saved_abort, saved_trap;
+   memset(&action, 0, sizeof(action));
+   action.sa_handler = ps5vk_compile_signal;
+   sigemptyset(&action.sa_mask);
+   const bool caught_abort = sigaction(SIGABRT, &action, &saved_abort) == 0;
+   const bool caught_trap = sigaction(SIGTRAP, &action, &saved_trap) == 0;
+   ps5vk_compile_raised = 0;
+   if (!caught_abort && !caught_trap) {
+      call->result = call->nir ? psbc_compile_nir(call->nir, call->options, call->output)
+                               : psbc_compile_shader(call->words, call->size, call->options,
+                                                     call->output);
+   } else if (sigsetjmp(ps5vk_compile_jump, 1) == 0) {
+      call->result = call->nir ? psbc_compile_nir(call->nir, call->options, call->output)
+                               : psbc_compile_shader(call->words, call->size, call->options,
+                                                     call->output);
+   } else {
+      /* The compiler raised: no package was written and the result is the
+       * caller's to turn into a sentence. */
+      call->aborted = true;
+      call->result = PSBC_RESULT_COMPILE_ACO;
+      printf("[ps5vk] compile raised: the shader compiler aborted on this shader\n");
+      fflush(stdout);
+   }
+   if (caught_trap)
+      sigaction(SIGTRAP, &saved_trap, NULL);
+   if (caught_abort)
+      sigaction(SIGABRT, &saved_abort, NULL);
    printf("[ps5vk] compile done: result=%d\n", (int)call->result);
    fflush(stdout);
    return NULL;
@@ -605,7 +834,8 @@ ps5vk_compile_worker(void *argument)
  * and the fault stays a possibility rather than becoming a new failure. */
 PsbcResult
 ps5vk_compile_shader_deep(struct nir_shader *nir, const uint32_t *words, size_t size,
-                          const PsbcCompileOptions *options, PsbcShaderOutput *output)
+                          const PsbcCompileOptions *options, PsbcShaderOutput *output,
+                          bool *aborted)
 {
    struct ps5vk_compile_call call = {.nir = nir,
                                      .words = words,
@@ -613,13 +843,18 @@ ps5vk_compile_shader_deep(struct nir_shader *nir, const uint32_t *words, size_t 
                                      .options = options,
                                      .output = output,
                                      .result = PSBC_RESULT_INTERNAL_ERROR};
+   if (aborted != NULL)
+      *aborted = false;
    pthread_attr_t attributes;
    pthread_t thread;
    char *const stack = malloc(PS5VK_COMPILE_STACK_BYTES);
    if (pthread_attr_init(&attributes) != 0)
    {
       free(stack);
-      return ps5vk_compile_worker(&call), call.result;
+      ps5vk_compile_worker(&call);
+      if (aborted != NULL)
+         *aborted = call.aborted;
+      return call.result;
    }
    int created = -1;
    if (stack)
@@ -633,6 +868,8 @@ ps5vk_compile_shader_deep(struct nir_shader *nir, const uint32_t *words, size_t 
    {
       pthread_join(thread, NULL);
       free(stack);
+      if (aborted != NULL)
+         *aborted = call.aborted;
       return call.result;
    }
    /* The console's pthreads refused both forms: say so once for the log, then
@@ -641,6 +878,8 @@ ps5vk_compile_shader_deep(struct nir_shader *nir, const uint32_t *words, size_t 
            created);
    free(stack);
    ps5vk_compile_worker(&call);
+   if (aborted != NULL)
+      *aborted = call.aborted;
    return call.result;
 }
 
@@ -667,6 +906,17 @@ ps5vk_compile_stage(struct ps5vk_device *device, const VkPipelineShaderStageCrea
       return vk_errorf(device, VK_ERROR_UNKNOWN,
                        "%s stage: not well-formed SPIR-V with an entry point \"%s\"", stage_name,
                        stage->pName);
+
+   /* R10: a capability this compiler cannot lower is refused here, before the
+    * compiler runs, which is what makes the refusal a VkResult the application
+    * can act on rather than a process that dies with the compiler's own message
+    * on its way out. */
+   if (stage && !nir_info) {
+      char reason[PS5VK_CAPABILITY_LIST_BYTES];
+      if (ps5vk_spirv_refusal(module->words, module->size, reason, sizeof(reason)))
+         return vk_errorf(device, VK_ERROR_UNKNOWN, "%s stage: %s (docs/M5_PHASE_C.md, R10)",
+                          stage_name, reason);
+   }
 
    /* R9: the stage's own specialization constants. Mesa's meta stages are NIR,
     * which has none to apply. */
@@ -696,7 +946,9 @@ ps5vk_compile_stage(struct ps5vk_device *device, const VkPipelineShaderStageCrea
     * 2026-09-20). */
    const uint32_t *const words = module ? module->words : NULL;
    const size_t size = module ? module->size : 0;
-   const PsbcResult result = ps5vk_compile_shader_deep(nir, words, size, &stage_options, &output);
+   bool aborted = false;
+   const PsbcResult result = ps5vk_compile_shader_deep(nir, words, size, &stage_options, &output,
+                                                      &aborted);
    const int written = result == PSBC_RESULT_OK
                           ? ps5_agc_package_build(&output, PS5VK_ESGS_RING_ITEM_SIZE,
                                                   &package->data, &package->size)
@@ -708,9 +960,23 @@ ps5vk_compile_stage(struct ps5vk_device *device, const VkPipelineShaderStageCrea
    if (nir)
       ps5vk_nir_free(nir);
 
-   if (result != PSBC_RESULT_OK)
+   if (result != PSBC_RESULT_OK) {
+      /* R10: an abort is not a compile result, so it gets a sentence of its
+       * own: the compiler never returned, and what the shader asked it for --
+       * its capability list -- is the part of it the log can still name. */
+      if (aborted) {
+         char declared[PS5VK_CAPABILITY_LIST_BYTES];
+         ps5vk_spirv_capability_list(words, size, declared, sizeof(declared));
+         return vk_errorf(device, VK_ERROR_UNKNOWN,
+                          "%s stage: the shader compiler aborted on this shader instead of "
+                          "returning a result, so no package was written: it cannot lower "
+                          "something the shader uses (the shader declares %s; "
+                          "docs/M5_PHASE_C.md, R10)",
+                          stage_name, declared);
+      }
       return vk_errorf(device, VK_ERROR_UNKNOWN, "%s stage: %s", stage_name,
                        psbc_result_string(result));
+   }
    if (written != 0 || !package->data)
       return vk_errorf(device, VK_ERROR_UNKNOWN, "the AGC package writer failed: %d", written);
    return VK_SUCCESS;

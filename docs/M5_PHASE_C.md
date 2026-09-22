@@ -8172,3 +8172,61 @@ compared byte for byte**, `v0-spec` and `v0-spec-hardcoded` among them, with `c8
 `shaders` the two named exceptions. Worth recording as itself: the packages were correct the whole
 time and the gate was right to fail -- what it caught was a set that nothing in the tree could
 rebuild, which is exactly the drift it exists to prevent.
+
+## 2026-09-22 — R10, second ask: a shader the compiler cannot lower is refused, not fatal
+
+**What the port measured.** A console run (port build `b41844d2`, eight minutes) compiled 528 shaders
+and 267 pipelines with `result=0`, then stopped on `postprocess_frag`: `SpvCapabilityInputAttachment`
+warned, ACO printed `Unimplemented intrinsic instr: div 32x3 %1 = @load_input_attachment_coord`, and
+**the title was gone** -- no `VkResult`, no refusal sentence, nothing the application could act on.
+That is the shape this commit fixes, whatever the input-attachment read's own schedule turns out to
+be: a compiler that raises on a shader must come back as a result the application can read.
+
+**Two mechanisms, because the failures have two shapes.**
+
+1. *Before the compiler*, in `ps5vk_spirv_refusal` (`driver/ps5vk_pipeline.c`, called by
+   `ps5vk_compile_stage` and by the compute path): the driver reads the module's `OpMemoryModel`
+   addressing model and its `OpCapability` instructions and refuses by name. Two entries, both
+   measured on this host against this compiler rather than inferred:
+   - the addressing model `PhysicalStorageBuffer64` (5348), which the front end itself rejects
+     (`spirv_to_nir.c`: *"AddressingModelPhysicalStorageBuffer64 not supported"*);
+   - `SpvCapabilityPhysicalStorageBufferAddressesEXT` (4472), whose ACO has no case for the
+     `@bindless_image_store` the shaders that use it reach.
+   Both sentences name the advertised limit: buffer device address is not advertised by this
+   physical device at all.
+2. *Behind the compiler*, in `ps5vk_compile_worker`: a `SIGABRT`/`SIGTRAP` guard around the compile
+   call on the thread that runs it, which turns a raise into `PSBC_RESULT_COMPILE_ACO` and a
+   `bool aborted` the caller writes a sentence from -- *"the shader compiler aborted on this shader
+   instead of returning a result ... (the shader declares ...)"*. It is the backstop for everything
+   the table does not know, which is the point: the table is a better message, not the safety.
+
+**Measured, not assumed: the table is per capability and the shape is per failure.** Declaring
+`PhysicalStorageBufferAddresses` (5347) *without* the physical addressing model **compiles** -- the
+front end warns and continues -- so a refusal on the declaration alone would refuse a shader that
+works. `SampleRateShading` (35), `SampledBuffer` (46), `StorageImageExtendedFormats` (49),
+`ImageQuery` (50), `GroupNonUniform` (61) and `GroupNonUniformShuffle` (65) all compile too, so none
+of them is refused. The console port's own capability scanner (`tools/check-shader-capabilities.py`
+in its tree) numbers several of them by a neighbour -- 35 as ImageGatherExtended, 46 as
+StorageImageWriteWithoutFormat, 49 as GroupNonUniform, 61 as GroupNonUniformBallot -- and the values
+here are the SPIR-V specification's; that correction is in the reply to the port.
+
+**The probe** is `driver/tests/vk_v0_capability_test.c`, 14 of 14 in loader, direct and PS5 link, and
+**it is the acceptance the port asked for, run without a console**: five modules created from
+`probes/m2`'s pixel SPIR-V, with one instruction injected each --
+
+| module | creation | stderr |
+| --- | --- | --- |
+| as it stands | created | -- |
+| `+ PhysicalStorageBufferAddressesEXT` (4472) | `VK_ERROR_UNKNOWN`, sentence names the capability | **no `SPIR-V` text at all**: the compiler never ran |
+| `+ SampledBuffer` (46) | created | `SPIR-V WARNING` -- it warns and lowers it |
+| `+ PhysicalStorageBufferAddresses` (5347), logical addressing | created | `SPIR-V WARNING` |
+| `+ PhysicalStorageBuffer64` addressing model | `VK_ERROR_UNKNOWN`, sentence names the model | no `SPIR-V` text: refused first |
+| `+ capability 999`, which the front end fails on | `VK_ERROR_UNKNOWN`, the guard's sentence names the declared list | `SPIR-V parsing FAILED`, and **the process is still there** |
+
+The stderr column is the measurement's own evidence rather than decoration: the compiler writes its
+warnings and failures as `SPIR-V ...` text and nothing else in the process does, so a refusal case
+with none of it is a refusal that happened *before* the compiler -- the port's "and no ACO ERROR
+appears".
+
+**Host gates.** `make lint` PASS (213 files), `tools/check-driver.sh v0_capability` PASS in all three
+builds. The full driver check, the suite and the archive are in the round's own entry below.

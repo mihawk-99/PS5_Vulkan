@@ -145,12 +145,24 @@ static VkResult ps5vk_compute_pipeline_compile(struct ps5vk_device *device,
    if (pipeline->push_constant_bytes > PS5VK_MAX_PUSH_CONSTANT_BYTES)
       return vk_errorf(device, VK_ERROR_UNKNOWN, "compute push constants exceed the driver budget");
 
+   /* R10: what this compiler has no path for is refused before it runs, so the
+    * application gets a result and a sentence instead of a dead process. */
+   {
+      char reason[PS5VK_CAPABILITY_LIST_BYTES];
+      if (ps5vk_spirv_refusal((const uint32_t *)module->words, module->size, reason,
+                              sizeof(reason)))
+         return vk_errorf(device, VK_ERROR_UNKNOWN, "the compute shader: %s (docs/M5_PHASE_C.md, "
+                                                   "R10)",
+                          reason);
+   }
+
    call_once(&ps5vk_compile_once, ps5vk_compile_mutex_init);
    mtx_lock(&ps5vk_compile_mutex);
    PsbcShaderOutput output;
    memset(&output, 0, sizeof(output));
+   bool aborted = false;
    const PsbcResult compiled = ps5vk_compile_shader_deep(
-      NULL, (const uint32_t *)module->words, module->size, &options, &output);
+      NULL, (const uint32_t *)module->words, module->size, &options, &output, &aborted);
    mtx_unlock(&ps5vk_compile_mutex);
    const PsbcShaderMetadata metadata = output.metadata;
    const bool produced =
@@ -158,6 +170,16 @@ static VkResult ps5vk_compute_pipeline_compile(struct ps5vk_device *device,
    if (!produced)
    {
       psbc_free_output(&output);
+      if (aborted) {
+         char declared[PS5VK_CAPABILITY_LIST_BYTES];
+         ps5vk_spirv_capability_list((const uint32_t *)module->words, module->size, declared,
+                                     sizeof(declared));
+         return vk_errorf(device, VK_ERROR_UNKNOWN,
+                          "the compute shader compiler aborted on this shader instead of returning "
+                          "a result, so no package was written: it cannot lower something the "
+                          "shader uses (the shader declares %s; docs/M5_PHASE_C.md, R10)",
+                          declared);
+      }
       return vk_errorf(device, VK_ERROR_UNKNOWN,
                          "the compute shader did not compile: %s (result %d)",
                          psbc_result_string(compiled), (int)compiled);
