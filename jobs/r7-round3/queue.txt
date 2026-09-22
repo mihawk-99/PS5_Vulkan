@@ -1,0 +1,18 @@
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/r7-round3/queue.txt
+# R7 Round 3's console cycle: the standing nine-case regression, plus the two
+# cases the two R7 rounds before this one added or changed -- v0-two-sets, whose
+# expectation Round 2 flipped, and v0-multiset-quake, this round's shape.
+hold 60
+capture
+v0-cull
+v0-depth-bias
+v0-stencil-clear
+v0-sampler-address
+v0-two-passes
+v0-resolve-usage
+v0-push-constant
+c8-resolve
+m2-solid
+v0-two-sets
+v0-multiset-quake
+exit
