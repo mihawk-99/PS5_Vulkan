@@ -606,3 +606,50 @@ reason, and the defect stays invisible until a replay is attempted; the blast ra
 console cycle and one unusable golden. A guard would be "a queue whose cases are all driver
 cases must name a runner-built frame or say why it is not a golden capture", which is policy
 this round chose not to invent.
+
+## Step 1 (MRT) — reconnaissance, and the one input that had to be sourced rather than guessed
+
+**What is already in place**, read rather than assumed: `ps5vk_color_export_options`
+(`driver/ps5vk_pipeline.c`) accepts up to `PS5VK_MAX_COLOR_EXPORTS` (8) and emits one
+`SPI_SHADER_COL_FORMAT` nibble per attachment, so the *export* side is general already. The
+pass, the framebuffer and a pipeline against it succeed on the console. `ps5vk_draw.c`
+refuses `colorAttachmentCount > 1` at one place, ahead of the colour-format and
+target-register checks, and the colour target's registers are the 16 `CB_COLOR0_*` offsets
+in `ps5vk_target_offsets[]`, with the comment "gfx103 context register offsets:
+(address - 0x28000) / 4". The advertised limit is `maxColorAttachments = 4`
+(`ps5vk_physical_device.c`), and the refusal text names one, not the limit.
+
+**The unknown that had to be settled before any code: where targets 1..3's registers are.**
+They are *sourced*, not invented: `amdgfxregs.h` in the SDK tree carries the gfx103
+addresses, and the same `(address - 0x28000)/4` arithmetic the table documents reproduces
+them -- to the dword:
+
+```
+R_028C60_CB_COLOR0_BASE  0x028C60 -> 0x318   (the table's own first entry, so the arithmetic holds)
+R_028C9C_CB_COLOR1_BASE  0x028C9C -> 0x327   (not 0x328: the per-target stride is 15 dwords, not 16)
+R_028CD8_CB_COLOR2_BASE  0x028CD8 -> 0x336
+R_028D14_CB_COLOR3_BASE  0x028D14 -> 0x345
+R_028C70_CB_COLOR0_INFO  0x028C70 -> 0x31c   and CB_COLOR1_INFO -> 0x32b, +15 as well
+R_028E40_CB_COLOR0_BASE_EXT      0x028E40 -> 0x390
+R_028E44_CB_COLOR1_BASE_EXT      0x028E44 -> 0x391   (this family's stride is 1, not 15)
+R_028E60_CB_COLOR0_CMASK_BASE_EXT 0x028E60 -> 0x398  and CB_COLOR1's -> 0x399
+```
+
+The two register families therefore have **different per-target strides** -- the main ten
+registers (BASE, VIEW, INFO, ATTRIB, DCC_CONTROL, CMASK, FMASK, CLEAR_WORD0/1, DCC_BASE)
+stride by **15 dwords**, the `_EXT` four by **1 dword within a field**, with the fields eight
+dwords apart. A table built as "target 0's offsets plus one stride" would be right for one
+family and silently wrong for the other, which is why the first draft of this paragraph (it
+said 0x328 and one stride) was corrected here. `_ATTRIB2` and `_ATTRIB3` did not match that
+naming in the header and still have to be located there before the table is written.
+
+**The acceptance shape, fixed before the code**: the probe varies the attachment count (1, 2
+and the advertised maximum, read from `maxColorAttachments` rather than written as 4) and
+each attachment carries a distinguishable value, every one read back -- a driver that wrote
+attachment 0's data into all of them, or wrote one twice, has to fail. R6's case joins the
+battery because the colour-target dynarray is where R6's heap corruption lived and more
+targets changes exactly that arithmetic. The refusal past the limit names
+`VkPhysicalDeviceLimits.maxColorAttachments` and the reported number.
+
+**State**: not started. The next commit is the draw path's per-attachment programming, the
+probe, and the console run.
