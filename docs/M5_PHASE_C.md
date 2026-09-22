@@ -8097,3 +8097,22 @@ stencil test passed only where the first pass marked. Frame 2, the test's refere
 the clear everywhere, so frame 1's test was live. **Unclaimed** until that run passes; the
 port's own evidence (vkQuake's `sky_stencil` pipelines created, `evidence/m2-debug-lines/`) is
 creation, not a frame.
+
+## 2026-09-22 — R4: the swapchain refuses what the surface does not allow, by field
+
+`ps5vk_CreateSwapchainKHR` asserted the valid-usage rule, so an application asking for a usage,
+extent, present mode, format, colour space, layer count or image count the surface does not
+report aborted instead of getting a result (the port measured it with `TRANSFER_SRC` usage,
+`evidence/m2-swapchain/`). The rule stays; its form is a `VK_ERROR_UNKNOWN` refusal whose
+sentence starts with the first field that disagrees, in the structure's order --
+`"imageUsage 0x11 asks for 0x1 outside the surface's supportedUsageFlags
+(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT only)"` is the measured case -- and a retired
+`oldSwapchain` is refused the same way. `ps5vk_CreateDisplayPlaneSurfaceKHR` asserted its own
+valid-usage rule (plane 0, the display's extent) and now refuses by field too. The other
+assertion left in the file is at present time (an image presented that was not acquired), which
+is not create-time input. Host gate: C1 present (16/16 both builds) asks for four swapchains the
+surface does not allow while the first holds VideoOut -- imageUsage with TRANSFER_SRC, a
+1280x720 extent, MAILBOX, three images -- and a 1280x720 plane surface; each is refused with
+`VK_ERROR_UNKNOWN` and a message naming its field, and the C1 streams stay identical to the
+golden. Nothing here draws, so it needs no console run: the refusal is the driver's own
+reporting.

@@ -31,10 +31,15 @@
 
 #define FRAMES 4
 
+/* The driver's last message, which a refusal's sentence arrives as. */
+static char g_last_message[512];
+
 static void
 report_step(void *context, const char *name, bool passed, int result, const char *detail)
 {
    (void)context;
+   if (strcmp(name, "vk_message") == 0)
+      snprintf(g_last_message, sizeof(g_last_message), "%s", detail);
    if (!passed)
       printf("  (%s failed: VkResult %d%s%s)\n", name, result, detail[0] ? ", " : "", detail);
 }
@@ -67,6 +72,90 @@ read_spirv(const char *probes, const char *set, const char *stage, size_t *bytes
  * acquired from the first swapchain before it is replaced can still be
  * presented, which reports VK_ERROR_OUT_OF_DATE_KHR and flips nothing; a
  * retired swapchain may not be acquired from again. */
+/* R4: a create the surface does not allow is refused with a VkResult and a
+ * sentence naming the field, where it used to abort the program. Each request
+ * changes one field of the program's own, which the surface allows; none may
+ * reach VideoOut, which the first swapchain holds. */
+static void
+check_refusals(struct ps5vk_triangle *triangle)
+{
+   static const struct {
+      const char *field;
+      VkImageUsageFlags usage;
+      VkExtent2D extent;
+      VkPresentModeKHR mode;
+      uint32_t images;
+   } kCases[] = {
+      {"imageUsage", VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+       {0, 0}, VK_PRESENT_MODE_FIFO_KHR, 0},
+      {"imageExtent", 0, {1280, 720}, VK_PRESENT_MODE_FIFO_KHR, 0},
+      {"presentMode", 0, {0, 0}, VK_PRESENT_MODE_MAILBOX_KHR, 0},
+      {"minImageCount", 0, {0, 0}, VK_PRESENT_MODE_FIFO_KHR, 3},
+   };
+   for (size_t at = 0; at < sizeof(kCases) / sizeof(kCases[0]); at++) {
+      VkSwapchainCreateInfoKHR info = triangle->swapchain_info;
+      if (kCases[at].usage != 0)
+         info.imageUsage = kCases[at].usage;
+      if (kCases[at].extent.width != 0)
+         info.imageExtent = kCases[at].extent;
+      info.presentMode = kCases[at].mode;
+      if (kCases[at].images != 0)
+         info.minImageCount = kCases[at].images;
+      g_last_message[0] = '\0';
+      VkSwapchainKHR refused = VK_NULL_HANDLE;
+      const VkResult result = VK_FUNCTION(triangle->instance, CreateSwapchainKHR)(
+         triangle->device, &info, NULL, &refused);
+      char what[160];
+      snprintf(what, sizeof(what),
+               "a swapchain whose %s the surface does not allow is refused with "
+               "VK_ERROR_UNKNOWN and a sentence naming %s",
+               kCases[at].field, kCases[at].field);
+      check(result == VK_ERROR_UNKNOWN && refused == VK_NULL_HANDLE &&
+               strncmp(g_last_message, kCases[at].field, strlen(kCases[at].field)) == 0,
+            what);
+      if (result != VK_ERROR_UNKNOWN || g_last_message[0] == '\0')
+         printf("  (VkResult %d, message \"%s\")\n", result, g_last_message);
+      if (result == VK_SUCCESS)
+         VK_FUNCTION(triangle->instance, DestroySwapchainKHR)(triangle->device, refused, NULL);
+   }
+
+   /* The surface's own create refuses the same way: a plane surface with an
+    * extent the plane does not have. */
+   VkPhysicalDevice physical = VK_NULL_HANDLE;
+   uint32_t count = 1;
+   VkResult result =
+      VK_FUNCTION(triangle->instance, EnumeratePhysicalDevices)(triangle->instance, &count, &physical);
+   VkDisplayPropertiesKHR display = {0};
+   count = 1;
+   if (result == VK_SUCCESS || result == VK_INCOMPLETE)
+      result = VK_FUNCTION(triangle->instance, GetPhysicalDeviceDisplayPropertiesKHR)(
+         physical, &count, &display);
+   VkDisplayModePropertiesKHR mode = {0};
+   count = 1;
+   if (result == VK_SUCCESS || result == VK_INCOMPLETE)
+      result = VK_FUNCTION(triangle->instance, GetDisplayModePropertiesKHR)(
+         physical, display.display, &count, &mode);
+   const VkDisplaySurfaceCreateInfoKHR surface_info = {
+      .sType = VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_INFO_KHR,
+      .displayMode = mode.displayMode,
+      .transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+      .globalAlpha = 1.0f,
+      .alphaMode = VK_DISPLAY_PLANE_ALPHA_OPAQUE_BIT_KHR,
+      .imageExtent = {1280, 720},
+   };
+   VkSurfaceKHR surface = VK_NULL_HANDLE;
+   g_last_message[0] = '\0';
+   if (result == VK_SUCCESS || result == VK_INCOMPLETE)
+      result = VK_FUNCTION(triangle->instance, CreateDisplayPlaneSurfaceKHR)(
+         triangle->instance, &surface_info, NULL, &surface);
+   check(result == VK_ERROR_UNKNOWN && surface == VK_NULL_HANDLE &&
+            strncmp(g_last_message, "imageExtent", strlen("imageExtent")) == 0,
+         "a plane surface whose imageExtent the plane does not have is refused with "
+         "VK_ERROR_UNKNOWN and a sentence naming imageExtent");
+   if (result == VK_SUCCESS)
+      VK_FUNCTION(triangle->instance, DestroySurfaceKHR)(triangle->instance, surface, NULL);
+}
+
 static void
 check_replacement(struct ps5vk_triangle *triangle)
 {
@@ -166,6 +255,7 @@ main(void)
       if (status == PS5VK_TRIANGLE_OK) {
          check(ps5vk_triangle_present(&triangle) == PS5VK_TRIANGLE_FAILED,
                "the program presents only a drawn image");
+         check_refusals(&triangle);
          check_replacement(&triangle);
       }
       if (status != PS5VK_TRIANGLE_IN_FLIGHT)

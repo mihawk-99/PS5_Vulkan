@@ -197,10 +197,18 @@ ps5vk_CreateDisplayPlaneSurfaceKHR(VkInstance _instance,
                                    VkSurfaceKHR *pSurface)
 {
    VK_FROM_HANDLE(ps5vk_instance, instance, _instance);
-   /* Valid usage: the plane capabilities allow only the full display. */
-   assert(pCreateInfo->planeIndex == 0 &&
-          pCreateInfo->imageExtent.width == PS5VK_DISPLAY_WIDTH &&
-          pCreateInfo->imageExtent.height == PS5VK_DISPLAY_HEIGHT);
+   /* Valid usage: the plane capabilities allow only the full display. Refused by
+    * field rather than asserted, as ps5vk_CreateSwapchainKHR refuses its own. */
+   if (pCreateInfo->planeIndex != 0)
+      return vk_errorf(instance, VK_ERROR_UNKNOWN,
+                       "planeIndex %u is not a plane the display reports: it has plane 0 only",
+                       pCreateInfo->planeIndex);
+   if (pCreateInfo->imageExtent.width != PS5VK_DISPLAY_WIDTH ||
+       pCreateInfo->imageExtent.height != PS5VK_DISPLAY_HEIGHT)
+      return vk_errorf(instance, VK_ERROR_UNKNOWN,
+                       "imageExtent %ux%u is not the plane's %ux%u, its only extent",
+                       pCreateInfo->imageExtent.width, pCreateInfo->imageExtent.height,
+                       PS5VK_DISPLAY_WIDTH, PS5VK_DISPLAY_HEIGHT);
    VkIcdSurfaceDisplay *const surface = vk_alloc2(&instance->vk.alloc, pAllocator,
                                                   sizeof(*surface), 8,
                                                   VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
@@ -434,15 +442,50 @@ ps5vk_CreateSwapchainKHR(VkDevice _device, const VkSwapchainCreateInfoKHR *pCrea
    VK_FROM_HANDLE(ps5vk_swapchain, old, pCreateInfo->oldSwapchain);
    const VkSwapchainCreateInfoKHR *const info = pCreateInfo;
    /* Valid usage: the surface's capabilities, formats and present modes allow
-    * these values, and oldSwapchain is not retired. */
-   assert(info->imageFormat == VK_FORMAT_B8G8R8A8_UNORM &&
-          info->imageColorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR &&
-          info->imageExtent.width == PS5VK_DISPLAY_WIDTH &&
-          info->imageExtent.height == PS5VK_DISPLAY_HEIGHT && info->imageArrayLayers == 1 &&
-          (info->imageUsage & ~VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) == 0 &&
-          info->presentMode == VK_PRESENT_MODE_FIFO_KHR &&
-          info->minImageCount <= PS5VK_SWAPCHAIN_IMAGES);
-   assert(!old || (!old->retired && old->video));
+    * these values, and oldSwapchain is not retired. The rule is the driver's to
+    * enforce, but an application that breaks it gets a refusal naming the field
+    * rather than an aborted title: an assertion gives it no VkResult and nothing
+    * to act on (R4 of the vkQuake port's requests, measured when vkQuake asked
+    * for TRANSFER_SRC usage the surface does not report). One sentence for the
+    * first field that disagrees, in the order the structure declares them. */
+   if (info->minImageCount > PS5VK_SWAPCHAIN_IMAGES)
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "minImageCount %u is past the surface's maxImageCount %u",
+                       info->minImageCount, PS5VK_SWAPCHAIN_IMAGES);
+   if (info->imageFormat != VK_FORMAT_B8G8R8A8_UNORM)
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "imageFormat %d is not a format the surface reports: it reports "
+                       "VK_FORMAT_B8G8R8A8_UNORM only",
+                       (int)info->imageFormat);
+   if (info->imageColorSpace != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "imageColorSpace %d is not the surface's: it reports "
+                       "VK_COLOR_SPACE_SRGB_NONLINEAR_KHR only",
+                       (int)info->imageColorSpace);
+   if (info->imageExtent.width != PS5VK_DISPLAY_WIDTH ||
+       info->imageExtent.height != PS5VK_DISPLAY_HEIGHT)
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "imageExtent %ux%u is not the surface's %ux%u, its only extent",
+                       info->imageExtent.width, info->imageExtent.height, PS5VK_DISPLAY_WIDTH,
+                       PS5VK_DISPLAY_HEIGHT);
+   if (info->imageArrayLayers != 1)
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "imageArrayLayers %u is past the surface's maxImageArrayLayers 1",
+                       info->imageArrayLayers);
+   if ((info->imageUsage & ~VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) != 0)
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "imageUsage 0x%x asks for 0x%x outside the surface's supportedUsageFlags "
+                       "(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT only)",
+                       (unsigned)info->imageUsage,
+                       (unsigned)(info->imageUsage & ~VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT));
+   if (info->presentMode != VK_PRESENT_MODE_FIFO_KHR)
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "presentMode %d is not a mode the surface reports: it reports "
+                       "VK_PRESENT_MODE_FIFO_KHR only",
+                       (int)info->presentMode);
+   if (old && (old->retired || !old->video))
+      return vk_errorf(device, VK_ERROR_UNKNOWN,
+                       "oldSwapchain was already retired by another swapchain's creation");
    if (!old && device->video_out)
       return vk_errorf(device, VK_ERROR_NATIVE_WINDOW_IN_USE_KHR,
                        "VideoOut belongs to another swapchain");
