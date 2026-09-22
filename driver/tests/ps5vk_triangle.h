@@ -538,6 +538,14 @@ struct ps5vk_triangle_input {
    bool textures_in_first_set;
    const void *texture_data_second;
    const void *texture_data_third;
+   /* What the frame's samplers ask for anisotropically: the device reports
+    * maxSamplerAnisotropy 1.0, where the flag can only be 1.0 and is a no-op, so
+    * a frame that sets it has to render the isotropic frame exactly
+    * (driver/ps5vk_image.c, ps5vk_CreateSampler; the probe is
+    * src/diagnostics.cpp's v0-sampler-anisotropy). False and 0.0 are what every
+    * earlier phase created. */
+   bool sampler_anisotropy;
+   float sampler_max_anisotropy;
 };
 
 
@@ -762,6 +770,10 @@ struct ps5vk_triangle {
    VkDescriptorSetLayout multiset_set_layout;
    VkDescriptorPool multiset_pool;
    VkDescriptorSet multiset_set;
+   /* The anisotropy the frame's samplers were created with, from the input
+    * above; create_texture_samplers reads it. */
+   bool sampler_anisotropy;
+   float sampler_max_anisotropy;
    /* The uniform texel buffer a frame's pixel shader fetches from, its view and
     * the set the frame binds (V0-formats' descriptor-type rows). Zero handles
     * when the caller passed no texel buffer, and the driver's destroys ignore

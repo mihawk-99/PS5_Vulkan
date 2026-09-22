@@ -17352,6 +17352,187 @@ void run_vulkan_multiset_quake_frames(const TestContext &test, TestOutcome &outc
     ps5vk_triangle_finish(&triangle);
 }
 
+// R7's anisotropy gate: what the vkQuake port needs next. The address-mode work
+// gets its point_sampler created; the **next sampler in the same unconditional
+// block** sets anisotropyEnable while this device reports maxSamplerAnisotropy
+// 1.0, and vkQuake calls Sys_Error on any sampler failure -- so the port dies
+// inside R_InitSamplers and never reaches a map.
+//
+// A flag that cannot ask for anything is not a feature to refuse. Vulkan's valid
+// usage puts maxAnisotropy inside [1, maxSamplerAnisotropy] while the flag is
+// set, and 1.0 is what this device reports: the only legal value is a no-op,
+// because anisotropic filtering with one sample *is* isotropic
+// (driver/ps5vk_image.c, ps5vk_CreateSampler).
+//
+// The proof is the identity, not the acceptance. One texture, sampled at the
+// same coordinates by a sampler with the flag and one without, has to give the
+// same frame **texel for texel**: if the flag reached the hardware's sampler
+// descriptor it would have to change a fetch, and nothing here may change one.
+// The second half is the refusal that stays -- maxAnisotropy 2.0 is past the
+// limit this device reports and is refused by that name, which the debug
+// messenger carries into this log.
+struct AnisotropyMode
+{
+    bool enable;
+    float maximum;
+    const char *name;
+};
+constexpr AnisotropyMode kAnisotropyModes[] = {
+    {false, 1.0f, "no anisotropy"},
+    {true, 1.0f, "anisotropy 1.0, the reported maximum"},
+};
+
+void run_vulkan_sampler_anisotropy_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32_SFLOAT, 8},
+    };
+    // The address probe's texture: four groups across its width, so the frame has
+    // content to be identical *about* rather than identical because it is empty.
+    static const std::array<std::uint8_t, kAddressTextureWidth * 4 * 4> texels =
+        address_texture_texels();
+    // Both frames stay alive at once, because a frame's target dies with its
+    // triangle and the anisotropic frame has to equal the isotropic one word for
+    // word. Each target is one the driver maps directly -- the harness allocates
+    // one per frame for this output -- and *not* a copy on the C++ heap: the
+    // first version of this probe copied the first frame into a 33 MiB
+    // std::vector, and the runner's heap reports no failure anyone can catch, so
+    // the title exited between the AGC staging and the case's first log line and
+    // the run produced no completion record at all (2026-09-21).
+    ps5vk_triangle frames[std::size(kAnisotropyModes)]{};
+    bool drawn[std::size(kAnisotropyModes)]{};
+    bool refused_by_name = false;
+    for (unsigned index = 0; index < std::size(kAnisotropyModes); index++)
+    {
+        const AnisotropyMode &mode = kAnisotropyModes[index];
+        log.event("agc_sampler_anisotropy", "INFO", 0, mode.name);
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = kAddressVertices;
+        input.vertex_count = kSquareVertexCount;
+        input.vertex_stride = kTextureVertexStride;
+        input.index_data = kIndices;
+        input.index_count = kIndexCount;
+        input.attribute_count = 2;
+        input.attributes[0] = attributes[0];
+        input.attributes[1] = attributes[1];
+        input.texture_data = texels.data();
+        input.texture_width = kAddressTextureWidth;
+        input.texture_height = 4;
+        input.texture_format = VK_FORMAT_R8G8B8A8_UNORM;
+        input.texture_bilinear = false;
+        input.sampler_anisotropy = mode.enable;
+        input.sampler_max_anisotropy = mode.maximum;
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+            return;
+        ps5vk_triangle &triangle = frames[index];
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (test.capture && status == PS5VK_TRIANGLE_OK)
+        {
+            // One capture a mode: the frame a PC rebuild replays, and the mode it
+            // replayed is the label (tools/golden.py, capture_problems).
+            log_driver_submission(triangle.device, mode.name, log);
+            log_driver_stages(triangle.device, log);
+        }
+        const bool frame_ok =
+            status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes;
+        if (frame_ok)
+        {
+            flush_gpu_data(const_cast<void *>(triangle.target), kFramebufferBytes);
+            drawn[index] = true;
+            // The refusal that stays: a value past the limit this device reports.
+            const auto create_sampler = (PFN_vkCreateSampler)vk_icdGetInstanceProcAddr(
+                triangle.instance, "vkCreateSampler");
+            const VkSamplerCreateInfo past_the_limit = {
+                .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                .magFilter = VK_FILTER_NEAREST,
+                .minFilter = VK_FILTER_NEAREST,
+                .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+                .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                .anisotropyEnable = VK_TRUE,
+                .maxAnisotropy = 2.0f,
+            };
+            VkSampler refused = VK_NULL_HANDLE;
+            const VkResult result =
+                create_sampler != nullptr
+                    ? create_sampler(triangle.device, &past_the_limit, nullptr, &refused)
+                    : VK_ERROR_UNKNOWN;
+            refused_by_name = result != VK_SUCCESS && refused == VK_NULL_HANDLE;
+            log.event("agc_sampler_anisotropy", refused_by_name ? "PASS" : "FAIL",
+                      refused_by_name ? 0 : -1,
+                      refused_by_name
+                          ? "maxAnisotropy 2.0 was refused; the sentence the driver logged names "
+                            "maxSamplerAnisotropy 1.0"
+                          : "a sampler asking for anisotropy past the reported maximum was not "
+                            "refused");
+        }
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            log.event("agc_sampler_anisotropy", "FAIL", -1,
+                      "a submission did not complete; the program's objects stay allocated");
+            return;
+        }
+    }
+    // Texel for texel, over the whole target: if the flag reached the hardware's
+    // sampler descriptor it would have to change a fetch *somewhere*, and the
+    // mismatch count is what says whether it did.
+    bool identical = false;
+    std::size_t mismatches = 0;
+    std::uint32_t first_x = 0;
+    std::uint32_t first_y = 0;
+    if (drawn[0] && drawn[1])
+    {
+        const FramebufferView isotropic{static_cast<const std::uint32_t *>(frames[0].target),
+                                        kTiledRgba8Layout};
+        const FramebufferView anisotropic{static_cast<const std::uint32_t *>(frames[1].target),
+                                          kTiledRgba8Layout};
+        identical = true;
+        for (std::uint32_t y = 0; y < kOutputHeight; y++)
+            for (std::uint32_t x = 0; x < kOutputWidth; x++)
+                if (isotropic.word(x, y) != anisotropic.word(x, y))
+                {
+                    if (mismatches == 0)
+                    {
+                        first_x = x;
+                        first_y = y;
+                    }
+                    ++mismatches;
+                    identical = false;
+                }
+    }
+    const unsigned drawn_frames = (drawn[0] ? 1u : 0u) + (drawn[1] ? 1u : 0u);
+    for (ps5vk_triangle &frame : frames)
+        ps5vk_triangle_finish(&frame);
+    const bool passed = drawn_frames == std::size(kAnisotropyModes) && identical && refused_by_name;
+    log.number("agc_sampler_anisotropy", "frames_drawn", drawn_frames);
+    log.number("agc_sampler_anisotropy", "mismatched_texels", mismatches);
+    if (mismatches != 0)
+    {
+        log.number("agc_sampler_anisotropy", "first_mismatch_x", first_x);
+        log.number("agc_sampler_anisotropy", "first_mismatch_y", first_y);
+    }
+    log.event("agc_sampler_anisotropy", passed ? "PASS" : "FAIL", passed ? 0 : -1,
+              passed ? "the frame a sampler with anisotropyEnable at the reported maximum drew is "
+                       "the isotropic frame texel for texel, and a value past the maximum is "
+                       "refused by name"
+                     : "the anisotropy flag changed a fetch, or the frame or the refusal did not "
+                       "happen");
+    outcome.command_built = true;
+    outcome.passed = passed;
+}
+
 // R4's residual gap (PS5_VULKAN_REQUESTS.md, R4; docs/REQUESTS_RESPONSE.md): the
 // colour clear, read back with nothing drawn over it. The stencil plane has had a
 // case of this shape since R3; the colour target has not -- and it is the shape
@@ -22637,6 +22818,11 @@ constexpr RunnerTest kRunnerTests[] = {
     // with a frame whose every value is read out of one of the two sets
     // (run_vulkan_multiset_quake_frames).
     {"v0-multiset-quake", "v0-multiset-quake", run_vulkan_multiset_quake_frames},
+    // R7's next gate for the vkQuake port: anisotropyEnable at the maximum this
+    // device reports is a no-op and has to render the isotropic frame texel for
+    // texel, while a value past the maximum is refused by name
+    // (run_vulkan_sampler_anisotropy_frames).
+    {"v0-sampler-anisotropy", "m3-texture", run_vulkan_sampler_anisotropy_frames},
     // R9: push constants, the path every vkQuake pipeline layout depends on: two
     // draws whose fragment output comes from vkCmdPushConstants, one value each,
     // read back (run_vulkan_push_constant_frames).

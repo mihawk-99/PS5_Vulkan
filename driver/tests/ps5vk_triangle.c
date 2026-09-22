@@ -666,6 +666,10 @@ create_texture_samplers(struct ps5vk_triangle *triangle)
       .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
       .magFilter = VK_FILTER_NEAREST,
       .minFilter = VK_FILTER_NEAREST,
+      /* R7's anisotropy probe: a frame may ask for the flag, which at this
+       * device's maxSamplerAnisotropy of 1.0 cannot change a fetch. */
+      .anisotropyEnable = triangle->sampler_anisotropy,
+      .maxAnisotropy = triangle->sampler_max_anisotropy,
       .mipmapMode = mips && triangle->texture_mip_linear ? VK_SAMPLER_MIPMAP_MODE_LINEAR
                                                          : VK_SAMPLER_MIPMAP_MODE_NEAREST,
       .addressModeU = address,
@@ -2606,6 +2610,8 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
    triangle->two_descriptor_sets = input->two_descriptor_sets;
    triangle->two_passes = input->two_passes;
    triangle->texture_address_mode_set = input->texture_address_mode_set;
+   triangle->sampler_anisotropy = input->sampler_anisotropy;
+   triangle->sampler_max_anisotropy = input->sampler_max_anisotropy;
    triangle->texture_address_mode = input->texture_address_mode;
    triangle->rasterization_cull_mode = input->rasterization_cull_mode;
    triangle->rasterization_discard = input->rasterization_discard;

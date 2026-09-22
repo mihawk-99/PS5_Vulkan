@@ -9,6 +9,17 @@ _Updated: 2026-09-21_
 
 ## Now
 
+**The anisotropy gate is cleared** (the thing that stood between vkQuake's port and its
+first world draw): `anisotropyEnable` with `maxAnisotropy` inside `[1, maxSamplerAnisotropy]`
+is accepted as a no-op at the 1.0 this device reports, and anything above it is refused by
+name. `v0-sampler-anisotropy` proves it on the console -- two frames, the flag off and on at
+the reported maximum, **0 mismatched texels** over the whole target (pid 138,
+`Klog_Logs/v0-sampler-anisotropy.log`, golden `golden/v0-sampler-anisotropy/`). The
+`samplerAnisotropy` feature stays FALSE: nothing is filtered, and the flag cannot change a
+fetch at one sample. `docs/M5_REFERENCE.md`'s C4 row and its limits row now claim exactly
+that and no more.
+
+
 **The second request batch (`PS5_VULKAN_REQUESTSv2.md`, R7-R9) is worked**, one commit
 per item, and its evidence was weaker on purpose -- each item was a prediction read
 from vkQuake's source, so each was re-checked at HEAD before anything was written:

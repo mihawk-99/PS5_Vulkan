@@ -1,0 +1,17 @@
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/v0-sampler-anisotropy/queue.txt
+# R7's anisotropy gate: the sampler vkQuake's R_InitSamplers creates next to its
+# point_sampler sets anisotropyEnable while this device reports
+# maxSamplerAnisotropy 1.0. One texture, two frames -- the flag off and on at the
+# reported maximum -- whose readbacks have to be identical texel for texel, and a
+# third sampler asking for 2.0, which has to be refused by name
+# (src/diagnostics.cpp, run_vulkan_sampler_anisotropy_frames).
+#
+# m2-solid is in the queue for the golden: a driver case's capture carries no
+# context register table, and tools/golden.py replay takes that table from a
+# runner-built frame of the same capture (its sibling_defaults). Without one the
+# golden cannot be replayed on the PC at all.
+hold 60
+capture
+v0-sampler-anisotropy
+m2-solid
+exit

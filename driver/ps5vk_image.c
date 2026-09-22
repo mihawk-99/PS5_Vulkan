@@ -1298,12 +1298,24 @@ ps5vk_CreateSampler(VkDevice _device, const VkSamplerCreateInfo *pCreateInfo,
                        "sampler LOD bias %f is not the none the texture canary ran; a bias needs a "
                        "runner probe (docs/M5_REFERENCE.md, C4)", (double)info->mipLodBias);
    /* maxAnisotropy and compareOp are ignored while their enable flags are
-    * VK_FALSE (Valid Usage), so the flags are the whole of that state. */
-   if (info->anisotropyEnable)
+    * VK_FALSE (Valid Usage), so the flags are the whole of that state. With the
+    * flag set, Vulkan's valid usage puts maxAnisotropy inside
+    * [1, maxSamplerAnisotropy]: this device reports 1.0 (ps5vk_get_properties),
+    * so 1.0 is the only legal value there is and the flag cannot ask for
+    * anything. Accepting it is therefore a no-op and not a workaround --
+    * anisotropic filtering with one sample *is* isotropic -- and refusing it
+    * refuses a conformant application: vkQuake's R_InitSamplers creates its
+    * point_aniso_sampler in the same unconditional block as its point_sampler
+    * and calls Sys_Error on any failure, so the refusal is what keeps the port
+    * out of a map. What is refused is a value past the limit this device
+    * reports, by that name. */
+   const float reported_anisotropy = device->vk.physical->properties.maxSamplerAnisotropy;
+   if (info->anisotropyEnable && info->maxAnisotropy > reported_anisotropy)
       return vk_errorf(device, VK_ERROR_UNKNOWN,
-                       "sampler anisotropy is not the none the texture canary ran; the device "
-                       "reports maxSamplerAnisotropy 1.0, and more needs a runner probe "
-                       "(docs/M5_REFERENCE.md, C4)");
+                       "sampler anisotropy %.1f is past the maxSamplerAnisotropy %.1f this device "
+                       "reports; one sample is isotropic, and more needs a runner probe "
+                       "(docs/M5_REFERENCE.md, C4)",
+                       (double)info->maxAnisotropy, (double)reported_anisotropy);
    if (info->compareEnable)
       return vk_errorf(device, VK_ERROR_UNKNOWN,
                        "comparison sampling is not the none the texture canary ran; shadow "

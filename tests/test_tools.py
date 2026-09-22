@@ -378,6 +378,26 @@ class RunnerCaseTests(unittest.TestCase):
             if line.strip() and not line.strip().startswith("#")
         ]
 
+    def test_every_runner_case_names_a_probe_set_that_exists(self):
+        """The runner table's second column is the probe set a case's shaders come
+        from, and a case whose package set does not exist fails *inside* the
+        runner's own package staging rather than in the case: the queue is
+        accepted, the test reports FAIL, and the log says only "missing /download0
+        and /app0 package paths" (2026-09-21, v0-sampler-anisotropy was registered
+        against its own case name instead of the m3-texture probe). No host gate
+        reads that column, so this one does."""
+        diagnostics = (ROOT / "src/diagnostics.cpp").read_text(encoding="utf-8")
+        start = diagnostics.index("constexpr RunnerTest kRunnerTests[] = {")
+        end = diagnostics.index("constexpr std::uint32_t kRunnerTestCount", start)
+        rows = re.findall(r'\{"([a-z0-9\-]+)",\s*"([^"]+)"', diagnostics[start:end])
+        self.assertGreater(len(rows), 100, "the runner table did not parse")
+        for name, package in rows:
+            with self.subTest(case=name):
+                self.assertTrue(
+                    (ROOT / "probes" / package).is_dir(),
+                    f"{name} names probe set {package!r}, which probes/ does not hold",
+                )
+
     def test_every_runner_case_is_in_the_runner_table(self):
         script = (ROOT / "tools/check-runner-cases.sh").read_text(encoding="utf-8")
         cases = self.cases_of(script, "cases") + self.cases_of(script, "drawing_cases")

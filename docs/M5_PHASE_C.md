@@ -7470,3 +7470,72 @@ the refusal's sentence -- and the table builder's is defensive: an application w
 declares a binding for a stage the shader does not read it in gets the options refusal
 first, so the draw-time guard is a net rather than a path. That test, and the wrapper
 Makefile's header prerequisites, are the two items this request leaves behind.
+
+## 2026-09-21 — The anisotropy gate: a flag that cannot ask for anything, proved by an identity
+
+vkQuake's `R_InitSamplers` creates its `point_aniso_sampler` in the **same unconditional
+block** as its `point_sampler` and calls `Sys_Error` on any sampler failure. The address-mode
+work had got the first one created; the second sets `anisotropyEnable` while this device
+reports `maxSamplerAnisotropy` 1.0, so the port died inside `R_InitSamplers` and never
+reached a map. That is the gate this round clears.
+
+**The change** (`driver/ps5vk_image.c`, `ps5vk_CreateSampler`): the refusal that named
+anisotropy as "not the none the texture canary ran" is now a refusal of *values the device
+cannot honour*. Vulkan's valid usage puts `maxAnisotropy` inside
+`[1, maxSamplerAnisotropy]` while the flag is set, the driver reads that limit from the
+physical device that reports it, and 1.0 is what this device reports -- so 1.0 is the only
+legal value there is and taking it is a no-op, not a workaround: anisotropic filtering with
+one sample **is** isotropic. Anything above the reported limit is still refused, and the
+sentence names the limit and the number:
+
+```
+sampler anisotropy 2.0 is past the maxSamplerAnisotropy 1.0 this device reports;
+one sample is isotropic, and more needs a runner probe (docs/M5_REFERENCE.md, C4)
+```
+
+The `samplerAnisotropy` *feature* stays FALSE. That is deliberate and not a contradiction:
+nothing is filtered, so the feature is not claimed; the flag is accepted because at one
+sample it cannot change a fetch, and an application that asks for it anyway is conformant
+rather than optimistic.
+
+**The proof is the identity, not the acceptance** (`v0-sampler-anisotropy`,
+`run_vulkan_sampler_anisotropy_frames`, `jobs/v0-sampler-anisotropy/queue.txt`). One
+texture -- the address probe's four-group one, so the frame has content to be identical
+*about* -- sampled at the same coordinates by a sampler with the flag at the reported maximum
+and by one without it. The two frames are then compared **texel for texel over the whole
+target**: if the flag reached the hardware's sampler descriptor it would have to change a
+fetch somewhere. Run **pid 138**, `Klog_Logs/v0-sampler-anisotropy.log`:
+
+```
+"field":"frames_drawn","value":2
+"field":"mismatched_texels","value":0
+"detail":"the frame a sampler with anisotropyEnable at the reported maximum drew is the
+          isotropic frame texel for texel, and a value past the maximum is refused by name"
+```
+
+The second half is the refusal that stays: a third sampler asking for `maxAnisotropy` 2.0 is
+created once per frame and refused each time, and the debug messenger carries the sentence
+above into the log **twice**. The golden is `golden/v0-sampler-anisotropy/` (two submissions,
+four pipelines, extracted from the capture; `m2-solid` is in the queue because a driver case's
+capture carries no context register table and a replay borrows one from a runner-built frame
+of the same capture).
+
+**A crash the case caused, and what it says about the runner's heap.** The first version of
+the probe copied the first frame into a 33 MiB `std::vector` on the C++ heap. The runner is
+built without exceptions, so that allocation's failure is not catchable: the title exited
+between the AGC staging and the case's first log line, the klog stopped mid-run, and the
+battery reported *nothing at all* -- no FAIL, no test record. The case now holds both frames
+at once instead, in the targets the driver maps directly (one per frame, which is what the
+harness allocates for this output), and the comparison is the same texel-for-texel one with no
+heap involved. A case that dies before its first `log.event` is indistinguishable from a hung
+title in this tooling; `ps5vkctl payload` answering `idle` while a battery still waits is the
+tell.
+
+**A registration mistake, and the guard that would have caught it.** The case was first
+registered against probe set `"v0-sampler-address"` -- its own case name -- where the address
+case uses `"m3-texture"`. No host gate reads that column, so the queue was accepted, the
+console ran the runner's package staging, found no package, and reported
+`missing /download0 and /app0 package paths` followed by a FAIL of the case itself. A
+console cycle was spent on it. `tests/test_tools.py` now has
+`test_every_runner_case_names_a_probe_set_that_exists`, which parses the runner table and
+requires every package column to name a directory under `probes/`; all 116 cases pass it.
