@@ -119,8 +119,10 @@ check_refusals(struct ps5vk_triangle *triangle)
          VK_FUNCTION(triangle->instance, DestroySwapchainKHR)(triangle->device, refused, NULL);
    }
 
-   /* The surface's own create refuses the same way: a plane surface with an
-    * extent the plane does not have. */
+#if defined(PS5VK_TEST_DIRECT)
+   /* The loader defers ICD surface creation until swapchain creation: its
+    * standalone CreateDisplayPlaneSurfaceKHR returns a wrapper without calling
+    * this driver (R11 gate audit). Test the driver's own refusal directly. */
    VkPhysicalDevice physical = VK_NULL_HANDLE;
    uint32_t count = 1;
    VkResult result =
@@ -152,8 +154,12 @@ check_refusals(struct ps5vk_triangle *triangle)
             strncmp(g_last_message, "imageExtent", strlen("imageExtent")) == 0,
          "a plane surface whose imageExtent the plane does not have is refused with "
          "VK_ERROR_UNKNOWN and a sentence naming imageExtent");
+   if (result != VK_ERROR_UNKNOWN || g_last_message[0] == '\0')
+      printf("  (plane surface: VkResult %d, handle %s, message \"%s\")\n", result,
+             surface == VK_NULL_HANDLE ? "NULL" : "non-NULL", g_last_message);
    if (result == VK_SUCCESS)
       VK_FUNCTION(triangle->instance, DestroySurfaceKHR)(triangle->instance, surface, NULL);
+#endif
 }
 
 static void

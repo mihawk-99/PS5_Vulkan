@@ -8318,3 +8318,70 @@ names itself instead of looking like a frame that was never drawn. And the harne
 two-subpass mode (`input->subpass_input`) whose subpass-0 attachment is host-visible and mapped, which
 is what let the case separate "the writer did not draw it" from "the reader did not read it" -- a
 distinction the first three runs could not make.
+
+## 2026-09-22 — correction: the system loader owns the surface-create boundary
+
+The full R11 matrix exposed a C1 test-boundary error: direct mode refuses an
+invalid 1280x720 display surface with `imageExtent`, but the host loader returns
+success, a non-NULL surface and no driver callback. GDB, with a breakpoint on
+`ps5vk_CreateDisplayPlaneSurfaceKHR`, measured exactly one driver call, for the
+valid 3840x2160 surface when its swapchain was created; the standalone invalid
+surface never reached the ICD. The assertion now belongs to the direct/PS5-link
+arm. It is not a driver capability regression or a weakened golden. The driver
+surface code is unchanged. Reproduce the test: `tools/check-driver.sh c1_present`;
+the read-only boundary check is a breakpoint on the function while running the
+loader arm with its C1 replay. Initial raw diagnostics stay in
+`build/r11-c1-boundary.log` and `build/r11-c1-gdb.log`.
+
+## 2026-09-22 — R11: deferred secondaries remove the first recording refusal
+
+Question: does the port's unspecified inheritance framebuffer account for the
+first-frame recording refusal, and can the runtime's existing command queue
+carry the secondary until the primary supplies its attachments?
+
+Host witness: change the existing B8 probe's framebuffer hint to NULL. Before
+the driver fix, both loader and direct arms return -13 and name
+`a secondary recorded with RENDER_PASS_CONTINUE needs the framebuffer its inheritance info names`.
+The port's source sets that same NULL hint for every secondary. Mesa's
+`vk_errorf` normally delivers the reason only through optional debug logging or
+a messenger; the port has neither. This is the concrete recording refusal,
+not a guessed pipeline or a subpass-read change.
+
+The driver now uses Mesa's deep-copy command queue for secondaries and replays
+into the primary. The old framebuffer-specific inheritance and PM4 copying
+paths are removed. Existing default-register and submission goldens remain
+unchanged. Nested secondary execution remains an explicit recording refusal.
+`ps5vk_cmd_buffer_error` prints the caller and sentence to stderr and retains
+the original Vulkan callback. A no-messenger negative test captures and checks
+that sentence. An initial experiment enabling all Mesa logging was rejected:
+it changed shader precheck stderr and failed the capability test. The final
+change is limited to recording refusals. A host dispatch initialization mistake
+was also caught and fixed before deployment (`overwrite=true` clears the table;
+the enqueue, driver and common entries must be composed in that order).
+
+Final host verification: all eleven `bash build/gates.sh` gates PASS; full
+`bash tools/check-driver.sh` PASS (55 loader + 55 direct + 55 PS5 link + 2 negative
+arms). `../ps5-homebrew-template/tools/verify.sh` passes all five gates, and its
+final driver relink passes. No template console acceptance is claimed.
+
+Console: PID 194, PPSA99988, queue `jobs/r11-secondary/queue.txt`; listener armed
+before restart, all three cases PASS (235 PASS, zero FAIL): B8 secondary triangle
+readback, C1 four presented/read-back frames, C4 render-to-texture pixel checks.
+The title was closed after capture. Driver archive SHA-256
+`65550cae897ee2fab14224d07b7cf6766e986be21c9e5ba81359b0a0535c75ce`, 14,383,172 bytes.
+Both reads of the deployed runner matched SHA-256
+`02d42a0d55ba2c88573948f0078130a0fd972ca0b1e7a78fd7f913561e2d0376` and contained
+the new recording-refusal string with the old inheritance refusal absent.
+
+Evidence: `golden/r11-secondary/` (twelve extracted JSON files), queue above,
+and `host-replay.txt`: all eleven submissions/flip streams match the console.
+The queue omitted an AGC-level register-default anchor; the README explicitly
+records and reproduces use of the old B4 defaults, validated against these new
+streams. Generic helper checking/replay discovery is not suitable for this
+anchor-free driver capture; it was not reported as passing.
+
+Reproduction: build/deploy the runner, then
+`python3 tools/ps5_console.py battery PPSA99988 jobs/r11-secondary/queue.txt --output Klog_Logs/r11-secondary.log --timeout 240`,
+close PPSA99988, and extract with `tools/golden.py extract`. Exact replay commands
+are in `golden/r11-secondary/README.md`. R11's driver substrate is proven; the
+port's first presentation remains the next independent acceptance run.

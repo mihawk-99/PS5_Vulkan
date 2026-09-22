@@ -1073,3 +1073,18 @@ Relink and the world pipelines should keep creating where `-13` used to be, your
 `postprocess_frag` should compile and its second subpass should read its offscreen attachment -- with
 the x-scale defect above still in it, which is why this reply does not claim the frame. When it is
 fixed, this section gets an entry rather than a new number.
+
+## 2026-09-22 — vkQuake R11: named recording refusals and optional framebuffer
+
+| Request | Result | Evidence |
+| --- | --- | --- |
+| Name the first-frame refusal | Host B8 reproduces -13 for the same NULL inheritance framebuffer; recording errors now print caller and reason to stderr without requiring a debug messenger | `driver/tests/vk_b2_commands_test.c`, full driver check PASS |
+| Accept framebuffer-free secondaries | Mesa's owned command queue defers encoding to the primary's subpass; B8 readback PASS on PID 194 | `jobs/r11-secondary/queue.txt`, `golden/r11-secondary/` |
+| Preserve existing rendering | C1 4/4 frames presented/read back and C4 RTT pixel checks PASS; eleven new streams replay identically, existing goldens unchanged | `golden/r11-secondary/host-replay.txt` and its README |
+| vkQuake first frame | Still requires the port's own run and on-screen confirmation; not claimed by these probes | Port `docs/ACTIVE.md` |
+
+Archive: `build/driver/ps5/libps5vk.ps5.a`, 14,383,172 bytes,
+SHA-256 `65550cae897ee2fab14224d07b7cf6766e986be21c9e5ba81359b0a0535c75ce`.
+The R10 quarter-width read defect and the hardware line failure are unchanged.
+The phase log separately records the host loader's deferred surface creation and
+the resulting correction to C1's direct-only surface-refusal assertion.

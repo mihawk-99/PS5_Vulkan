@@ -1,0 +1,12 @@
+Register defaults: existing golden/b4/b4-headless-1.json; new run has no AGC-level anchor.
+b8-secondary.dump b8-secondary draw: identical to b8-secondary-1.json: 8 packets, 3 register tables
+c1-triangle.dump c1-triangle frame 0 draw: identical to c1-triangle-1.json: 18 packets, 6 register tables
+c1-triangle.dump c1-triangle frame 0 flip: identical to c1-triangle-2.json: 4 packets, 0 register tables
+c1-triangle.dump c1-triangle frame 1 draw: identical to c1-triangle-3.json: 18 packets, 6 register tables
+c1-triangle.dump c1-triangle frame 1 flip: identical to c1-triangle-4.json: 4 packets, 0 register tables
+c1-triangle.dump c1-triangle frame 2 draw: identical to c1-triangle-5.json: 18 packets, 6 register tables
+c1-triangle.dump c1-triangle frame 2 flip: identical to c1-triangle-6.json: 4 packets, 0 register tables
+c1-triangle.dump c1-triangle frame 3 draw: identical to c1-triangle-7.json: 18 packets, 6 register tables
+c1-triangle.dump c1-triangle frame 3 flip: identical to c1-triangle-8.json: 4 packets, 0 register tables
+c4-rtt.dump c4-rtt draw 1, step 1 of 2: identical to c4-rtt-1.json: 8 packets, 3 register tables
+c4-rtt.dump c4-rtt draw 1, step 2 of 2: identical to c4-rtt-2.json: 12 packets, 3 register tables

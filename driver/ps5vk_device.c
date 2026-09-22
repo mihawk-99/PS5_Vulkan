@@ -15,6 +15,8 @@
 #include <assert.h>
 
 #include "vk_alloc.h"
+#include "vk_cmd_enqueue_entrypoints.h"
+#include "vk_common_entrypoints.h"
 #include "vk_util.h"
 
 /* AGC's library state belongs to the process: it is initialised once, with
@@ -50,7 +52,9 @@ ps5vk_CreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreateInfo *pC
       return vk_error(physical_device, VK_ERROR_OUT_OF_HOST_MEMORY);
 
    struct vk_device_dispatch_table dispatch_table;
-   vk_device_dispatch_table_from_entrypoints(&dispatch_table, &ps5vk_device_entrypoints, true);
+   vk_device_dispatch_table_from_entrypoints(&dispatch_table,
+                                             &vk_cmd_enqueue_unless_primary_device_entrypoints, true);
+   vk_device_dispatch_table_from_entrypoints(&dispatch_table, &ps5vk_device_entrypoints, false);
    VkResult result = vk_device_init(&device->vk, &physical_device->vk, &dispatch_table,
                                     pCreateInfo, pAllocator);
    if (result != VK_SUCCESS) {
@@ -58,6 +62,15 @@ ps5vk_CreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreateInfo *pC
       return result;
    }
    device->vk.command_buffer_ops = &ps5vk_cmd_buffer_ops;
+   /* Mesa owns the deep copies for deferred secondary commands. Replay them
+    * into the primary, where its render pass supplies the actual attachments. */
+   vk_device_dispatch_table_from_entrypoints(&device->command_dispatch,
+                                             &ps5vk_device_entrypoints, true);
+   vk_device_dispatch_table_from_entrypoints(&device->command_dispatch,
+                                             &vk_common_device_entrypoints, false);
+   device->vk.command_dispatch_table = &device->command_dispatch;
+   /* Keep invalid nested execution a recording-time refusal. */
+   device->vk.dispatch_table.CmdExecuteCommands = ps5vk_CmdExecuteCommands;
 
    for (uint32_t i = 0; i < pCreateInfo->queueCreateInfoCount; i++) {
       const VkDeviceQueueCreateInfo *const info = &pCreateInfo->pQueueCreateInfos[i];

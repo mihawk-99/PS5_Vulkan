@@ -3568,9 +3568,8 @@ record(struct ps5vk_triangle *triangle, VkCommandBuffer command, VkRenderPass pa
 }
 
 /* The same frame through a secondary command buffer the primary executes: the
- * secondary inherits the pass and framebuffer its inheritance info names, which
- * is what a Vulkan 1.0 application that records its draws once and runs them in
- * several frames does (Phase B8, vkCmdExecuteCommands). The two command buffers
+ * secondary names its pass but leaves the optional framebuffer unspecified,
+ * as vkQuake does. The primary supplies the attachments (R11). The two command buffers
  * submit as one, so the driver's stream is the primary's pass around the
  * secondary's draws. */
 static VkResult
@@ -3581,7 +3580,8 @@ record_secondary(struct ps5vk_triangle *triangle, VkCommandBuffer secondary, VkC
       .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
       .renderPass = pass,
       .subpass = 0,
-      .framebuffer = framebuffer,
+      /* vkQuake leaves this optional hint unset; the primary supplies it. */
+      .framebuffer = VK_NULL_HANDLE,
    };
    const VkCommandBufferBeginInfo secondary_begin = {
       .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,

@@ -1,0 +1,8 @@
+# R11: optional secondary framebuffer, then direct rendering regressions.
+# Run: python3 tools/ps5_console.py battery PPSA99988 jobs/r11-secondary/queue.txt --output Klog_Logs/r11-secondary.log
+hold 1
+capture
+b8-secondary
+c1-triangle
+c4-rtt
+exit

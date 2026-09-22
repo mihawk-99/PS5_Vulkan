@@ -551,13 +551,6 @@ struct ps5vk_cmd_buffer {
    } index_buffer;
 };
 
-/* The targets a secondary command buffer inherits from its inheritance info's
- * framebuffer, which vkBeginCommandBuffer calls when the secondary is recorded
- * with RENDER_PASS_CONTINUE (ps5vk_draw.c, Phase B8). */
-bool
-ps5vk_cmd_buffer_inherit(struct ps5vk_cmd_buffer *cmd_buffer,
-                         const VkCommandBufferInheritanceInfo *info);
-
 /* A command-buffer state a meta operation replaces, kept across it: Mesa's
  * meta code binds its own pipeline, vertex buffer, descriptor sets, push
  * constants and dynamic state, and the application's must survive
@@ -589,11 +582,15 @@ ps5vk_cmd_buffer_split(struct ps5vk_cmd_buffer *cmd_buffer);
 
 /* Records that cmd_buffer cannot encode a command: logs why, and recording
  * ends with result at vkEndCommandBuffer. */
+void PRINTFLIKE(6, 7)
+ps5vk_cmd_buffer_error(struct ps5vk_cmd_buffer *cmd_buffer, VkResult result,
+                       const char *command, const char *file, int line, const char *format, ...);
 #define ps5vk_cmd_buffer_refuse(cmd_buffer, result, ...)                                         \
-   vk_command_buffer_set_error(&(cmd_buffer)->vk, vk_errorf(cmd_buffer, result, __VA_ARGS__))
+   ps5vk_cmd_buffer_error(cmd_buffer, result, __func__, __FILE__, __LINE__, __VA_ARGS__)
 
 struct ps5vk_device {
    struct vk_device vk;
+   struct vk_device_dispatch_table command_dispatch;
    /* The one queue of the one queue family, when the application requested it. */
    struct ps5vk_queue queue;
    bool queue_initialized;

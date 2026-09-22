@@ -49,7 +49,12 @@
  * there is no frame and no golden: the PC runs it and the PS5 build only links.
  */
 
+#define _POSIX_C_SOURCE 200809L
+
 #include <string.h>
+#if defined(__linux__)
+#include <unistd.h>
+#endif
 
 #include "ps5vk_test.h"
 
@@ -172,6 +177,32 @@ main(void)
          snprintf(what, sizeof(what), "%s refuses instead of crashing", refused[index]);
          check(record_one(instance, device, pool, refused[index]) == VK_ERROR_UNKNOWN, what);
       }
+#if defined(__linux__)
+      /* This instance has no debug messenger. Its recording refusal must still
+       * reach stderr, which a console title redirects into its trace. */
+      FILE *const capture = tmpfile();
+      const int saved_stderr = dup(STDERR_FILENO);
+      check(capture != NULL && saved_stderr >= 0, "capture refusal without a debug messenger");
+      if (capture != NULL && saved_stderr >= 0) {
+         fflush(stderr);
+         const int redirected = dup2(fileno(capture), STDERR_FILENO);
+         check(redirected >= 0, "redirect refusal trace");
+         if (redirected >= 0) {
+            const VkResult result = record_one(instance, device, pool, "vkCmdCopyQueryPoolResults");
+            fflush(stderr);
+            check(dup2(saved_stderr, STDERR_FILENO) >= 0, "restore refusal trace");
+            rewind(capture);
+            char text[2048] = {0};
+            (void)fread(text, 1, sizeof(text) - 1, capture);
+            check(result == VK_ERROR_UNKNOWN && strstr(text, "a query-result copy names a query pool"),
+                  "recording refusal carries its sentence without a debug messenger");
+         }
+      }
+      if (saved_stderr >= 0)
+         close(saved_stderr);
+      if (capture != NULL)
+         fclose(capture);
+#endif
       VK_FUNCTION(instance, DestroyCommandPool)(device, pool, NULL);
    }
 

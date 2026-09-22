@@ -8,36 +8,32 @@ _Updated: 2026-09-22 (late evening)_
 
 ## Now
 
-**R10 (the port's subpass input, its refusal ask, and a capability audit): two of three landed and
-measured, one defect named.** Three commits: `f9131e5` (a shader the compiler cannot lower is
-refused, not fatal -- pre-check by addressing model and capability, plus a `SIGABRT`/`SIGTRAP` guard
-around the compile), `3ee2f96` (the subpass read through the input attachment's descriptor: one
-field in the fork's RADV call site, plus the driver binding it from the subpass), `5f7e910` (the
-console case and the harness's two-subpass mode, with the frame's own measurements).
+**R11: framebuffer-free secondary recording is console-proven.** The port's
+`vkBeginCommandBuffer` leaves the optional inheritance framebuffer unset. The
+old driver refused that before any draw. Its reason was hidden behind Mesa's
+optional debug logging. Secondary commands now use Mesa's owned command queue,
+replayed into the primary's current subpass; no GPU INDIRECT_BUFFER is used.
+Recording refusals write their command and sentence to stderr as well as the
+existing Vulkan callback. A host negative test checks the no-messenger case.
 
-- **The refusal is done and console-seen.** `v0_capability` 14/14 loader, direct and PS5 link; the
-  guard's sentence appears in the round's own console log where the port's run had a dead title.
-- **The subpass read works and is not a permanent limit.** The port's `postprocess_frag` compiles
-  here (324 bytes, metadata set 0 binding 0 type 4 stride 32); on the console subpass 0's attachment
-  is right in its own memory (16 of 16) and subpass 1's fetch returns the writer's texels for the
-  first quarter-width (4 of 16). **Open**: past x = 960 the read returns band 0, i.e. the fetch
-  behaves as if the row-stored attachment were 960 texels wide -- `SQ_RSRC_IMG_WORD2`'s
-  `(extent.width - 1) >> 2`. A descriptor question for a row-stored image, measurable on the host
-  before another console cycle (docs/M5_PHASE_C.md, the R10 subpass entry).
-- **The audit** (a host sweep: each deployed shader's SPIR-V extracted from its C array, its own
-  descriptors declared from its decorations, then the patched probe CLI -- re-run after the patch):
-  of the port's deployed shaders
-  with capabilities beyond `Shader`, 15 compile and 6 do not -- the three 5347 ones (addressing
-  model) and the three 4472 ones (bindless store) -- both classes refused by name. The port's own
-  scanner mislabels 35, 46, 49 and 61; the reply carries the correction.
-- **Port handoff.** The archive is rebuilt at `5f7e910`: `build/driver/ps5/libps5vk.ps5.a`,
-  14 415 958 bytes, sha256 `6e12550b…`. `docs/REQUESTS_RESPONSE.md` has the R10 answer.
+**Console PID 194, PPSA99988:** `b8-secondary`, `c1-triangle`, `c4-rtt` all PASS;
+235 PASS probe records, zero FAIL. The runner was closed. Evidence and exact
+reproduction: `golden/r11-secondary/README.md`, `jobs/r11-secondary/queue.txt`.
+All eleven captured submissions/flip streams reproduce exactly on the host,
+using explicitly identified existing B4 register defaults (the new queue lacks
+an AGC-level anchor). No existing golden changed.
 
-**Open items from the rounds before this one.** **`v0-lines` FAILs on the console** (R8's case, its
-first run, `Klog_Logs/r9-spec.log`): read its own log lines before touching the driver. R9
-(`fef4387`) is console-proven (`v0-r9`, 13 of 14 that run) and its archive digest was
-`f3d749d6…`; R6's strip correction, the fragment-less case and R4's swapchain refusals are in
-`docs/M5_PHASE_C.md`. The port's `debug_lines` / `md5_debug` edits stay until `v0-lines` passes.
+**Gates:** `bash build/gates.sh` all eleven PASS; full `tools/check-driver.sh`
+PASS (55 loader, 55 direct, 55 PS5 links, two negative arms). The template's
+five gates pass and its final driver relink passes. Archive: 14,383,172 bytes,
+SHA-256 `65550cae…`; the port is relinked, awaiting its own first-frame run.
+R11 is not yet closed for vkQuake: its presentation and visible picture remain
+unmeasured with this change.
+
+**Still open from R10:** the subpass read is correct only through x=960 of 3840;
+the row-stored input descriptor needs its own readback fix. `v0-lines` still
+FAILs on hardware. R9 specialization constants remain console-proven. No
+shader/compiler, descriptor, line, gamma, resolution or OIT change in R11.
 
 ## Standing work
 

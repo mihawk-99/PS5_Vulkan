@@ -16,10 +16,29 @@
 #include "ps5vk_debug.h"
 
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "vk_alloc.h"
 #include "vk_command_pool.h"
+
+void
+ps5vk_cmd_buffer_error(struct ps5vk_cmd_buffer *cmd_buffer, VkResult result,
+                       const char *command, const char *file, int line, const char *format, ...)
+{
+   /* stderr is the title's trace even when it has no Vulkan debug messenger.
+    * Keep Mesa's callback too, and evaluate the format arguments only once. */
+   va_list args;
+   va_start(args, format);
+   fprintf(stderr, "[ps5vk] recording refusal in %s: ", command);
+   vfprintf(stderr, format, args);
+   fputc('\n', stderr);
+   va_end(args);
+   va_start(args, format);
+   vk_command_buffer_set_error(&cmd_buffer->vk,
+                               __vk_errorv(cmd_buffer, result, file, line, format, args));
+   va_end(args);
+}
 
 static void
 ps5vk_cmd_buffer_release_tables(struct ps5vk_cmd_buffer *cmd_buffer)
@@ -78,8 +97,13 @@ ps5vk_cmd_buffer_create(struct vk_command_pool *pool, VkCommandBufferLevel level
    if (!cmd_buffer)
       return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
 
-   const VkResult result =
-      vk_command_buffer_init(pool, &cmd_buffer->vk, &ps5vk_cmd_buffer_ops, level);
+   const VkResult result = vk_command_buffer_init_with_params(
+      &cmd_buffer->vk, &(struct vk_command_buffer_init_params){
+         .pool = pool,
+         .ops = &ps5vk_cmd_buffer_ops,
+         .level = level,
+         .needs_cmd_queue = level == VK_COMMAND_BUFFER_LEVEL_SECONDARY,
+      });
    if (result != VK_SUCCESS) {
       vk_free(&pool->alloc, cmd_buffer);
       return result;
@@ -191,13 +215,7 @@ ps5vk_BeginCommandBuffer(VkCommandBuffer commandBuffer, const VkCommandBufferBeg
    VK_FROM_HANDLE(ps5vk_cmd_buffer, cmd_buffer, commandBuffer);
    /* Resets a command buffer that is not in the initial state first. */
    vk_command_buffer_begin(&cmd_buffer->vk, pBeginInfo);
-   /* A secondary recorded to continue a render pass inherits the framebuffer's
-    * targets, because its draws run inside the primary's rendering and the
-    * primary executes it between the rendering's begin and end (Phase B8,
-    * ps5vk_cmd_buffer_inherit). The refusal a framebuffer this driver cannot
-    * render into records ends the recording, as any refusal does. */
-   if ((pBeginInfo->flags & VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT) != 0)
-      (void)ps5vk_cmd_buffer_inherit(cmd_buffer, pBeginInfo->pInheritanceInfo);
+   /* Secondary commands are encoded only when the primary executes them. */
    return VK_SUCCESS;
 }
 
@@ -263,15 +281,9 @@ ps5vk_CmdCopyMemoryKHR(VkCommandBuffer commandBuffer, const VkCopyDeviceMemoryIn
    }
 }
 
-/* vkCmdExecuteCommands: the secondary's recorded words are copied into this
- * command buffer's stream where the call is, which is what the queue submits --
- * not jumped to through the INDIRECT_BUFFER packet B8 measured as faulting the
- * GPU (docs/M5_PHASE_B.md). The secondary's CPU work moves with them, its
- * records' offsets shifted by where its words landed, and the targets it renders
- * into become this submission's, so the queue evicts their cache lines and waits
- * for the swapchain buffers among them (ps5vk_queue.c). The secondary's table
- * chunks stay alive: Vulkan requires a command buffer not to be reset or freed
- * while its commands are pending, and this driver's words point into them. */
+/* Secondary commands use Mesa's owned command queue. Encoding into the primary
+ * binds the current subpass attachments, including an unspecified inheritance
+ * framebuffer. No GPU INDIRECT_BUFFER is used (the B8 hardware invariant). */
 VKAPI_ATTR void VKAPI_CALL
 ps5vk_CmdExecuteCommands(VkCommandBuffer commandBuffer, uint32_t commandBufferCount,
                          const VkCommandBuffer *pCommandBuffers)
@@ -292,49 +304,8 @@ ps5vk_CmdExecuteCommands(VkCommandBuffer commandBuffer, uint32_t commandBufferCo
                                  "vkCmdExecuteCommands executes secondary command buffers");
          return;
       }
-      const uint32_t at = (uint32_t)util_dynarray_num_elements(&cmd_buffer->words, uint32_t);
-      const uint32_t words = (uint32_t)util_dynarray_num_elements(&secondary->words, uint32_t);
-      if (words != 0) {
-         uint32_t *const destination = util_dynarray_grow(&cmd_buffer->words, uint32_t, words);
-         if (destination == NULL) {
-            ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
-                                    "no memory to record an executed command buffer's words");
-            return;
-         }
-         memcpy(destination, util_dynarray_begin(&secondary->words),
-                (size_t)words * sizeof(uint32_t));
-      }
-      util_dynarray_foreach (&secondary->copies, struct ps5vk_memory_copy, copy)
-      {
-         struct ps5vk_memory_copy *const moved =
-            util_dynarray_grow(&cmd_buffer->copies, struct ps5vk_memory_copy, 1);
-         if (moved == NULL) {
-            ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
-                                    "no memory to record an executed command buffer's copies");
-            return;
-         }
-         *moved = *copy;
-         moved->after_words += at;
-         /* The snapshot stays the secondary's to free: the record is a copy of
-          * the pointers, and both command buffers read the same bytes. */
-         moved->owned_source = NULL;
-      }
-      util_dynarray_foreach (&secondary->targets, struct ps5vk_render_target, target)
-      {
-         bool known = false;
-         util_dynarray_foreach (&cmd_buffer->targets, struct ps5vk_render_target, existing)
-            known = known || existing->address == target->address;
-         if (known)
-            continue;
-         struct ps5vk_render_target *const added =
-            util_dynarray_grow(&cmd_buffer->targets, struct ps5vk_render_target, 1);
-         if (added == NULL) {
-            ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
-                                    "no memory to track an executed command buffer's targets");
-            return;
-         }
-         *added = *target;
-      }
+      vk_cmd_queue_execute(&secondary->vk.cmd_queue, commandBuffer,
+                            cmd_buffer->vk.base.device->command_dispatch_table);
    }
 }
 
