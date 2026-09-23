@@ -922,6 +922,8 @@ struct ps5vk_triangle {
     * (input.texture_upload). */
    bool texture_upload;
    bool texture_blit_mips;
+   /* Address-map probes fill mapped texels directly instead of staging a copy. */
+   bool texture_host_filled;
    /* Phase V0-query's timestamps: the pool a frame writes its clock into --
     * query 0 before the frame's draws and query 1 after them -- when the caller
     * set one with ps5vk_triangle_set_timestamp_pool. */

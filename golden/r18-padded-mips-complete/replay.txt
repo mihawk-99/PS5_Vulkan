@@ -1,0 +1,21 @@
+submission.dump c4-padded draw 1: identical to c4-padded-1.json: 11 packets, 3 register tables
+submission.dump c4-padded draw 2: identical to c4-padded-2.json: 10 packets, 3 register tables
+submission.dump r18-padded-mips padded mip 0: identical to r18-padded-mips-1.json: 17 packets, 6 register tables
+submission.dump r18-padded-mips padded mip 1: identical to r18-padded-mips-2.json: 16 packets, 6 register tables
+submission.dump r18-padded-mips padded mip 2: identical to r18-padded-mips-3.json: 16 packets, 6 register tables
+submission.dump r18-padded-mips padded mip 3: identical to r18-padded-mips-4.json: 16 packets, 6 register tables
+submission.dump r18-padded-mips padded mip 4: identical to r18-padded-mips-5.json: 16 packets, 6 register tables
+submission.dump r18-padded-mips padded mip 5: identical to r18-padded-mips-6.json: 16 packets, 6 register tables
+submission.dump r18-padded-mips padded mip 6: identical to r18-padded-mips-7.json: 16 packets, 6 register tables
+submission.dump r18-padded-mips padded mip 7: identical to r18-padded-mips-8.json: 16 packets, 6 register tables
+submission.dump r18-small-mips padded mip 0: identical to r18-small-mips-1.json: 17 packets, 6 register tables
+submission.dump r18-small-mips padded mip 1: identical to r18-small-mips-2.json: 16 packets, 6 register tables
+submission.dump r18-small-mips padded mip 2: identical to r18-small-mips-3.json: 16 packets, 6 register tables
+submission.dump r18-small-mips padded mip 3: identical to r18-small-mips-4.json: 16 packets, 6 register tables
+submission.dump r18-small-mips padded mip 4: identical to r18-small-mips-5.json: 16 packets, 6 register tables
+submission.dump r18-small-mips padded mip 5: identical to r18-small-mips-6.json: 16 packets, 6 register tables
+submission.dump r18-aligned-mips padded mip 0: identical to r18-aligned-mips-1.json: 17 packets, 6 register tables
+submission.dump r18-aligned-mips padded mip 1: identical to r18-aligned-mips-2.json: 16 packets, 6 register tables
+submission.dump r18-aligned-mips padded mip 2: identical to r18-aligned-mips-3.json: 16 packets, 6 register tables
+submission.dump r18-aligned-mips padded mip 3: identical to r18-aligned-mips-4.json: 16 packets, 6 register tables
+submission.dump r18-aligned-mips padded mip 4: identical to r18-aligned-mips-5.json: 16 packets, 6 register tables

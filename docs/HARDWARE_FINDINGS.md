@@ -3081,3 +3081,51 @@ explicitly disables cache; its three loader/direct/link arms PASS. Eleven gates,
 port five gates/scan and template relink PASS. No runtime cache change.
 Evidence/reproduction: jobs/r17-descriptor-array and golden/r17-descriptor-array.
 R18 exact padded image shape remains next; no vkQuake retry yet.
+
+## 2026-09-23 — R18 first candidate rejected; row mip origins measured
+
+PID 211 removes only the padded-chain refusal. C4's single-level 32-wide
+nearest/bilinear case remains correct, but both 224x195/eight-level and
+32x36/six-level chains fail their full-frame pinned-LOD checks. Status totals:
+476 PASS, 33 FAIL; title closed and count=0 verified. No vkQuake retry follows.
+Failed captures are retained in golden/r18-padded-mips-before.
+
+The address-filled 224x195 chain returns level origins 0x12800, 0x6400,
+0x3300, 0x1a00, 0xd00, 0x600, 0x200, 0. These exactly match the pinned
+AddrLib ADDR_SW_LINEAR result: smaller levels precede larger levels; stored
+width/height round up and row bytes align to 256. The driver's allocation
+size is correct (275,456 bytes), but its upload/readback offsets were forward.
+Nine samples per level also record horizontal/vertical steps; address-map.txt
+contains the 72 values. The address collection's PASS is not pixel acceptance.
+
+This descriptor supplies word 4's custom pitch, unlike the old C7 row-chain
+runs whose word 4 was zero and whose levels did not select. That old measured
+failure remains; the candidate now supplies pitch for aligned 2D mip chains as
+well, with a separate 256x256/five-level full-frame regression queued. Layout
+and descriptor corrections still require a fresh hardware run.
+
+## 2026-09-23 — R18 row mip layout accepted, PID 214
+
+The shared row-chain layout now places smaller levels before larger levels,
+keeps each row aligned to 256 bytes, and sums all levels for layer size.
+Non-array 2D mip descriptors supply the stored pitch even when the base width
+is already aligned. Padded mip chains can now record. Arrays retain their
+separate descriptor fields and guards; no port texture/visual workaround.
+
+PS5 PID 214: 531 PASS, zero FAIL. All 19 pinned mip frames match all 8,294,400
+pixels: 224x195/eight levels (the actual vkQuake image), 32x36/six levels,
+and 256x256/five levels. Single-level C4 nearest/bilinear also passes.
+All 21 command streams replay exactly. Two deployed ELF reads and all five
+PT_LOAD segments match. Known benign VideoOut unregister-busy warning; title
+closed and count=0 checked. Goldens: golden/r18-padded-mips-complete.
+The verifier accepts PID 213/214 readbacks and rejects failed PID 211.
+
+Explicit driver build: 14,434,994 bytes, SHA-256
+cef1d81708d06d6fa68b2ac5df6b3f781c0fb59e3026e83e09ee469b112167fa.
+Twenty-one targeted check-driver loader/direct/link arms, shader cache checks,
+all eleven gates, port five gates/scan and template relink pass. The later
+recorder-only change adds log_driver_stages; lint, unit and runner gates pass,
+and the driver archive is unchanged. PID 213's successful pixel-only capture,
+PID 211's failed candidate, and the misqueued PID 212 history are retained.
+Reproduction: jobs/r18-padded-mips/README.md and the fixed queue beside it.
+Next: vkQuake deployment and launch; M6 is not claimed.

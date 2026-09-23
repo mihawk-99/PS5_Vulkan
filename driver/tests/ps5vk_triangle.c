@@ -3678,7 +3678,7 @@ record_uploads(struct ps5vk_triangle *triangle, VkCommandBuffer command)
          CALL(triangle, CmdCopyBuffer)(command, triangle->staging_buffer, triangle->index_buffer,
                                        1, &index_region);
    }
-   if (triangle->texture_image != VK_NULL_HANDLE &&
+   if (triangle->texture_image != VK_NULL_HANDLE && !triangle->texture_host_filled &&
        (!triangle->texture_tiled || triangle->texture_upload)) {
       /* One region per level (Phase C7): the staging buffer holds them one
        * after another, each level's rows tightly packed, so a copy reads whole

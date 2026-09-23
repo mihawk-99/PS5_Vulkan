@@ -1,0 +1,8 @@
+hold 1
+capture
+m2-solid
+c4-padded
+r18-mip-addresses
+r18-padded-mips
+r18-small-mips
+exit

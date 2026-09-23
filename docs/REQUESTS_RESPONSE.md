@@ -1294,3 +1294,29 @@ PID 210 presents and no longer refuses the descriptor array. R18 names a
 padded pitch 256 texels. This is the exact shape the next probe must measure.
 No layout fix is claimed. Port evidence/m2-r18-shape has two matching final
 reads and PID-correlated exit 1/SIGSYS; the bounded run ended count=0.
+
+## 2026-09-23 — R18 row mip layout accepted, PID 214
+
+The shared row-chain layout now places smaller levels before larger levels,
+keeps each row aligned to 256 bytes, and sums all levels for layer size.
+Non-array 2D mip descriptors supply the stored pitch even when the base width
+is already aligned. Padded mip chains can now record. Arrays retain their
+separate descriptor fields and guards; no port texture/visual workaround.
+
+PS5 PID 214: 531 PASS, zero FAIL. All 19 pinned mip frames match all 8,294,400
+pixels: 224x195/eight levels (the actual vkQuake image), 32x36/six levels,
+and 256x256/five levels. Single-level C4 nearest/bilinear also passes.
+All 21 command streams replay exactly. Two deployed ELF reads and all five
+PT_LOAD segments match. Known benign VideoOut unregister-busy warning; title
+closed and count=0 checked. Goldens: golden/r18-padded-mips-complete.
+The verifier accepts PID 213/214 readbacks and rejects failed PID 211.
+
+Explicit driver build: 14,434,994 bytes, SHA-256
+cef1d81708d06d6fa68b2ac5df6b3f781c0fb59e3026e83e09ee469b112167fa.
+Twenty-one targeted check-driver loader/direct/link arms, shader cache checks,
+all eleven gates, port five gates/scan and template relink pass. The later
+recorder-only change adds log_driver_stages; lint, unit and runner gates pass,
+and the driver archive is unchanged. PID 213's successful pixel-only capture,
+PID 211's failed candidate, and the misqueued PID 212 history are retained.
+Reproduction: jobs/r18-padded-mips/README.md and the fixed queue beside it.
+Next: vkQuake deployment and launch; M6 is not claimed.

@@ -1,0 +1,2126 @@
+{
+  "pid": 213,
+  "ended": true,
+  "raw_sha256": "3488cbba7dd696463ba0bcb5eb54ebc67f0246222d5999262a1928cd8776f2df",
+  "statuses": {
+    "PASS": 531,
+    "INFO": 51,
+    "NOT_REQUIRED": 20,
+    "ARMED": 1,
+    "WARN": 1
+  },
+  "records": [
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test_start",
+      "status": "INFO",
+      "result": 0,
+      "detail": "m2-solid"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff20a0ff"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff20a0ff"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "m2-solid"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test_start",
+      "status": "INFO",
+      "result": 1,
+      "detail": "c4-padded"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "c4-padded"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test_start",
+      "status": "INFO",
+      "result": 2,
+      "detail": "r18-padded-mips"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff141414"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff141414"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff2d2d2d"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff2d2d2d"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 2
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 2
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff464646"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff464646"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 3
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 3
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff5f5f5f"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff5f5f5f"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 4
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 4
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff787878"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff787878"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 5
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 5
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff919191"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff919191"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 6
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 6
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xffaaaaaa"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xffaaaaaa"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 7
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 7
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xffc3c3c3"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xffc3c3c3"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "r18_mip",
+      "status": "PASS",
+      "result": 0,
+      "detail": "compare every pixel in each pinned mip frame"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "r18-padded-mips"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test_start",
+      "status": "INFO",
+      "result": 3,
+      "detail": "r18-small-mips"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff141414"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff141414"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff2d2d2d"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff2d2d2d"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 2
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 2
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff464646"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff464646"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 3
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 3
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff5f5f5f"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff5f5f5f"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 4
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 4
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff787878"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff787878"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 5
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 5
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff919191"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff919191"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "r18_mip",
+      "status": "PASS",
+      "result": 0,
+      "detail": "compare every pixel in each pinned mip frame"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "r18-small-mips"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test_start",
+      "status": "INFO",
+      "result": 4,
+      "detail": "r18-aligned-mips"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff141414"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff141414"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff2d2d2d"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff2d2d2d"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 2
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 2
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff464646"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff464646"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 3
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 3
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff5f5f5f"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff5f5f5f"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r18_mip",
+      "field": "level",
+      "value": 4
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 4
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff787878"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff787878"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "r18_mip",
+      "status": "PASS",
+      "result": 0,
+      "detail": "compare every pixel in each pinned mip frame"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "r18-aligned-mips"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "runner_summary",
+      "field": "ran",
+      "value": 5
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_summary",
+      "status": "PASS",
+      "result": 0,
+      "detail": "5 of 5 queued tests passed"
+    }
+  ]
+}

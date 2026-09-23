@@ -21208,6 +21208,121 @@ void run_vulkan_mip_frames(const TestContext &test, TestOutcome &outcome, std::u
     log.event("agc_c7_mip", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1, detail);
 }
 
+// R18: the exact non-power-of-two mip chain named by vkQuake PID 210.
+void run_vulkan_padded_mips(const TestContext &test, TestOutcome &outcome, bool addresses = false,
+                            unsigned width = 224, unsigned height = 195,
+                            unsigned levels = 8) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const float vertices[] = {-1, -1, 0, 0, 1, -1, 1, 0, 1, 1, 1, 1, -1, 1, 0, 1};
+    const std::uint16_t indices[] = {0, 1, 2, 2, 3, 0};
+    std::vector<std::uint8_t> colours(levels * 4);
+    for (unsigned level = 0; level < levels; level++)
+    {
+        colours[level * 4] = colours[level * 4 + 1] = colours[level * 4 + 2] = 20 + level * 25;
+        colours[level * 4 + 3] = 255;
+    }
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    input.vertex_data = vertices;
+    input.vertex_count = 4;
+    input.vertex_stride = 16;
+    input.index_data = indices;
+    input.index_count = 6;
+    input.attribute_count = 2;
+    input.attributes[0] = {0, 0, VK_FORMAT_R32G32_SFLOAT, 0};
+    input.attributes[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, 8};
+    input.texture_data = colours.data();
+    input.texture_width = width;
+    input.texture_height = height;
+    input.texture_levels = levels;
+    input.texture_level_colours = colours.data();
+    input.texture_max_lod = static_cast<float>(levels - 1);
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    ps5vk_triangle triangle{};
+    auto status = ps5vk_triangle_create(&triangle, &input);
+    if (status == PS5VK_TRIANGLE_OK && addresses)
+    {
+        fill_tiled_addresses(triangle.texture_mapped, triangle.texture_bytes, levels, log);
+        triangle.texture_host_filled = true;
+    }
+    bool exact = true;
+    for (unsigned level = 0; level < levels && status == PS5VK_TRIANGLE_OK; level++)
+    {
+        if (!ps5vk_triangle_set_texture_lod(&triangle, static_cast<float>(level),
+                                            static_cast<float>(level)))
+        {
+            status = PS5VK_TRIANGLE_FAILED;
+            break;
+        }
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (status != PS5VK_TRIANGLE_OK)
+            break;
+        char label[32];
+        std::snprintf(label, sizeof(label), "padded mip %u", level);
+        if (test.capture)
+            log_driver_submission(triangle.device, label, log);
+        log.number("r18_mip", "level", level);
+        if (addresses)
+        {
+            const FramebufferView frame{static_cast<const std::uint32_t *>(triangle.target),
+                                        kTiledRgba8Layout};
+            for (unsigned row = 0; row < 3; row++)
+                for (unsigned col = 0; col < 3; col++)
+                {
+                    log.number("r18_address", "level", level);
+                    log.number("r18_address", "column", col);
+                    log.number("r18_address", "row", row);
+                    log.hex(
+                        "r18_address", "byte_offset",
+                        frame.word(col * (kOutputWidth - 1) / 2, row * (kOutputHeight - 1) / 2) &
+                            0x00ffffffu);
+                }
+        }
+        else
+        {
+            const std::uint32_t word = 0xff000000u | colours[level * 4] * 0x00010101u;
+            exact =
+                check_solid_frame(const_cast<void *>(triangle.target), word, level, log) && exact;
+        }
+    }
+    if (status == PS5VK_TRIANGLE_OK && test.capture)
+        log_driver_stages(triangle.device, log);
+    outcome.command_built = status == PS5VK_TRIANGLE_OK;
+    outcome.passed = outcome.command_built && exact;
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        outcome.stage_in_use = true;
+    else
+        ps5vk_triangle_finish(&triangle);
+    log.event("r18_mip", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1,
+              addresses ? "raw address samples collected; not pixel-layout acceptance"
+                        : "compare every pixel in each pinned mip frame");
+}
+
+void run_vulkan_padded_mip_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_vulkan_padded_mips(test, outcome);
+}
+void run_vulkan_padded_mip_addresses(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_vulkan_padded_mips(test, outcome, true);
+}
+void run_vulkan_small_padded_mips(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_vulkan_padded_mips(test, outcome, false, 32, 36, 6);
+}
+
+void run_vulkan_aligned_mips(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_vulkan_padded_mips(test, outcome, false, 256, 256, 5);
+}
+
 void run_vulkan_mip_nearest_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
     run_vulkan_mip_frames(test, outcome, kMipChainLevels, false, false, false);
@@ -24401,6 +24516,10 @@ constexpr RunnerTest kRunnerTests[] = {
     // (run_vulkan_tiled_upload_frames).
     {"c7-mip-upload", "c7-mip", run_vulkan_tiled_upload_frames},
     {"r16-mip-blit", "c7-mip", run_vulkan_mip_blit_frames},
+    {"r18-padded-mips", "c7-mip", run_vulkan_padded_mip_frames},
+    {"r18-mip-addresses", "c7-mip", run_vulkan_padded_mip_addresses},
+    {"r18-small-mips", "c7-mip", run_vulkan_small_padded_mips},
+    {"r18-aligned-mips", "c7-mip", run_vulkan_aligned_mips},
 #endif
 // V0-query through the driver: the same three regions asked of
 // vkCmdBeginQuery and vkGetQueryPoolResults, so the driver's own counter

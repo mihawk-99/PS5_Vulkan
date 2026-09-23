@@ -838,16 +838,16 @@ ps5vk_tile_extent(unsigned texel_bytes, bool depth, VkSampleCountFlagBits sample
 }
 
 /* Where one level of a row-layout image starts, its row pitch and its extent:
- * the levels stack in order and each one's rows pad to 256 bytes
- * (ps5vk_image_storage, ps5_linear_mip_storage_extent). Level 0's own layout is
- * the single-level one every earlier copy used. */
+ * smaller levels precede larger ones and each row pads to 256 bytes. R18
+ * measures these reverse-order bases on PS5, matching AddrLib linear layout.
+ * Storage extents round up; Vulkan copies still use the actual floor extents. */
 static void
 ps5vk_image_level_layout(const struct ps5vk_image *image, uint32_t level, uint64_t *offset,
                          uint64_t *row_pitch, VkExtent2D *extent)
 {
    const unsigned texel_bytes = vk_format_get_blocksize(image->vk.format);
    uint64_t at = 0;
-   for (uint32_t index = 0; index < level; index++) {
+   for (uint32_t index = level + 1; index < image->vk.mip_levels; index++) {
       const uint64_t width = MAX2(DIV_ROUND_UP(image->vk.extent.width, UINT64_C(1) << index), 1u);
       const uint64_t height = MAX2(DIV_ROUND_UP(image->vk.extent.height, UINT64_C(1) << index), 1u);
       at += align64(width * texel_bytes, PS5VK_ROW_ALIGNMENT) * height;
@@ -944,7 +944,7 @@ ps5vk_image_layer_bytes(const struct ps5vk_image *image)
       uint64_t offset = 0, row_pitch = 0;
       VkExtent2D extent = {0, 0};
       ps5vk_image_level_layout(image, level, &offset, &row_pitch, &extent);
-      slice = offset + row_pitch * extent.height;
+      slice += row_pitch * extent.height;
    }
    return slice;
 }

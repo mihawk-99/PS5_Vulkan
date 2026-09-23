@@ -7,7 +7,6 @@ Volatile by design. Keep this file under about 120 lines. Specifications are in
 _Updated: 2026-09-23_
 
 ## Now
-
 **Persistent SPIR-V shader cache accepted on PS5.** User requested much faster
 vkQuake startup. The shared graphics/compute compiler boundary now saves each
 successful output atomically in /app0/ps5vk-shader-cache and reuses it across
@@ -31,11 +30,11 @@ SHA-256 e089e060… . PS5 probe PIDs 200 and 201 each returned 241 PASS/zero FAI
 twelve submissions replay exactly, goldens in golden/shader-cache-cold and
 -warm. Driver probe stdout is not a hit-count witness; vkQuake's trace is.
 
-**R14–R17 accepted; R18 next.** R14 2925ff6 (single-draw stride), R15
+**R14–R18 accepted; vkQuake launch next.** R14 2925ff6 (single-draw stride), R15
 b838832 (independent dynamic UBO offsets), R16 c7f6f95 (mip-tail XOR/blits)
 passed PS5 probes. Port PID 208 presented past those three old failures, then
 named a three-element descriptor array and padded pitch 256. Its evidence is
-../PS5_vkQuake/evidence/m2-r16-map-recording; full padded shape still unknown.
+../PS5_vkQuake/evidence/m2-r16-map-recording; R18 shape identified below.
 
 R17 now passes PS5 PID 209: 104 PASS, zero FAIL. Three distinct sampled images
 survive full writes, copies, partial updates and later source changes; all
@@ -45,10 +44,19 @@ Full driver check initially 169/170 PASS; a cache hit skipped compiler stderr
 expected by the capability test. That test now disables cache and its three
 arms pass. Eleven gates, port five gates/scan and template relink PASS.
 Archive 14,434,234 bytes, SHA-256 aad0ebc7… . jobs/r17-descriptor-array and
-golden/r17-descriptor-array contain evidence/reproduction. No new port run.
+golden/r17-descriptor-array contain evidence/reproduction. Port PID 210 identified R18.
 R18 identified by port PID 210: 224x195 RGBA8, eight mips, one layer, 2D,
 pitch 256. Array refusal absent; padded mip descriptor remains. Gates/port scan
-PASS, two trace reads match, console idle. Next: full-mip readback of this shape.
+PASS, two trace reads match, console idle.
+R18 now passes PID 214: 531 PASS, zero FAIL; all 19 mip frames fully match,
+21 exact replays. Row mip offsets are reverse-order; 2D chains supply pitch.
+Padded 224x195/8 and 32x36/6, aligned 256x256/5, and C4 single-level pass.
+Archive 14,434,994 bytes, SHA-256 cef1d817…; 21 targeted host arms, eleven
+full gates, port gates/scan and template pass. Recorder-only correction also
+passes lint/unit/runner checks. Failed PID 211 and pixel-only PID 213 retained;
+PID 212 was a wrong queue filename, closed without an R18 conclusion.
+Goldens: golden/r18-padded-mips-complete; jobs/r18-padded-mips/README.md.
+Next: deploy/relaunch the already-relinked port. No title is running.
 
 **Port M2 met:** PID 197, QueuePresent success and human-confirmed Quake
 menu/console; port evidence/m2-first-frame. M3–M6 remain open. Input/audio
@@ -56,7 +64,6 @@ engine adapters are stubs. R10's quarter-width input-attachment read and the
 hardware line failure remain separate. No visual settings were changed.
 
 ## Standing work
-
 - Graphics R7 rounds 1-4, R8 dynamic depth bias, the first batch's R9 (push
   pointers), and the R4 clear/refusal coverage are in `docs/M5_PHASE_C.md`; the
   first R1-R6 batch is in `docs/REQUESTS_RESPONSE.md`. **The port's letters

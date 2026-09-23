@@ -1143,18 +1143,18 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
    }
    const bool tiled = image->storage == PS5VK_IMAGE_STORAGE_TILES;
    /* Row storage aligns bytes, not texels. Word 4 can encode a custom
-    * pitch for a single-level 2D image (ps5-opengl ps5_screen.c); arrays
-    * use that field for layers, and mip chains have their own layout. */
+    * pitch for a non-array 2D image; arrays use that field for layers. R18
+    * measures reverse-order mip placement with this pitch supplied. */
    const uint32_t texel_bytes = vk_format_get_blocksize(image->vk.format);
    const uint32_t pitch_texels = align(image->vk.extent.width * texel_bytes, 256) / texel_bytes;
    const bool padded = !tiled && pitch_texels != image->vk.extent.width;
    if (padded && (view->view_type != VK_IMAGE_VIEW_TYPE_2D || image->vk.array_layers != 1 ||
-                  image->vk.mip_levels != 1 || pitch_texels > 0x4000)) {
+                  pitch_texels > 0x4000)) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                               "set %u binding %u needs a padded texture pitch of %u texels; "
                               "image %ux%ux%u format %u mips %u layers %u view %u name %s; "
-                              "only single-level, single-layer 2D images up to 16384 texels "
-                              "have a custom-pitch descriptor probe (C4)",
+                              "only single-layer 2D images up to 16384 texels "
+                              "have custom-pitch descriptor probes (C4, R18)",
                               (unsigned)set, binding, pitch_texels,
                               image->vk.extent.width, image->vk.extent.height, image->vk.extent.depth,
                               (unsigned)image->vk.format, image->vk.mip_levels, image->vk.array_layers,
@@ -1190,7 +1190,9 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
    sampled->address = image->address;
    sampled->extent = (VkExtent2D){image->vk.extent.width, image->vk.extent.height};
    sampled->format_word = entry->image_format << 20;
-   sampled->pitch_texels = padded ? pitch_texels : 0;
+   sampled->pitch_texels = !tiled && view->view_type == VK_IMAGE_VIEW_TYPE_2D &&
+                           image->vk.array_layers == 1 && (padded || image->vk.mip_levels > 1)
+                              ? pitch_texels : 0;
    sampled->dst_sel = entry->dst_sel;
    /* Only a combined image sampler carries a sampler's words; a storage image's
     * 32 bytes leave them out (ps5vk_write_image_descriptor). */
