@@ -46,7 +46,9 @@ expected by the capability test. That test now disables cache and its three
 arms pass. Eleven gates, port five gates/scan and template relink PASS.
 Archive 14,434,234 bytes, SHA-256 aad0ebc7… . jobs/r17-descriptor-array and
 golden/r17-descriptor-array contain evidence/reproduction. No new port run.
-Next: identify R18's image extent/format/mips/layers before changing its layout.
+R18 identified by port PID 210: 224x195 RGBA8, eight mips, one layer, 2D,
+pitch 256. Array refusal absent; padded mip descriptor remains. Gates/port scan
+PASS, two trace reads match, console idle. Next: full-mip readback of this shape.
 
 **Port M2 met:** PID 197, QueuePresent success and human-confirmed Quake
 menu/console; port evidence/m2-first-frame. M3–M6 remain open. Input/audio

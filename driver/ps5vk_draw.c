@@ -1152,9 +1152,14 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
                   image->vk.mip_levels != 1 || pitch_texels > 0x4000)) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                               "set %u binding %u needs a padded texture pitch of %u texels; "
+                              "image %ux%ux%u format %u mips %u layers %u view %u name %s; "
                               "only single-level, single-layer 2D images up to 16384 texels "
                               "have a custom-pitch descriptor probe (C4)",
-                              (unsigned)set, binding, pitch_texels);
+                              (unsigned)set, binding, pitch_texels,
+                              image->vk.extent.width, image->vk.extent.height, image->vk.extent.depth,
+                              (unsigned)image->vk.format, image->vk.mip_levels, image->vk.array_layers,
+                              (unsigned)view->view_type,
+                              image->vk.base.object_name ? image->vk.base.object_name : "(unnamed)");
       return false;
    }
    /* Sampling a target this command buffer rendered into needs both the
