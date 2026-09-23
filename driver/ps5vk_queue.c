@@ -54,6 +54,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "util/os_time.h"
 
@@ -122,6 +123,62 @@ ps5vk_profile_leave(struct ps5vk_queue *queue, unsigned slot)
    ps5vk_profile_call_from = 0;
    p->gap_from_ns = now;
    p->gap_slot = slot;
+}
+
+/* What the profile's own timestamps cost, and what the alternatives would: one
+ * line, once, when profiling is enabled. Each source is called PROBE_CALLS times
+ * between two os_time_get_nano reads, so the bracket's own cost is spread over
+ * all of them. getpid is a plain system call and the mutex pair an uncontended
+ * one, so the line also says whether a slow clock is the clock or every call
+ * into the kernel. */
+#define PS5VK_PROBE_CALLS 10000u
+static void
+ps5vk_queue_probe_costs(struct ps5vk_queue_profile *p)
+{
+   volatile uint64_t sink = 0;
+   uint64_t from = os_time_get_nano();
+   for (unsigned i = 0; i < PS5VK_PROBE_CALLS; i++)
+      sink += os_time_get_nano();
+   const uint64_t clock_ns = os_time_get_nano() - from;
+   from = os_time_get_nano();
+   for (unsigned i = 0; i < PS5VK_PROBE_CALLS; i++)
+      sink += sceKernelReadTsc();
+   const uint64_t tsc_ns = os_time_get_nano() - from;
+   from = os_time_get_nano();
+   for (unsigned i = 0; i < PS5VK_PROBE_CALLS; i++)
+      sink += sceKernelGetProcessTimeCounter();
+   const uint64_t counter_ns = os_time_get_nano() - from;
+   from = os_time_get_nano();
+   for (unsigned i = 0; i < PS5VK_PROBE_CALLS; i++)
+      sink += (uint64_t)getpid();
+   const uint64_t getpid_ns = os_time_get_nano() - from;
+   mtx_t lock;
+   mtx_init(&lock, mtx_plain);
+   from = os_time_get_nano();
+   for (unsigned i = 0; i < PS5VK_PROBE_CALLS; i++) {
+      mtx_lock(&lock);
+      mtx_unlock(&lock);
+   }
+   const uint64_t mutex_ns = os_time_get_nano() - from;
+   mtx_destroy(&lock);
+   /* Two TSC reads a known sleep apart: whether the counter ticks at the rate
+    * the kernel reports is what would make it usable as a clock. */
+   const uint64_t tsc_from = sceKernelReadTsc();
+   const uint64_t wall_from = os_time_get_nano();
+   sceKernelUsleep(20000);
+   const uint64_t tsc_ticks = sceKernelReadTsc() - tsc_from;
+   const uint64_t wall_ns = os_time_get_nano() - wall_from;
+   p->clock_ns_x1000 = clock_ns / (PS5VK_PROBE_CALLS / 1000u);
+   char line[512];
+   snprintf(line, sizeof(line),
+            "[ps5vk] cost probe calls=%u clock_gettime_ns=%.1f read_tsc_ns=%.1f "
+            "process_time_counter_ns=%.1f getpid_ns=%.1f mutex_pair_ns=%.1f "
+            "tsc_hz=%" PRIu64 " tsc_ticks=%" PRIu64 " over_ns=%" PRIu64 " sink=%" PRIu64 "\n",
+            PS5VK_PROBE_CALLS, (double)clock_ns / PS5VK_PROBE_CALLS,
+            (double)tsc_ns / PS5VK_PROBE_CALLS, (double)counter_ns / PS5VK_PROBE_CALLS,
+            (double)getpid_ns / PS5VK_PROBE_CALLS, (double)mutex_ns / PS5VK_PROBE_CALLS,
+            sceKernelGetTscFrequency(), tsc_ticks, wall_ns, (uint64_t)(sink & 1u));
+   fputs(line, stderr);
 }
 
 struct ps5vk_queue *
@@ -1216,7 +1273,7 @@ ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now, char *l
             "call_begin_ms=%.3f call_end_ms=%.3f named_ms=%.3f unnamed_ms=%.3f "
             "draws/frame=%.1f begins/frame=%.1f call_draw_ms=%.3f between_draws_ms=%.3f "
             "secondary_begins/frame=%.1f call_begin_secondary_ms=%.3f resets/frame=%.1f "
-            "reset_common_ms=%.3f reset_driver_ms=%.3f "
+            "reset_common_ms=%.3f reset_driver_ms=%.3f last_write_ms=%.3f clock_ns=%.1f "
             "presents=%" PRIu64 "/%" PRIu64
             " periods=%s elapsed_ms=%.0f\n",
             p->app_pre_submit_ns * per_present, p->app_pre_present_ns * per_present,
@@ -1248,9 +1305,12 @@ ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now, char *l
             p->begin_secondary_ns * per_present,
             p->frames != 0 ? (double)p->resets / (double)p->frames : 0.0,
             p->reset_common_ns * per_present, p->reset_driver_ns * per_present,
+            (double)p->report_write_ns / 1000000.0, (double)p->clock_ns_x1000 / 1000.0,
             p->present_index[0], p->present_index[1], periods,
             (double)(now - p->since) / 1000000.0);
+   const uint64_t written = os_time_get_nano();
    fputs(line, stderr);
+   p->report_write_ns = os_time_get_nano() - written;
 }
 
 /* A flip in a stream of its own, as run pid 134 presented (c1-present):
@@ -1359,7 +1419,9 @@ ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, in
                *p = (struct ps5vk_queue_profile){.enabled = true,
                                                  .since = now,
                                                  .last_return_ns = now,
-                                                 .last_present_ns = now};
+                                                 .last_present_ns = now,
+                                                 .report_write_ns = p->report_write_ns,
+                                                 .clock_ns_x1000 = p->clock_ns_x1000};
             }
          }
          return VK_SUCCESS;
@@ -1697,6 +1759,8 @@ ps5vk_queue_init(struct ps5vk_device *device, struct ps5vk_queue *queue,
                                                  getenv("PS5VK_PROFILE") != NULL};
    if (profile)
       fclose(profile);
+   if (queue->profile.enabled)
+      ps5vk_queue_probe_costs(&queue->profile);
    queue->marker_value = 0;
    queue->last_words = 0;
    queue->last_stream = NULL;

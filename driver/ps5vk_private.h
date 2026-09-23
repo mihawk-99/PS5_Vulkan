@@ -247,6 +247,10 @@ struct ps5vk_queue_profile {
     * this driver's own state. */
    uint64_t begin_secondary_calls, begin_secondary_ns;
    uint64_t resets, reset_common_ns, reset_driver_ns;
+   /* Carried across windows: how long the previous summary's single write took,
+    * and what one os_time_get_nano costs (measured once when profiling is
+    * enabled), which bounds how much the probes themselves add to a frame. */
+   uint64_t report_write_ns, clock_ns_x1000;
    uint64_t gap_from_ns, interval_from_ns;
    unsigned gap_slot;
    uint64_t flip_status_calls, flip_status_ns, flip_vblank_waits, flip_vblank_ns;
@@ -1613,6 +1617,16 @@ sceVideoOutConfigureOutput(int32_t handle, uint32_t mode, const void *a, const v
 
 int
 sceKernelUsleep(uint32_t microseconds);
+
+/* Time sources, for the profile's one-time cost probe (ps5vk_queue.c). */
+uint64_t
+sceKernelReadTsc(void);
+
+uint64_t
+sceKernelGetTscFrequency(void);
+
+uint64_t
+sceKernelGetProcessTimeCounter(void);
 
 /* The PS5 kernel: libkernel on the console, host/ps5/ps5_host.cpp on the PC.
  * Declared as the test runner declares them (src/diagnostics.cpp). */

@@ -891,6 +891,22 @@ int sceKernelUsleep(std::uint32_t)
     return 0;
 }
 
+// The profile's time-source cost probe only; the PC's answers measure nothing.
+std::uint64_t sceKernelReadTsc(void)
+{
+    return 0;
+}
+
+std::uint64_t sceKernelGetTscFrequency(void)
+{
+    return 1;
+}
+
+std::uint64_t sceKernelGetProcessTimeCounter(void)
+{
+    return 0;
+}
+
 int sceVideoOutOpen(std::int32_t, std::int32_t, std::int32_t, const void *)
 {
     return g_video;

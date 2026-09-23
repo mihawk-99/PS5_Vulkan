@@ -54,3 +54,37 @@ cadence, and their traces show the driver's single summary `fputs` split
 mid-line by the audio thread's line and, at the harness close, cut off
 mid-write. The report write itself is therefore the leading suspect for the
 "unattributed" stall; it is timed next rather than asserted here.
+
+## R34: the report write is the stall, and a system call costs 20 us
+
+Two more default-off fields and a one-time line, still one write each:
+`last_write_ms` (the previous summary's `fputs` duration, carried across the
+window reset), `clock_ns`, and `[ps5vk] cost probe`, which times 10,000 calls of
+each time source between two clock reads when profiling is enabled.
+
+**The once-per-window hitch of every profiled run is this driver's own summary
+write.** `last_write_ms` equals the next window's `frame_max_ms` each time:
+1606/1657, 2098/2146, 1726/1773, 3124/3397, 5783/5817, 5331/5373, 5830/5874 ms.
+One ~1.9 KB `fputs` to `/app0/trace.txt` takes 1.6-5.8 s. The report runs inside
+`ps5vk_queue_flip` after the present is confirmed, so that time lands in the next
+frame's period. Every window-mean millisecond from a profiled run since R31 is
+inflated by it; per-call costs and counts are not. Port evidence
+`m6-r34-report-write`.
+
+**Every system call costs ~20 us on this console** (port evidence
+`m6-r34-cost-probe`):
+
+| 10,000 calls each               | ns per call |
+| ------------------------------- | ----------- |
+| `clock_gettime` (os_time)       | 20,278.8    |
+| `getpid`                        | 20,123.6    |
+| `sceKernelReadTsc`              | 11.8        |
+| `sceKernelGetProcessTimeCounter`| 12.1        |
+| uncontended mutex lock+unlock   | 16.3        |
+
+The TSC ticks at its reported rate: 32,167,462 ticks over 20.150 ms = 1.5964 GHz
+against 1,596,300,232 Hz reported. Consequences: each probe pair of this
+profile adds ~20-40 us, so R32's "23 us a draw" and much of R33's begin cost are
+the clock reads themselves; and anything, in the driver or the engine, that
+enters the kernel per frame (`mmap`, a contended lock, a condition wake,
+`usleep`, `write`, a clock read) pays ~20 us each time.
