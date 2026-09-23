@@ -1,0 +1,11 @@
+# R51: the swapchain and present tests after the display-mode change.
+hold 1
+c1-flip
+m2-solid
+c1-present
+c1-triangle
+c1-readback
+c1-clear
+b7-triangle
+b7-corner
+exit

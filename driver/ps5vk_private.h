@@ -137,16 +137,22 @@ struct ps5vk_instance {
    struct vk_instance vk;
 };
 
-/* The one VideoOut display and its one mode (ps5vk_wsi.c): their addresses
- * are the VkDisplayKHR and VkDisplayModeKHR handles. */
+/* The one VideoOut display and its modes (ps5vk_wsi.c): their addresses are the
+ * VkDisplayKHR and VkDisplayModeKHR handles. A mode carries the refresh it
+ * reports, in millihertz, and whether presenting in it asks VideoOut for its
+ * high-frame-rate output. */
 struct ps5vk_display {
-   uint32_t unused;
+   uint32_t refresh_millihertz;
+   bool high_frame_rate;
 };
 
 struct ps5vk_physical_device {
    struct vk_physical_device vk;
    struct ps5vk_display display;
-   struct ps5vk_display mode;
+   /* The 119.88 Hz mode, offered only when the title and the console both allow
+    * it, and the 59.94 Hz mode, always. Settled once, on first enumeration. */
+   struct ps5vk_display high_mode, mode;
+   bool modes_settled, high_mode_offered;
 };
 
 /* A CPU-signalled binary sync object for fences and semaphores (ps5vk_sync.c). */
@@ -1420,6 +1426,9 @@ struct ps5vk_pipeline {
 struct ps5vk_video_out {
    int handle;
    bool registered;
+   /* VideoOut accepted its high-frame-rate output for this handle, which is
+    * restored before the handle closes. */
+   bool high_frame_rate;
    struct ps5vk_direct_mapping buffers;
    /* The buffer on screen, or UINT32_MAX before the first flip. */
    uint32_t shown;
