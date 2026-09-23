@@ -11,6 +11,10 @@ struct ps5vk_shader_cache_key {
 bool ps5vk_shader_cache_key(const uint32_t *words, size_t size,
                             const PsbcCompileOptions *options,
                             struct ps5vk_shader_cache_key *key);
+struct nir_shader;
+bool ps5vk_shader_cache_nir_key(const struct nir_shader *nir,
+                                const PsbcCompileOptions *options,
+                                struct ps5vk_shader_cache_key *key);
 bool ps5vk_shader_cache_load(const struct ps5vk_shader_cache_key *key, PsbcShaderOutput *output);
 void ps5vk_shader_cache_store(const struct ps5vk_shader_cache_key *key,
                               const PsbcShaderOutput *output);

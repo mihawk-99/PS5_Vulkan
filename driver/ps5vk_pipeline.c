@@ -1050,7 +1050,8 @@ ps5vk_compile_shader_deep(struct nir_shader *nir, const uint32_t *words, size_t 
                           bool *aborted)
 {
    struct ps5vk_shader_cache_key key;
-   const bool cacheable = !nir && ps5vk_shader_cache_key(words, size, options, &key);
+   const bool cacheable = nir ? ps5vk_shader_cache_nir_key(nir, options, &key)
+                              : ps5vk_shader_cache_key(words, size, options, &key);
    if (aborted)
       *aborted = false;
    if (cacheable && ps5vk_shader_cache_load(&key, output))

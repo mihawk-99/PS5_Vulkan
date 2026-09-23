@@ -33,9 +33,11 @@
  */
 
 #include "ps5vk_private.h"
+#include "ps5vk_shader_cache.h"
 
 #include "compiler/nir/nir.h"
 #include "compiler/nir/nir_builder.h"
+#include "compiler/nir/nir_serialize.h"
 
 /* Removes every store to the shader's layer output, then the variable. */
 static bool
@@ -141,4 +143,20 @@ void
 ps5vk_nir_free(nir_shader *nir)
 {
    ralloc_free(nir);
+}
+
+/* Reuse Mesa's pointer-free serialization and the same persistent-output key.
+ * A zero prefix distinguishes this input from a valid SPIR-V module. */
+bool
+ps5vk_shader_cache_nir_key(const nir_shader *nir, const PsbcCompileOptions *options,
+                           struct ps5vk_shader_cache_key *key)
+{
+   struct blob blob;
+   blob_init(&blob);
+   blob_write_uint32(&blob, 0);
+   nir_serialize(&blob, nir, true);
+   const bool valid = !blob.out_of_memory &&
+      ps5vk_shader_cache_key((const uint32_t *)blob.data, blob.size, options, key);
+   blob_finish(&blob);
+   return valid;
 }

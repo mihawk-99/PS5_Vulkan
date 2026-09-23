@@ -1,0 +1,12 @@
+# R46: mip and menu-alpha cases, run twice on one binary (cold, then warm NIR cache).
+hold 1
+m2-solid
+r16-mip-blit
+c7-mip-nearest
+c7-mip-linear
+c7-mip-tiled
+c7-mip-upload
+r27-menu-alpha-raw
+r27-menu-alpha
+r26-lod-bias
+exit

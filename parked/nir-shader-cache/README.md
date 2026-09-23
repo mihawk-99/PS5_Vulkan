@@ -49,3 +49,9 @@ Remaining acceptance:
 
 The existing common cache tests cover unavailable directories and corrupt or
 truncated output recovery. Cache-directory disable still compiles normally.
+
+## Landed (R46)
+
+Applied unchanged to production after the console acceptance above was run;
+see `jobs/r46-nir-cache`. This directory stays as the record of how it was
+developed.

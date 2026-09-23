@@ -4,7 +4,7 @@
  *
  * Called under the existing compiler mutex. Save after each successful compile,
  * so a later application crash preserves completed work. Cache failures are
- * misses, never Vulkan errors. NIR meta shaders remain on the compiler path.
+ * misses, never Vulkan errors. NIR meta shaders use Mesa serialization as input.
  */
 #include "ps5vk_shader_cache.h"
 #include "ps5vk_cache_build.h"
