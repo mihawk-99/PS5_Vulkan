@@ -1,0 +1,8 @@
+c4-padded.dump c4-padded draw 1: identical to c4-padded-1.json: 11 packets, 3 register tables
+c4-padded.dump c4-padded draw 2: identical to c4-padded-2.json: 10 packets, 3 register tables
+
+c4-texture.dump c4-texture draw 1: identical to c4-texture-1.json: 11 packets, 3 register tables
+c4-texture.dump c4-texture draw 2: identical to c4-texture-2.json: 10 packets, 3 register tables
+
+d2-compute.dump d2-compute dispatch: identical to d2-compute-1.json: 14 packets, 0 register tables
+d2-compute.dump d2-compute indirect dispatch: identical to d2-compute-2.json: 14 packets, 0 register tables

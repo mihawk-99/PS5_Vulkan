@@ -3,26 +3,9 @@
  * Copyright (C) 2026 Mihawk-99
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Milestone 5 Phase B6 (docs/M5_REFERENCE.md). vkCreateGraphicsPipelines hands
- * its state to AGC and links the compiled microcode into a pipeline object each
- * time it is called: there is nothing this driver stores between runs, so its
- * pipeline cache is the empty cache Vulkan lets an implementation have. The
- * object exists, the cache data is zero bytes, merging one cache into another
- * is a no-op, and the cache handle a pipeline is created with is ignored
- * (ps5vk_pipeline.c) -- all of which the specification allows, because the data
- * in a cache is an optimization the implementation may decline to use, and the
- * implementation is what decides what a cache holds.
- *
- * The device's pipelineCacheUUID is the constant in ps5vk_physical_device.c:
- * one identifier for the one cache format this driver has, which never holds
- * anything. A cache created from data (pCreateInfo->initialData) is accepted
- * and ignored for the same reason; an application that saves the zero bytes it
- * gets back and passes them in again is asking for exactly the behavior it
- * gets.
- *
- * No probe was needed and no console run is owed: nothing here reaches the GPU
- * or the command stream, and driver/tests/vk_b6_pipeline_cache_test.c checks
- * the four entry points through the loader on the PC.
+ * The optional application-managed Vulkan cache remains empty. The driver's
+ * separate disk shader cache persists immutable compiler outputs even when an
+ * application supplies VK_NULL_HANDLE here (ps5vk_shader_cache.c).
  */
 
 #include "ps5vk_private.h"

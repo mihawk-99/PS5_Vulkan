@@ -682,5 +682,8 @@ for negative in "${negatives[@]}"; do
     printf '%-28s %s\n' "$test negative" "${results[$test negative]}"
     [[ ${results[$test negative]} == PASS ]] || status=1
 done
+if [[ $status == 0 ]] && want c4_texture; then
+    bash "$root/tools/check-shader-cache.sh" || status=1
+fi
 echo "driver check: $([[ $status == 0 ]] && echo PASS || echo FAIL)"
 exit $status

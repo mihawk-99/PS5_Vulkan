@@ -8521,3 +8521,53 @@ Kernel PID 199 abort/termination; console idle. Port committed evidence is
 evidence/m2-r13-map-recording. These failures remain open. User reprioritized
 persistent shader caching and measurable faster warm startup before rendering
 work continues. No new shader-cache implementation is claimed by this entry.
+
+
+## 2026-09-22 — Persistent shader cache, host checks and PS5 cold/warm acceptance
+
+User priority: eliminate the roughly ten-minute wait by keeping shaders on disk.
+Added one shared compiler-output disk cache for graphics and compute, using the
+existing compiler mutex and Mesa BLAKE3. Each successful SPIR-V compile writes
+metadata, wrapper and machine code via flush/fsync/atomic rename before return.
+Default PS5 path is /app0/ps5vk-shader-cache; host use is opt-in. Hash every
+compiler option by value (no pointers/padding), shader/entry point and
+specialization map/data. Generated content digest of linked compiler inputs,
+relevant driver sources, headers and flags invalidates stale builds. Bounded,
+checksummed reads reject corruption/truncation; unavailable storage falls back
+to compile. The Vulkan application-managed cache remains empty; this works
+with VK_NULL_HANDLE. NIR meta shaders are deliberately not persisted. No new
+library or dependency, no GPU resource/address serialized.
+
+Explicit build-driver PASS with zero warnings; archive 14,425,130 bytes,
+SHA-256 e089e0608def7d4f2b100e0b5ee1713b1d2b6c2ed8cd7a59f261f8686efeb44f.
+Full check-driver: 167 arms PASS. Its new check-shader-cache.sh tests all-option
+key coverage, pointer independence, changed shader/entry/specialization/options,
+exact restored output, corrupt/truncated recovery, and two fresh C4 processes
+whose vertex/pixel packages are identical while the second skips SPIR-V compile.
+All eleven gates PASS; final lint includes benchmark script; port five gates
+and template relink PASS. Cache namespace is content-based, not timestamps.
+
+Driver probe PID 200 then unchanged-binary PID 201: each 241 PASS, zero FAIL,
+known benign VideoOut unregister-busy warning. Texture readback and direct/
+indirect compute output pass, all twelve submissions replay exactly with
+same-run defaults. Two deployed ELF reads and every PT_LOAD byte matched.
+Evidence: golden/shader-cache-cold and golden/shader-cache-warm. The runner's
+stdout does not expose cache-hit counts to its structured kernel log. FTP can
+enter the cache directory but cannot list its private mode-0700 contents; no
+console permissions or configuration were changed to work around that. Actual
+hit/store evidence comes from vkQuake's trace below, not an inferred file count.
+
+Same port identity 78bd43a2e575089a96cf8dc561937dd7781c462fbcf051f2fa177ac0c55107b1:
+PID 202 cold launch-to-first-present 30.410 seconds, 99 SPIR-V compiles,
+433 cache hits, 99 stores. PID 203 warm 13.018 seconds, zero SPIR-V compiles,
+532 cache hits, zero stores. Both compile eight internal NIR shaders. Times
+include launch IPC and one-second trace polling, not display scanout. Each
+run has a listener before launch, newest-boot identity check, two identical
+final trace reads and idle closure. Paired measurement script and exact hashes:
+jobs/shader-cache/README.md, cold-startup.txt and warm-startup.txt. Cold run
+crashed after presentation; warm hits prove its saved shaders survived.
+
+The same two map-recording refusals and ps5vk_cmd_draw_indirect stride assertion
+repeat (already PID 199). No M3–M6 acceptance or rendering repair is claimed.
+The pair was the user's cache experiment; with it complete, follow the user's
+repeat-failure stop rule rather than start another rendering experiment.

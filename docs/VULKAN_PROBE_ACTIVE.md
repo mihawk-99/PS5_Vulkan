@@ -8,40 +8,41 @@ _Updated: 2026-09-22 (late evening)_
 
 ## Now
 
-**R13: upload metadata is now one record per region.** R12 let vkQuake present
-its first human-visible menu/console frame, then PID 197 ran out of host memory
-recording map-staging image copies. The old row path appended one 272-byte
-record per row. It now reuses the existing region-copy executor; two linear
-sides copy whole rows. Tiled maps and command order remain unchanged.
+**Persistent SPIR-V shader cache accepted on PS5.** User requested much faster
+vkQuake startup. The shared graphics/compute compiler boundary now saves each
+successful output atomically in /app0/ps5vk-shader-cache and reuses it across
+launches, including after an application crash. The key covers shader bytes,
+entry point, every compile option, specialization maps/data, compiler archive,
+relevant driver sources/headers and build flags. Corrupt, stale or unavailable
+entries fall back to compilation. No GPU pointers or live resources are saved.
 
-**Host witness:** a 36-row upload fell from 36 records to one. Sixty-four repeated
-regions use 64 records and 17,408 bytes of capacity, below 32 KiB. Reproduce:
-`jobs/r13-upload/README.md`. This bounds upload metadata; it does not establish
-that every contributor to the port's heap pressure is gone.
+**Same-binary vkQuake measurement:** identity 78bd43a2…; PID 202 cold first
+present 30.410 s, 99 SPIR-V compiles + 433 hits, 99 files stored. PID 203 warm
+first present 13.018 s, zero SPIR-V compiles + 532 hits, zero stores. Eight
+internal NIR stages still compile in each. One-second trace polling; these are
+presentation-return timings, not optical measurements. Both traces were read
+twice and PID-correlated; console idle. jobs/shader-cache/README.md and its
+cold/warm-startup.txt contain exact evidence and reproduction.
 
-**Gates:** explicit driver build PASS, zero warnings; targeted check-driver
-c4_texture/c7_mip_upload/c7_copy/c7_blit_formats/v0_formats PASS (15 arms).
-All eleven driver gates PASS. Template relink PASS. The compile/pipeline path
-was unchanged; the full 167-arm suite passed in R12. Archive 14,383,804 bytes,
-SHA-256 `b3bb7ac9…`.
+**Verification:** explicit driver build, zero warnings; 167 check-driver arms
+PASS plus key/invalidation/corruption/fresh-process package tests; eleven gates
+PASS; port five gates PASS; template relink PASS. Archive 14,425,130 bytes,
+SHA-256 e089e060… . PS5 probe PIDs 200 and 201 each returned 241 PASS/zero FAIL;
+twelve submissions replay exactly, goldens in golden/shader-cache-cold and
+-warm. Driver probe stdout is not a hit-count witness; vkQuake's trace is.
 
-**Console PID 198, PPSA99988:** m2-solid, c4-padded, c7-mip-upload, c7-copy PASS;
-486 PASS records, zero FAIL; known benign unregister-busy warning then closure.
-Twelve submissions replay exactly with same-run defaults. Evidence and exact
-commands: `golden/r13-upload/README.md`. Port PID 199 passed the prior OOM and presented, then reached new tiled-chain
-blit and multiple-dynamic-offset refusals and an indirect-stride assertion.
-Port evidence/m2-r13-map-recording records the two matching reads and kernel abort.
-User priority is now persistent shader caching, with measured cold/warm startup.
+**M6 remains blocked after first presentation.** PIDs 199, 202 and 203 repeat
+named tiled-chain blit and multiple dynamic-offset refusals, then the indirect
+stride assertion. Upstream uses count=1/stride=0; this driver asserts stride
+at least command size even for one draw. The cache runs were the explicitly
+requested persistence/timing experiment, not retries to repair rendering.
+The user's repeat-failure stop rule now bars another rendering experiment
+without resumption. R13 removed the prior upload OOM; it was not all of M6.
 
-**Port M2 is met:** R12 c8658bf, PID 197, identity a779b2bd…, QueuePresent success
-and human-visible Quake menu/console; port evidence/m2-first-frame. M3–M6 remain
-open. That boot's staging path ignored EndCommandBuffer=-1 and submitted the
-invalid recording, causing a runtime assertion; that error handling is a
-separate port issue. R11 secondary replay/diagnostics are proven in PID 194.
-
-**Other open rendering findings:** R10 input-attachment fetch matched only the
-first quarter-width; `v0-lines` still fails. R13 does not alter either path,
-gamma, contrast, OIT or resolution.
+**Port M2 met:** PID 197, QueuePresent success and human-confirmed Quake
+menu/console; port evidence/m2-first-frame. M3–M6 remain open. Input/audio
+engine adapters are stubs. R10's quarter-width input-attachment read and the
+hardware line failure remain separate. No visual settings were changed.
 
 ## Standing work
 

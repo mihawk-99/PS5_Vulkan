@@ -1,0 +1,1165 @@
+{
+  "pid": 200,
+  "statuses": {
+    "PASS": 241,
+    "INFO": 54,
+    "NOT_REQUIRED": 16,
+    "ARMED": 1,
+    "WARN": 1
+  },
+  "records": [
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff20a0ff"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_live_video_unregister",
+      "status": "WARN",
+      "result": -2144796663,
+      "detail": "VideoOut busy 0x80290009 (known benign); close follows"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "m2-solid"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "c4-padded"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "c4-texture"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "d2_compute",
+      "field": "frame",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "d2_compute",
+      "field": "words",
+      "value": 144
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "d2_compute",
+      "field": "readback",
+      "value": "0xa5a5a5a5"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "d2_compute",
+      "field": "expected",
+      "value": "0xa5a5a5a5"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "d2_compute",
+      "status": "PASS",
+      "result": 0,
+      "detail": "the direct dispatch recorded, submitted and signalled its fence; the readback is the expected shader output"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "d2_compute",
+      "field": "frame",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "d2_compute",
+      "field": "words",
+      "value": 144
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "d2_compute",
+      "field": "readback",
+      "value": "0xa5a5a5a5"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "d2_compute",
+      "field": "expected",
+      "value": "0xa5a5a5a5"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "d2_compute",
+      "status": "PASS",
+      "result": 0,
+      "detail": "the indirect dispatch recorded, submitted and signalled its fence; the readback is the expected shader output"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "d2-compute"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_shader_package_pixel",
+      "status": "PASS",
+      "result": 0,
+      "detail": "/app0/probes/m2/pixel.bin"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_shader_package_pixel",
+      "field": "bytes",
+      "value": 864
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_shader_package_pixel",
+      "field": "address_mod_4096",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_shader_package_pixel",
+      "field": "fnv1a64",
+      "value": "0xd78c3f4744339a5a"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_shader_checksum_pixel",
+      "field": "actual_fnv1a64",
+      "value": "0xd78c3f4744339a5a"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_shader_checksum_forensics_pixel",
+      "status": "NOT_REQUIRED",
+      "result": 0,
+      "detail": "read-only checksum-register inspection"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_program_checksum_pixel",
+      "status": "NOT_REQUIRED",
+      "result": 0,
+      "detail": "unresolved checksum register accepted, as in ps5-opengl runtime packages"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_shader_checksum_pixel",
+      "status": "PASS",
+      "result": 0,
+      "detail": "matches checksums.txt"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_shader_create_pixel",
+      "status": "PASS",
+      "result": 0
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_shader_package_pixel",
+      "status": "PASS",
+      "result": 0,
+      "detail": "/app0/probes/m3-texture/pixel.bin"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_shader_package_pixel",
+      "field": "bytes",
+      "value": 936
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_shader_package_pixel",
+      "field": "address_mod_4096",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_shader_package_pixel",
+      "field": "fnv1a64",
+      "value": "0x9f37829855a60b55"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_shader_checksum_pixel",
+      "field": "actual_fnv1a64",
+      "value": "0x9f37829855a60b55"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_shader_checksum_forensics_pixel",
+      "status": "NOT_REQUIRED",
+      "result": 0,
+      "detail": "read-only checksum-register inspection"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_program_checksum_pixel",
+      "status": "NOT_REQUIRED",
+      "result": 0,
+      "detail": "unresolved checksum register accepted, as in ps5-opengl runtime packages"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_shader_checksum_pixel",
+      "status": "PASS",
+      "result": 0,
+      "detail": "matches checksums.txt"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_shader_create_pixel",
+      "status": "PASS",
+      "result": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "frame",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "nearest"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "red_shift",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "rows_bottom_up",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "raw_nonzero_words",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "inside_drawn",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "outside_drawn",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "matching_pixels",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_0",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_1",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_2",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_3_or_more",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "max_error",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_undrawn_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_undrawn_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_stray_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_stray_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_expected",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "undrawn per 128-row band: 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "undrawn per 128-column band: 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the textured square"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "frame",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "bilinear"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "red_shift",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "rows_bottom_up",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "raw_nonzero_words",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "inside_drawn",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "outside_drawn",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "matching_pixels",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_0",
+      "value": 1753975
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_1",
+      "value": 319625
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_2",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_3_or_more",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "max_error",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_undrawn_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_undrawn_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_stray_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_stray_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_expected",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "undrawn per 128-row band: 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "undrawn per 128-column band: 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the textured square"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_shader_package_pixel",
+      "status": "PASS",
+      "result": 0,
+      "detail": "/app0/probes/m3-texture/pixel.bin"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_shader_package_pixel",
+      "field": "bytes",
+      "value": 936
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_shader_package_pixel",
+      "field": "address_mod_4096",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_shader_package_pixel",
+      "field": "fnv1a64",
+      "value": "0x9f37829855a60b55"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_shader_checksum_pixel",
+      "field": "actual_fnv1a64",
+      "value": "0x9f37829855a60b55"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_shader_checksum_forensics_pixel",
+      "status": "NOT_REQUIRED",
+      "result": 0,
+      "detail": "read-only checksum-register inspection"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_program_checksum_pixel",
+      "status": "NOT_REQUIRED",
+      "result": 0,
+      "detail": "unresolved checksum register accepted, as in ps5-opengl runtime packages"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_shader_checksum_pixel",
+      "status": "PASS",
+      "result": 0,
+      "detail": "matches checksums.txt"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_shader_create_pixel",
+      "status": "PASS",
+      "result": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "frame",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "nearest"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "red_shift",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "rows_bottom_up",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "raw_nonzero_words",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "inside_drawn",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "outside_drawn",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "matching_pixels",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_0",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_1",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_2",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_3_or_more",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "max_error",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_undrawn_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_undrawn_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_stray_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_stray_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_expected",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "undrawn per 128-row band: 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "undrawn per 128-column band: 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the textured square"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "frame",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "bilinear"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "red_shift",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "rows_bottom_up",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "raw_nonzero_words",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "inside_drawn",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "outside_drawn",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "matching_pixels",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_0",
+      "value": 1864860
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_1",
+      "value": 208740
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_2",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_3_or_more",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "max_error",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_undrawn_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_undrawn_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_stray_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_stray_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_expected",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "undrawn per 128-row band: 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "undrawn per 128-column band: 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the textured square"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_shader_package_pixel",
+      "status": "PASS",
+      "result": 0,
+      "detail": "/app0/probes/m2/pixel.bin"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_shader_package_pixel",
+      "field": "bytes",
+      "value": 864
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_shader_package_pixel",
+      "field": "address_mod_4096",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_shader_package_pixel",
+      "field": "fnv1a64",
+      "value": "0xd78c3f4744339a5a"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_shader_checksum_pixel",
+      "field": "actual_fnv1a64",
+      "value": "0xd78c3f4744339a5a"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_shader_checksum_forensics_pixel",
+      "status": "NOT_REQUIRED",
+      "result": 0,
+      "detail": "read-only checksum-register inspection"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_program_checksum_pixel",
+      "status": "NOT_REQUIRED",
+      "result": 0,
+      "detail": "unresolved checksum register accepted, as in ps5-opengl runtime packages"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_shader_checksum_pixel",
+      "status": "PASS",
+      "result": 0,
+      "detail": "matches checksums.txt"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_shader_create_pixel",
+      "status": "PASS",
+      "result": 0
+    }
+  ]
+}

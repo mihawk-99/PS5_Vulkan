@@ -6,24 +6,9 @@
  * Milestone 5 Phase B6 (docs/M5_REFERENCE.md); built and run through the
  * loader and directly by tools/check-driver.sh (see ps5vk_test.h).
  *
- * vkCreateGraphicsPipelines hands its state to AGC and links compiled microcode
- * into a pipeline object each time it is called: this driver stores nothing
- * between calls, so its pipeline cache is the empty cache Vulkan allows an
- * implementation to have (driver/ps5vk_pipeline_cache.c). The data in a cache
- * is an optimization, and it is the implementation that decides what a cache
- * holds, so the object, the zero-byte data and the no-op merge below are the
- * whole of what a cache can be here.
- *
- * This test is what checks it: a cache is created, asked for its size both ways
- * round, merged from another cache, and destroyed. The device's
- * pipelineCacheUUID is checked too, because a cache that never holds anything
- * is exactly what one constant identifier says. No pipeline is built here:
- * ps5vk_CreateGraphicsPipelines ignores the cache handle it is passed, which is
- * the same statement as the empty cache, and the pipeline tests that build one
- * through the triangle harness already run that path.
- *
- * Nothing here renders, so there is no frame and no golden, and no console run
- * is owed: no entry point in this file reaches the GPU or the command stream.
+ * This checks the optional application-managed Vulkan cache API, which remains
+ * empty. The independent driver disk cache also serves VK_NULL_HANDLE callers;
+ * tools/check-shader-cache.sh verifies its persistent compiler outputs.
  */
 
 #include "ps5vk_test.h"

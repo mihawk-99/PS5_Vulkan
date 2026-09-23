@@ -108,6 +108,30 @@ header_digest() {
       find "$psbc_include" -name '*.h' -print0 2>/dev/null
     } | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | cut -c1-16
 }
+# Persistent shader outputs are valid only for these compiler/driver inputs.
+# Hash content, not timestamps: unchanged builds retain the on-console cache.
+python3 - "$root" "$host_psbc" "$ps5_cflags" "$host_cflags" <<'PY_CACHE'
+import hashlib, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+common = [root / "driver" / name for name in
+          ("ps5vk_pipeline.c", "ps5vk_compute.c", "ps5vk_nir.c", "ps5vk_shader_cache.c",
+           "ps5vk_shader_cache.h", "ps5vk_private.h")]
+common += [root / ".deps/native/psbc/include/psbc_compile.h"]
+lines = []
+for target, compiler, flags in (
+    ("PS5", root / ".deps/native/psbc/lib/libpsbc.ps5.a", sys.argv[3]),
+    ("HOST", pathlib.Path(sys.argv[2]), sys.argv[4])):
+    digest = hashlib.sha256(b"ps5vk-shader-cache-v1" + flags.encode())
+    for path in [*common, compiler]:
+        data = path.read_bytes()
+        digest.update(len(data).to_bytes(8, "little"))
+        digest.update(data)
+    lines.append(f'#define PS5VK_CACHE_{target}_BUILD "{digest.hexdigest()}"')
+path = root / "build/driver/generated/ps5vk_cache_build.h"
+text = "\n".join(lines) + "\n"
+if not path.exists() or path.read_text() != text:
+    path.write_text(text)
+PY_CACHE
 headers=$(header_digest)
 
 build_archive() {

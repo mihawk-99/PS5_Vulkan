@@ -35,6 +35,7 @@
 
 #include "ps5vk_private.h"
 #include "ps5vk_debug.h"
+#include "ps5vk_shader_cache.h"
 
 #include <assert.h>
 #include <pthread.h>
@@ -190,9 +191,8 @@ ps5vk_pipeline_free(struct ps5vk_device *device, struct ps5vk_pipeline *pipeline
  * end, whose spirv_to_nir applies a stage's VkSpecializationInfo by SpecId; the
  * options carry it there (tooling/psbc/patch-specialization.py). The compiler's
  * entry is VkSpecializationMapEntry's own layout, so the application's array is
- * handed over as it is. There is no pipeline cache yet (the cache is a zero-byte
- * stub, ps5vk_pipeline_cache.c): when one stores compiled stages, the constants'
- * values belong in its key, as RADV hashes them (radv_shader.c). */
+ * handed over as it is. The disk shader cache hashes these entries and values,
+ * independently of their process addresses (ps5vk_shader_cache.c). */
 _Static_assert(sizeof(PsbcSpecializationEntry) == sizeof(VkSpecializationMapEntry) &&
                   offsetof(PsbcSpecializationEntry, constant_id) ==
                      offsetof(VkSpecializationMapEntry, constantID) &&
@@ -979,8 +979,8 @@ ps5vk_compile_worker(void *argument)
  * attributes ask for, then the caller's stack, which is what every compile did
  * before this existed -- so a platform that refuses one of them keeps working
  * and the fault stays a possibility rather than becoming a new failure. */
-PsbcResult
-ps5vk_compile_shader_deep(struct nir_shader *nir, const uint32_t *words, size_t size,
+static PsbcResult
+ps5vk_compile_shader_uncached(struct nir_shader *nir, const uint32_t *words, size_t size,
                           const PsbcCompileOptions *options, PsbcShaderOutput *output,
                           bool *aborted)
 {
@@ -1028,6 +1028,25 @@ ps5vk_compile_shader_deep(struct nir_shader *nir, const uint32_t *words, size_t 
    if (aborted != NULL)
       *aborted = call.aborted;
    return call.result;
+}
+
+/* Both callers hold ps5vk_compile_mutex. Only immutable compiler output is
+ * cached; GPU addresses, AGC objects and pipeline state are always rebuilt. */
+PsbcResult
+ps5vk_compile_shader_deep(struct nir_shader *nir, const uint32_t *words, size_t size,
+                          const PsbcCompileOptions *options, PsbcShaderOutput *output,
+                          bool *aborted)
+{
+   struct ps5vk_shader_cache_key key;
+   const bool cacheable = !nir && ps5vk_shader_cache_key(words, size, options, &key);
+   if (aborted)
+      *aborted = false;
+   if (cacheable && ps5vk_shader_cache_load(&key, output))
+      return PSBC_RESULT_OK;
+   const PsbcResult result = ps5vk_compile_shader_uncached(nir, words, size, options, output, aborted);
+   if (cacheable && result == PSBC_RESULT_OK)
+      ps5vk_shader_cache_store(&key, output);
+   return result;
 }
 
 /* A stage's shader, as SPIR-V from a shader module or as the NIR Mesa's meta
@@ -1987,7 +2006,7 @@ ps5vk_CreateGraphicsPipelines(VkDevice _device, VkPipelineCache pipelineCache, u
                               const VkAllocationCallbacks *pAllocator, VkPipeline *pPipelines)
 {
    VK_FROM_HANDLE(ps5vk_device, device, _device);
-   /* There is no pipeline cache: every pipeline compiles. */
+   /* The Vulkan cache handle is unused; compiler outputs use the driver disk cache. */
    (void)pipelineCache;
    VkResult result = VK_SUCCESS;
    uint32_t index = 0;

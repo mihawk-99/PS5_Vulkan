@@ -1131,3 +1131,23 @@ Kernel PID 199 abort/termination; console idle. Port committed evidence is
 evidence/m2-r13-map-recording. These failures remain open. User reprioritized
 persistent shader caching and measurable faster warm startup before rendering
 work continues. No new shader-cache implementation is claimed by this entry.
+
+
+## 2026-09-22 — Persistent shader cache accepted
+
+Same port identity 78bd43a2e575089a96cf8dc561937dd7781c462fbcf051f2fa177ac0c55107b1:
+PID 202 cold launch-to-first-present 30.410 seconds, 99 SPIR-V compiles,
+433 cache hits, 99 stores. PID 203 warm 13.018 seconds, zero SPIR-V compiles,
+532 cache hits, zero stores. Both compile eight internal NIR shaders. Times
+include launch IPC and one-second trace polling, not display scanout. Each
+run has a listener before launch, newest-boot identity check, two identical
+final trace reads and idle closure. Paired measurement script and exact hashes:
+jobs/shader-cache/README.md, cold-startup.txt and warm-startup.txt. Cold run
+crashed after presentation; warm hits prove its saved shaders survived.
+
+The same two map-recording refusals and ps5vk_cmd_draw_indirect stride assertion
+repeat (already PID 199). No M3–M6 acceptance or rendering repair is claimed.
+The pair was the user's cache experiment; with it complete, follow the user's
+repeat-failure stop rule rather than start another rendering experiment.
+
+Implementation and gates are recorded in M5_PHASE_C.md and jobs/shader-cache/README.md.

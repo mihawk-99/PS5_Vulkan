@@ -1,0 +1,28 @@
+Explicit tools/build-driver.sh: PASS, zero warnings
+Full tools/check-driver.sh: 167 arms PASS
+PASS: every compiler-option field participates in the key
+[ps5vk] shader cache stored
+[ps5vk] shader cache hit
+[ps5vk] shader cache invalid; recompiling
+[ps5vk] shader cache invalid; recompiling
+[ps5vk] shader cache stored
+[ps5vk] shader cache hit
+PASS: stable keys, input/option invalidation, exact output, corruption/truncation recovery
+PASS: fresh-process warm launch skips SPIR-V compilation; vertex/pixel packages identical
+driver check: PASS
+
+All driver gates:
+lint PASS
+test PASS
+audit-commands PASS
+audit-limits PASS
+audit-formats PASS
+migration PASS
+mip-layout PASS
+psbc-link PASS
+probe-packages PASS
+vulkan-runtime PASS
+runner-cases PASS
+
+Final lint:
+Lint passed: 220 attributed code and tooling files.

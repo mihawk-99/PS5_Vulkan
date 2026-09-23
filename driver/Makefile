@@ -41,6 +41,7 @@ DRIVER_SRCS := \
 	ps5vk_queue.c \
 	ps5vk_refusals.c \
 	ps5vk_query.c \
+	ps5vk_shader_cache.c \
 	ps5vk_shader_module.c \
 	ps5vk_sync.c \
 	ps5vk_wsi.c
@@ -72,7 +73,7 @@ all: $(OUT)/$(ARCHIVE)
 DRIVER_HEADERS := $(wildcard $(DRIVER)/*.h)
 
 $(OUT)/%.o: $(DRIVER)/%.c $(DRIVER_HEADERS) $(GENERATED)/ps5vk_entrypoints.h \
-	$(PSBC_INCLUDE)/psbc_compile.h
+	$(PSBC_INCLUDE)/psbc_compile.h $(GENERATED)/ps5vk_cache_build.h
 	@mkdir -p $(dir $@)
 	$(CC) $(INCLUDES) $(CFLAGS) -Werror -c $< -o $@
 

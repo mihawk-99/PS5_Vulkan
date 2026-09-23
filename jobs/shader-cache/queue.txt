@@ -1,0 +1,8 @@
+# Cold and repeated shaders: same pixel/copy/compute checks with disk reuse.
+hold 1
+capture
+m2-solid
+c4-padded
+c4-texture
+d2-compute
+exit
