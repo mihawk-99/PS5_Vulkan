@@ -86,7 +86,7 @@ check_refusals(struct ps5vk_triangle *triangle)
       VkPresentModeKHR mode;
       uint32_t images;
    } kCases[] = {
-      {"imageUsage", VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+      {"imageUsage", VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
        {0, 0}, VK_PRESENT_MODE_FIFO_KHR, 0},
       {"imageExtent", 0, {1280, 720}, VK_PRESENT_MODE_FIFO_KHR, 0},
       {"presentMode", 0, {0, 0}, VK_PRESENT_MODE_MAILBOX_KHR, 0},

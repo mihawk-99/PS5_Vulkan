@@ -3217,3 +3217,21 @@ five gates/shader scan and template relink PASS. Port PID 225 runs 300 seconds,
 and 509.54 -> 373.73 MiB/frame, but increased flip wait leaves FPS around 20–30.
 No FPS gain claimed. Both trace reads and deployed ELF match; PID correlated,
 closed and idle verified. See jobs/r22-target-flush and its retained goldens.
+
+## 2026-09-23 — R23 swapchain transfer-source readback
+
+Swapchain images now report/accept TRANSFER_SRC alongside COLOR_ATTACHMENT;
+TRANSFER_DST remains refused. Existing image-copy code is used unchanged.
+PID 229: 238 PASS, zero FAIL, original C1 plus four copied frames. Each copy
+compares every one of 8,294,400 linear pixels against an independently checked
+tiled render before presentation; both buffers are covered twice. Sixteen
+captured draw/flip streams replay exactly.
+
+The full host runner exposed an absent optional helper workspace and stale
+initial flip-counter metadata. The former is guarded; replay seeds the existing
+model from recorded process state. No captured command or tolerance changed.
+See jobs/r23-display-readback/replay-notes.txt for original failures. Explicit
+driver build, host/cache checks, eleven gates, port five gates/scan and template
+relink pass. Lint/unit/runner and console build pass after the harness-only fix.
+Archive e662f699…; two deployed ELF reads/all load segments match, title closes
+and idle is verified. Goldens: golden/r23-display-readback.

@@ -40,12 +40,9 @@ Archive 14,434,594 bytes, SHA-256 f2666ab8…; deployed ELF segments match,
 title closed, count=0. jobs/r19-index32 and golden/r19-index32 hold evidence.
 Port PID 217 then ran 180 seconds without refusal/Quake error, progressing
 from Necropolis to The Door To Chthon; harness closed it, count=0 verified.
-R20 corrects R10's quarter-width diagnosis: the probe used linear indexing
-on tiled memory and never mapped its writer. Fixed probe PID 219: 128 PASS,
-zero FAIL; both writer/reader images match all 8,294,400 pixels in two frames.
-First frame's two submissions replay exactly. No production driver change.
-See jobs/r20-subpass and golden/r20-subpass; failed PID 218 retained.
-Next: port input/audio adapters and sustained game verification.
+R20 d8080dc retires R10's quarter-width diagnosis: the old probe misread tiled
+bytes and never mapped its writer. PID 219 matches every writer/reader pixel
+in two frames; no production driver change. jobs/r20-subpass retains evidence.
 
 **Port:** M2 human-confirmed earlier; input adapter opens DualSense. Audio
 now feeds native 48 kHz stereo PCM, PID 222 alive 300 seconds, 6,335 presents,
@@ -62,7 +59,11 @@ Host 170/cache, eleven gates, port/template PASS. Archive b95beefd….
 Game PID 225 ran 300 seconds without error: 6,557 presents. First 27 intervals
 reduce flush 7.872 -> 5.788 ms and 509.54 -> 373.73 MiB/frame; flip wait grows,
 FPS remains about 20–30. No FPS improvement claimed. jobs/r22-target-flush.
-Next: port normal quit/map/config validation, then measured rendering costs.
+R23 now proves swapchain TRANSFER_SRC: PID 229, 238 PASS / zero FAIL; four
+copies each match all 8,294,400 pixels, 16 strict replays. Original presentation
+regression passes. Archive e662f699…; eleven gates, port/template pass. Host
+replay corrections are explicit in jobs/r23-display-readback/replay-notes.txt.
+Next: inspect actual game screenshots and local map connection, then optimize.
 ## Standing work
 - Graphics R7 rounds 1-4, R8 dynamic depth bias, the first batch's R9 (push
   pointers), and the R4 clear/refusal coverage are in `docs/M5_PHASE_C.md`; the

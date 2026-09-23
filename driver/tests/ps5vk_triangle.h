@@ -597,6 +597,8 @@ struct ps5vk_triangle_input {
     * is the full-target triangle the m2 set declares. */
    bool subpass_input;
    VkIndexType index_type;
+   /* Copy the acquired display image to host memory before presentation. */
+   bool display_readback;
 };
 
 
@@ -993,6 +995,10 @@ struct ps5vk_triangle {
     * beside subpass 1's output (R10). */
    void *subpass_mapped;
    size_t subpass_bytes;
+   bool display_readback;
+   VkBuffer display_readback_buffer;
+   VkDeviceMemory display_readback_memory;
+   void *display_readback_mapped;
 };
 
 /* Creates every object into triangle. Unless the result is

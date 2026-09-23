@@ -266,8 +266,8 @@ ps5vk_GetPhysicalDeviceSurfaceCapabilitiesKHR(VkPhysicalDevice physicalDevice,
       .supportedTransforms = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
       .currentTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
       .supportedCompositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-      /* Rendering is the only use swapchain images have been proven for. */
-      .supportedUsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+      /* R23 also reads the acquired image back before presenting it. */
+      .supportedUsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
    };
    return VK_SUCCESS;
 }
@@ -472,12 +472,14 @@ ps5vk_CreateSwapchainKHR(VkDevice _device, const VkSwapchainCreateInfoKHR *pCrea
       return vk_errorf(device, VK_ERROR_UNKNOWN,
                        "imageArrayLayers %u is past the surface's maxImageArrayLayers 1",
                        info->imageArrayLayers);
-   if ((info->imageUsage & ~VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) != 0)
+   const VkImageUsageFlags supported_usage =
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+   if ((info->imageUsage & ~supported_usage) != 0)
       return vk_errorf(device, VK_ERROR_UNKNOWN,
                        "imageUsage 0x%x asks for 0x%x outside the surface's supportedUsageFlags "
-                       "(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT only)",
+                       "(COLOR_ATTACHMENT_BIT | TRANSFER_SRC_BIT)",
                        (unsigned)info->imageUsage,
-                       (unsigned)(info->imageUsage & ~VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT));
+                       (unsigned)(info->imageUsage & ~supported_usage));
    if (info->presentMode != VK_PRESENT_MODE_FIFO_KHR)
       return vk_errorf(device, VK_ERROR_UNKNOWN,
                        "presentMode %d is not a mode the surface reports: it reports "

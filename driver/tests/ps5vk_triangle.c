@@ -210,7 +210,8 @@ create_swapchain(struct ps5vk_triangle *triangle, VkPhysicalDevice physical)
       .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
       .imageExtent = extent,
       .imageArrayLayers = 1,
-      .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+      .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                    (triangle->display_readback ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0),
       .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
       .preTransform = capabilities.currentTransform,
       .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
@@ -2993,6 +2994,7 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
    triangle->colour_attachment_count =
       input->color_attachment_count > 1 ? input->color_attachment_count : 1u;
    triangle->separated_texture_pair = input->separated_texture_pair;
+   triangle->display_readback = input->display_readback;
    /* Every colour attachment's format, whatever creates them: the caller's, or
     * the RGBA8 the canary ran (ps5vk_triangle.c, create_image and
     * create_color_attachments). */
@@ -3014,6 +3016,14 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
                : (input->color_attachment_count > 1
                      ? !create_color_attachments(triangle, physical, input)
                      : !create_image(triangle, physical)))
+      return PS5VK_TRIANGLE_FAILED;
+
+   if (triangle->display_readback &&
+       !create_buffer(triangle, physical,
+                      (VkDeviceSize)PS5VK_TRIANGLE_WIDTH * PS5VK_TRIANGLE_HEIGHT * 4u,
+                      VK_BUFFER_USAGE_TRANSFER_DST_BIT, "display readback", NULL,
+                      &triangle->display_readback_buffer, &triangle->display_readback_memory,
+                      &triangle->display_readback_mapped))
       return PS5VK_TRIANGLE_FAILED;
 
    /* The caller's geometry, when it draws an indexed frame (Phase C2). */
@@ -3590,6 +3600,36 @@ record(struct ps5vk_triangle *triangle, VkCommandBuffer command, VkRenderPass pa
                                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, triangle->images[0],
                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
    }
+   if (triangle->display_readback) {
+      VkImageMemoryBarrier barrier = {
+         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+         .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+         .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+         .oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+         .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+         .image = triangle->images[triangle->image_index],
+         .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+      };
+      CALL(triangle, CmdPipelineBarrier)(command, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1,
+                                         &barrier);
+      const VkBufferImageCopy region = {
+         .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+         .imageExtent = {PS5VK_TRIANGLE_WIDTH, PS5VK_TRIANGLE_HEIGHT, 1},
+      };
+      CALL(triangle, CmdCopyImageToBuffer)(command, barrier.image,
+                                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                          triangle->display_readback_buffer, 1, &region);
+      barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      barrier.dstAccessMask = 0;
+      barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+      CALL(triangle, CmdPipelineBarrier)(command, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1,
+                                         &barrier);
+   }
    return CALL(triangle, EndCommandBuffer)(command);
 }
 
@@ -3836,6 +3876,9 @@ ps5vk_triangle_draw(struct ps5vk_triangle *triangle, enum ps5vk_triangle_groupin
    }
    triangle->target = NULL;
    triangle->target_bytes = 0;
+   if (triangle->display_readback_mapped)
+      memset(triangle->display_readback_mapped, 0xcd,
+             (size_t)PS5VK_TRIANGLE_WIDTH * PS5VK_TRIANGLE_HEIGHT * 4u);
    /* R8/R9: the draws of this frame are counted from zero, so the first takes
     * the first per-draw values and the second the second. */
    triangle->draws_recorded = 0;
@@ -4003,6 +4046,10 @@ ps5vk_triangle_finish(struct ps5vk_triangle *triangle)
       /* As the Vulkan Tutorial cleans up: nothing is released while the queue
        * may still use it. */
       step(triangle, "device_wait_idle", CALL(triangle, DeviceWaitIdle)(device), NULL);
+      if (triangle->display_readback_mapped)
+         CALL(triangle, UnmapMemory)(device, triangle->display_readback_memory);
+      CALL(triangle, DestroyBuffer)(device, triangle->display_readback_buffer, NULL);
+      CALL(triangle, FreeMemory)(device, triangle->display_readback_memory, NULL);
       CALL(triangle, DestroySemaphore)(device, triangle->render_finished, NULL);
       CALL(triangle, DestroySemaphore)(device, triangle->image_available, NULL);
       CALL(triangle, DestroyFence)(device, triangle->fence, NULL);

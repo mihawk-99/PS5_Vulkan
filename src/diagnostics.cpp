@@ -19670,7 +19670,8 @@ constexpr std::uint32_t kRefreshMicroseconds = 16667;
 bool flip_probe_packet(const TestContext &test, std::uint32_t video, const char *where,
                        JsonLog &log) noexcept;
 
-void run_vulkan_present_frames(const TestContext &test, TestOutcome &outcome) noexcept
+void run_vulkan_present_frames_impl(const TestContext &test, TestOutcome &outcome,
+                                    bool readback) noexcept
 {
     JsonLog &log = test.log;
     const ps5vk_triangle_report report{&log, log_vulkan_step};
@@ -19693,6 +19694,7 @@ void run_vulkan_present_frames(const TestContext &test, TestOutcome &outcome) no
                                nullptr,
                                0,
                                0};
+    input.display_readback = readback;
     if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
         return;
 
@@ -19718,9 +19720,34 @@ void run_vulkan_present_frames(const TestContext &test, TestOutcome &outcome) no
         log.hex("agc_gpu_pointer_swapchain_image", "begin",
                 reinterpret_cast<std::uintptr_t>(storage));
         log.number("agc_gpu_pointer_swapchain_image", "bytes", static_cast<long long>(bytes));
-        const bool drawn =
-            storage != nullptr && bytes >= kFramebufferBytes && triangle.image_index == index % 2 &&
-            check_split_frame(storage, index, kTriangleClearWord, kCornerColourWord, log);
+        bool drawn = storage != nullptr && bytes >= kFramebufferBytes &&
+                     triangle.image_index == index % 2 &&
+                     check_split_frame(storage, index, kTriangleClearWord, kCornerColourWord, log);
+        if (readback && status == PS5VK_TRIANGLE_OK)
+        {
+            const auto *const copied =
+                static_cast<const std::uint32_t *>(triangle.display_readback_mapped);
+            const auto *const tiled = static_cast<const std::uint32_t *>(storage);
+            const FramebufferView view{tiled, kTiledRgba8Layout};
+            std::size_t mismatches = 0;
+            if (copied && tiled)
+            {
+                flush_gpu_data(const_cast<std::uint32_t *>(copied),
+                               std::size_t{kOutputWidth} * kOutputHeight * 4u);
+                for (std::uint32_t y = 0; y < kOutputHeight; ++y)
+                    for (std::uint32_t x = 0; x < kOutputWidth; ++x)
+                        mismatches += copied[std::size_t{y} * kOutputWidth + x] != view.word(x, y);
+            }
+            else
+                mismatches = std::size_t{kOutputWidth} * kOutputHeight;
+            log.number("agc_display_readback", "frame", index);
+            log.number("agc_display_readback", "pixels", kOutputWidth * kOutputHeight);
+            log.number("agc_display_readback", "mismatches", static_cast<long long>(mismatches));
+            log.event("agc_display_readback", mismatches == 0 ? "PASS" : "FAIL",
+                      mismatches == 0 ? 0 : -1,
+                      "linear buffer compared with independently checked tiled swapchain pixels");
+            drawn = drawn && mismatches == 0;
+        }
         if (status == PS5VK_TRIANGLE_OK)
             status = ps5vk_triangle_present(&triangle);
         if (test.capture && status == PS5VK_TRIANGLE_OK)
@@ -19769,6 +19796,15 @@ void run_vulkan_present_frames(const TestContext &test, TestOutcome &outcome) no
                   "%u of %u frames drawn exactly through the swapchain and presented",
                   passed_frames, kPresentFrameCount);
     log.event("agc_c1_triangle", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1, detail);
+}
+void run_vulkan_present_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_vulkan_present_frames_impl(test, outcome, false);
+}
+
+void run_vulkan_display_readback(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_vulkan_present_frames_impl(test, outcome, true);
 }
 #endif // AGC_VULKAN_DRIVER
 #endif // AGC_TEST_RUNNER
@@ -20395,6 +20431,12 @@ constexpr std::int64_t kFlipProbeArg = 0x123456789abcdef0;
 bool flip_probe_packet(const TestContext &test, std::uint32_t video, const char *where,
                        JsonLog &log) noexcept
 {
+    if (test.stage == 0)
+    {
+        log.event("agc_flip_probe", "NOT_REQUIRED", 0,
+                  "driver-only host replay has no separate helper-probe workspace");
+        return false;
+    }
     std::uint32_t stack[kFlipProbeWords]{};
     auto *const mapped = reinterpret_cast<std::uint32_t *>(test.stage + kFlipProbeOffset);
     std::uint32_t written_by_pattern = 0;
@@ -24664,6 +24706,7 @@ constexpr RunnerTest kRunnerTests[] = {
     // through the driver's swapchain. The corner set draws half the target, so
     // the readback sees the clear's colour in the other half.
     {"c1-triangle", "b8-corner", run_vulkan_present_frames},
+    {"c1-readback", "b8-corner", run_vulkan_display_readback},
 #endif
 };
 constexpr std::uint32_t kRunnerTestCount = std::size(kRunnerTests);

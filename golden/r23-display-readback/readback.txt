@@ -1,0 +1,1 @@
+PID 229: four acquired images copied pixel-exactly and presented; regression PASS

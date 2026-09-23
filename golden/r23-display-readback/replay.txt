@@ -1,0 +1,21 @@
+/home/mihawk/Desktop/PS5_Homebrews/PS5_Vulkan/build/r23-replay-q39qz8fa
+/home/mihawk/Desktop/PS5_Homebrews/PS5_Vulkan/golden/r23-display-readback/run-1.json: register defaults from m2-solid-1.json, the same run
+c1-triangle: captured flip counter seed 1
+submission.dump c1-triangle frame 0 draw: identical to c1-triangle-1.json: 18 packets, 6 register tables
+submission.dump c1-triangle frame 0 flip: identical to c1-triangle-2.json: 4 packets, 0 register tables
+submission.dump c1-triangle frame 1 draw: identical to c1-triangle-3.json: 18 packets, 6 register tables
+submission.dump c1-triangle frame 1 flip: identical to c1-triangle-4.json: 4 packets, 0 register tables
+submission.dump c1-triangle frame 2 draw: identical to c1-triangle-5.json: 18 packets, 6 register tables
+submission.dump c1-triangle frame 2 flip: identical to c1-triangle-6.json: 4 packets, 0 register tables
+submission.dump c1-triangle frame 3 draw: identical to c1-triangle-7.json: 18 packets, 6 register tables
+submission.dump c1-triangle frame 3 flip: identical to c1-triangle-8.json: 4 packets, 0 register tables
+/home/mihawk/Desktop/PS5_Homebrews/PS5_Vulkan/golden/r23-display-readback/run-1.json: register defaults from m2-solid-1.json, the same run
+c1-readback: captured flip counter seed 8
+submission.dump c1-readback frame 0 draw: identical to c1-readback-1.json: 18 packets, 6 register tables
+submission.dump c1-readback frame 0 flip: identical to c1-readback-2.json: 4 packets, 0 register tables
+submission.dump c1-readback frame 1 draw: identical to c1-readback-3.json: 18 packets, 6 register tables
+submission.dump c1-readback frame 1 flip: identical to c1-readback-4.json: 4 packets, 0 register tables
+submission.dump c1-readback frame 2 draw: identical to c1-readback-5.json: 18 packets, 6 register tables
+submission.dump c1-readback frame 2 flip: identical to c1-readback-6.json: 4 packets, 0 register tables
+submission.dump c1-readback frame 3 draw: identical to c1-readback-7.json: 18 packets, 6 register tables
+submission.dump c1-readback frame 3 flip: identical to c1-readback-8.json: 4 packets, 0 register tables

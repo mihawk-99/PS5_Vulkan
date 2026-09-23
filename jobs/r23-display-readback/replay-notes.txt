@@ -1,0 +1,15 @@
+The first complete host runner replay reached all eight submissions, then
+segfaulted in the optional flip_probe_packet diagnostic. Debugger backtrace:
+flip_probe_packet -> run_vulkan_present_frames_impl -> run_linked_agc_canary.
+Driver-only replay does not allocate test.stage; the optional probe wrote at
+stage + 0x4000. It now reports NOT_REQUIRED when that workspace is absent.
+The console allocates it, so its probe path remains unchanged.
+
+The next comparison found a stale initial flip counter in the replay metadata:
+driver_replay_text always starts at zero, but this battery runs m2-solid before
+C1, and its optional flip helper also advances the process counter. replay.py
+now seeds the existing host model from the first captured flip's counter word.
+This is recorded process state, not a command comparison tolerance. Captured
+words, addresses and register tables remain unchanged. All sixteen captured
+submissions now compare exactly. The initial failures remain in ignored build
+logs (r23-replay.log, r23-host-debug.log, r23-replay-fixed.log).
