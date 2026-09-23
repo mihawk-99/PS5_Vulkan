@@ -4,7 +4,7 @@ Volatile by design. Keep this file under about 120 lines. Specifications are in
 `docs/VULKAN_PROBE_PLAN.md`; measurements are in `docs/M5_PHASE_C.md` and
 `docs/HARDWARE_FINDINGS.md`.
 
-_Updated: 2026-09-23 (R40)_
+_Updated: 2026-09-23 (R47)_
 
 ## Now
 **vkQuake performance is the priority; no CTS work.** Rounds R33-R40 this
@@ -29,9 +29,15 @@ through m6-r40-*):
   wait and FPS follows work. E1M1 55.76 FPS, start map 33.08 (was 29.58/19.72
   at R29). The console's runner title currently holds the R37 baseline build.
 
-Next: split the application's ~17 ms; the start map's ~11.5 ms of CPU mip
-blits (2:1 box fast path or GPU blit); then the 120 Hz mode at swapchain
-creation (enumerate, restore, fall back, report truthfully).
+R41-R47 (jobs/r42-parallel-blit, r43-hitch-recorder, r46-nir-cache,
+r47-shipped-cache): blits resampled on five threads (walking the start map
+52-55 FPS, runner blit/mip/resolve tests identical); a per-frame hitch report;
+the internal NIR cache landed (warm launches compile nothing); one cache
+directory per build, 0777 so the port can harvest and ship it. The owner's New
+Game stutter was the port's unbuffered console stream, now fixed there.
+
+Next: the application's ~17 ms; then the 120 Hz mode at swapchain creation
+(enumerate, restore, fall back, report truthfully).
 
 ## Standing work
 - Graphics R7 rounds 1-4, R8 dynamic depth bias, the first batch's R9 (push
