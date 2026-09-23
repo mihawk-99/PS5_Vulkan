@@ -1,0 +1,6 @@
+The first host replay assigned the query-copy buffer and the counter pool in reverse order because their allocations have equal size. The generic replay names the pool first; this whole runner probe allocates its copy buffer first, unlike the standalone check-driver arm. replay.py moves the pool allocation metadata after the other regions for this case. No command word, comparison tolerance or golden changed. The rerun matches exactly.
+
+Initial comparison, retained:
+captured-frames.dump v0-query-full full: DIFFERENT from v0-query-full-1.json
+  packet at word 0: 0xc0024600 0x00000115 0x00030000 0x00000002 (console 0xc0024600 0x00000115 0x00034000 0x00000002)
+  packet at word 31: 0xc0024600 0x00000115 0x00030008 0x00000002 (console 0xc0024600 0x00000115 0x00034008 0x00000002)

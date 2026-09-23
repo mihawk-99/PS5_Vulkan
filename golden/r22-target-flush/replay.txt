@@ -1,0 +1,14 @@
+captured-frames.dump v0-two-passes one pass: identical to v0-two-passes-1.json: 17 packets, 6 register tables
+captured-frames.dump v0-two-passes two passes: identical to v0-two-passes-2.json: 32 packets, 12 register tables
+captured-frames.dump v0-two-passes two passes, resolve between, step 1 of 2: identical to v0-two-passes-3.json: 17 packets, 6 register tables
+captured-frames.dump v0-two-passes two passes, resolve between, step 2 of 2: identical to v0-two-passes-4.json: 17 packets, 6 register tables
+captured-frames.dump v0-subpass v0-subpass, step 1 of 2: identical to v0-subpass-1.json: 20 packets, 9 register tables
+captured-frames.dump v0-subpass v0-subpass, step 2 of 2: identical to v0-subpass-2.json: 9 packets, 3 register tables
+captured-frames.dump c4-rtt draw 1, step 1 of 2: identical to c4-rtt-1.json: 8 packets, 3 register tables
+captured-frames.dump c4-rtt draw 1, step 2 of 2: identical to c4-rtt-2.json: 12 packets, 3 register tables
+captured-frames.dump v0-query-full full: identical to v0-query-full-1.json: 10 packets, 3 register tables
+captured-frames.dump v0-timestamp-driver timestamp: identical to v0-timestamp-driver-1.json: 10 packets, 3 register tables
+captured-frames.dump c8-resolve one sample, no resolve: identical to c8-resolve-1.json: 11 packets, 3 register tables
+captured-frames.dump c8-resolve four samples, no resolve: identical to c8-resolve-2.json: 11 packets, 3 register tables
+captured-frames.dump c8-resolve four samples, resolved: identical to c8-resolve-3.json: 11 packets, 3 register tables
+captured-frames.dump c8-resolve one-sample reference: identical to c8-resolve-4.json: 11 packets, 3 register tables

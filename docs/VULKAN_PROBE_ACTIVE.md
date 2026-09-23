@@ -29,27 +29,9 @@ passed PS5 probes. Port PID 208 presented past those three old failures, then
 named a three-element descriptor array and padded pitch 256. Its evidence is
 ../PS5_vkQuake/evidence/m2-r16-map-recording.
 
-R17 now passes PS5 PID 209: 104 PASS, zero FAIL. Three distinct sampled images
-survive full writes, copies, partial updates and later source changes; all
-256 output texels match, as does the scalar regression. Two exact replays,
-title closed, count=0 verified. Host checks assert all three emitted addresses.
-R17 archive aad0ebc7…; full gate/port/template results and the cache-aware
-capability-test correction are recorded in jobs/r17-descriptor-array.
-R18 identified by port PID 210: 224x195 RGBA8, eight mips, one layer, 2D,
-pitch 256. Array refusal absent; padded mip descriptor remains. Gates/port scan
-PASS, two trace reads match, console idle.
-R18 now passes PID 214: 531 PASS, zero FAIL; all 19 mip frames fully match,
-21 exact replays. Row mip offsets are reverse-order; 2D chains supply pitch.
-Padded 224x195/8 and 32x36/6, aligned 256x256/5, and C4 single-level pass.
-Archive 14,434,994 bytes, SHA-256 cef1d817…; 21 targeted host arms, eleven
-full gates, port gates/scan and template pass. Recorder-only correction also
-passes lint/unit/runner checks. Failed PID 211 and pixel-only PID 213 retained;
-PID 212 was a wrong queue filename, closed without an R18 conclusion.
-Goldens: golden/r18-padded-mips-complete; jobs/r18-padded-mips/README.md.
-Port PID 215 now presents past R17/R18, then refuses 32-bit indices in
-ps5vk_cmd_draw during Necropolis map recording. Port commit 1c65915 and
-evidence/m2-r18-map-recording; trace reads/PID match, count=0. Cache: 532 hits,
-zero SPIR-V compiles.
+R17 descriptor arrays and R18 padded mip chains pass on console. Their complete
+readbacks/replays and failed attempts are retained in jobs/r17-descriptor-array
+and jobs/r18-padded-mips. R18 PID 214: 531 PASS, 19 mip frames, 21 exact replays.
 R19 now passes PID 216: 257 PASS, zero FAIL; three UINT32 full-frame pixel
 checks and UINT16 before/after regression. Five streams replay exactly.
 Each draw writes its index size; bounds and firstIndex use the element width.
@@ -73,8 +55,14 @@ PID 222 averages 509.54 MiB target flushes/frame, 7.87 ms flush, 15.20 ms
 queue, 2.85 ms native-submit/marker and 7.79 ms flip waiting (overlapping
 metrics). Archive dae28c8a…; 170 arms/cache checks, eleven gates, port and
 template relinks pass. Two R20 streams replay exactly with profiling enabled.
-See jobs/r21-profile. Next: remove repeated target flushes, preserve waits,
-then run repeated-pass/subpass/query pixel probes and measure the game again.
+See jobs/r21-profile. R22 now skips identical target address/size entries within
+one flush, preserving each step and every wait/barrier/copy boundary. PID 224:
+1,043 PASS, zero FAIL, 14 exact replays; incomplete timeout PID 223 retained.
+Host 170/cache, eleven gates, port/template PASS. Archive b95beefd….
+Game PID 225 ran 300 seconds without error: 6,557 presents. First 27 intervals
+reduce flush 7.872 -> 5.788 ms and 509.54 -> 373.73 MiB/frame; flip wait grows,
+FPS remains about 20–30. No FPS improvement claimed. jobs/r22-target-flush.
+Next: port normal quit/map/config validation, then measured rendering costs.
 ## Standing work
 - Graphics R7 rounds 1-4, R8 dynamic depth bias, the first batch's R9 (push
   pointers), and the R4 clear/refusal coverage are in `docs/M5_PHASE_C.md`; the

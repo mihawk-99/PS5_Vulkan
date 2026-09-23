@@ -8891,3 +8891,19 @@ and 7.79 ms flip waiting. Flush and submit measurements are included in queue
 time; this is not a sum of independent GPU timings. The engine registers its
 world color target again for UI, motivating duplicate-flush removal while
 preserving every GPU barrier, marker wait and CPU-copy boundary.
+
+## 2026-09-23 — R22 duplicate target flush removal
+
+Identical address/byte ranges are evicted once per flush operation; all distinct
+ranges, step boundaries, markers and CPU copies remain. PID 224 completes seven
+cases, 1,043 PASS / zero FAIL; 14 exact replays. The query-copy runner allocates
+equal-size copy storage before the counter pool; replay metadata now reflects
+that order without changing command words. PID 223 timed out during final
+resolve readback and remains an incomplete capture, not a passing battery.
+
+Archive b95beefd…; explicit build, 170 driver/cache checks, eleven gates, port
+five gates/shader scan and template relink PASS. Port PID 225 runs 300 seconds,
+6,557 presents, no reported game/audio error. Flush cost falls 7.872 -> 5.788 ms
+and 509.54 -> 373.73 MiB/frame, but increased flip wait leaves FPS around 20–30.
+No FPS gain claimed. Both trace reads and deployed ELF match; PID correlated,
+closed and idle verified. See jobs/r22-target-flush and its retained goldens.

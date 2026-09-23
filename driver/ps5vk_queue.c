@@ -82,7 +82,27 @@ ps5vk_agc_out_of_space(struct ps5vk_agc_command_buffer *buffer, uint32_t words, 
    return 0;
 }
 
-/* Evicts the CPU cache lines of every colour target of a submission. */
+/* A target may be registered by several passes or query writes. Between
+ * entries in one flush operation no GPU or CPU copy runs, so an identical
+ * range needs eviction only once. Keep all records for their other users. */
+static bool
+ps5vk_target_already_flushed(const struct vk_queue_submit *submit, uint32_t buffer_index,
+                              const struct ps5vk_render_target *target)
+{
+   for (uint32_t i = 0; i <= buffer_index; i++) {
+      const struct ps5vk_cmd_buffer *const cmd_buffer =
+         container_of(submit->command_buffers[i], struct ps5vk_cmd_buffer, vk);
+      util_dynarray_foreach (&cmd_buffer->targets, struct ps5vk_render_target, earlier) {
+         if (i == buffer_index && earlier == target)
+            return false;
+         if (earlier->address == target->address && earlier->bytes == target->bytes)
+            return true;
+      }
+   }
+   return false;
+}
+
+/* Evicts every distinct target range, before and after each submission step. */
 static void
 ps5vk_queue_flush_targets(struct ps5vk_queue *queue, const struct vk_queue_submit *submit)
 {
@@ -91,6 +111,8 @@ ps5vk_queue_flush_targets(struct ps5vk_queue *queue, const struct vk_queue_submi
       const struct ps5vk_cmd_buffer *const cmd_buffer =
          container_of(submit->command_buffers[i], struct ps5vk_cmd_buffer, vk);
       util_dynarray_foreach (&cmd_buffer->targets, struct ps5vk_render_target, target) {
+         if (ps5vk_target_already_flushed(submit, i, target))
+            continue;
          ps5vk_flush_cpu_cache(target->address, target->bytes);
          if (queue->profile.enabled)
             queue->profile.flush_bytes += target->bytes;

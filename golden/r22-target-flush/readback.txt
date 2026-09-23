@@ -1,0 +1,513 @@
+{
+  "pid": 224,
+  "ended": true,
+  "raw_sha256": "137c228df39e46562801711b41584b1fd4dd81c82276576e8da34c5c66e9a2bc",
+  "statuses": {
+    "PASS": 1043,
+    "INFO": 221,
+    "NOT_REQUIRED": 28,
+    "ARMED": 1,
+    "WARN": 1
+  },
+  "records": [
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "m2-solid"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_two_pass_shape",
+      "status": "INFO",
+      "result": 0,
+      "detail": "one pass"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_two_pass_shape",
+      "field": "first_checksum",
+      "value": "0x9194688c3e430000"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_two_pass_shape",
+      "field": "last_checksum",
+      "value": "0x9194688c3e430000"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_two_pass_shape",
+      "field": "frames",
+      "value": 40
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_two_pass_shape",
+      "status": "PASS",
+      "result": 0,
+      "detail": "the first and last frames of the shape are the same image"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_two_pass_shape",
+      "status": "INFO",
+      "result": 0,
+      "detail": "two passes"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_two_pass_shape",
+      "field": "first_checksum",
+      "value": "0x9194688c3e430000"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_two_pass_shape",
+      "field": "last_checksum",
+      "value": "0x9194688c3e430000"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_two_pass_shape",
+      "field": "frames",
+      "value": 40
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_two_pass_shape",
+      "status": "PASS",
+      "result": 0,
+      "detail": "the first and last frames of the shape are the same image"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_two_pass_shape",
+      "status": "INFO",
+      "result": 0,
+      "detail": "two passes, resolve between"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_two_pass_shape",
+      "field": "first_checksum",
+      "value": "0xb2b5b08ff1f18000"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_two_pass_shape",
+      "field": "last_checksum",
+      "value": "0xb2b5b08ff1f18000"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_two_pass_shape",
+      "field": "frames",
+      "value": 40
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_two_pass_shape",
+      "status": "PASS",
+      "result": 0,
+      "detail": "the first and last frames of the shape are the same image"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_two_passes",
+      "status": "PASS",
+      "result": 0,
+      "detail": "3 of 3 shapes recorded 40 frames each and read back the same image twice"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "v0-two-passes"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "frame",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_subpass",
+      "field": "first_wrong",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "wrong_x",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "wrong_y",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "writer_samples",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "reader_samples",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "of",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_subpass",
+      "status": "PASS",
+      "result": 0,
+      "detail": "subpass 1 read subpass 0's attachment, band for band"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "frame",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_subpass",
+      "field": "first_wrong",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "wrong_x",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "wrong_y",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "writer_samples",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "reader_samples",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "of",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_subpass",
+      "status": "PASS",
+      "result": 0,
+      "detail": "subpass 1 read subpass 0's attachment, band for band"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_subpass",
+      "status": "PASS",
+      "result": 0,
+      "detail": "both frames of the two-subpass pass drew, and the second attachment holds the first's bands"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "v0-subpass"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_c4_rtt",
+      "status": "PASS",
+      "result": 0,
+      "detail": "1 of 1 frame sampled the image it rendered into"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "c4-rtt"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_query_copy",
+      "field": "copied",
+      "value": "0x7e9000"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_query_copy",
+      "field": "available",
+      "value": "0x1"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_query_copy",
+      "field": "samples",
+      "value": "0x7e9000"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_query_copy",
+      "status": "PASS",
+      "result": 0,
+      "detail": "vkCmdCopyQueryPoolResults wrote the same result vkGetQueryPoolResults answers"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_query_driver",
+      "status": "PASS",
+      "result": 0,
+      "detail": "a query around the full region counted 8294400 samples of the 8294400 one sample per pixel predicts"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "v0-query-full"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_timestamp_driver",
+      "field": "before",
+      "value": "0x649b2b2645f"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_timestamp_driver",
+      "field": "after",
+      "value": "0x649b2b29247"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_timestamp_driver",
+      "field": "ticks",
+      "value": 11752
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_timestamp_driver",
+      "field": "copied",
+      "value": "0x649b2b29247"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_timestamp_driver",
+      "field": "available",
+      "value": "0x1"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_timestamp_driver",
+      "status": "PASS",
+      "result": 0,
+      "detail": "the two writes read 6913600414815 then 6913600426567 ticks, 11752 apart"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "v0-timestamp-driver"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_resolve",
+      "field": "resolved_checksum",
+      "value": "0xb2b5b08ff1f18000"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_resolve",
+      "field": "reference_checksum",
+      "value": "0xb2b5b08ff1f18000"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_resolve",
+      "field": "first_differing_row",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_resolve",
+      "field": "differing_rows",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_resolve",
+      "field": "of_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_resolve",
+      "field": "first_differing_column",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_resolve",
+      "field": "differing_columns",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_resolve",
+      "field": "of_columns",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_resolve",
+      "field": "words",
+      "value": 8388608
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_resolve",
+      "field": "prefix_words_compared",
+      "value": 4096
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_resolve",
+      "field": "differing_words",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_resolve",
+      "field": "first_differing_word",
+      "value": 4096
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_resolve",
+      "field": "max_channel_error",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_resolve",
+      "status": "PASS",
+      "result": 0,
+      "detail": "the resolved four-sample frame equals the one-sample one, word for word"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "c8-resolve"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "runner_summary",
+      "field": "ran",
+      "value": 7
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_summary",
+      "status": "PASS",
+      "result": 0,
+      "detail": "7 of 7 queued tests passed"
+    }
+  ]
+}

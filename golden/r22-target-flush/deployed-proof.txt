@@ -1,0 +1,32 @@
+{
+  "two_reads_identical": true,
+  "deployed_elf_sha256": "5aac0d38ec0307de262756b1e1392f44f214311d599136c12bec2965d68193ad",
+  "deployed_bytes": 17749616,
+  "load_segments": [
+    {
+      "offset": 16384,
+      "bytes": 6310631,
+      "sha256": "a2de1513c317fe5a1e246bb51d1c487e9fc822f1b31c595e251b96a0cced45a1"
+    },
+    {
+      "offset": 6340608,
+      "bytes": 10368096,
+      "sha256": "6441333548237fa1bddb83067811b4380b607930f8b34bb1a2ed3df5e8204ea6"
+    },
+    {
+      "offset": 16711680,
+      "bytes": 422616,
+      "sha256": "bcafb1ea60e6827669101ef152d83cdcc351570327b22fdb702abc02eff4af91"
+    },
+    {
+      "offset": 17432576,
+      "bytes": 11224,
+      "sha256": "abed60834016cb0b283cdda934d6117e81d9dff9340010df5455cc1b5df11462"
+    },
+    {
+      "offset": 17454960,
+      "bytes": 294288,
+      "sha256": "44d9e9720811bdfc82098dd787a2244309ce8e8371400d9d3a4aa299574afc59"
+    }
+  ]
+}

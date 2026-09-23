@@ -1,0 +1,10 @@
+hold 1
+capture
+m2-solid
+v0-two-passes
+v0-subpass
+c4-rtt
+v0-query-full
+v0-timestamp-driver
+c8-resolve
+exit
