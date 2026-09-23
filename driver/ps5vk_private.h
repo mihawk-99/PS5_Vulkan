@@ -188,6 +188,11 @@ struct ps5vk_pipeline_cache {
  * first PS5VK_MAX_SUBMISSION_STEPS of them, which is what the capture reports. */
 #define PS5VK_MAX_SUBMISSION_STEPS 8
 
+struct ps5vk_queue_profile {
+   bool enabled;
+   uint64_t since, frames, steps, queue_ns, flush_ns, gpu_ns, flip_ns, flush_bytes;
+};
+
 struct ps5vk_queue {
    struct vk_queue vk;
    /* The GPU-visible submission buffer (ps5vk_queue.c); its last word is the
@@ -217,6 +222,7 @@ struct ps5vk_queue {
     * queue, and grown over submissions (ps5vk_queue.c). */
    uint32_t *step_capture;
    size_t step_capture_words;
+   struct ps5vk_queue_profile profile;
 };
 
 /* One AGC register-table record: register offset and value. */

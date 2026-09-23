@@ -3190,3 +3190,14 @@ PID 219 and rejects the old PID 218 capture. Reproduce with
 jobs/r20-subpass/queue.txt and python3 jobs/r20-subpass/check.py
 Klog_Logs/r20-subpass.log; evidence in golden/r20-subpass. This retires the
 quarter-width finding, without asserting all game visuals are correct.
+
+## 2026-09-23: vkQuake target cache work is measurable frame cost
+
+R21 PID 222 measures an average 509.54 MiB of target CPU cache eviction per
+frame, taking 7.87 ms of 15.20 ms queue wall time. Native submit/marker waiting
+is 2.85 ms, flip waiting 7.79 ms; the first two components overlap queue time.
+27 intervals cover 6,334 frames after the first present. These are CPU wall
+timings, not GPU shader timestamps. jobs/r21-profile/baseline.txt preserves
+all intervals and identity. Repeated registrations of a target are flushed
+repeatedly without intervening work; eliminating those is the next measured
+candidate, not yet a claimed performance improvement.

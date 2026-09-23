@@ -84,14 +84,20 @@ ps5vk_agc_out_of_space(struct ps5vk_agc_command_buffer *buffer, uint32_t words, 
 
 /* Evicts the CPU cache lines of every colour target of a submission. */
 static void
-ps5vk_queue_flush_targets(const struct vk_queue_submit *submit)
+ps5vk_queue_flush_targets(struct ps5vk_queue *queue, const struct vk_queue_submit *submit)
 {
+   const uint64_t started = queue->profile.enabled ? os_time_get_nano() : 0;
    for (uint32_t i = 0; i < submit->command_buffer_count; i++) {
       const struct ps5vk_cmd_buffer *const cmd_buffer =
          container_of(submit->command_buffers[i], struct ps5vk_cmd_buffer, vk);
-      util_dynarray_foreach (&cmd_buffer->targets, struct ps5vk_render_target, target)
+      util_dynarray_foreach (&cmd_buffer->targets, struct ps5vk_render_target, target) {
          ps5vk_flush_cpu_cache(target->address, target->bytes);
+         if (queue->profile.enabled)
+            queue->profile.flush_bytes += target->bytes;
+      }
    }
+   if (queue->profile.enabled)
+      queue->profile.flush_ns += os_time_get_nano() - started;
 }
 
 /* One split of a submission and the stream offset its step ends at: the words
@@ -664,7 +670,7 @@ ps5vk_queue_run_step(struct ps5vk_queue *queue, const struct vk_queue_submit *su
       queue->steps[queue->step_count].words = word_count;
       queue->step_count++;
    }
-   ps5vk_queue_flush_targets(submit);
+   ps5vk_queue_flush_targets(queue, submit);
    ps5vk_flush_cpu_cache(stream + start, word_count * sizeof(uint32_t));
    ps5vk_flush_cpu_cache(marker, sizeof(*marker));
 
@@ -672,6 +678,7 @@ ps5vk_queue_run_step(struct ps5vk_queue *queue, const struct vk_queue_submit *su
       .words = stream + start,
       .word_count = word_count,
    };
+   const uint64_t started = queue->profile.enabled ? os_time_get_nano() : 0;
    int32_t result = sceAgcDriverSubmitDcb(&description);
    if (result != 0)
       return vk_queue_set_lost(&queue->vk, "sceAgcDriverSubmitDcb failed: 0x%08x",
@@ -683,7 +690,11 @@ ps5vk_queue_run_step(struct ps5vk_queue *queue, const struct vk_queue_submit *su
    for (unsigned poll = 0; poll < PS5VK_MARKER_POLLS; poll++) {
       ps5vk_flush_cpu_cache(marker, sizeof(*marker));
       if (*marker == value) {
-         ps5vk_queue_flush_targets(submit);
+         if (queue->profile.enabled) {
+            queue->profile.steps++;
+            queue->profile.gpu_ns += os_time_get_nano() - started;
+         }
+         ps5vk_queue_flush_targets(queue, submit);
          return VK_SUCCESS;
       }
       sceKernelUsleep(PS5VK_MARKER_POLL_MICROSECONDS);
@@ -1003,6 +1014,7 @@ ps5vk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
    struct ps5vk_queue *const queue = container_of(vk_queue, struct ps5vk_queue, vk);
    struct vk_device *const device = vk_queue->base.device;
 
+   const uint64_t started = queue->profile.enabled ? os_time_get_nano() : 0;
    VkResult result = vk_sync_wait_many(device, submit->wait_count, submit->waits,
                                        VK_SYNC_WAIT_COMPLETE, UINT64_MAX);
    if (result != VK_SUCCESS)
@@ -1012,7 +1024,10 @@ ps5vk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
       if (result != VK_SUCCESS)
          return result;
    }
-   return vk_sync_signal_many(device, submit->signal_count, submit->signals);
+   result = vk_sync_signal_many(device, submit->signal_count, submit->signals);
+   if (queue->profile.enabled)
+      queue->profile.queue_ns += os_time_get_nano() - started;
+   return result;
 }
 
 /* The flip mode the runner flips with. */
@@ -1030,6 +1045,7 @@ ps5vk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
 VkResult
 ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, int64_t marker)
 {
+   const uint64_t started = queue->profile.enabled ? os_time_get_nano() : 0;
    uint32_t *const stream = queue->submission.address;
    const size_t capacity = queue->submission.bytes / sizeof(uint32_t) - 1;
    struct ps5vk_agc_command_buffer command = {
@@ -1073,8 +1089,27 @@ ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, in
    uint64_t status[PS5VK_FLIP_STATUS_WORDS];
    for (unsigned wait = 0; wait < PS5VK_FLIP_WAITS; wait++) {
       if (sceVideoOutGetFlipStatus(video, status) == 0 &&
-          (int64_t)status[PS5VK_FLIP_STATUS_MARKER] >= marker)
+          (int64_t)status[PS5VK_FLIP_STATUS_MARKER] >= marker) {
+         struct ps5vk_queue_profile *const p = &queue->profile;
+         if (p->enabled) {
+            const uint64_t now = os_time_get_nano();
+            p->frames++;
+            p->flip_ns += now - started;
+            if (p->since == 0 || now - p->since >= UINT64_C(10000000000)) {
+               if (p->since != 0) {
+                  const double ms = 1.0 / ((double)p->frames * 1000000.0);
+                  fprintf(stderr, "[ps5vk] profile frames=%" PRIu64 " steps/frame=%.2f "
+                          "queue_ms=%.3f flush_ms=%.3f gpu_ms=%.3f flip_ms=%.3f "
+                          "flush_MiB/frame=%.2f\n", p->frames,
+                          (double)p->steps / p->frames, p->queue_ns * ms, p->flush_ns * ms,
+                          p->gpu_ns * ms, p->flip_ns * ms,
+                          (double)p->flush_bytes / (p->frames * 1048576.0));
+               }
+               *p = (struct ps5vk_queue_profile){.enabled = true, .since = now};
+            }
+         }
          return VK_SUCCESS;
+      }
       sceVideoOutWaitVblank(video);
    }
    return vk_queue_set_lost(&queue->vk,
@@ -1397,6 +1432,12 @@ ps5vk_queue_init(struct ps5vk_device *device, struct ps5vk_queue *queue,
    VkResult result = vk_queue_init(&queue->vk, &device->vk, info, 0);
    if (result != VK_SUCCESS)
       return result;
+   /* Opt-in timing only; no command words or synchronization behavior change. */
+   FILE *profile = fopen("/app0/ps5vk-profile.txt", "rb");
+   queue->profile = (struct ps5vk_queue_profile){.enabled = profile != NULL ||
+                                                 getenv("PS5VK_PROFILE") != NULL};
+   if (profile)
+      fclose(profile);
    queue->marker_value = 0;
    queue->last_words = 0;
    queue->last_stream = NULL;

@@ -23,14 +23,7 @@ presentation-return timings, not optical measurements. Both traces were read
 twice and PID-correlated; console idle. jobs/shader-cache/README.md and its
 cold/warm-startup.txt contain exact evidence and reproduction.
 
-**Verification:** explicit driver build, zero warnings; 167 check-driver arms
-PASS plus key/invalidation/corruption/fresh-process package tests; eleven gates
-PASS; port five gates PASS; template relink PASS. Archive 14,425,130 bytes,
-SHA-256 e089e060… . PS5 probe PIDs 200 and 201 each returned 241 PASS/zero FAIL;
-twelve submissions replay exactly, goldens in golden/shader-cache-cold and
--warm. Driver probe stdout is not a hit-count witness; vkQuake's trace is.
-
-**R14–R19 accepted; vkQuake relaunch next.** R14 2925ff6 (single-draw stride), R15
+**R14–R19 accepted; game runs sustained demos.** R14 2925ff6 (single-draw stride), R15
 b838832 (independent dynamic UBO offsets), R16 c7f6f95 (mip-tail XOR/blits)
 passed PS5 probes. Port PID 208 presented past those three old failures, then
 named a three-element descriptor array and padded pitch 256. Its evidence is
@@ -40,11 +33,8 @@ R17 now passes PS5 PID 209: 104 PASS, zero FAIL. Three distinct sampled images
 survive full writes, copies, partial updates and later source changes; all
 256 output texels match, as does the scalar regression. Two exact replays,
 title closed, count=0 verified. Host checks assert all three emitted addresses.
-Full driver check initially 169/170 PASS; a cache hit skipped compiler stderr
-expected by the capability test. That test now disables cache and its three
-arms pass. Eleven gates, port five gates/scan and template relink PASS.
-Archive 14,434,234 bytes, SHA-256 aad0ebc7… . jobs/r17-descriptor-array and
-golden/r17-descriptor-array contain evidence/reproduction.
+R17 archive aad0ebc7…; full gate/port/template results and the cache-aware
+capability-test correction are recorded in jobs/r17-descriptor-array.
 R18 identified by port PID 210: 224x195 RGBA8, eight mips, one layer, 2D,
 pitch 256. Array refusal absent; padded mip descriptor remains. Gates/port scan
 PASS, two trace reads match, console idle.
@@ -75,10 +65,16 @@ First frame's two submissions replay exactly. No production driver change.
 See jobs/r20-subpass and golden/r20-subpass; failed PID 218 retained.
 Next: port input/audio adapters and sustained game verification.
 
-**Port M2 met:** PID 197, QueuePresent success and human-confirmed Quake
-menu/console; port evidence/m2-first-frame. M3–M6 remain open. Input/audio
-audio adapter remains a stub; input work is in the port. The hardware line
-failure remains separate. No visual settings were changed.
+**Port:** M2 human-confirmed earlier; input adapter opens DualSense. Audio
+now feeds native 48 kHz stereo PCM, PID 222 alive 300 seconds, 6,335 presents,
+zero refusal/Quake/audio errors. Port d537cbc; physical/audible checks pending.
+**R21 profiler verified:** default-off queue timing leaves packets unchanged.
+PID 222 averages 509.54 MiB target flushes/frame, 7.87 ms flush, 15.20 ms
+queue, 2.85 ms native-submit/marker and 7.79 ms flip waiting (overlapping
+metrics). Archive dae28c8a…; 170 arms/cache checks, eleven gates, port and
+template relinks pass. Two R20 streams replay exactly with profiling enabled.
+See jobs/r21-profile. Next: remove repeated target flushes, preserve waits,
+then run repeated-pass/subpass/query pixel probes and measure the game again.
 ## Standing work
 - Graphics R7 rounds 1-4, R8 dynamic depth bias, the first batch's R9 (push
   pointers), and the R4 clear/refusal coverage are in `docs/M5_PHASE_C.md`; the

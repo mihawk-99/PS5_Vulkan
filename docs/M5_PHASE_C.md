@@ -8864,3 +8864,30 @@ PID 219 and rejects the old PID 218 capture. Reproduce with
 jobs/r20-subpass/queue.txt and python3 jobs/r20-subpass/check.py
 Klog_Logs/r20-subpass.log; evidence in golden/r20-subpass. This retires the
 quarter-width finding, without asserting all game visuals are correct.
+
+## 2026-09-23: R21 opt-in queue timings for vkQuake
+
+Added default-off wall-clock counters around queue submission, target CPU
+cache eviction, native submission/completion-marker wait and flip wait. Each
+report averages approximately ten seconds, discarding pre-first-present work.
+/app0/ps5vk-profile.txt or PS5VK_PROFILE enables it. No command packets or
+synchronization change. Two captured R20 subpass streams replay exactly with
+profiling enabled; host dump retains the second frame but only frame zero is
+compared to the console capture. jobs/r21-profile documents the measurements.
+
+Explicit driver build PASS; archive 14,447,322 bytes, SHA-256
+dae28c8ad1705cc9b6b78ff3874d53bd3b2aa8c0ece10725def68584bb6f3484.
+170 host/link arms and shader-cache checks PASS; eleven gates PASS. An initial
+targeted command used the nonexistent c7_mip arm and stopped before gates;
+the full named check subsequently passed. Both consumers relink; port five
+gates and scan pass. PID 222, identity 87db84a9…, remains alive 300 seconds,
+6,335 presents, no refusal/Quake error. Deployed ELF verified; two final trace
+reads match dbd90d97…, PID correlated, closed and idle. Profiling flag removed.
+Port evidence/m5-audio-profile-run has the complete identity and trace hash.
+
+27 intervals/6,334 profiled frames average 509.54 MiB target cache work per
+frame, 7.87 ms flushing, 15.20 ms total queue time, 2.85 ms native-submit/wait
+and 7.79 ms flip waiting. Flush and submit measurements are included in queue
+time; this is not a sum of independent GPU timings. The engine registers its
+world color target again for UI, motivating duplicate-flush removal while
+preserving every GPU barrier, marker wait and CPU-copy boundary.

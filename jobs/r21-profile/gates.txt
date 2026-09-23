@@ -1,0 +1,13 @@
+lint PASS
+test PASS
+audit-commands PASS
+audit-limits PASS
+audit-formats PASS
+migration PASS
+mip-layout PASS
+psbc-link PASS
+probe-packages PASS
+vulkan-runtime PASS
+runner-cases PASS
+Driver archive: 14,447,322 bytes, SHA-256 dae28c8ad1705cc9b6b78ff3874d53bd3b2aa8c0ece10725def68584bb6f3484.
+170 host/link check arms and shader-cache checks PASS. Port five gates, shader scan and template relink PASS.

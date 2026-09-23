@@ -1,0 +1,53 @@
+{
+  "pid": 222,
+  "build_identity": "87db84a9207568947fc6e21e0c04ba5faf84e8cab4327cacd2501b1213c18ebb",
+  "duration_seconds": 300,
+  "successful_present_counter": 6335,
+  "final_trace_sha256": "dbd90d97308646162132790625b0f428e3d0d40a0e70b761c27af10181682735",
+  "profile_intervals": 27,
+  "profile_frames": 6334,
+  "weighted_per_frame": {
+    "steps/frame": 2.652655509946322,
+    "queue_ms": 15.201564414272182,
+    "flush_ms": 7.871664351120934,
+    "gpu_ms": 2.8520080517840225,
+    "flip_ms": 7.787419955794126,
+    "flush_MiB/frame": 509.5390101041995
+  },
+  "audio_intervals": 27,
+  "last_audio": "PS5 audio: played=12960000 nonzero_blocks=49890 errors=0",
+  "shader_cache_hits": 433,
+  "shader_cache_stores": 99,
+  "refusals": 0,
+  "quake_errors": 0,
+  "harness_closed": true,
+  "idle_verified": true
+}
+
+[ps5vk] profile frames=256 steps/frame=2.16 queue_ms=9.489 flush_ms=6.382 gpu_ms=2.775 flip_ms=5.304 flush_MiB/frame=414.13
+[ps5vk] profile frames=297 steps/frame=2.07 queue_ms=9.014 flush_ms=6.135 gpu_ms=2.671 flip_ms=5.477 flush_MiB/frame=397.71
+[ps5vk] profile frames=296 steps/frame=2.10 queue_ms=9.232 flush_ms=6.234 gpu_ms=2.705 flip_ms=5.594 flush_MiB/frame=404.24
+[ps5vk] profile frames=213 steps/frame=2.99 queue_ms=18.516 flush_ms=8.879 gpu_ms=2.965 flip_ms=9.046 flush_MiB/frame=573.48
+[ps5vk] profile frames=199 steps/frame=3.05 queue_ms=20.200 flush_ms=9.052 gpu_ms=2.800 flip_ms=10.767 flush_MiB/frame=584.87
+[ps5vk] profile frames=199 steps/frame=3.17 queue_ms=20.749 flush_ms=9.422 gpu_ms=2.981 flip_ms=10.259 flush_MiB/frame=609.00
+[ps5vk] profile frames=198 steps/frame=3.00 queue_ms=19.985 flush_ms=8.904 gpu_ms=2.748 flip_ms=11.016 flush_MiB/frame=576.19
+[ps5vk] profile frames=224 steps/frame=2.65 queue_ms=15.464 flush_ms=7.873 gpu_ms=2.805 flip_ms=8.269 flush_MiB/frame=509.31
+[ps5vk] profile frames=291 steps/frame=2.03 queue_ms=8.855 flush_ms=6.027 gpu_ms=2.626 flip_ms=5.858 flush_MiB/frame=390.73
+[ps5vk] profile frames=286 steps/frame=2.19 queue_ms=10.064 flush_ms=6.490 gpu_ms=2.739 flip_ms=5.930 flush_MiB/frame=421.06
+[ps5vk] profile frames=199 steps/frame=3.42 queue_ms=21.809 flush_ms=10.162 gpu_ms=3.293 flip_ms=9.241 flush_MiB/frame=657.26
+[ps5vk] profile frames=198 steps/frame=4.00 queue_ms=24.278 flush_ms=11.873 gpu_ms=4.018 flip_ms=6.826 flush_MiB/frame=768.25
+[ps5vk] profile frames=198 steps/frame=3.34 queue_ms=21.428 flush_ms=9.905 gpu_ms=3.177 flip_ms=9.717 flush_MiB/frame=641.18
+[ps5vk] profile frames=199 steps/frame=3.18 queue_ms=20.774 flush_ms=9.453 gpu_ms=2.989 flip_ms=10.211 flush_MiB/frame=610.93
+[ps5vk] profile frames=203 steps/frame=2.95 queue_ms=18.543 flush_ms=8.763 gpu_ms=2.881 flip_ms=9.430 flush_MiB/frame=566.73
+[ps5vk] profile frames=218 steps/frame=2.81 queue_ms=17.331 flush_ms=8.351 gpu_ms=2.806 flip_ms=9.194 flush_MiB/frame=540.07
+[ps5vk] profile frames=202 steps/frame=3.22 queue_ms=20.572 flush_ms=9.565 gpu_ms=3.093 flip_ms=9.522 flush_MiB/frame=618.97
+[ps5vk] profile frames=248 steps/frame=2.46 queue_ms=13.499 flush_ms=7.297 gpu_ms=2.716 flip_ms=7.615 flush_MiB/frame=472.41
+[ps5vk] profile frames=263 steps/frame=2.26 queue_ms=11.631 flush_ms=6.694 gpu_ms=2.630 flip_ms=7.091 flush_MiB/frame=433.78
+[ps5vk] profile frames=202 steps/frame=2.97 queue_ms=19.550 flush_ms=8.822 gpu_ms=2.757 flip_ms=10.611 flush_MiB/frame=570.48
+[ps5vk] profile frames=225 steps/frame=2.70 queue_ms=16.231 flush_ms=8.024 gpu_ms=2.761 flip_ms=8.762 flush_MiB/frame=519.00
+[ps5vk] profile frames=228 steps/frame=2.67 queue_ms=15.857 flush_ms=7.920 gpu_ms=2.762 flip_ms=8.807 flush_MiB/frame=512.17
+[ps5vk] profile frames=209 steps/frame=2.74 queue_ms=20.241 flush_ms=8.120 gpu_ms=2.808 flip_ms=6.288 flush_MiB/frame=526.56
+[ps5vk] profile frames=297 steps/frame=2.13 queue_ms=9.274 flush_ms=6.312 gpu_ms=2.749 flip_ms=5.395 flush_MiB/frame=409.35
+[ps5vk] profile frames=297 steps/frame=2.12 queue_ms=9.243 flush_ms=6.289 gpu_ms=2.742 flip_ms=5.380 flush_MiB/frame=407.41
+[ps5vk] profile frames=286 steps/frame=2.16 queue_ms=9.925 flush_ms=6.391 gpu_ms=2.695 flip_ms=6.107 flush_MiB/frame=414.34
+[ps5vk] profile frames=203 steps/frame=3.11 queue_ms=20.027 flush_ms=9.242 gpu_ms=2.959 flip_ms=9.923 flush_MiB/frame=597.00
