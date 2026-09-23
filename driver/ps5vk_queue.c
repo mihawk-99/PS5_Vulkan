@@ -859,6 +859,7 @@ ps5vk_queue_run_copy_steps(struct ps5vk_queue *queue, const struct vk_queue_subm
        * and the marker waited for above have already done all the work of
        * (a draw that samples a target this submission rendered into,
        * ps5vk_draw.c). */
+      const uint64_t copy_started = queue->profile.enabled ? os_time_get_nano() : 0;
       for (; at < split_count && split[at].offset == end; at++) {
          const struct ps5vk_memory_copy *const copy = split[at].copy;
          if (copy->resolve) {
@@ -935,6 +936,8 @@ ps5vk_queue_run_copy_steps(struct ps5vk_queue *queue, const struct vk_queue_subm
       }
       if (result != VK_SUCCESS)
          break;
+      if (queue->profile.enabled)
+         queue->profile.copy_ns += os_time_get_nano() - copy_started;
       start = end;
    }
    free(saved);
@@ -1039,6 +1042,8 @@ ps5vk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
    const uint64_t started = queue->profile.enabled ? os_time_get_nano() : 0;
    VkResult result = vk_sync_wait_many(device, submit->wait_count, submit->waits,
                                        VK_SYNC_WAIT_COMPLETE, UINT64_MAX);
+   if (queue->profile.enabled)
+      queue->profile.sync_wait_ns += os_time_get_nano() - started;
    if (result != VK_SUCCESS)
       return result;
    if (submit->command_buffer_count != 0) {
@@ -1046,9 +1051,13 @@ ps5vk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
       if (result != VK_SUCCESS)
          return result;
    }
+   const uint64_t signal_started = queue->profile.enabled ? os_time_get_nano() : 0;
    result = vk_sync_signal_many(device, submit->signal_count, submit->signals);
-   if (queue->profile.enabled)
-      queue->profile.queue_ns += os_time_get_nano() - started;
+   if (queue->profile.enabled) {
+      const uint64_t finished = os_time_get_nano();
+      queue->profile.sync_signal_ns += finished - signal_started;
+      queue->profile.queue_ns += finished - started;
+   }
    return result;
 }
 
@@ -1122,10 +1131,11 @@ ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, in
                   const double ms = 1.0 / ((double)p->frames * 1000000.0);
                   fprintf(stderr, "[ps5vk] profile frames=%" PRIu64 " steps/frame=%.2f "
                           "queue_ms=%.3f flush_ms=%.3f gpu_ms=%.3f flip_ms=%.3f "
-                          "flush_MiB/frame=%.2f\n", p->frames,
+                          "flush_MiB/frame=%.2f copy_ms=%.3f sync_wait_ms=%.3f sync_signal_ms=%.3f\n", p->frames,
                           (double)p->steps / p->frames, p->queue_ns * ms, p->flush_ns * ms,
                           p->gpu_ns * ms, p->flip_ns * ms,
-                          (double)p->flush_bytes / (p->frames * 1048576.0));
+                          (double)p->flush_bytes / (p->frames * 1048576.0),
+                          p->copy_ns * ms, p->sync_wait_ns * ms, p->sync_signal_ns * ms);
                }
                *p = (struct ps5vk_queue_profile){.enabled = true, .since = now};
             }

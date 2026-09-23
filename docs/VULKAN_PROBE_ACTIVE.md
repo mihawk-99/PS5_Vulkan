@@ -23,12 +23,6 @@ presentation-return timings, not optical measurements. Both traces were read
 twice and PID-correlated; console idle. jobs/shader-cache/README.md and its
 cold/warm-startup.txt contain exact evidence and reproduction.
 
-**R14–R19 accepted; game runs sustained demos.** R14 2925ff6 (single-draw stride), R15
-b838832 (independent dynamic UBO offsets), R16 c7f6f95 (mip-tail XOR/blits)
-passed PS5 probes. Port PID 208 presented past those three old failures, then
-named a three-element descriptor array and padded pitch 256. Its evidence is
-../PS5_vkQuake/evidence/m2-r16-map-recording.
-
 R17 descriptor arrays and R18 padded mip chains pass on console. Their complete
 readbacks/replays and failed attempts are retained in jobs/r17-descriptor-array
 and jobs/r18-padded-mips. R18 PID 214: 531 PASS, 19 mip frames, 21 exact replays.
@@ -77,7 +71,12 @@ Evidence: jobs/r26-lod-bias. Port PID 251 scaling works; no FPS gain.
 R27 restores the blend-control assignment removed by cfab0b9. PID 256 reproduces
 full-frame alpha/constant-blend errors; PID 258 passes 285 checks, four exact
 4K alpha frames and constant blend. Five strict replays; 170 host/cache, eleven
-gates, port/template pass. Evidence: jobs/r27-menu-alpha. Game retest running.
+gates, port/template pass. Evidence: jobs/r27-menu-alpha. Port PID 259 verifies
+correct menu/HUD blending in five PNGs and normal exit.
+R28 splits CPU-copy/wait/signal timing. Game PID 261: start copy 24.095 ms,
+E1M1 copy 0.041 ms; both sync operations 0.021 ms each. Full gates/relinks and
+five profiler-enabled strict replays pass. jobs/r28-copy-profile records it.
+Next game bottleneck candidate: exact 2:1 water-mipmap CPU blits.
 ## Standing work
 - Graphics R7 rounds 1-4, R8 dynamic depth bias, the first batch's R9 (push
   pointers), and the R4 clear/refusal coverage are in `docs/M5_PHASE_C.md`; the

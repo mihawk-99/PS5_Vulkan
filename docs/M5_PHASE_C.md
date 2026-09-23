@@ -8989,3 +8989,14 @@ limit. Baseline and final goldens retained; see jobs/r27-menu-alpha/README.md.
 Explicit driver rebuild, 170-arm host/cache suite, eleven gates, port five gates
 and shader scan, template relink pass. Deployed ELF read twice, all five load
 segments match; console closed and idle. Port visual retest is separate.
+
+## 2026-09-23 — R28 CPU copy timing isolates the slow map class
+
+Default-off profiler adds CPU copy/split work and semaphore wait/signal time.
+No command or synchronization change. Game PID 261 completes both 1,200-frame
+phases and normal exit. Start averages 24.095 ms CPU copy, E1M1 0.041 ms; wait
+and signal each 0.021 ms. Metrics overlap queue time as documented. Five R27
+submissions replay exactly with profiling enabled; explicit rebuild, full host/
+cache, eleven gates, port gates/scan and template pass. Deployment and final
+reads/PID verified; fixture/profile removed, console idle.
+Evidence/reproduction: jobs/r28-copy-profile and port m6-copy-profile.

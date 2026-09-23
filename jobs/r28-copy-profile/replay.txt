@@ -1,0 +1,8 @@
+/home/mihawk/Desktop/PS5_Homebrews/PS5_Vulkan/golden/r27-menu-alpha/run-1.json: register defaults from m2-solid-1.json, the same run
+submission.dump r27-menu-alpha-raw menu alpha 128 blend 0: identical to r27-menu-alpha-raw-1.json: 17 packets, 6 register tables
+/home/mihawk/Desktop/PS5_Homebrews/PS5_Vulkan/golden/r27-menu-alpha/run-1.json: register defaults from m2-solid-1.json, the same run
+submission.dump r27-menu-alpha menu alpha 0 blend 1: identical to r27-menu-alpha-1.json: 17 packets, 6 register tables
+submission.dump r27-menu-alpha menu alpha 128 blend 1: identical to r27-menu-alpha-2.json: 17 packets, 6 register tables
+submission.dump r27-menu-alpha menu alpha 255 blend 1: identical to r27-menu-alpha-3.json: 17 packets, 6 register tables
+/home/mihawk/Desktop/PS5_Homebrews/PS5_Vulkan/golden/r27-menu-alpha/run-1.json: register defaults from m2-solid-1.json, the same run
+submission.dump v0-blend-constant constant blend: identical to v0-blend-constant-1.json: 17 packets, 6 register tables

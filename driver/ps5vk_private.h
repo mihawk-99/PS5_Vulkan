@@ -191,6 +191,7 @@ struct ps5vk_pipeline_cache {
 struct ps5vk_queue_profile {
    bool enabled;
    uint64_t since, frames, steps, queue_ns, flush_ns, gpu_ns, flip_ns, flush_bytes;
+   uint64_t copy_ns, sync_wait_ns, sync_signal_ns;
 };
 
 struct ps5vk_queue {
