@@ -8508,3 +8508,16 @@ closure. Two ELF reads and every loadable byte matched the build. Fourteen new
 golden artifacts include twelve driver submissions, all identical on host
 replay using same-run defaults; no old golden changed. Evidence/reproduction:
 golden/r13-upload/README.md. Next: measure vkQuake's map staging in a fresh boot.
+
+
+## 2026-09-22 — R13 port result and user cache priority
+
+Port PID 199, identity 28581900…, 540 successful compiles and QueuePresent=0.
+Map lightmap/indirect/visibility allocations pass the prior OOM. New failures:
+tiled-chain blit; one descriptor set with two dynamic offsets; indirect draw
+stride assertion (upstream single draw uses zero stride). Two FTP reads match,
+SHA-256 193e40957f7cc0c786ce01d54bd344729694a10eba0f52c933bfd5a66fa9a36e.
+Kernel PID 199 abort/termination; console idle. Port committed evidence is
+evidence/m2-r13-map-recording. These failures remain open. User reprioritized
+persistent shader caching and measurable faster warm startup before rendering
+work continues. No new shader-cache implementation is claimed by this entry.

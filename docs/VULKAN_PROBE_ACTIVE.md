@@ -28,7 +28,10 @@ SHA-256 `b3bb7ac9…`.
 **Console PID 198, PPSA99988:** m2-solid, c4-padded, c7-mip-upload, c7-copy PASS;
 486 PASS records, zero FAIL; known benign unregister-busy warning then closure.
 Twelve submissions replay exactly with same-run defaults. Evidence and exact
-commands: `golden/r13-upload/README.md`. Port relink is pending its own boot.
+commands: `golden/r13-upload/README.md`. Port PID 199 passed the prior OOM and presented, then reached new tiled-chain
+blit and multiple-dynamic-offset refusals and an indirect-stride assertion.
+Port evidence/m2-r13-map-recording records the two matching reads and kernel abort.
+User priority is now persistent shader caching, with measured cold/warm startup.
 
 **Port M2 is met:** R12 c8658bf, PID 197, identity a779b2bd…, QueuePresent success
 and human-visible Quake menu/console; port evidence/m2-first-frame. M3–M6 remain

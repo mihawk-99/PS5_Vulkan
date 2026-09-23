@@ -1118,3 +1118,16 @@ the resulting correction to C1's direct-only surface-refusal assertion.
 | Request | Result | Evidence |
 | --- | --- | --- |
 | R13 bounded row-upload metadata | Driver criteria PASS: one record per region; 64 uploads use 17,408 bytes; copy/format host tests and PS5 texture/mip/copy pixels pass. Port heap outcome still pending. | PID 198; jobs/r13-upload/README.md; golden/r13-upload/README.md; archive b3bb7ac9… |
+
+
+## 2026-09-22 — R13 port result and user cache priority
+
+Port PID 199, identity 28581900…, 540 successful compiles and QueuePresent=0.
+Map lightmap/indirect/visibility allocations pass the prior OOM. New failures:
+tiled-chain blit; one descriptor set with two dynamic offsets; indirect draw
+stride assertion (upstream single draw uses zero stride). Two FTP reads match,
+SHA-256 193e40957f7cc0c786ce01d54bd344729694a10eba0f52c933bfd5a66fa9a36e.
+Kernel PID 199 abort/termination; console idle. Port committed evidence is
+evidence/m2-r13-map-recording. These failures remain open. User reprioritized
+persistent shader caching and measurable faster warm startup before rendering
+work continues. No new shader-cache implementation is claimed by this entry.
