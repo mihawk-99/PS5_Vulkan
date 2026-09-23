@@ -1,0 +1,191 @@
+{
+  "pid": 219,
+  "ended": true,
+  "raw_sha256": "426134f96f74f4580162e817634c5a1ef44bc00afd1da62d277fdb2af0a5eb2e",
+  "statuses": {
+    "PASS": 128,
+    "INFO": 13,
+    "NOT_REQUIRED": 8,
+    "ARMED": 1,
+    "WARN": 1
+  },
+  "records": [
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test_start",
+      "status": "INFO",
+      "result": 0,
+      "detail": "m2-solid"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "m2-solid"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test_start",
+      "status": "INFO",
+      "result": 1,
+      "detail": "v0-subpass"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "b7_map_subpass_memory",
+      "status": "PASS",
+      "result": 0,
+      "detail": ""
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "frame",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_subpass",
+      "field": "first_wrong",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "wrong_x",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "wrong_y",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "writer_samples",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "reader_samples",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "of",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_subpass",
+      "status": "PASS",
+      "result": 0,
+      "detail": "subpass 1 read subpass 0's attachment, band for band"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "frame",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_subpass",
+      "field": "first_wrong",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "wrong_x",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "wrong_y",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "writer_samples",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "reader_samples",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "of",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_subpass",
+      "status": "PASS",
+      "result": 0,
+      "detail": "subpass 1 read subpass 0's attachment, band for band"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_subpass",
+      "status": "PASS",
+      "result": 0,
+      "detail": "both frames of the two-subpass pass drew, and the second attachment holds the first's bands"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "v0-subpass"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "runner_summary",
+      "field": "ran",
+      "value": 2
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_summary",
+      "status": "PASS",
+      "result": 0,
+      "detail": "2 of 2 queued tests passed"
+    }
+  ]
+}

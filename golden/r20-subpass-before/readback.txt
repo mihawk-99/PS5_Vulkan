@@ -1,0 +1,89 @@
+{
+  "pid": 218,
+  "ended": true,
+  "raw_sha256": "044f7188d1ec61b663e9d48d772ec9315e0d389d95becf7f057395d99ddeed85",
+  "statuses": {
+    "PASS": 121,
+    "INFO": 13,
+    "NOT_REQUIRED": 8,
+    "ARMED": 1,
+    "WARN": 1,
+    "FAIL": 4,
+    "INCONCLUSIVE": 1
+  },
+  "records": [
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_subpass",
+      "field": "first_wrong",
+      "value": "0xff800000"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "wrong_x",
+      "value": 1440
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "wrong_y",
+      "value": 270
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "writer_samples",
+      "value": 16
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "reader_samples",
+      "value": 4
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_subpass",
+      "field": "of",
+      "value": 16
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_subpass",
+      "status": "FAIL",
+      "result": -1,
+      "detail": "subpass 1 did not read subpass 0's attachment"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_subpass",
+      "status": "FAIL",
+      "result": -1,
+      "detail": "the frames drew and the readback is not the writer's pattern"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "runner_summary",
+      "field": "ran",
+      "value": 2
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_summary",
+      "status": "FAIL",
+      "result": -1,
+      "detail": "1 of 2 queued tests passed"
+    }
+  ]
+}

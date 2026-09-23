@@ -1363,3 +1363,32 @@ Evidence: jobs/r19-index32/queue.txt and check.py; golden/r19-index32/run-1.json
 readback.txt, replay.txt and deployed-proof.txt. Reproduce pixel acceptance:
 python3 jobs/r19-index32/check.py Klog_Logs/r19-index32.log --pixels.
 Next is vkQuake relink/deployment/launch; playable-world acceptance is open.
+
+
+## 2026-09-23 — R20 corrects the R10 readback diagnosis, PID 219
+
+Correction to the earlier quarter-width claim: the old v0-subpass probe
+indexed a tiled attachment as linear rows. It also never mapped the writer
+attachment and substituted the expected word when no mapping existed. Its
+reported 16/16 writer values were not observations. PID 218 reproduces that
+old 4/16 reader result and is retained in golden/r20-subpass-before; it does
+not establish a descriptor-width defect.
+
+The probe now maps the writer, requires both mappings and decodes both using
+the previously measured tiled RGBA8 layout. In each of two frames it compares
+all 8,294,400 writer pixels and all 8,294,400 reader pixels against the shader's
+positional band pattern. PID 219: 128 PASS, zero FAIL; every pixel matches.
+The first frame's two captured submissions replay exactly. The host emits
+four submissions for two frames; its full dump is retained and only the first
+two are compared with the console's first-frame capture. No second-frame
+command capture is claimed; both frames have complete pixel verification.
+
+This is a test correction, with no production driver or shader change. Archive
+remains f2666ab80aadfb5a64722f9b7f014dd29c9c595462e9a1ae65d854ddbd26d411.
+The v0_subpass loader/direct/PS5-link arms, all eleven gates and final lint pass.
+Two deployed ELF reads/all PT_LOAD segments match; title closed and count=0
+verified. The known unregister-busy warning remains. The verifier accepts
+PID 219 and rejects the old PID 218 capture. Reproduce with
+jobs/r20-subpass/queue.txt and python3 jobs/r20-subpass/check.py
+Klog_Logs/r20-subpass.log; evidence in golden/r20-subpass. This retires the
+quarter-width finding, without asserting all game visuals are correct.

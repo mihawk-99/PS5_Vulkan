@@ -66,12 +66,19 @@ Each draw writes its index size; bounds and firstIndex use the element width.
 Host 170 arms, eleven gates, port five gates/scan and template relink PASS.
 Archive 14,434,594 bytes, SHA-256 f2666ab8…; deployed ELF segments match,
 title closed, count=0. jobs/r19-index32 and golden/r19-index32 hold evidence.
-Next: launch the relinked game and classify the next measured result.
+Port PID 217 then ran 180 seconds without refusal/Quake error, progressing
+from Necropolis to The Door To Chthon; harness closed it, count=0 verified.
+R20 corrects R10's quarter-width diagnosis: the probe used linear indexing
+on tiled memory and never mapped its writer. Fixed probe PID 219: 128 PASS,
+zero FAIL; both writer/reader images match all 8,294,400 pixels in two frames.
+First frame's two submissions replay exactly. No production driver change.
+See jobs/r20-subpass and golden/r20-subpass; failed PID 218 retained.
+Next: port input/audio adapters and sustained game verification.
 
 **Port M2 met:** PID 197, QueuePresent success and human-confirmed Quake
 menu/console; port evidence/m2-first-frame. M3–M6 remain open. Input/audio
-engine adapters are stubs. R10's quarter-width input-attachment read and the
-hardware line failure remain separate. No visual settings were changed.
+audio adapter remains a stub; input work is in the port. The hardware line
+failure remains separate. No visual settings were changed.
 ## Standing work
 - Graphics R7 rounds 1-4, R8 dynamic depth bias, the first batch's R9 (push
   pointers), and the R4 clear/refusal coverage are in `docs/M5_PHASE_C.md`; the

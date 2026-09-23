@@ -2081,8 +2081,12 @@ create_subpass_target(struct ps5vk_triangle *triangle, VkPhysicalDevice physical
        !step(triangle, "bind_subpass_memory",
              CALL(triangle, BindImageMemory)(triangle->device, triangle->subpass_image,
                                         triangle->subpass_memory, 0),
-             NULL))
+             NULL) ||
+       !step(triangle, "map_subpass_memory",
+             CALL(triangle, MapMemory)(triangle->device, triangle->subpass_memory, 0,
+                                       VK_WHOLE_SIZE, 0, &triangle->subpass_mapped), NULL))
       return false;
+   triangle->subpass_bytes = (size_t)requirements.size;
    const VkImageViewCreateInfo view_info = {
       .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
       .image = triangle->subpass_image,

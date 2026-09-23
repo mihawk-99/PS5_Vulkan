@@ -8167,10 +8167,6 @@ void run_vulkan_subpass_frames(const TestContext &test, TestOutcome &outcome) no
     // 8 bits by the RGBA8 target. B and A are the shader's constants.
     static constexpr std::uint32_t kBands[4] = {0u, 85u, 170u, 255u};
     static constexpr std::uint32_t kBlue = 128u;
-    // The middle of each band, so no sample sits on a boundary the writer and
-    // the reader could round differently.
-    static constexpr std::uint32_t kColumns[4] = {480u, 1440u, 2400u, 3360u};
-    static constexpr std::uint32_t kRows[4] = {270u, 810u, 1350u, 1890u};
 
     ps5vk_triangle_input input{};
     input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
@@ -8195,7 +8191,7 @@ void run_vulkan_subpass_frames(const TestContext &test, TestOutcome &outcome) no
     ps5vk_triangle triangle{};
     ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
     unsigned frames = 0;
-    bool bands = false;
+    bool bands = true;
     for (unsigned frame = 0; frame < 2 && status == PS5VK_TRIANGLE_OK; frame++)
     {
         // ONE_COMMAND_BUFFER is the grouping that records both draws in one
@@ -8205,12 +8201,17 @@ void run_vulkan_subpass_frames(const TestContext &test, TestOutcome &outcome) no
         if (status != PS5VK_TRIANGLE_OK)
             break;
         ++frames;
-        if (frame != 0 || triangle.target_bytes < kFramebufferBytes)
-            continue;
+        if (triangle.target_bytes < kFramebufferBytes ||
+            triangle.subpass_bytes < kFramebufferBytes || !triangle.subpass_mapped)
+        {
+            bands = false;
+            log.event("agc_subpass", "FAIL", -1, "both attachment mappings are required");
+            break;
+        }
         // The submission the frame recorded, and the tables it built, on the
         // run that captures: what the two subpasses' draws programmed, which is
         // what tells a read that saw nothing from a render that wrote nothing.
-        if (test.capture)
+        if (test.capture && frame == 0)
         {
             log_driver_submission(triangle.device, "v0-subpass", log);
             log_driver_stages(triangle.device, log);
@@ -8254,23 +8255,23 @@ void run_vulkan_subpass_frames(const TestContext &test, TestOutcome &outcome) no
             triangle.subpass_mapped != nullptr && triangle.subpass_bytes >= kFramebufferBytes
                 ? static_cast<const std::uint32_t *>(triangle.subpass_mapped)
                 : nullptr;
-        if (written != nullptr)
-            flush_gpu_data(const_cast<void *>(triangle.subpass_mapped), kFramebufferBytes);
+        flush_gpu_data(const_cast<void *>(triangle.subpass_mapped), kFramebufferBytes);
+        const FramebufferView writer{written, kTiledRgba8Layout};
+        const FramebufferView reader_view{words, kTiledRgba8Layout};
         unsigned writer_matching = 0;
         unsigned reader_matching = 0;
         unsigned sampled = 0;
         std::uint32_t first_wrong = 0;
         unsigned wrong_x = 0;
         unsigned wrong_y = 0;
-        for (const std::uint32_t y : kRows)
+        for (std::uint32_t y = 0; y < kOutputHeight; ++y)
         {
-            for (const std::uint32_t x : kColumns)
+            for (std::uint32_t x = 0; x < kOutputWidth; ++x)
             {
                 const std::uint32_t want =
                     (255u << 24) | (kBlue << 16) | (kBands[y / 540u] << 8) | kBands[x / 960u];
-                const std::uint32_t got = words[std::size_t{y} * PS5VK_TRIANGLE_WIDTH + x];
-                const std::uint32_t source =
-                    written != nullptr ? written[std::size_t{y} * PS5VK_TRIANGLE_WIDTH + x] : want;
+                const std::uint32_t got = reader_view.word(x, y);
+                const std::uint32_t source = writer.word(x, y);
                 ++sampled;
                 if (source == want)
                     ++writer_matching;
@@ -8284,18 +8285,20 @@ void run_vulkan_subpass_frames(const TestContext &test, TestOutcome &outcome) no
                 }
             }
         }
-        const bool wrote = written == nullptr || writer_matching == sampled;
-        bands = sampled != 0 && wrote && reader_matching == sampled;
+        const bool wrote = writer_matching == sampled;
+        const bool frame_matches = sampled != 0 && wrote && reader_matching == sampled;
+        bands = bands && frame_matches;
+        log.number("agc_subpass", "frame", frame);
         log.hex("agc_subpass", "first_wrong", first_wrong);
         log.number("agc_subpass", "wrong_x", wrong_x);
         log.number("agc_subpass", "wrong_y", wrong_y);
         log.number("agc_subpass", "writer_samples", writer_matching);
         log.number("agc_subpass", "reader_samples", reader_matching);
         log.number("agc_subpass", "of", sampled);
-        log.event("agc_subpass", bands ? "PASS" : "FAIL", bands ? 0 : -1,
+        log.event("agc_subpass", frame_matches ? "PASS" : "FAIL", frame_matches ? 0 : -1,
                   !wrote ? "subpass 0 did not draw the band pattern into its own attachment"
-                         : (bands ? "subpass 1 read subpass 0's attachment, band for band"
-                                  : "subpass 1 did not read subpass 0's attachment"));
+                         : (frame_matches ? "subpass 1 read subpass 0's attachment, band for band"
+                                          : "subpass 1 did not read subpass 0's attachment"));
     }
     if (status == PS5VK_TRIANGLE_IN_FLIGHT)
     {

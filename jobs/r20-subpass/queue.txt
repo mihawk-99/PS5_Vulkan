@@ -1,0 +1,5 @@
+hold 1
+capture
+m2-solid
+v0-subpass
+exit
