@@ -214,9 +214,15 @@ VKAPI_ATTR VkResult VKAPI_CALL
 ps5vk_BeginCommandBuffer(VkCommandBuffer commandBuffer, const VkCommandBufferBeginInfo *pBeginInfo)
 {
    VK_FROM_HANDLE(ps5vk_cmd_buffer, cmd_buffer, commandBuffer);
+   struct ps5vk_queue *const queue =
+      ps5vk_device_profile_queue(container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk));
+   if (queue)
+      ps5vk_profile_enter(queue, PS5VK_PROFILE_AFTER_BEGIN);
    /* Resets a command buffer that is not in the initial state first. */
    vk_command_buffer_begin(&cmd_buffer->vk, pBeginInfo);
    /* Secondary commands are encoded only when the primary executes them. */
+   if (queue)
+      ps5vk_profile_leave(queue, PS5VK_PROFILE_AFTER_BEGIN);
    return VK_SUCCESS;
 }
 
@@ -224,7 +230,14 @@ VKAPI_ATTR VkResult VKAPI_CALL
 ps5vk_EndCommandBuffer(VkCommandBuffer commandBuffer)
 {
    VK_FROM_HANDLE(ps5vk_cmd_buffer, cmd_buffer, commandBuffer);
-   return vk_command_buffer_end(&cmd_buffer->vk);
+   struct ps5vk_queue *const queue =
+      ps5vk_device_profile_queue(container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk));
+   if (queue)
+      ps5vk_profile_enter(queue, PS5VK_PROFILE_AFTER_END);
+   const VkResult result = vk_command_buffer_end(&cmd_buffer->vk);
+   if (queue)
+      ps5vk_profile_leave(queue, PS5VK_PROFILE_AFTER_END);
+   return result;
 }
 
 /* A synchronization split with no copy: everything the queue needs is where it

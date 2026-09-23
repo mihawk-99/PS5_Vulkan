@@ -188,17 +188,24 @@ struct ps5vk_pipeline_cache {
  * first PS5VK_MAX_SUBMISSION_STEPS of them, which is what the capture reports. */
 #define PS5VK_MAX_SUBMISSION_STEPS 8
 
-/* Which application stretch a gap belongs to: the time between one of three
- * Vulkan entry points returning and the next one being entered (ps5vk_queue.c).
- * It splits the application's own CPU time the way the queue timing splits the
- * driver's, and the application reports nothing: vkAcquireNextImageKHR starts a
- * frame's recording, vkQueueSubmit ends it, and vkQueuePresentKHR ends the
- * frame, so the three gaps are "engine logic before the frame", "recording the
- * frame" and "everything after the submission". */
+/* Which application stretch a gap belongs to: the time between one of the
+ * instrumented Vulkan entry points returning and the next one being entered
+ * (ps5vk_queue.c). It splits the application's own CPU time the way the queue
+ * timing splits the driver's, and the application reports nothing.
+ *
+ * The engine's frame calls them in this order, so the six gaps name its parts:
+ * acquire, then the frame's recording, then the query-results read that starts
+ * a frame, then one begin and one end per command buffer, then the submission
+ * and the present. AFTER_PRESENT is the engine's own work between two frames;
+ * AFTER_BEGIN is what it records between beginning and ending its command
+ * buffers, which is the renderer. */
 enum ps5vk_profile_slot {
    PS5VK_PROFILE_AFTER_ACQUIRE = 0,
    PS5VK_PROFILE_AFTER_SUBMIT,
    PS5VK_PROFILE_AFTER_PRESENT,
+   PS5VK_PROFILE_AFTER_QUERY,
+   PS5VK_PROFILE_AFTER_BEGIN,
+   PS5VK_PROFILE_AFTER_END,
    PS5VK_PROFILE_SLOTS
 };
 
@@ -276,6 +283,14 @@ ps5vk_profile_enter(struct ps5vk_queue *queue, unsigned slot);
 
 void
 ps5vk_profile_leave(struct ps5vk_queue *queue, unsigned slot);
+
+/* The queue to attribute an application stretch to, or NULL when the device has
+ * none yet: the call sites that only hold a device ask this first. The device's
+ * own definition comes later in this header, so the tag is named here. */
+struct ps5vk_device;
+
+struct ps5vk_queue *
+ps5vk_device_profile_queue(struct ps5vk_device *device);
 
 /* One AGC register-table record: register offset and value. */
 struct ps5vk_agc_register {

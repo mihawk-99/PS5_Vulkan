@@ -346,9 +346,13 @@ ps5vk_GetQueryPoolResults(VkDevice _device, VkQueryPool queryPool, uint32_t firs
 {
    VK_FROM_HANDLE(ps5vk_device, device, _device);
    VK_FROM_HANDLE(ps5vk_query_pool, pool, queryPool);
-   (void)device;
+   /* The engine reads the frame's timestamps here, at the top of the frame's
+    * setup, so this is where the recording stretch starts (R31, default off). */
+   struct ps5vk_queue *const queue = ps5vk_device_profile_queue(device);
+   if (queue)
+      ps5vk_profile_enter(queue, PS5VK_PROFILE_AFTER_QUERY);
    if (!pool || queryCount == 0)
-      return VK_SUCCESS;
+      goto out;
    assert(firstQuery + queryCount <= pool->count);
    const bool wide = (flags & VK_QUERY_RESULT_64_BIT) != 0;
    const bool available = (flags & VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) != 0;
@@ -371,6 +375,9 @@ ps5vk_GetQueryPoolResults(VkDevice _device, VkQueryPool queryPool, uint32_t firs
          memcpy(result, values, available ? sizeof(values) : sizeof(values[0]));
       }
    }
+out:
+   if (queue)
+      ps5vk_profile_leave(queue, PS5VK_PROFILE_AFTER_QUERY);
    return VK_SUCCESS;
 }
 

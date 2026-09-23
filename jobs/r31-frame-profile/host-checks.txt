@@ -34,3 +34,10 @@ Port tools added alongside, none of them run on hardware yet
   build/profile-metrics.py   per-phase means from a capture; reproduces
                              jobs/r28-copy-profile/metrics.txt exactly
   build/r29-run.sh           the whole console sequence, snapshot first
+
+Final build on the console (the one run D left deployed)
+  build/driver/ps5/libps5vk.ps5.a 14496858 bytes
+    sha256 5d74256bd020e568458ee54fe0b279117c2f840488657e90711b1d0dc1a6025f
+  gates and check-driver re-run after the single-write fix: all PASS.
+  Console runs C and D used it; D had no profiling flag and is the
+  no-regression measurement. Console state was restored after every run.

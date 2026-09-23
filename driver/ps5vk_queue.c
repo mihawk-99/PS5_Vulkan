@@ -105,6 +105,12 @@ ps5vk_profile_leave(struct ps5vk_queue *queue, unsigned slot)
    p->gap_slot = slot;
 }
 
+struct ps5vk_queue *
+ps5vk_device_profile_queue(struct ps5vk_device *device)
+{
+   return device != NULL && device->queue_initialized ? &device->queue : NULL;
+}
+
 uint8_t
 ps5vk_agc_out_of_space(struct ps5vk_agc_command_buffer *buffer, uint32_t words, void *user_data)
 {
@@ -1133,10 +1139,23 @@ ps5vk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
  * residual_ms is the check that the split is complete: the four parts summed
  * per present against the measured present-to-present period. Anything but
  * about zero means the frame spends time somewhere this profile does not name,
- * and the attribution below it is not to be trusted. */
+ * and the attribution below it is not to be trusted.
+ *
+ * The whole line is formatted into one buffer and written once. That is not a
+ * style choice: the port this driver serves reopens stderr unbuffered onto a
+ * file inside the title's folder (vQuake's src/trace.cpp), so every stdio write
+ * is a separate syscall on the mounted filesystem, and a summary emitted as one
+ * fprintf per field measured twelve per cent of the frame budget on the
+ * console. R31's first version did exactly that and slowed the game it was
+ * measuring; the fix is one write, and the rule is that this line and the one
+ * above it may never grow into a loop. */
 static void
-ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now)
+ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now, char *line,
+                            size_t line_bytes)
 {
+   /* The caller already formatted the first line into this buffer; the second
+    * is appended to it so that both leave as one write. */
+   const size_t used = strlen(line);
    const double per_present = p->frames != 0 ? 1.0 / ((double)p->frames * 1000000.0) : 0.0;
    const double per_step = p->steps != 0 ? 1.0 / ((double)p->steps * 1000000.0) : 0.0;
    const double frame_ms = p->present_gap_count != 0
@@ -1145,33 +1164,48 @@ ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now)
    const double summed_ms = (double)(p->app_pre_submit_ns + p->queue_ns + p->app_pre_present_ns +
                                      p->flip_ns) *
                             per_present;
-   fprintf(stderr,
-           "[ps5vk] profile2 app_pre_ms=%.3f app_post_ms=%.3f app_after_present_ms=%.3f "
-           "app_after_acquire_ms=%.3f app_after_submit_ms=%.3f submit_ms=%.3f "
-           "submit_calls/frame=%.2f poll_ms=%.3f polls/step=%.2f poll_first=%.0f%% "
-           "flip_status/present=%.2f flip_status_ms=%.3f vblank/present=%.2f "
-           "vblank_ms=%.3f vblank_first=%.0f%% frame_ms=%.3f frame_min_ms=%.3f "
-           "frame_max_ms=%.3f residual_ms=%.3f presents=%" PRIu64 "/%" PRIu64 " periods=",
-           p->app_pre_submit_ns * per_present, p->app_pre_present_ns * per_present,
-           p->gap_ns[PS5VK_PROFILE_AFTER_PRESENT] * per_present,
-           p->gap_ns[PS5VK_PROFILE_AFTER_ACQUIRE] * per_present,
-           p->gap_ns[PS5VK_PROFILE_AFTER_SUBMIT] * per_present, p->submit_call_ns * per_step,
-           p->frames != 0 ? (double)p->submit_calls / (double)p->frames : 0.0,
-           p->poll_ns * per_step, p->steps != 0 ? (double)p->polls / (double)p->steps : 0.0,
-           p->steps != 0 ? 100.0 * (double)p->poll_first_hits / (double)p->steps : 0.0,
-           p->frames != 0 ? (double)p->flip_status_calls / (double)p->frames : 0.0,
-           p->flip_status_ns * per_present,
-           p->frames != 0 ? (double)p->flip_vblank_waits / (double)p->frames : 0.0,
-           p->flip_vblank_ns * per_present,
-           p->frames != 0 ? 100.0 * (double)p->flip_first_hits / (double)p->frames : 0.0,
-           frame_ms, (double)p->present_gap_min_ns / 1000000.0,
-           (double)p->present_gap_max_ns / 1000000.0, summed_ms - frame_ms,
-           p->present_index[0], p->present_index[1]);
+   char periods[256];
+   size_t at = 0;
    for (unsigned bucket = 0; bucket < PS5VK_PERIOD_BUCKETS; bucket++) {
-      if (p->present_period[bucket] != 0)
-         fprintf(stderr, "%u:%u ", bucket * 4u, p->present_period[bucket]);
+      /* A bucket name is at most "64:4294967295 ", so sixteen bytes of room is
+       * always enough and the buffer can never be overrun by the append. */
+      if (p->present_period[bucket] == 0)
+         continue;
+      if (sizeof(periods) - at < 16)
+         break;
+      at += (size_t)snprintf(periods + at, sizeof(periods) - at, "%u:%u ", bucket * 4u,
+                             p->present_period[bucket]);
    }
-   fprintf(stderr, "elapsed_ms=%.0f\n", (double)(now - p->since) / 1000000.0);
+   periods[at] = '\0';
+   snprintf(line + used, line_bytes - used,
+            "[ps5vk] profile2 app_pre_ms=%.3f app_post_ms=%.3f app_after_present_ms=%.3f "
+            "app_after_acquire_ms=%.3f app_after_submit_ms=%.3f app_after_query_ms=%.3f "
+            "app_after_begin_ms=%.3f app_after_end_ms=%.3f submit_ms=%.3f "
+            "submit_calls/frame=%.2f poll_ms=%.3f polls/step=%.2f poll_first=%.0f%% "
+            "flip_status/present=%.2f flip_status_ms=%.3f vblank/present=%.2f "
+            "vblank_ms=%.3f vblank_first=%.0f%% frame_ms=%.3f frame_min_ms=%.3f "
+            "frame_max_ms=%.3f residual_ms=%.3f presents=%" PRIu64 "/%" PRIu64
+            " periods=%s elapsed_ms=%.0f\n",
+            p->app_pre_submit_ns * per_present, p->app_pre_present_ns * per_present,
+            p->gap_ns[PS5VK_PROFILE_AFTER_PRESENT] * per_present,
+            p->gap_ns[PS5VK_PROFILE_AFTER_ACQUIRE] * per_present,
+            p->gap_ns[PS5VK_PROFILE_AFTER_SUBMIT] * per_present,
+            p->gap_ns[PS5VK_PROFILE_AFTER_QUERY] * per_present,
+            p->gap_ns[PS5VK_PROFILE_AFTER_BEGIN] * per_present,
+            p->gap_ns[PS5VK_PROFILE_AFTER_END] * per_present, p->submit_call_ns * per_step,
+            p->frames != 0 ? (double)p->submit_calls / (double)p->frames : 0.0,
+            p->poll_ns * per_step, p->steps != 0 ? (double)p->polls / (double)p->steps : 0.0,
+            p->steps != 0 ? 100.0 * (double)p->poll_first_hits / (double)p->steps : 0.0,
+            p->frames != 0 ? (double)p->flip_status_calls / (double)p->frames : 0.0,
+            p->flip_status_ns * per_present,
+            p->frames != 0 ? (double)p->flip_vblank_waits / (double)p->frames : 0.0,
+            p->flip_vblank_ns * per_present,
+            p->frames != 0 ? 100.0 * (double)p->flip_first_hits / (double)p->frames : 0.0,
+            frame_ms, (double)p->present_gap_min_ns / 1000000.0,
+            (double)p->present_gap_max_ns / 1000000.0, summed_ms - frame_ms,
+            p->present_index[0], p->present_index[1], periods,
+            (double)(now - p->since) / 1000000.0);
+   fputs(line, stderr);
 }
 
 /* A flip in a stream of its own, as run pid 134 presented (c1-present):
@@ -1262,14 +1296,18 @@ ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, in
             if (p->since == 0 || now - p->since >= UINT64_C(10000000000)) {
                if (p->since != 0) {
                   const double ms = 1.0 / ((double)p->frames * 1000000.0);
-                  fprintf(stderr, "[ps5vk] profile frames=%" PRIu64 " steps/frame=%.2f "
+                  /* Both summary lines go out as one write: see the note on
+                   * ps5vk_queue_profile_report2 for what a second one costs. */
+                  char line[1024];
+                  snprintf(line, sizeof(line),
+                          "[ps5vk] profile frames=%" PRIu64 " steps/frame=%.2f "
                           "queue_ms=%.3f flush_ms=%.3f gpu_ms=%.3f flip_ms=%.3f "
                           "flush_MiB/frame=%.2f copy_ms=%.3f sync_wait_ms=%.3f sync_signal_ms=%.3f\n", p->frames,
                           (double)p->steps / p->frames, p->queue_ns * ms, p->flush_ns * ms,
                           p->gpu_ns * ms, p->flip_ns * ms,
                           (double)p->flush_bytes / (p->frames * 1048576.0),
                           p->copy_ns * ms, p->sync_wait_ns * ms, p->sync_signal_ns * ms);
-                  ps5vk_queue_profile_report2(p, now);
+                  ps5vk_queue_profile_report2(p, now, line, sizeof(line));
                }
                /* last_return_ns and last_present_ns carry across a window: the
                 * first interval after one is still a real one. */

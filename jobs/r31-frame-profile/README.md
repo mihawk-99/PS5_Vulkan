@@ -117,3 +117,134 @@ restores them by deleting them; `r29b-collect.py` collects without deleting;
 `profile-metrics.py` turns a capture into per-phase means and reproduces
 `jobs/r28-copy-profile/metrics.txt` exactly from its capture; `r29-run.sh` is
 the whole sequence with the snapshot first and the restore last.
+
+## Console results
+
+The console answered between 12:40 and 13:20 UTC on 2026-09-23 and was idle:
+`procs` reported `count=0`, from live kernel process enumeration. Four runs were
+made, each with the console's own state snapshotted first and restored exactly
+afterwards -- the two configuration files the owner has, `vkQuake.cfg` (1020
+bytes) and `id1/vkQuake.cfg` (2510 bytes), were unchanged at the end, and the
+staged autoexec and flags were removed.
+
+**Run A -- the controlled R29 baseline (game `e3525e30`, driver c3e51f6).** The
+deployed binary itself, verified before the run by reading the served ELF twice
+and comparing its whole-file hash and all five PT_LOAD segments against
+`evidence/manual-r29-deployment/deployed-proof.txt` in the port: both match. No
+upload, no relink, `--no-build --no-deploy`.
+
+|                        | start map | E1M1      |
+| ---------------------- | --------- | --------- |
+| fps (before, R28)      | 14.81     | 29.58     |
+| fps (R29)              | **19.72** | 29.58     |
+| frame period           | 50.71 ms  | 33.81 ms  |
+| CPU copies             | 11.62     | 0.041     |
+| cache flush            | 5.96      | 3.96      |
+| submit + marker        | 2.80      | 2.58      |
+| flip / scanout wait    | 10.23     | 7.54      |
+| flush MiB/frame        | 384.09    | 256.06    |
+
+So R29's tile-address change is worth 14.81 -> 19.72 FPS on the start map, and
+its 12.5 ms copy saving moves the period from four 60 Hz vblanks to three. E1M1
+is unchanged, which is what its 0.041 ms copy cost predicted. This is the game
+measurement R29 was missing; the host address benchmark was never the evidence.
+
+**The period is quantised to whole vblanks.** `frame_min_ms` was 49.976 ms at
+the start map and 33.292 ms at E1M1, against 16.683 ms a vblank: three and two.
+A frame whose work is under a whole number of vblanks takes that many, so a
+partial saving cannot raise FPS at all until the whole frame fits one interval
+less. That is exactly what R22's deduplicated flushes (2 ms saved, no FPS gain)
+and R29's rolled-back filter (1.4 ms saved, no FPS gain) observed, and it is why
+an optimizer on this title must measure work, not only FPS.
+
+**`gpu_ms` is not GPU time.** `submit_ms` -- `sceAgcDriverSubmitDcb` through
+`sceAgcSuspendPoint` -- is 0.169 ms per step. The rest of the 2.8 ms `gpu_ms` is
+the marker poll's 1 ms sleeps: `polls/step` 0.66 at the start map and 1.00 at
+E1M1, with 34% and 0% of steps seeing the marker on the first check. The GPU
+finishes within about a millisecond; the measurement could not see that before.
+
+**Presentation waits exactly one vblank.** `vblank/present` is 1.00 in every
+window and `vblank_first` is 0%: a flip is never already on screen at the first
+status check, so the present path adds no extra refresh of latency. It is not a
+defect; it is the next vblank doing its job.
+
+**The display's real cadence, measured.** The opt-in probe timed 60 consecutive
+bare `sceVideoOutWaitVblank` calls at VideoOut open: mean 16.6831 ms, min
+16.6386, max 16.7466, spread 0.108 ms, equivalent 59.941 Hz. That is the
+refresh, measured rather than taken from the 60000 millihertz the mode reports.
+
+**The largest remaining cost is the application's own CPU, and it is
+scene-independent.** `app_pre_ms` -- the time between a present returning and
+the next submission being entered -- was 21.7 ms at the start map and 21.7 ms at
+E1M1, in a run where the two maps' driver costs differ by a factor of three
+(20.8 ms against 6.9 ms of queue time). `host_speeds`, captured for the first
+time, agrees from the other side: of E1M1's 35.4 ms frame, `gfx` is 33.9 ms and
+`server` is 1.6 ms, so the simulation is not the cost and the render path is.
+
+## The measurement that invalidated a run
+
+Run B -- the same fixture on a relinked R31 build -- was 10-13% slower at the
+start map with a 1.2 second stall in every ten-second window, and then collapsed
+to 0.04 FPS when `host_speeds` was enabled, presenting one frame every 20
+seconds until the harness closed it. It is not a rendering defect and it is not
+in the submission path: every driver interval in that run was normal
+(`queue_ms` 20.77, `flush_ms` 5.94, `copy_ms` 11.61, identical to the baseline),
+and only the application's own time grew.
+
+The cause is the port's trace shim. `PS5_vkQuake/src/trace.cpp` reopens stdout
+and stderr unbuffered onto `/app0/trace.txt`, a file inside the title's folder,
+so every stdio call from the driver is its own write to that filesystem. R31's
+first summary line was formatted as one `fprintf` per field -- eighteen writes
+per window -- and that cost about 12% of the frame budget. Enabling a
+`host_speeds` line per frame then made every frame pay that cost, and the run
+died of its own logging.
+
+The fix is that both summary lines are now formatted into one buffer and leave
+as a single write, and the file says so where it is done, because the next
+person to add a field will otherwise add a write. Two consequences worth keeping:
+a run that logs per frame on this console measures its logging, and the console's
+own steady-state logging is not free either -- the port writes a present line and
+an audio line every ten seconds whether or not anyone is profiling.
+
+Run C, with that fix, had no stalls: its start-map windows were 190 frames in
+10009-10028 ms, uniform, against run B's 177-190 frames in 10000-10443 ms.
+
+## No regression
+
+Run D staged the same fixture with **no profiling flag and no cadence probe**,
+so the same two scenes were timed on a build with R31 compiled in but never
+armed. It exited normally with two correct readbacks.
+
+|        | run A: deployed R29, profiling on | run D: R31 build, profiling off |
+| ------ | --------------------------------- | ------------------------------- |
+| E1M1   | 29.58 fps / 33.81 ms              | **29.97 fps / 33.37 ms**        |
+| start  | 19.72 fps / 50.71 ms              | **21.12 fps / 47.56 ms**        |
+
+E1M1's 33.37 ms sits on the two-vblank floor of 33.33 ms. The start map's window
+mean of 47.56 ms is between two and three vblanks, which is what a mix of frames
+does when some of them cross under 33.33 ms and the rest do not. So R31 does not
+regress the game, with or without its instrumentation armed, and the build that
+was left on the console is this one.
+
+## What is still open
+
+- **The per-slot split of the application's ~21.7 ms is not trustworthy.** The
+  gap chain is one shared structure (ps5vk_queue.c) and the engine records on
+  the main thread while presenting on a worker (`r_tasks 1`), so the two
+  threads close each other's gaps and the slot a stretch lands in is not
+  necessarily the thread that spent it. The numbers are strongly suggestive --
+  `app_after_begin_ms` 3.6 and `app_after_end_ms` 14.8, identical in both maps
+  to within 1% -- but they are not evidence yet. Either make the chain
+  thread-local or run the decomposition at `r_tasks 0`, where there is one
+  thread and the attribution is exact.
+- The whole application cost is inside a driver entry point rather than between
+  them: `app_pre_ms` 21.7 exceeds the sum of the six gaps (18.7), and the
+  difference is the duration of `vkGetQueryPoolResults`, every
+  `vkBeginCommandBuffer`, every `vkEndCommandBuffer` and the acquire, which are
+  timed as gaps and never as calls. Timing those calls themselves is the next
+  instrument, and it is the one that says whether the ~20 ms is the driver's
+  command-buffer bookkeeping or the engine.
+- R29 remains unmeasured against R28 for E1M1 by anything other than this run's
+  agreement, which is what a change to a CPU address helper should look like.
+- Everything from section 12 of the assignment -- movement, firing, save/load,
+  all eight shareware maps, a long soak -- is still not done.
