@@ -48,6 +48,8 @@ extern "C"
    bool indirect;
       /* Sample set 0 into set 1, then compare every output texel. */
       bool images;
+      /* R17: three sampled images, partial writes and inter-set array copies. */
+      bool descriptor_array;
       /* The word every element of the storage buffer starts at, and the word the
          * shader leaves there: the console's readback compares them. */
       uint32_t initial_word;
@@ -69,16 +71,16 @@ extern "C"
       VkDescriptorSetLayout set_layout[2];
       VkPipelineLayout pipeline_layout;
       VkDescriptorPool descriptor_pool;
-      VkDescriptorSet descriptor_set[2];
+      VkDescriptorSet descriptor_set[3];
       VkPipeline pipeline;
       VkCommandPool command_pool;
       VkCommandBuffer command;
       VkFence fence;
       /* What the buffer holds when the dispatch's fence has signalled. */
       uint32_t result_word;
-      VkImage images[2];
-      VkDeviceMemory image_memory[2];
-      VkImageView views[2];
+      VkImage images[4];
+      VkDeviceMemory image_memory[4];
+      VkImageView views[4];
       VkSampler sampler;
       uint32_t mismatched_texels;
    };

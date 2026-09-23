@@ -1,0 +1,15 @@
+// Copyright (C) 2026 Mihawk-99
+// SPDX-License-Identifier: GPL-3.0-or-later
+#version 450
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+layout(set = 0, binding = 0) uniform sampler image_sampler;
+layout(set = 0, binding = 2) uniform texture2D source_images[3];
+layout(set = 1, binding = 0, rgba8) uniform writeonly image2D destination_image;
+void main()
+{
+    ivec2 at = ivec2(gl_GlobalInvocationID.xy);
+    float r = texelFetch(sampler2D(source_images[0], image_sampler), at, 0).r;
+    float g = texelFetch(sampler2D(source_images[1], image_sampler), at, 0).g;
+    float b = texelFetch(sampler2D(source_images[2], image_sampler), at, 0).b;
+    imageStore(destination_image, at, vec4(r, g, b, 1.0));
+}

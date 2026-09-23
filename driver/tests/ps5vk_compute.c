@@ -99,19 +99,26 @@ bool ps5vk_compute_run(const struct ps5vk_compute_input *input, struct ps5vk_com
       return false;
 
    const uint32_t set_count = input->images ? 2 : 1;
+   const uint32_t sources = input->descriptor_array ? 3 : 1;
    for (uint32_t i = 0; i < set_count; i++) {
-   const VkDescriptorSetLayoutBinding binding = {
+   VkDescriptorSetLayoutBinding bindings[2] = {{
       .binding = 0,
       .descriptorType = input->images ? (i == 0 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-                                                   : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                                : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
                                       : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-      .descriptorCount = 1,
-      .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-   };
+      .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+   }};
+   if (input->descriptor_array && i == 0) {
+      bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+      bindings[1] = (VkDescriptorSetLayoutBinding){
+         .binding = 2, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+         .descriptorCount = 3, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+      };
+   }
    const VkDescriptorSetLayoutCreateInfo set_layout_info = {
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      .bindingCount = 1,
-      .pBindings = &binding,
+      .bindingCount = input->descriptor_array && i == 0 ? 2 : 1,
+      .pBindings = bindings,
    };
    if (!step(compute, input, "create_descriptor_set_layout",
               CALL(compute, CreateDescriptorSetLayout)(compute->device, &set_layout_info, NULL,
@@ -204,21 +211,22 @@ bool ps5vk_compute_run(const struct ps5vk_compute_input *input, struct ps5vk_com
    if (input->images) {
       /* 64x4 RGBA texels: full 256-byte rows in the driver's linear storage. */
       uint8_t *pixels = compute->mapped;
+      for (uint32_t source = 0; source < sources; source++)
       for (uint32_t y = 0; y < 4; y++)
          for (uint32_t x = 0; x < 64; x++) {
-            const uint32_t at = (y * 64 + x) * 4;
-            pixels[at] = (uint8_t)(x * 3);
-            pixels[at + 1] = (uint8_t)(y * 61 + 7);
-            pixels[at + 2] = (uint8_t)(255 - x * 2);
+            const uint32_t at = source * 1024 + (y * 64 + x) * 4;
+            pixels[at] = (uint8_t)(x * 3 + source * 17);
+            pixels[at + 1] = (uint8_t)(y * 61 + 7 + source * 11);
+            pixels[at + 2] = (uint8_t)(255 - x * 2 - source * 23);
             pixels[at + 3] = 255;
          }
-      for (uint32_t i = 0; i < 2; i++) {
+      for (uint32_t i = 0; i <= sources; i++) {
          const VkImageCreateInfo image_info = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
             .imageType = VK_IMAGE_TYPE_2D, .format = VK_FORMAT_R8G8B8A8_UNORM,
             .extent = {64, 4, 1}, .mipLevels = 1, .arrayLayers = 1,
             .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
-            .usage = i == 0 ? VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+            .usage = i < sources ? VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
                             : VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
          };
@@ -261,13 +269,17 @@ bool ps5vk_compute_run(const struct ps5vk_compute_input *input, struct ps5vk_com
                 CALL(compute, CreateSampler)(compute->device, &sampler_info, NULL, &compute->sampler), NULL))
          return false;
    }
-   const VkDescriptorPoolSize pool_sizes[2] = {
-      {input->images ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
+   const VkDescriptorPoolSize pool_sizes[3] = {
+      {input->descriptor_array ? VK_DESCRIPTOR_TYPE_SAMPLER :
+       input->images ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+       input->descriptor_array ? 2 : 1},
       {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
+      {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 6},
    };
    const VkDescriptorPoolCreateInfo pool_info = {
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-      .maxSets = set_count, .poolSizeCount = set_count, .pPoolSizes = pool_sizes,
+      .maxSets = input->descriptor_array ? 3 : set_count,
+      .poolSizeCount = input->descriptor_array ? 3 : set_count, .pPoolSizes = pool_sizes,
    };
    if (!step(compute, input, "create_descriptor_pool",
               CALL(compute, CreateDescriptorPool)(compute->device, &pool_info, NULL,
@@ -288,7 +300,7 @@ bool ps5vk_compute_run(const struct ps5vk_compute_input *input, struct ps5vk_com
    for (uint32_t i = 0; i < set_count; i++) {
       const VkDescriptorImageInfo image_binding = {
          .sampler = i == 0 ? compute->sampler : VK_NULL_HANDLE,
-         .imageView = compute->views[i], .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+         .imageView = compute->views[i == 0 ? 0 : sources], .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
       };
       const VkWriteDescriptorSet write = {
          .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -297,6 +309,45 @@ bool ps5vk_compute_run(const struct ps5vk_compute_input *input, struct ps5vk_com
          .pBufferInfo = input->images ? NULL : &buffer_binding,
          .pImageInfo = input->images ? &image_binding : NULL,
       };
+      CALL(compute, UpdateDescriptorSets)(compute->device, 1, &write, 0, NULL);
+   }
+
+   if (input->descriptor_array) {
+      const VkDescriptorSetAllocateInfo extra = {
+         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+         .descriptorPool = compute->descriptor_pool, .descriptorSetCount = 1,
+         .pSetLayouts = &compute->set_layout[0],
+      };
+      if (!step(compute, input, "allocate_array_source",
+                CALL(compute, AllocateDescriptorSets)(compute->device, &extra,
+                                                      &compute->descriptor_set[2]), NULL))
+         return false;
+      VkDescriptorImageInfo images[3];
+      for (uint32_t i = 0; i < 3; i++)
+         images[i] = (VkDescriptorImageInfo){.imageView = compute->views[i],
+                                            .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
+      VkWriteDescriptorSet write = {
+         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = compute->descriptor_set[2],
+         .dstBinding = 2, .descriptorCount = 3, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+         .pImageInfo = images,
+      };
+      CALL(compute, UpdateDescriptorSets)(compute->device, 1, &write, 0, NULL);
+      VkCopyDescriptorSet copies[2] = {
+         {.sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET, .srcSet = compute->descriptor_set[2],
+          .srcBinding = 2, .dstSet = compute->descriptor_set[0], .dstBinding = 2,
+          .descriptorCount = 3},
+         {.sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET, .srcSet = compute->descriptor_set[2],
+          .srcBinding = 2, .dstSet = compute->descriptor_set[0], .dstBinding = 2,
+          .dstArrayElement = 1, .descriptorCount = 2},
+      };
+      CALL(compute, UpdateDescriptorSets)(compute->device, 0, NULL, 2, copies);
+      /* Final order [2,0,1]: the copied records must not alias their source. */
+      write.dstSet = compute->descriptor_set[0];
+      write.descriptorCount = 1;
+      write.pImageInfo = &images[2];
+      CALL(compute, UpdateDescriptorSets)(compute->device, 1, &write, 0, NULL);
+      write.dstSet = compute->descriptor_set[2];
+      write.dstArrayElement = 1;
       CALL(compute, UpdateDescriptorSets)(compute->device, 1, &write, 0, NULL);
    }
 
@@ -340,11 +391,11 @@ bool ps5vk_compute_run(const struct ps5vk_compute_input *input, struct ps5vk_com
       .imageExtent = {64, 4, 1},
    };
    if (input->images) {
-      VkImageMemoryBarrier image_barriers[2] = {0};
-      for (uint32_t i = 0; i < 2; i++) {
+      VkImageMemoryBarrier image_barriers[4] = {0};
+      for (uint32_t i = 0; i <= sources; i++) {
          image_barriers[i] = (VkImageMemoryBarrier){
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .dstAccessMask = i == 0 ? VK_ACCESS_TRANSFER_WRITE_BIT : VK_ACCESS_SHADER_WRITE_BIT,
+            .dstAccessMask = i < sources ? VK_ACCESS_TRANSFER_WRITE_BIT : VK_ACCESS_SHADER_WRITE_BIT,
             .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = VK_IMAGE_LAYOUT_GENERAL,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -354,14 +405,17 @@ bool ps5vk_compute_run(const struct ps5vk_compute_input *input, struct ps5vk_com
       }
       CALL(compute, CmdPipelineBarrier)(compute->command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
          VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
-         0, NULL, 0, NULL, 2, image_barriers);
-      CALL(compute, CmdCopyBufferToImage)(compute->command, compute->buffer, compute->images[0],
-                                        VK_IMAGE_LAYOUT_GENERAL, 1, &image_copy);
-      image_barriers[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-      image_barriers[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-      image_barriers[0].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+         0, NULL, 0, NULL, sources + 1, image_barriers);
+      for (uint32_t i = 0; i < sources; i++) {
+         image_copy.bufferOffset = i * 1024;
+         CALL(compute, CmdCopyBufferToImage)(compute->command, compute->buffer, compute->images[i],
+                                           VK_IMAGE_LAYOUT_GENERAL, 1, &image_copy);
+         image_barriers[i].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+         image_barriers[i].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+         image_barriers[i].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+      }
       CALL(compute, CmdPipelineBarrier)(compute->command, VK_PIPELINE_STAGE_TRANSFER_BIT,
-         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL, 0, NULL, 1, image_barriers);
+         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL, 0, NULL, sources, image_barriers);
    }
    CALL(compute, CmdBindPipeline)(compute->command, VK_PIPELINE_BIND_POINT_COMPUTE,
                                    compute->pipeline);
@@ -381,8 +435,8 @@ bool ps5vk_compute_run(const struct ps5vk_compute_input *input, struct ps5vk_com
       };
       CALL(compute, CmdPipelineBarrier)(compute->command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &readback_barrier, 0, NULL, 0, NULL);
-      image_copy.bufferOffset = 1024;
-      CALL(compute, CmdCopyImageToBuffer)(compute->command, compute->images[1],
+      image_copy.bufferOffset = sources * 1024;
+      CALL(compute, CmdCopyImageToBuffer)(compute->command, compute->images[sources],
                                         VK_IMAGE_LAYOUT_GENERAL, compute->buffer, 1, &image_copy);
       const VkMemoryBarrier host_barrier = {
          .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
@@ -422,8 +476,11 @@ bool ps5vk_compute_run(const struct ps5vk_compute_input *input, struct ps5vk_com
    if (input->images) {
       const uint8_t *pixels = compute->mapped;
       for (uint32_t at = 0; at < 1024; at += 4) {
-         const uint8_t expected[4] = {pixels[at + 2], pixels[at + 1], pixels[at], pixels[at + 3]};
-         if (memcmp(pixels + 1024 + at, expected, 4) != 0)
+         const uint8_t expected[4] = {
+            input->descriptor_array ? pixels[2048 + at] : pixels[at + 2],
+            pixels[at + 1], input->descriptor_array ? pixels[1024 + at + 2] : pixels[at],
+            pixels[at + 3]};
+         if (memcmp(pixels + sources * 1024 + at, expected, 4) != 0)
             compute->mismatched_texels++;
       }
    }
@@ -445,8 +502,8 @@ void ps5vk_compute_finish(struct ps5vk_compute *compute)
       CALL(compute, DestroyPipeline)(compute->device, compute->pipeline, NULL);
    if (compute->pipeline_layout != VK_NULL_HANDLE)
       CALL(compute, DestroyPipelineLayout)(compute->device, compute->pipeline_layout, NULL);
-   for (uint32_t i = 0; i < 2; i++) {
-      if (compute->set_layout[i] != VK_NULL_HANDLE)
+   for (uint32_t i = 0; i < 4; i++) {
+      if (i < 2 && compute->set_layout[i] != VK_NULL_HANDLE)
          CALL(compute, DestroyDescriptorSetLayout)(compute->device, compute->set_layout[i], NULL);
       if (compute->views[i] != VK_NULL_HANDLE)
          CALL(compute, DestroyImageView)(compute->device, compute->views[i], NULL);

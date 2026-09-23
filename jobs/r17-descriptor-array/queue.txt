@@ -1,0 +1,6 @@
+hold 1
+capture
+m2-solid
+d2-compute-images
+r17-descriptor-array
+exit

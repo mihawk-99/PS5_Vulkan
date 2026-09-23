@@ -1,0 +1,4 @@
+golden/r17-descriptor-array/run-1.json: register defaults from m2-solid-1.json, the same run
+d2-compute-images.dump d2-compute-images dispatch: identical to d2-compute-images-1.json: 14 packets, 0 register tables
+golden/r17-descriptor-array/run-1.json: register defaults from m2-solid-1.json, the same run
+r17-descriptor-array.dump r17-descriptor-array dispatch: identical to r17-descriptor-array-1.json: 14 packets, 0 register tables

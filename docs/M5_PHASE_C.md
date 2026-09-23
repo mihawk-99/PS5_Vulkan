@@ -8699,3 +8699,28 @@ Two final trace reads agree: SHA-256
 kernel PID 208 matches. Two-minute harness finishes count=0, console idle.
 Evidence: ../PS5_vkQuake/evidence/m2-r16-map-recording (24 captures, zero
 replay failures). On-screen question pending; no new visual acceptance claimed.
+
+
+## 2026-09-23 — R17 descriptor arrays accepted, PID 209
+
+The user requested R17 then R18. Each descriptor array element now has its own
+record; writes, copies and partial updates use binding record indices. Shared
+graphics/compute validation and emission walk elements at their declared stride.
+Dynamic offsets retain binding/element order. Input-attachment arrays remain
+refused pending a subpass-index witness.
+
+PS5 PID 209: 104 PASS, zero FAIL. Both scalar d2-compute-images and the new
+r17-descriptor-array produce all 256 exact output texels; two streams replay
+exactly. The new case writes/copies/partially updates a three-image array,
+changes its source set afterwards, and requires final order [2,0,1]. Host direct
+checks confirm all three emitted image addresses. Title closed; count=0 checked.
+Two deployed ELF reads and all five PT_LOAD segments match.
+
+Explicit driver archive: 14,434,234 bytes, SHA-256
+aad0ebc750f06f00e130b524e4ebe055a8d190682a9abfbdba2ab105935f634a.
+Full check-driver initially 169/170 PASS: capability direct expected compiler
+stderr but a cache hit skipped compilation. That warning-specific test now
+explicitly disables cache; its three loader/direct/link arms PASS. Eleven gates,
+port five gates/scan and template relink PASS. No runtime cache change.
+Evidence/reproduction: jobs/r17-descriptor-array and golden/r17-descriptor-array.
+R18 exact padded image shape remains next; no vkQuake retry yet.

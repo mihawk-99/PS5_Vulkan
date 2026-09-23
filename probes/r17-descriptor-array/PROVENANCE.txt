@@ -1,0 +1,5 @@
+PS5 Vulkan r17-descriptor-array compute dispatch probe, built by tools/build-compute-probe.sh r17-descriptor-array.
+source: shaders/r17-descriptor-array/dispatch.comp
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0), compiled on the console by libpsbc
+glslang: Glslang Version: 11:16.4.0
+dispatch.spv: 451 words, sha256 efdc27228db8fd205044f983f7556dbce1688e1d38bf36ad754894a3e94a5547

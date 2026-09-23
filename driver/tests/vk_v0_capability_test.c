@@ -230,6 +230,8 @@ main(void)
 {
    test_begin("V0 capability refusal");
 #if defined(__linux__)
+   /* This test observes compiler stderr, which cache hits intentionally skip. */
+   setenv("PS5VK_SHADER_CACHE_DIR", "", 1);
    const char *const probes = getenv("PS5VK_PROBES");
    size_t vertex_words = 0;
    size_t pixel_words = 0;

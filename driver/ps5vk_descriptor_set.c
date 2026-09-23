@@ -9,16 +9,9 @@
  * vkCmdBindDescriptorSets stores the set in the command buffer, where the
  * draw writes it into the stage's set-0 table (ps5vk_draw.c).
  *
- * One record per binding is all the hardware has run: one 16-byte
- * uniform-buffer table entry (M3's uniform colour, probes/m3/bindings.txt) and
- * one 48-byte combined image-sampler entry (M3's texture and M4's render to
- * texture, Phase C4), whose record is the VkDescriptorImageInfo's view and
- * sampler: the draw builds the entry's bytes from the image the view names and
- * the sampler's own word (ps5vk_image.c). A write of several elements, a
- * descriptor copy of several and any other type therefore stay refused, with
- * the step that settles them named where the refusal is logged: storage
- * buffers are D2, and descriptor arrays, dynamic offsets and sets past 0 are
- * D1.
+ * Each array element has its own record. Layouts number records in binding
+ * order, independently of the byte strides in the GPU descriptor table.
+ * Writes and copies may span consecutive compatible bindings, as Vulkan allows.
  *
  * A set holds its layout: vkUpdateDescriptorSets has no layout argument, so
  * the set is the only place its binding space is known, and the layout stays
@@ -127,14 +120,15 @@ ps5vk_descriptor_pool_clear(struct ps5vk_device *device, struct ps5vk_descriptor
 
 const struct ps5vk_descriptor_buffer *
 ps5vk_cmd_buffer_descriptor(const struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set_index,
-                            uint32_t binding)
+                            uint32_t binding, uint32_t element)
 {
    if (set_index >= PS5VK_DESCRIPTOR_SET_COUNT)
       return NULL;
    const struct ps5vk_descriptor_set *const set = cmd_buffer->descriptor_sets[set_index];
-   if (set == NULL || binding >= set->layout->binding_count)
+   if (set == NULL || binding >= set->layout->binding_count ||
+       element >= set->layout->bindings[binding].count)
       return NULL;
-   const struct ps5vk_descriptor_buffer *const buffer = &set->buffers[binding];
+   const struct ps5vk_descriptor_buffer *const buffer = &set->buffers[set->layout->bindings[binding].record_index + element];
    return buffer->type == VK_DESCRIPTOR_TYPE_MAX_ENUM ? NULL : buffer;
 }
 
@@ -226,7 +220,7 @@ ps5vk_AllocateDescriptorSets(VkDevice _device, const VkDescriptorSetAllocateInfo
       ps5vk_descriptor_pool_take(pool, layout);
       struct ps5vk_descriptor_set *const set =
          vk_object_zalloc(&device->vk, NULL,
-                          sizeof(*set) + layout->binding_count * sizeof(set->buffers[0]),
+                          sizeof(*set) + layout->descriptor_count * sizeof(set->buffers[0]),
                           VK_OBJECT_TYPE_DESCRIPTOR_SET);
       if (!set) {
          ps5vk_descriptor_pool_give(pool, layout);
@@ -237,7 +231,7 @@ ps5vk_AllocateDescriptorSets(VkDevice _device, const VkDescriptorSetAllocateInfo
       vk_descriptor_set_layout_ref(&layout->vk);
       /* A binding no write has named keeps this type, which is what a draw
        * refuses (ps5vk_cmd_buffer_descriptor). */
-      for (uint32_t b = 0; b < layout->binding_count; b++)
+      for (uint32_t b = 0; b < layout->descriptor_count; b++)
          set->buffers[b].type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
       set->next_in_pool = pool->sets;
       pool->sets = set;
@@ -274,24 +268,11 @@ ps5vk_FreeDescriptorSets(VkDevice _device, VkDescriptorPool _descriptorPool,
    return VK_SUCCESS;
 }
 
-/* Records one write. Two shapes the record cannot hold leave no record at
- * all, which is what the draw refuses by name: several descriptors in one
- * binding, and an element other than the first. */
+/* Record one element; the caller resolves its position in the set. */
 static void
-ps5vk_descriptor_set_write(struct ps5vk_device *device, const VkWriteDescriptorSet *write)
+ps5vk_descriptor_write_one(struct ps5vk_descriptor_buffer *record,
+                           const VkWriteDescriptorSet *write, uint32_t element)
 {
-   VK_FROM_HANDLE(ps5vk_descriptor_set, set, write->dstSet);
-   if (set == NULL || write->dstBinding >= set->layout->binding_count)
-      return;
-   if (write->dstArrayElement != 0 || write->descriptorCount != 1 ||
-       set->layout->bindings[write->dstBinding].count != 1) {
-      vk_errorf(device, VK_ERROR_UNKNOWN,
-                "set 0 binding %u: a write of %u descriptors from element %u is not the one this "
-                "driver records; descriptor arrays are D1 (docs/M5_REFERENCE.md)",
-                write->dstBinding, write->descriptorCount, write->dstArrayElement);
-      return;
-   }
-   struct ps5vk_descriptor_buffer *const record = &set->buffers[write->dstBinding];
    /* A texel buffer's write names a view: what the draw needs is the view's
     * buffer, offset, range and format, and the view's own rule is that the
     * format carries the texel-buffer feature the buffer's usage asks for
@@ -301,7 +282,7 @@ ps5vk_descriptor_set_write(struct ps5vk_device *device, const VkWriteDescriptorS
        write->pTexelBufferView != NULL) {
       *record = (struct ps5vk_descriptor_buffer){
          .type = write->descriptorType,
-         .buffer_view = write->pTexelBufferView[0],
+         .buffer_view = write->pTexelBufferView[element],
       };
       return;
    }
@@ -313,7 +294,7 @@ ps5vk_descriptor_set_write(struct ps5vk_device *device, const VkWriteDescriptorS
        write->pImageInfo != NULL) {
       *record = (struct ps5vk_descriptor_buffer){
          .type = write->descriptorType,
-         .view = write->pImageInfo[0].imageView,
+         .view = write->pImageInfo[element].imageView,
       };
       return;
    }
@@ -323,7 +304,7 @@ ps5vk_descriptor_set_write(struct ps5vk_device *device, const VkWriteDescriptorS
    if (write->descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER && write->pImageInfo != NULL) {
       *record = (struct ps5vk_descriptor_buffer){
          .type = write->descriptorType,
-         .sampler = write->pImageInfo[0].sampler,
+         .sampler = write->pImageInfo[element].sampler,
       };
       return;
    }
@@ -334,8 +315,8 @@ ps5vk_descriptor_set_write(struct ps5vk_device *device, const VkWriteDescriptorS
        * what the hardware has not sampled (ps5vk_draw.c). */
       *record = (struct ps5vk_descriptor_buffer){
          .type = write->descriptorType,
-         .view = write->pImageInfo[0].imageView,
-         .sampler = write->pImageInfo[0].sampler,
+         .view = write->pImageInfo[element].imageView,
+         .sampler = write->pImageInfo[element].sampler,
       };
       return;
    }
@@ -351,15 +332,15 @@ ps5vk_descriptor_set_write(struct ps5vk_device *device, const VkWriteDescriptorS
       *record = (struct ps5vk_descriptor_buffer){.type = write->descriptorType};
       return;
    }
-   VK_FROM_HANDLE(ps5vk_buffer, buffer, write->pBufferInfo[0].buffer);
+   VK_FROM_HANDLE(ps5vk_buffer, buffer, write->pBufferInfo[element].buffer);
    if (buffer == NULL || buffer->vk.device_address == 0) {
       /* An unbound buffer has no address: the draw refuses the binding rather
        * than writing a descriptor that names the wrong memory. */
       *record = (struct ps5vk_descriptor_buffer){.type = write->descriptorType};
       return;
    }
-   const VkDeviceSize offset = write->pBufferInfo[0].offset;
-   const VkDeviceSize range = write->pBufferInfo[0].range;
+   const VkDeviceSize offset = write->pBufferInfo[element].offset;
+   const VkDeviceSize range = write->pBufferInfo[element].range;
    *record = (struct ps5vk_descriptor_buffer){
       .address = buffer->vk.device_address + offset,
       .size = range == VK_WHOLE_SIZE ? buffer->vk.size - offset : range,
@@ -367,24 +348,48 @@ ps5vk_descriptor_set_write(struct ps5vk_device *device, const VkWriteDescriptorS
    };
 }
 
-/* Copies one binding's record to another; as for a write, only the
- * one-element form has a record to land in. */
+/* Compatible consecutive bindings are consecutive records, including past
+ * zero-count bindings. Valid Vulkan writes/copies require matching types. */
+static bool
+ps5vk_descriptor_range(const struct ps5vk_descriptor_set *set, uint32_t binding,
+                       uint32_t element, uint32_t count, uint32_t *first)
+{
+   if (set == NULL || binding >= set->layout->binding_count ||
+       element >= set->layout->bindings[binding].count)
+      return false;
+   *first = set->layout->bindings[binding].record_index + element;
+   return count <= set->layout->descriptor_count - *first;
+}
+
+static void
+ps5vk_descriptor_set_write(struct ps5vk_device *device, const VkWriteDescriptorSet *write)
+{
+   VK_FROM_HANDLE(ps5vk_descriptor_set, set, write->dstSet);
+   uint32_t first;
+   if (!ps5vk_descriptor_range(set, write->dstBinding, write->dstArrayElement,
+                               write->descriptorCount, &first)) {
+      vk_errorf(device, VK_ERROR_UNKNOWN, "descriptor write exceeds the set's records");
+      return;
+   }
+   for (uint32_t i = 0; i < write->descriptorCount; i++)
+      ps5vk_descriptor_write_one(&set->buffers[first + i], write, i);
+}
+
 static void
 ps5vk_descriptor_set_copy(struct ps5vk_device *device, const VkCopyDescriptorSet *copy)
 {
    VK_FROM_HANDLE(ps5vk_descriptor_set, source, copy->srcSet);
    VK_FROM_HANDLE(ps5vk_descriptor_set, destination, copy->dstSet);
-   if (source == NULL || destination == NULL ||
-       copy->srcBinding >= source->layout->binding_count ||
-       copy->dstBinding >= destination->layout->binding_count)
-      return;
-   if (copy->srcArrayElement != 0 || copy->dstArrayElement != 0 || copy->descriptorCount != 1) {
-      vk_errorf(device, VK_ERROR_UNKNOWN,
-                "a copy of %u descriptors from element %u only records one; descriptor arrays "
-                "are D1 (docs/M5_REFERENCE.md)", copy->descriptorCount, copy->srcArrayElement);
+   uint32_t src, dst;
+   if (!ps5vk_descriptor_range(source, copy->srcBinding, copy->srcArrayElement,
+                               copy->descriptorCount, &src) ||
+       !ps5vk_descriptor_range(destination, copy->dstBinding, copy->dstArrayElement,
+                               copy->descriptorCount, &dst)) {
+      vk_errorf(device, VK_ERROR_UNKNOWN, "descriptor copy exceeds the set's records");
       return;
    }
-   destination->buffers[copy->dstBinding] = source->buffers[copy->srcBinding];
+   memmove(&destination->buffers[dst], &source->buffers[src],
+           copy->descriptorCount * sizeof(source->buffers[0]));
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -429,21 +434,22 @@ ps5vk_CmdBindDescriptorSets2KHR(VkCommandBuffer commandBuffer,
              sizeof(cmd_buffer->descriptor_set_offsets[index]));
       if (set == NULL)
          continue;
-      /* Vulkan orders offsets by set, then binding, then array element.
-       * The descriptor writer currently accepts scalar bindings only. */
+      /* Vulkan orders offsets by set, then binding, then array element. */
       for (uint32_t b = 0; b < set->layout->binding_count; b++) {
          const struct ps5vk_descriptor_binding *binding = &set->layout->bindings[b];
          if (binding->count == 0 || binding->type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC)
             continue;
-         if (binding->count != 1 || binding->dynamic_index >= PS5VK_DYNAMIC_UNIFORM_COUNT ||
-             next_offset >= info->dynamicOffsetCount) {
+         if (binding->dynamic_index > PS5VK_DYNAMIC_UNIFORM_COUNT ||
+             binding->count > PS5VK_DYNAMIC_UNIFORM_COUNT - binding->dynamic_index ||
+             binding->count > info->dynamicOffsetCount - next_offset) {
             ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                                     "set %u binding %u: unsupported dynamic uniform array/count",
                                     index, b);
             return;
          }
-         cmd_buffer->descriptor_set_offsets[index][binding->dynamic_index] =
-            info->pDynamicOffsets[next_offset++];
+         for (uint32_t element = 0; element < binding->count; element++)
+            cmd_buffer->descriptor_set_offsets[index][binding->dynamic_index + element] =
+               info->pDynamicOffsets[next_offset++];
       }
    }
    if (next_offset != info->dynamicOffsetCount)

@@ -1,0 +1,71 @@
+{
+ "schema": 1,
+ "kind": "driver-run",
+ "source": {
+  "klog": "r17-descriptor-array.log",
+  "pid": 209
+ },
+ "video": -1,
+ "videos": {
+  "d2-compute-images": -1,
+  "r17-descriptor-array": -1
+ },
+ "stages": [
+  {
+   "index": 0,
+   "address": "0x200030000",
+   "bytes": "0x4000",
+   "fnv1a64": "0x2358b64b5e0b9fc7",
+   "chunk_words": 64,
+   "chunks": {
+    "0x0000": "be800303be810382be830382bfa10001f40c0200fa000000f40c0401fa000000d746000004010c047e020205bf8cc07ff0001f0800040400bf8c3f707e08cb06f0201f0800020400bf810000bf9f0000bf9f0000bf9f0000bf9f0000bf9f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "test": "d2-compute-images"
+  },
+  {
+   "index": 0,
+   "address": "0x200030000",
+   "bytes": "0x4000",
+   "fnv1a64": "0x6250663b798d5a95",
+   "chunk_words": 64,
+   "chunks": {
+    "0x0000": "be800303be810382be830382bfa10003f40c0200fa000000f40c0401fa000030f40c0601fa000060f40c0801fa000090d746000004010c047e020205bf8cc07ff000110800040400f000120800060500f0001408000806007e0e02f2bf8c3f70f0201f0800020400bf810000bf9f0000bf9f0000bf9f0000bf9f0000bf9f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "test": "r17-descriptor-array"
+  }
+ ],
+ "regions": {
+  "tables-d2-compute-images-0x200040000": {
+   "address": "0x200040000",
+   "bytes": 262144,
+   "test": "d2-compute-images"
+  },
+  "tables-d2-compute-images-0x200034000": {
+   "address": "0x200034000",
+   "bytes": 16384,
+   "test": "d2-compute-images"
+  },
+  "tables-r17-descriptor-array-0x200048000": {
+   "address": "0x200048000",
+   "bytes": 262144,
+   "test": "r17-descriptor-array"
+  },
+  "tables-r17-descriptor-array-0x200034000": {
+   "address": "0x200034000",
+   "bytes": 16384,
+   "test": "r17-descriptor-array"
+  }
+ },
+ "submissions": [
+  {
+   "test": "d2-compute-images",
+   "label": "dispatch",
+   "file": "d2-compute-images-1.json"
+  },
+  {
+   "test": "r17-descriptor-array",
+   "label": "dispatch",
+   "file": "r17-descriptor-array-1.json"
+  }
+ ]
+}

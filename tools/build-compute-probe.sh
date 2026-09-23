@@ -15,7 +15,7 @@ set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 set_name=${1:-c0}
-case "$set_name" in c0|c0-images) ;; *) echo "unknown compute probe: $set_name" >&2; exit 2 ;; esac
+case "$set_name" in c0|c0-images|r17-descriptor-array) ;; *) echo "unknown compute probe: $set_name" >&2; exit 2 ;; esac
 source_file="$root/shaders/$set_name/dispatch.comp"
 output="$root/probes/$set_name"
 work="$root/build/probes/$set_name"

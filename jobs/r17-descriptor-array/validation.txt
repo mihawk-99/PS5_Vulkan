@@ -1,0 +1,25 @@
+{
+  "archive_bytes": 14434234,
+  "archive_sha256": "aad0ebc750f06f00e130b524e4ebe055a8d190682a9abfbdba2ab105935f634a",
+  "full_check_initial": {
+    "pass": 169,
+    "fail": 1,
+    "failure": "v0_capability direct expected compiler stderr but got a shader cache hit"
+  },
+  "final_capability_check": "loader/direct/PS5 link PASS after disabling cache in warning-specific test",
+  "driver_gates": [
+    "lint PASS",
+    "test PASS",
+    "audit-commands PASS",
+    "audit-limits PASS",
+    "audit-formats PASS",
+    "migration PASS",
+    "mip-layout PASS",
+    "psbc-link PASS",
+    "probe-packages PASS",
+    "vulkan-runtime PASS",
+    "runner-cases PASS"
+  ],
+  "port_gates": "five PASS; shader scan PASS",
+  "template_relink": "PASS; existing unused audio helper warnings"
+}

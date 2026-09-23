@@ -4,7 +4,7 @@ Volatile by design. Keep this file under about 120 lines. Specifications are in
 `docs/VULKAN_PROBE_PLAN.md`; measurements are in `docs/M5_PHASE_C.md` and
 `docs/HARDWARE_FINDINGS.md`.
 
-_Updated: 2026-09-22 (late evening)_
+_Updated: 2026-09-23_
 
 ## Now
 
@@ -31,28 +31,22 @@ SHA-256 e089e060… . PS5 probe PIDs 200 and 201 each returned 241 PASS/zero FAI
 twelve submissions replay exactly, goldens in golden/shader-cache-cold and
 -warm. Driver probe stdout is not a hit-count witness; vkQuake's trace is.
 
-**M6 resumed by user; R14 and R15 accepted.** R14 stride fix is 2925ff6;
-PS5 PID 204 has indirect pixels and exact replay. R15 independently applies
-multiple dynamic UBO offsets and leaves static buffers fixed. PID 205: 196
-PASS, zero FAIL, all four frames and four exact replays. Eleven driver gates,
-port five gates and template relink PASS; host subpass regression fixed before
-deployment. Evidence: jobs/r15-dynamic-pair and golden/r15-dynamic-pair.
-The phase log explicitly corrects old D1 coverage: its write used the static
-type despite a dynamic layout. Corrected writes now pass unchanged streams.
-**R16 accepted after user resumption.** Corrected XOR mip-tail addressing
-and mapped 512x512/five-level blits pass PS5 PID 207: 277 PASS, zero FAIL.
-All four lower-mip frames match every pixel; independent CPU checks cover
-87,040 lower texels. Ten exact replays; title closed and count=0 confirmed.
-Fifteen host/link arms, eleven gates, port five gates/scan and template relink
-PASS. Archive 14,428,778 bytes, SHA-256 8d5206d5… . Evidence/reproduction:
-jobs/r16-mip-blit and golden/r16-mip-blit-corrected. Failed PID 206 and the
-separate correction to earlier centre-only C7 coverage remain preserved.
-vkQuake relink/launch completed: PID 208, identity b6a1e954…, first present
-success, then new descriptor-array (three sampled images) and padded-pitch
-(256 texels) recording refusals. Prior stride/offset/tiled-blit failures absent.
-EndCommandBuffer -13; exit 1 then known SIGSYS. Both trace reads agree; console
-idle. Port evidence/m2-r16-map-recording names the next R17/R18 witnesses.
-Full padded-image shape is not yet measured. M6 remains open.
+**R14–R17 accepted; R18 next.** R14 2925ff6 (single-draw stride), R15
+b838832 (independent dynamic UBO offsets), R16 c7f6f95 (mip-tail XOR/blits)
+passed PS5 probes. Port PID 208 presented past those three old failures, then
+named a three-element descriptor array and padded pitch 256. Its evidence is
+../PS5_vkQuake/evidence/m2-r16-map-recording; full padded shape still unknown.
+
+R17 now passes PS5 PID 209: 104 PASS, zero FAIL. Three distinct sampled images
+survive full writes, copies, partial updates and later source changes; all
+256 output texels match, as does the scalar regression. Two exact replays,
+title closed, count=0 verified. Host checks assert all three emitted addresses.
+Full driver check initially 169/170 PASS; a cache hit skipped compiler stderr
+expected by the capability test. That test now disables cache and its three
+arms pass. Eleven gates, port five gates/scan and template relink PASS.
+Archive 14,434,234 bytes, SHA-256 aad0ebc7… . jobs/r17-descriptor-array and
+golden/r17-descriptor-array contain evidence/reproduction. No new port run.
+Next: identify R18's image extent/format/mips/layers before changing its layout.
 
 **Port M2 met:** PID 197, QueuePresent success and human-confirmed Quake
 menu/console; port evidence/m2-first-frame. M3–M6 remain open. Input/audio

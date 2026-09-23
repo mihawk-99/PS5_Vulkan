@@ -21272,10 +21272,13 @@ void run_vulkan_page_mip_frames_six(const TestContext &test, TestOutcome &outcom
 // console's readback is exact; a PC rebuild records the dispatch without running
 // it, which is why the submission is what the PC comparison covers.
 #ifdef AGC_VULKAN_DRIVER
-void run_vulkan_compute(const TestContext &test, TestOutcome &outcome, bool images) noexcept
+void run_vulkan_compute(const TestContext &test, TestOutcome &outcome, bool images,
+                        bool descriptor_array = false) noexcept
 {
     JsonLog &log = test.log;
-    const PackagePaths compute = package_paths(images ? "c0-images" : "c0");
+    const PackagePaths compute = package_paths(descriptor_array ? "r17-descriptor-array"
+                                               : images         ? "c0-images"
+                                                                : "c0");
     char spirv_download[96]{};
     char spirv_app[96]{};
     std::snprintf(spirv_download, sizeof(spirv_download), "%sdispatch.spv", compute.download);
@@ -21319,6 +21322,7 @@ void run_vulkan_compute(const TestContext &test, TestOutcome &outcome, bool imag
     input.expected_word = kComputeWord;
     input.report = report;
     input.images = images;
+    input.descriptor_array = descriptor_array;
     // Two dispatches: vkCmdDispatch over the counts the command names, then
     // vkCmdDispatchIndirect over the counts the buffer holds. Each is its own
     // program and its own submission, so the capture and the PC comparison see
@@ -21372,6 +21376,11 @@ void run_vulkan_compute_dispatch(const TestContext &test, TestOutcome &outcome) 
 void run_vulkan_compute_images(const TestContext &test, TestOutcome &outcome) noexcept
 {
     run_vulkan_compute(test, outcome, true);
+}
+
+void run_vulkan_descriptor_array(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_vulkan_compute(test, outcome, true, true);
 }
 
 // The three format items this session's driver work added and no console run
@@ -24328,6 +24337,7 @@ constexpr RunnerTest kRunnerTests[] = {
     // the m2 set is only what the runner stages for every test).
     {"d2-compute", "m2", run_vulkan_compute_dispatch},
     {"d2-compute-images", "m2", run_vulkan_compute_images},
+    {"r17-descriptor-array", "m2", run_vulkan_descriptor_array},
     // Phase C5: the tutorial's depth program, the m4-depth canary's two
     // rectangles over a D32_SFLOAT attachment the frame clears through
     // vk_meta, testing and writing depth with LESS.

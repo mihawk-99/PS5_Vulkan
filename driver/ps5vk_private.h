@@ -908,6 +908,7 @@ struct ps5vk_descriptor_binding {
    uint32_t offset;
    uint32_t stride;
    uint32_t dynamic_index;
+   uint32_t record_index;
 };
 
 /* A descriptor set layout: bindings indexed by binding number. */
@@ -915,6 +916,7 @@ struct ps5vk_descriptor_set_layout {
    struct vk_descriptor_set_layout vk;
    uint32_t binding_count;
    uint32_t table_bytes;
+   uint32_t descriptor_count;
    struct ps5vk_descriptor_binding bindings[];
 };
 
@@ -1079,10 +1081,10 @@ struct ps5vk_descriptor_buffer {
    VkBufferView buffer_view;
 };
 
-/* A descriptor set: one record per binding of the layout it was allocated
+/* A descriptor set: one record per array element of the layout it was allocated
  * with, and that layout itself. The layout is reference counted because
  * vkUpdateDescriptorSets and vkCmdBindDescriptorSets take no layout, and the
- * records are indexed by its bindings. */
+ * records are indexed by binding.record_index plus array element. */
 struct ps5vk_descriptor_set {
    struct vk_object_base base;
    struct ps5vk_descriptor_set_layout *layout;
@@ -1111,12 +1113,12 @@ struct ps5vk_descriptor_pool {
    struct ps5vk_descriptor_pool_size sizes[];
 };
 
-/* What the application wrote into one binding of the set bound at set_index,
+/* What the application wrote into one array element of the set bound at set_index,
  * or NULL when no set is bound there or the binding holds no write
  * (ps5vk_descriptor_set.c). A draw builds its set-0 tables from it. */
 const struct ps5vk_descriptor_buffer *
 ps5vk_cmd_buffer_descriptor(const struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set_index,
-                            uint32_t binding);
+                            uint32_t binding, uint32_t element);
 
 /* A compiled shader stage: the AGC package and the compiler's metadata. */
 struct ps5vk_shader_package {

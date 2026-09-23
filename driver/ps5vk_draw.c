@@ -1242,6 +1242,12 @@ ps5vk_input_attachment_descriptor(struct ps5vk_cmd_buffer *cmd_buffer,
    }
    if (declared == NULL)
       return NULL;
+   if (binding->array_size != 1) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                              "input attachment arrays need a subpass-index probe (R10)");
+      *refused = true;
+      return NULL;
+   }
    const struct vk_render_pass *const pass = cmd_buffer->vk.render_pass;
    const struct vk_framebuffer *const framebuffer = cmd_buffer->vk.framebuffer;
    if (pass == NULL || framebuffer == NULL ||
@@ -1470,9 +1476,7 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
          /* Every binding is checked before its table exists: what the compiler
           * reads, where it reads it, and what the application put there. The
           * table reaches past the last binding's end, its offset plus one entry
-          * for each descriptor the binding holds. What a combined image sampler
-          * binding's image and sampler are is kept here, for the table below. */
-         struct ps5vk_sampled_image sampled[PSBC_MAX_DESCRIPTOR_BINDINGS];
+          * for each descriptor the binding holds. */
          size_t table_bytes = 0;
          for (uint32_t b = 0; b < stage_metadata->descriptor_binding_count; b++) {
             const PsbcDescriptorBinding *const binding = &stage_metadata->descriptor_bindings[b];
@@ -1511,15 +1515,10 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
                   return false;
                }
             }
-            if (binding->array_size != 1) {
-               ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                                       "set %u binding %u holds %u descriptors; descriptor arrays are "
-                                       "D1 (docs/M5_REFERENCE.md)", (unsigned)set, (unsigned)binding->binding,
-                                       binding->array_size);
-               return false;
-            }
-            if (!(binding->binding == PS5VK_PUSH_CONSTANT_BINDING &&
-                  (pipeline->push_constant_stages & stage_bits[s]))) {
+            if (binding->binding == PS5VK_PUSH_CONSTANT_BINDING &&
+                (pipeline->push_constant_stages & stage_bits[s]))
+               continue;
+            for (uint32_t element = 0; element < binding->array_size; element++) {
                /* R10: an input attachment comes from the subpass, everything
                 * else from the application's write. */
                struct ps5vk_descriptor_buffer attachment = {0};
@@ -1529,13 +1528,13 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
                if (refused_attachment)
                   return false;
                if (written == NULL)
-                  written = ps5vk_cmd_buffer_descriptor(cmd_buffer, binding->set, binding->binding);
+                  written = ps5vk_cmd_buffer_descriptor(cmd_buffer, binding->set, binding->binding, element);
                if (written == NULL) {
                   ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                                          "set %u binding %u is not bound or holds no write; the "
+                                          "set %u binding %u element %u is not bound or holds no write; the "
                                           "application has to bind and update it "
                                           "(docs/M5_REFERENCE.md, C3)",
-                                          (unsigned)set, (unsigned)binding->binding);
+                                          (unsigned)set, (unsigned)binding->binding, element);
                   return false;
                }
                if (binding->stride == PS5VK_COMBINED_IMAGE_SAMPLER_DESCRIPTOR_BYTES ||
@@ -1574,10 +1573,11 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
                   /* A bare sampler names no view: its entry is the sampler's
                    * three words and nothing else, written below. */
                   if (written->type != VK_DESCRIPTOR_TYPE_SAMPLER) {
+                     struct ps5vk_sampled_image sampled;
                      if (!ps5vk_sampled_image(cmd_buffer, set, binding->binding, written,
-                                             &sampled[b]))
+                                             &sampled))
                         return false;
-                     *colour_barrier = *colour_barrier || sampled[b].barrier;
+                     *colour_barrier = *colour_barrier || sampled.barrier;
                   }
                } else if (binding->stride == PS5VK_UNIFORM_BUFFER_DESCRIPTOR_BYTES ||
                           binding->stride == PS5VK_TEXEL_BUFFER_DESCRIPTOR_BYTES) {
@@ -1644,7 +1644,7 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
             const PsbcDescriptorBinding *const binding = &stage_metadata->descriptor_bindings[b];
             if (binding->set != set)
                continue;
-            uint32_t *const descriptor = table + binding->offset / sizeof(uint32_t);
+            uint32_t *descriptor = table + binding->offset / sizeof(uint32_t);
             if (binding->binding == PS5VK_PUSH_CONSTANT_BINDING &&
                 (pipeline->push_constant_stages & stage_bits[s])) {
                /* The reserved binding's descriptor, exactly as the C1b path
@@ -1657,93 +1657,106 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
                device->push_constant_descriptor = descriptor;
                continue;
             }
-            /* The application's binding: a combined image sampler's 48 bytes, or
-             * the uniform buffer's entry in the stride form the hardware ran: the
-             * address, its high word with the element stride, the elements the
-             * range covers and the flags (src/diagnostics.cpp,
-             * kUniformBufferFlags). */
-            if (binding->stride == PS5VK_STORAGE_IMAGE_DESCRIPTOR_BYTES) {
-               /* A storage image's 32 bytes are the combined sampler's first
-                * eight: the image descriptor without the sampler's three words.
-                * The kind, levels and layer fields are the sampled path's, and the
-                * format's DST_SEL is what supplies Vulkan's fill-in rule for the
-                * channels a format does not have (ps5vk_write_image_descriptor). */
-               uint32_t image_descriptor[PS5VK_COMBINED_IMAGE_SAMPLER_DESCRIPTOR_BYTES / 4];
-               ps5vk_write_image_descriptor(image_descriptor, &sampled[b]);
-               memcpy(descriptor, image_descriptor, PS5VK_STORAGE_IMAGE_DESCRIPTOR_BYTES);
-               continue;
-            }
-            if (binding->stride == PS5VK_COMBINED_IMAGE_SAMPLER_DESCRIPTOR_BYTES) {
-               /* A bare sampler's entry is the sampler half alone: the words the
-                * image descriptor leaves at 8, 9 and 10, with the image half zero
-                * because the paired SAMPLED_IMAGE binding's entry carries it. The
-                * instruction reads each half from its own binding, which is what
-                * makes the separated form fetch what the combined form fetches
-                * (R2 of the port's requests). */
-               const struct ps5vk_descriptor_buffer *const written_sampler =
-                  ps5vk_cmd_buffer_descriptor(cmd_buffer, binding->set, binding->binding);
-               if (written_sampler != NULL &&
-                   written_sampler->type == VK_DESCRIPTOR_TYPE_SAMPLER) {
-                  VK_FROM_HANDLE(ps5vk_sampler, sampler, written_sampler->sampler);
-                  memset(descriptor, 0, PS5VK_COMBINED_IMAGE_SAMPLER_DESCRIPTOR_BYTES);
-                  descriptor[8] = sampler->address_word;
-                  descriptor[9] = sampler->lod_word;
-                  descriptor[10] = sampler->word;
+            for (uint32_t element = 0; element < binding->array_size; element++) {
+               descriptor = table + (binding->offset + element * binding->stride) / sizeof(uint32_t);
+               struct ps5vk_descriptor_buffer attachment = {0};
+               bool refused_attachment = false;
+               const struct ps5vk_descriptor_buffer *written = ps5vk_input_attachment_descriptor(
+                  cmd_buffer, pipeline, s, binding, &refused_attachment, &attachment);
+               if (refused_attachment)
+                  return false;
+               if (written == NULL)
+                  written = ps5vk_cmd_buffer_descriptor(cmd_buffer, binding->set, binding->binding, element);
+               assert(written != NULL); /* Validated above. */
+               struct ps5vk_sampled_image sampled;
+               if ((binding->stride == PS5VK_STORAGE_IMAGE_DESCRIPTOR_BYTES ||
+                    binding->stride == PS5VK_COMBINED_IMAGE_SAMPLER_DESCRIPTOR_BYTES) &&
+                   written->type != VK_DESCRIPTOR_TYPE_SAMPLER &&
+                   !ps5vk_sampled_image(cmd_buffer, set, binding->binding, written, &sampled))
+                  return false;
+               /* The application's binding: a combined image sampler's 48 bytes, or
+                * the uniform buffer's entry in the stride form the hardware ran: the
+                * address, its high word with the element stride, the elements the
+                * range covers and the flags (src/diagnostics.cpp,
+                * kUniformBufferFlags). */
+               if (binding->stride == PS5VK_STORAGE_IMAGE_DESCRIPTOR_BYTES) {
+                  /* A storage image's 32 bytes are the combined sampler's first
+                   * eight: the image descriptor without the sampler's three words.
+                   * The kind, levels and layer fields are the sampled path's, and the
+                   * format's DST_SEL is what supplies Vulkan's fill-in rule for the
+                   * channels a format does not have (ps5vk_write_image_descriptor). */
+                  uint32_t image_descriptor[PS5VK_COMBINED_IMAGE_SAMPLER_DESCRIPTOR_BYTES / 4];
+                  ps5vk_write_image_descriptor(image_descriptor, &sampled);
+                  memcpy(descriptor, image_descriptor, PS5VK_STORAGE_IMAGE_DESCRIPTOR_BYTES);
                   continue;
                }
-               ps5vk_write_image_descriptor(descriptor, &sampled[b]);
-               continue;
-            }
-            const struct ps5vk_descriptor_buffer *const written =
-               ps5vk_cmd_buffer_descriptor(cmd_buffer, binding->set, binding->binding);
-            if (written->type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER ||
-                written->type == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER) {
-               /* A texel buffer's V#: the view's buffer as elements of the view's
-                * format, the format entry's channel selectors and format word in
-                * word 3 (docs/BLOCKERS.md, the descriptor types). */
-               VK_FROM_HANDLE(ps5vk_buffer_view, view, written->buffer_view);
-               const struct ps5vk_format *const texel = view ? ps5vk_find_format(view->format) : NULL;
-               if (view == NULL || texel == NULL || texel->image_format == 0 ||
-                   view->buffer->vk.device_address == 0) {
-                  ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                                          "set %u binding %u names a texel buffer view with no buffer, "
-                                          "address or recorded format word",
-                                          (unsigned)set, (unsigned)binding->binding);
-                  return false;
+               if (binding->stride == PS5VK_COMBINED_IMAGE_SAMPLER_DESCRIPTOR_BYTES) {
+                  /* A bare sampler's entry is the sampler half alone: the words the
+                   * image descriptor leaves at 8, 9 and 10, with the image half zero
+                   * because the paired SAMPLED_IMAGE binding's entry carries it. The
+                   * instruction reads each half from its own binding, which is what
+                   * makes the separated form fetch what the combined form fetches
+                   * (R2 of the port's requests). */
+                  if (written->type == VK_DESCRIPTOR_TYPE_SAMPLER) {
+                     VK_FROM_HANDLE(ps5vk_sampler, sampler, written->sampler);
+                     memset(descriptor, 0, PS5VK_COMBINED_IMAGE_SAMPLER_DESCRIPTOR_BYTES);
+                     descriptor[8] = sampler->address_word;
+                     descriptor[9] = sampler->lod_word;
+                     descriptor[10] = sampler->word;
+                     continue;
+                  }
+                  ps5vk_write_image_descriptor(descriptor, &sampled);
+                  continue;
                }
-               const uint32_t texel_bytes = vk_format_get_blocksize(view->format);
-               const uint64_t address = view->buffer->vk.device_address + view->offset;
+               if (written->type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER ||
+                   written->type == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER) {
+                  /* A texel buffer's V#: the view's buffer as elements of the view's
+                   * format, the format entry's channel selectors and format word in
+                   * word 3 (docs/BLOCKERS.md, the descriptor types). */
+                  VK_FROM_HANDLE(ps5vk_buffer_view, view, written->buffer_view);
+                  const struct ps5vk_format *const texel = view ? ps5vk_find_format(view->format) : NULL;
+                  if (view == NULL || texel == NULL || texel->image_format == 0 ||
+                      view->buffer->vk.device_address == 0) {
+                     ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                                             "set %u binding %u names a texel buffer view with no buffer, "
+                                             "address or recorded format word",
+                                             (unsigned)set, (unsigned)binding->binding);
+                     return false;
+                  }
+                  const uint32_t texel_bytes = vk_format_get_blocksize(view->format);
+                  const uint64_t address = view->buffer->vk.device_address + view->offset;
+                  descriptor[0] = (uint32_t)address;
+                  descriptor[1] = (uint32_t)(address >> 32) | (texel_bytes << 16);
+                  descriptor[2] = texel_bytes != 0 ? (uint32_t)(view->range / texel_bytes) : 0u;
+                  descriptor[3] = texel->dst_sel | PS5VK_TEXEL_BUFFER_FORMAT(texel->image_format) |
+                                  PS5VK_TEXEL_BUFFER_RESOURCE_LEVEL;
+                  continue;
+               }
+               if (written->type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
+                  descriptor[0] = (uint32_t)written->address;
+                  descriptor[1] = (uint32_t)(written->address >> 32);
+                  descriptor[2] = (uint32_t)written->size;
+                  /* The byte-addressed storage-buffer form proven by c0/D2. */
+                  descriptor[3] = UINT32_C(0x31016fac);
+                  continue;
+               }
+               /* A dynamic uniform buffer's address is the application's offset into
+                * the bound range (VkBindDescriptorSetsInfo.pDynamicOffsets, D1). The
+                * bound range itself does not change, so the record count does not
+                * either. */
+               uint64_t address = written->address;
+               if (written->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC) {
+                  const struct ps5vk_descriptor_set_layout *layout =
+                     cmd_buffer->descriptor_sets[binding->set]->layout;
+                  const uint32_t dynamic_index = layout->bindings[binding->binding].dynamic_index + element;
+                  assert(dynamic_index < PS5VK_DYNAMIC_UNIFORM_COUNT);
+                  address += cmd_buffer->descriptor_set_offsets[binding->set][dynamic_index];
+               }
                descriptor[0] = (uint32_t)address;
-               descriptor[1] = (uint32_t)(address >> 32) | (texel_bytes << 16);
-               descriptor[2] = texel_bytes != 0 ? (uint32_t)(view->range / texel_bytes) : 0u;
-               descriptor[3] = texel->dst_sel | PS5VK_TEXEL_BUFFER_FORMAT(texel->image_format) |
-                               PS5VK_TEXEL_BUFFER_RESOURCE_LEVEL;
-               continue;
+               descriptor[1] = (uint32_t)(address >> 32) | (binding->stride << 16);
+               descriptor[2] = (uint32_t)(written->size / binding->stride);
+               descriptor[3] = PS5VK_UNIFORM_BUFFER_FLAGS;
             }
-            if (written->type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
-               descriptor[0] = (uint32_t)written->address;
-               descriptor[1] = (uint32_t)(written->address >> 32);
-               descriptor[2] = (uint32_t)written->size;
-               /* The byte-addressed storage-buffer form proven by c0/D2. */
-               descriptor[3] = UINT32_C(0x31016fac);
-               continue;
-            }
-            /* A dynamic uniform buffer's address is the application's offset into
-             * the bound range (VkBindDescriptorSetsInfo.pDynamicOffsets, D1). The
-             * bound range itself does not change, so the record count does not
-             * either. */
-            uint64_t address = written->address;
-            if (written->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC) {
-               const struct ps5vk_descriptor_set_layout *layout =
-                  cmd_buffer->descriptor_sets[binding->set]->layout;
-               const uint32_t dynamic_index = layout->bindings[binding->binding].dynamic_index;
-               assert(dynamic_index < PS5VK_DYNAMIC_UNIFORM_COUNT);
-               address += cmd_buffer->descriptor_set_offsets[binding->set][dynamic_index];
-            }
-            descriptor[0] = (uint32_t)address;
-            descriptor[1] = (uint32_t)(address >> 32) | (binding->stride << 16);
-            descriptor[2] = (uint32_t)(written->size / binding->stride);
-            descriptor[3] = PS5VK_UNIFORM_BUFFER_FLAGS;
          }
          ps5vk_flush_cpu_cache(table, allocated);
          const uint32_t dword = stage_metadata->descriptor_sets_user_data_dword[set];

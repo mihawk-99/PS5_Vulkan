@@ -74,6 +74,7 @@ tests=(
     c8_resolve
     d2_compute
     d2_compute_images
+    r17_descriptor_array
     v0_query_full
     v0_robust
     v0_formats
