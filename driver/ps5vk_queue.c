@@ -1214,7 +1214,7 @@ ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now, char *l
             "vblank_ms=%.3f vblank_first=%.0f%% frame_ms=%.3f frame_min_ms=%.3f "
             "frame_max_ms=%.3f residual_ms=%.3f call_acquire_ms=%.3f call_query_ms=%.3f "
             "call_begin_ms=%.3f call_end_ms=%.3f named_ms=%.3f unnamed_ms=%.3f "
-            "draws/frame=%.1f call_draw_ms=%.3f between_draws_ms=%.3f "
+            "draws/frame=%.1f begins/frame=%.1f call_draw_ms=%.3f between_draws_ms=%.3f "
             "presents=%" PRIu64 "/%" PRIu64
             " periods=%s elapsed_ms=%.0f\n",
             p->app_pre_submit_ns * per_present, p->app_pre_present_ns * per_present,
@@ -1239,6 +1239,7 @@ ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now, char *l
             p->call_ns[PS5VK_PROFILE_AFTER_BEGIN] * per_present,
             p->call_ns[PS5VK_PROFILE_AFTER_END] * per_present, named_ms, unnamed_ms,
             p->frames != 0 ? (double)p->gap_count[PS5VK_PROFILE_AFTER_DRAW] / (double)p->frames : 0.0,
+            p->frames != 0 ? (double)p->gap_count[PS5VK_PROFILE_AFTER_BEGIN] / (double)p->frames : 0.0,
             p->call_ns[PS5VK_PROFILE_AFTER_DRAW] * per_present,
             p->gap_ns[PS5VK_PROFILE_AFTER_DRAW] * per_present,
             p->present_index[0], p->present_index[1], periods,
