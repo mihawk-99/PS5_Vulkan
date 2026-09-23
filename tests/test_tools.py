@@ -1026,3 +1026,19 @@ class CommandAuditTests(unittest.TestCase):
         self.assertEqual(gap, 0)
         self.assertEqual(driver + refused + runtime_count + gap, required)
         self.assertGreaterEqual(required, 137)
+
+
+class IndexSizeMigrationTests(unittest.TestCase):
+    def test_rebinds_preserve_other_packets_and_reject_missing_or_wrong_sizes(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        from golden import checked_uint16_rebinds
+        size = (0, [0xc0017a00, 0x20000243, 0x400])
+        draw = (3, [0xc0042700, 6, 12, 2, 6, 0])
+        other = (9, [0xc0001300, 6])
+        self.assertEqual(checked_uint16_rebinds([size, other, draw, size, draw], True),
+                         [other, draw, draw])
+        self.assertEqual(checked_uint16_rebinds([draw], False), [draw])
+        for packets in ([draw], [size, draw, draw],
+                        [(0, [0xc0017a00, 0x20000243, 0x401]), draw]):
+            with self.assertRaises(ValueError):
+                checked_uint16_rebinds(packets, True)

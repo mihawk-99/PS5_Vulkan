@@ -544,14 +544,13 @@ struct ps5vk_cmd_buffer {
     * push constants copies them into a GPU-visible buffer. */
    uint8_t push_constants[PS5VK_MAX_PUSH_CONSTANT_BYTES];
    /* The index buffer bound for the next indexed draws, its type, the bytes
-    * its binding covers and whether the INDEX_TYPE register has been written
-    * for it (ps5vk_draw.c). The size is what V0-robust clamps a draw's index
+    * its binding covers. Each indexed draw writes its INDEX_TYPE register
+    * (ps5vk_draw.c). The size is what V0-robust clamps a draw's index
     * count to, so a count past the bound fetches no index outside it. */
    struct {
       uint64_t address;
       uint64_t size;
       VkIndexType type;
-      bool size_written;
    } index_buffer;
 };
 
@@ -1436,7 +1435,7 @@ sceAgcCbSetShRegisterRangeDirect(void *buffer, uint32_t offset, const uint32_t *
 /* The index-buffer packets of an indexed draw, in the order the recorded
  * streams use them: SET_UCONFIG_REG_INDEX of the index size, INDEX_BASE,
  * INDEX_BUFFER_SIZE and DRAW_INDEX_2 (host/agc/agc_host.cpp,
- * golden/runner/m3-vertex-1.json). Only the 16-bit size, (0, 0), is recorded. */
+ * golden/runner/m3-vertex-1.json). Size 0 is UINT16, size 1 is UINT32 (R19). */
 uint32_t *
 sceAgcDcbSetIndexSize(void *buffer, uint8_t size, uint8_t reserved);
 

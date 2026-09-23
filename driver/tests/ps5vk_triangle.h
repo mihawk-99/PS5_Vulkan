@@ -124,11 +124,11 @@ struct ps5vk_triangle_input {
    /* An indexed draw's geometry (Phase C2), or zeros to draw a triangle with
     * no vertex bindings as the B7/B8/C1 sets do. vertex_data is vertex_count
     * records of vertex_stride bytes in the layout the pipeline declares;
-    * index_data is index_count 16-bit indices. */
+    * index_data is index_count elements of index_type (UINT16 by default). */
    const void *vertex_data;
    uint32_t vertex_count;
    uint32_t vertex_stride;
-   const uint16_t *index_data;
+   const void *index_data;
    uint32_t index_count;
    /* The vertex input layout of the geometry above, as the probe set's
     * shaders were compiled for it: one binding of vertex_stride bytes.
@@ -596,6 +596,7 @@ struct ps5vk_triangle_input {
     * caller's, and both draws are the caller's geometry, which for this probe
     * is the full-target triangle the m2 set declares. */
    bool subpass_input;
+   VkIndexType index_type;
 };
 
 
@@ -705,6 +706,8 @@ struct ps5vk_triangle {
     * as the B7/B8/C1 sets do. */
    uint32_t vertex_count;
    uint32_t index_count;
+   VkIndexType index_type;
+   uint32_t first_index;
    /* The caller's geometry when it is staged (Phase C2): the mapped staging
     * buffer the data was written into, and the copies the GPU-side buffers
     * hold after the submission, which a test reads to prove the copy ran. */

@@ -1,0 +1,497 @@
+{
+  "pid": 216,
+  "ended": true,
+  "raw_sha256": "2cdef4111a6b02cfb3bfea0889f94e04eb5cb2fc79e300a7e9205def6c1897a1",
+  "statuses": {
+    "PASS": 257,
+    "INFO": 30,
+    "NOT_REQUIRED": 16,
+    "ARMED": 1,
+    "WARN": 1
+  },
+  "records": [
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test_start",
+      "status": "INFO",
+      "result": 0,
+      "detail": "m2-solid"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xff20a0ff"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xff20a0ff"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "m2-solid"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test_start",
+      "status": "INFO",
+      "result": 1,
+      "detail": "c2-indexed"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "c2-indexed"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test_start",
+      "status": "INFO",
+      "result": 2,
+      "detail": "r19-index32"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "r19_index_packets",
+      "status": "PASS",
+      "result": 0,
+      "detail": "UINT32 packet, firstIndex byte offset 12, bounds clamp to six indices"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xffffffff"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xffffffff"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "r19_index_packets",
+      "status": "PASS",
+      "result": 0,
+      "detail": "UINT32 packet, firstIndex byte offset 12, bounds clamp to six indices"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xffffffff"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xffffffff"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "r19_index_packets",
+      "status": "PASS",
+      "result": 0,
+      "detail": "UINT32 packet, firstIndex byte offset 12, bounds clamp to six indices"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "width",
+      "value": 3840
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "height",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "frame",
+      "value": 2
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "expected_word",
+      "value": "0xffffffff"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "raw_nonzero_words",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "drawn_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "matching_pixels",
+      "value": 8294400
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "full_rows",
+      "value": 2160
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_solid_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_colour",
+      "status": "PASS",
+      "result": 0,
+      "detail": "8294400 of 8294400 drawn pixels equal 0xffffffff"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_solid_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the own-shader native-size frame"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "r19_index32",
+      "status": "PASS",
+      "result": 0,
+      "detail": "high indices, firstIndex 3 and six-element bounds across three draw paths"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "r19-index32"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test_start",
+      "status": "INFO",
+      "result": 3,
+      "detail": "r19-index16-after"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "r19-index16-after"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "runner_summary",
+      "field": "ran",
+      "value": 4
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_summary",
+      "status": "PASS",
+      "result": 0,
+      "detail": "4 of 4 queued tests passed"
+    }
+  ]
+}

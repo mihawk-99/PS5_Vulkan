@@ -1,0 +1,5 @@
+submission.dump c2-indexed draw: identical to c2-indexed-1.json: 11 packets, 3 register tables
+submission.dump r19-index32 uint32 direct: identical to r19-index32-1.json: 11 packets, 3 register tables
+submission.dump r19-index32 uint32 indirect: identical to r19-index32-2.json: 11 packets, 3 register tables
+submission.dump r19-index32 uint32 secondary: identical to r19-index32-3.json: 11 packets, 3 register tables
+submission.dump r19-index16-after draw: identical to r19-index16-after-1.json: 11 packets, 3 register tables

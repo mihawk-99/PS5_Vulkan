@@ -2168,9 +2168,11 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
     * past the bound index buffer fetches no index outside it, so the count is
     * clamped to the indices the binding covers. Every frame before that probe
     * draws inside its bound, where the clamp changes nothing. */
+   const uint32_t index_bytes = cmd_buffer->index_buffer.type == VK_INDEX_TYPE_UINT32
+                                   ? sizeof(uint32_t) : sizeof(uint16_t);
    uint32_t draw_count = indexed != NULL ? indexed->index_count : vertex_count;
    if (indexed != NULL && cmd_buffer->index_buffer.size != 0) {
-      const uint64_t bound = cmd_buffer->index_buffer.size / sizeof(uint16_t);
+      const uint64_t bound = cmd_buffer->index_buffer.size / index_bytes;
       const uint64_t covers =
          bound > indexed->first_index ? bound - indexed->first_index : 0;
       if (draw_count > covers)
@@ -2180,17 +2182,19 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
    if (draw_count == 0)
       return;
    /* An indexed draw names the index buffer the application bound; a binding
-    * that never happened leaves address 0. Only 16-bit indices have a
-    * recorded stream to match (docs/M5_REFERENCE.md, C6). */
+    * that never happened leaves address 0. Core UINT16 and UINT32 indices
+    * use their own element width for bounds, offsets and the size packet. */
    if (indexed != NULL) {
       if (cmd_buffer->index_buffer.address == 0) {
          ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                                  "an indexed draw needs an index buffer");
          return;
       }
-      if (cmd_buffer->index_buffer.type != VK_INDEX_TYPE_UINT16) {
+      if (cmd_buffer->index_buffer.type != VK_INDEX_TYPE_UINT16 &&
+          cmd_buffer->index_buffer.type != VK_INDEX_TYPE_UINT32) {
          ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                                 "32-bit indices need a runner probe (docs/M5_REFERENCE.md, C6)");
+                                 "index type %u is not a supported UINT16 or UINT32 type",
+                                 (unsigned)cmd_buffer->index_buffer.type);
          return;
       }
    }
@@ -2244,19 +2248,14 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
    if (indexed == NULL) {
       encoded = encoded && sceAgcDcbDrawIndexAuto(&command, draw_count, PS5VK_DRAW_AUTO_INDEX);
    } else {
-      /* The address of the draw's first index: 16-bit indices are two bytes
-       * each, and the runner records the byte address the same way
-       * (src/diagnostics.cpp). */
+      /* firstIndex is in elements, while INDEX_BASE names a byte address. */
       const uint64_t index_address =
-         cmd_buffer->index_buffer.address + (uint64_t)indexed->first_index * 2;
-      /* The index packets of the recorded stream, in its order: the index size
-       * once, then the draw's INDEX_BASE, INDEX_BUFFER_SIZE and DRAW_INDEX_2
+         cmd_buffer->index_buffer.address + (uint64_t)indexed->first_index * index_bytes;
+      /* Each draw writes its index size: another recording may have used a
+       * different width. Then INDEX_BASE, INDEX_BUFFER_SIZE and DRAW_INDEX_2
        * (golden/runner/m3-vertex-1.json). */
       encoded = encoded &&
-                (!cmd_buffer->index_buffer.size_written
-                    ? (cmd_buffer->index_buffer.size_written = true,
-                       sceAgcDcbSetIndexSize(&command, 0, 0) != NULL)
-                    : true) &&
+                sceAgcDcbSetIndexSize(&command, index_bytes == 4 ? 1 : 0, 0) != NULL &&
                 sceAgcDcbSetIndexBuffer(&command, (void *)(uintptr_t)index_address) != NULL &&
                 sceAgcDcbSetIndexCount(&command, draw_count) != NULL &&
                 sceAgcDcbDrawIndex(&command, draw_count,

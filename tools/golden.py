@@ -851,7 +851,29 @@ def compare_packets(golden, submission, draws, expected, extra_sh_registers=()):
     return compare_stream(console, submission, expected, extra_sh_registers)
 
 
-def compare_stream(console, submission, expected, extra_sh_registers=()):
+def checked_uint16_rebinds(packets, require_each_draw):
+    """R19 migration: retain old captures, validate fresh UINT16 state separately.
+
+    Only the exact, idempotent UINT16 size write is removed. Other values fail,
+    and the new stream must explicitly write it before every indexed draw.
+    """
+    kept = []
+    armed = False
+    for origin, packet in packets:
+        if len(packet) == 3 and packet[:2] == [0xc0017a00, 0x20000243]:
+            if packet[2] != 0x400:
+                raise ValueError("UINT16 rebind migration encountered a different index size")
+            armed = True
+        else:
+            if ((packet[0] >> 8) & 0xff) == 0x27:
+                if require_each_draw and not armed:
+                    raise ValueError("indexed draw is missing its explicit UINT16 size write")
+                armed = False
+            kept.append((origin, packet))
+    return kept
+
+
+def compare_stream(console, submission, expected, extra_sh_registers=(), index_size_rebind=False):
     """How one recorded submission differs from console packets, each given
     with the golden document holding its register tables: (problems, expected
     differences found, their register offsets, packets, register tables).
@@ -866,6 +888,9 @@ def compare_stream(console, submission, expected, extra_sh_registers=()):
     try:
         driver = stream_packets([int(word, 16) for word in submission["words"]])
         driver = declared_user_data(driver, extra_sh_registers, documented)
+        if index_size_rebind:
+            console = checked_uint16_rebinds(console, False)
+            driver = checked_uint16_rebinds(driver, True)
         if len(console) != len(driver):
             problems.append(f"{len(driver)} packets (console {len(console)})")
         for (golden, recorded), (at, built) in zip(console, driver):
@@ -950,7 +975,8 @@ def compare_run(args):
         document = dict(document, stages=stages)
         words = [int(word, 16) for word in document["words"]]
         console = [(document, packet) for _, packet in stream_packets(words)]
-        problems, _, _, packets, tables = compare_stream(console, json.loads(line), {})
+        problems, _, _, packets, tables = compare_stream(console, json.loads(line), {},
+                                                         index_size_rebind=args.index_size_rebind)
         label = f"{Path(args.dump).name} {entry['test']} {entry['label']}"
         if problems:
             failures += 1
@@ -958,7 +984,8 @@ def compare_run(args):
             for problem in problems:
                 print(f"  {problem}")
         else:
-            print(f"{label}: identical to {entry['file']}: {packets} packets, "
+            status = "matches with explicit UINT16 rebinds" if args.index_size_rebind else "identical"
+            print(f"{label}: {status} to {entry['file']}: {packets} packets, "
                   f"{tables} register tables")
     return 1 if failures else 0
 
@@ -1032,6 +1059,9 @@ def main():
     command.add_argument("dump")
     command.add_argument("--test", help="the runner test whose submissions to compare, e.g. "
                                         "c1-triangle")
+    command.add_argument("--index-size-rebind", action="store_true",
+                         help="R19 migration: require fresh UINT16 size before every indexed draw; "
+                              "compare all other packets against the unchanged historical capture")
     command.set_defaults(handler=compare_run)
     command = commands.add_parser("compare-submission",
                                   help="compare a driver test's submission with a golden frame")

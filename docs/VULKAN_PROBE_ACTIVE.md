@@ -30,7 +30,7 @@ SHA-256 e089e060… . PS5 probe PIDs 200 and 201 each returned 241 PASS/zero FAI
 twelve submissions replay exactly, goldens in golden/shader-cache-cold and
 -warm. Driver probe stdout is not a hit-count witness; vkQuake's trace is.
 
-**R14–R18 accepted; R19 (32-bit indices) next.** R14 2925ff6 (single-draw stride), R15
+**R14–R19 accepted; vkQuake relaunch next.** R14 2925ff6 (single-draw stride), R15
 b838832 (independent dynamic UBO offsets), R16 c7f6f95 (mip-tail XOR/blits)
 passed PS5 probes. Port PID 208 presented past those three old failures, then
 named a three-element descriptor array and padded pitch 256. Its evidence is
@@ -59,7 +59,14 @@ Goldens: golden/r18-padded-mips-complete; jobs/r18-padded-mips/README.md.
 Port PID 215 now presents past R17/R18, then refuses 32-bit indices in
 ps5vk_cmd_draw during Necropolis map recording. Port commit 1c65915 and
 evidence/m2-r18-map-recording; trace reads/PID match, count=0. Cache: 532 hits,
-zero SPIR-V compiles. Next: R19 shared index size/offset/bounds and PS5 probe.
+zero SPIR-V compiles.
+R19 now passes PID 216: 257 PASS, zero FAIL; three UINT32 full-frame pixel
+checks and UINT16 before/after regression. Five streams replay exactly.
+Each draw writes its index size; bounds and firstIndex use the element width.
+Host 170 arms, eleven gates, port five gates/scan and template relink PASS.
+Archive 14,434,594 bytes, SHA-256 f2666ab8…; deployed ELF segments match,
+title closed, count=0. jobs/r19-index32 and golden/r19-index32 hold evidence.
+Next: launch the relinked game and classify the next measured result.
 
 **Port M2 met:** PID 197, QueuePresent success and human-confirmed Quake
 menu/console; port evidence/m2-first-frame. M3–M6 remain open. Input/audio

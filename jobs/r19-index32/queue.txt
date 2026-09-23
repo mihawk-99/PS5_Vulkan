@@ -1,0 +1,7 @@
+hold 1
+capture
+m2-solid
+c2-indexed
+r19-index32
+r19-index16-after
+exit

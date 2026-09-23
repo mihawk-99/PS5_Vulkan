@@ -3129,3 +3129,35 @@ and the driver archive is unchanged. PID 213's successful pixel-only capture,
 PID 211's failed candidate, and the misqueued PID 212 history are retained.
 Reproduction: jobs/r18-padded-mips/README.md and the fixed queue beside it.
 Next: vkQuake deployment and launch; M6 is not claimed.
+
+
+## 2026-09-23 — R19 UINT32 indexed draws accepted, PID 216
+
+vkQuake PID 215 named UINT32 indices as the next refusal. The shared draw
+path now uses the bound element width for robust bounds, firstIndex byte
+offsets and the native size packet. It writes index size on every indexed
+draw: the first host candidate found a stale cached-size flag across separate
+recordings (direct passed; indirect and secondary omitted the packet).
+
+The new probe uses vertices 65536..65539, firstIndex 3, and a nine-element
+request clamped to the six remaining elements. PS5 PPSA99988 PID 216 reports
+257 PASS, zero FAIL: direct, indirect and secondary frames each match all
+8,294,400 white pixels, with exact UINT32/offset/bounds packet checks. UINT16
+regressions pass before and after. All five Vulkan streams replay exactly
+without migration options. Two deployed ELF reads and all five PT_LOAD
+segments match; title closed and count=0 verified. The known VideoOut
+unregister-busy warning is unchanged.
+
+Explicit archive: 14,434,594 bytes, SHA-256
+f2666ab80aadfb5a64722f9b7f014dd29c9c595462e9a1ae65d854ddbd26d411.
+All 170 check-driver arms and shader-cache checks pass; eleven gates, port
+five gates/scan, template relink and final runner rebuild/lint pass. Historical
+UINT16 captures remain unchanged: check-driver's explicit migration verifies
+a fresh exact UINT16 size write before every indexed draw and compares every
+other packet/table. Missing/reused/wrong-size writes fail the unit witness.
+Default golden comparison remains strict; new R19 captures use that default.
+
+Evidence: jobs/r19-index32/queue.txt and check.py; golden/r19-index32/run-1.json,
+readback.txt, replay.txt and deployed-proof.txt. Reproduce pixel acceptance:
+python3 jobs/r19-index32/check.py Klog_Logs/r19-index32.log --pixels.
+Next is vkQuake relink/deployment/launch; playable-world acceptance is open.

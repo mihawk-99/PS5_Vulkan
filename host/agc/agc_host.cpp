@@ -129,12 +129,12 @@ std::uint32_t *sceAgcCbSetShRegisterRangeDirect(void *buffer, std::uint32_t offs
     return start;
 }
 
-// SET_UCONFIG_REG_INDEX of VGT_INDEX_TYPE. Only 16-bit indices are captured.
+// SET_UCONFIG_REG_INDEX of VGT_INDEX_TYPE: 0 for UINT16, 1 for UINT32.
 std::uint32_t *sceAgcDcbSetIndexSize(void *buffer, std::uint8_t size, std::uint8_t reserved)
 {
-    if (size != 0 || reserved != 0)
-        return refuse("sceAgcDcbSetIndexSize: only 16-bit indices (0, 0) are captured");
-    return emit(buffer, {pkt3(0x7a, 1), 0x20000243u, 0x00000400u});
+    if (size > 1 || reserved != 0)
+        return refuse("sceAgcDcbSetIndexSize: expected UINT16 (0) or UINT32 (1), reserved zero");
+    return emit(buffer, {pkt3(0x7a, 1), 0x20000243u, 0x00000400u | size});
 }
 
 // INDEX_BASE: index buffer address low and high.

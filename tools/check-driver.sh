@@ -556,6 +556,12 @@ run_test() {
         compare+=(--extra-sh-register 0x8c --extra-sh-register 0x0c
                   --expect-record 0x111=0x44870000)
     fi
+    # R19 removes the index-size cache. Historical UINT16 captures omitted
+    # repeated writes; keep them, but require each new draw to bind UINT16 and
+    # compare every other word/table. New R19 captures use strict comparison.
+    if [[ ${#compare[@]} -gt 0 && ${compare[0]} == compare-run ]]; then
+        compare+=(--index-size-rebind)
+    fi
     rm -f "$dump"
     # A test whose golden is not in the tree yet runs against the replay alone:
     # the console capture is what its submission is compared with, and until

@@ -517,8 +517,12 @@ create_geometry(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
    triangle->vertex_count = input->vertex_count;
    triangle->index_count = input->index_count;
    const VkDeviceSize vertex_bytes = (VkDeviceSize)input->vertex_count * input->vertex_stride;
-   /* 16-bit indices, two bytes each. */
-   const VkDeviceSize index_bytes = (VkDeviceSize)triangle->index_count * 2;
+   if (input->index_type != VK_INDEX_TYPE_UINT16 && input->index_type != VK_INDEX_TYPE_UINT32)
+      return step(triangle, "index type", VK_ERROR_INITIALIZATION_FAILED,
+                  "the harness supports UINT16 and UINT32");
+   triangle->index_type = input->index_type;
+   const VkDeviceSize index_bytes = (VkDeviceSize)triangle->index_count *
+                                    (input->index_type == VK_INDEX_TYPE_UINT32 ? 4 : 2);
    if (input->stage_geometry) {
       /* Phase C2's upload: the geometry goes into one mapped staging buffer,
        * the records first and the indices right after them, and the copies a
@@ -3325,7 +3329,7 @@ draw(struct ps5vk_triangle *triangle, VkCommandBuffer command)
       CALL(triangle, CmdDrawIndirect)(command, triangle->indirect_buffer, 0, 1, 0);
       return;
    }
-   CALL(triangle, CmdBindIndexBuffer)(command, triangle->index_buffer, 0, VK_INDEX_TYPE_UINT16);
+   CALL(triangle, CmdBindIndexBuffer)(command, triangle->index_buffer, 0, triangle->index_type);
    uint32_t indices =
       triangle->draw_index_count != 0 ? triangle->draw_index_count : triangle->index_count;
    /* A frame whose two draws must differ in what they drew splits the index
@@ -3341,6 +3345,7 @@ draw(struct ps5vk_triangle *triangle, VkCommandBuffer command)
          indices -= first_index;
       }
    }
+   first_index += triangle->first_index;
    if (!triangle->indirect) {
       CALL(triangle, CmdDrawIndexed)(command, indices, instances, first_index, triangle->base_vertex,
                                      0);

@@ -8492,6 +8492,91 @@ void run_vulkan_indexed(const TestContext &test, TestOutcome &outcome, bool stag
                        "Vulkan driver");
 }
 
+// R19: firstIndex, bounds and high index bits must survive direct/indirect/secondary draws.
+void run_vulkan_index32(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    constexpr unsigned base = 65536;
+    std::vector<float> vertices((base + 4) * 6, 0.0f);
+    const float quad[] = {-1, -1, 1, 1, 1, 1, 1,  -1, 1, 1, 1, 1,
+                          1,  1,  1, 1, 1, 1, -1, 1,  1, 1, 1, 1};
+    std::copy(std::begin(quad), std::end(quad), vertices.begin() + base * 6);
+    const std::uint32_t indices[] = {0xffffffffu, 0xffffffffu, 0xffffffffu, base, base + 1,
+                                     base + 2,    base + 2,    base + 3,    base};
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    input.vertex_data = vertices.data();
+    input.vertex_count = base + 4;
+    input.vertex_stride = 24;
+    input.index_data = indices;
+    input.index_count = 9;
+    input.index_type = VK_INDEX_TYPE_UINT32;
+    input.attribute_count = 2;
+    input.attributes[0] = {0, 0, VK_FORMAT_R32G32_SFLOAT, 0};
+    input.attributes[1] = {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8};
+    input.indirect = true;
+    input.secondary = true;
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    ps5vk_triangle triangle{};
+    auto status = ps5vk_triangle_create(&triangle, &input);
+    triangle.first_index = 3;
+    // Ask for nine indices at offset three; the bound contains six.
+    triangle.draw_index_count = 9;
+    bool exact = true;
+    const char *labels[] = {"uint32 direct", "uint32 indirect", "uint32 secondary"};
+    for (unsigned frame = 0; frame < 3 && status == PS5VK_TRIANGLE_OK; frame++)
+    {
+        triangle.indirect = frame == 1;
+        triangle.secondary = frame == 2;
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (status != PS5VK_TRIANGLE_OK)
+            break;
+        if (test.capture)
+            log_driver_submission(triangle.device, labels[frame], log);
+        std::uint32_t count = 0;
+        const auto *words = ps5vk_debug_last_submission(triangle.device, &count);
+        const auto address = reinterpret_cast<std::uintptr_t>(triangle.index_mapped) + 12;
+        bool size_ok = false, base_ok = false, draw_ok = false;
+        for (unsigned at = 0; words && at + 1 < count;)
+        {
+            const auto header = words[at];
+            const unsigned length = ((header >> 16) & 0x3fff) + 2;
+            if ((header >> 30) != 3 || at + length > count)
+                break;
+            if (header == 0xc0017a00u && words[at + 1] == 0x20000243u)
+                size_ok = words[at + 2] == 0x401;
+            if (header == 0xc0012600u)
+                base_ok = (words[at + 1] | (std::uint64_t(words[at + 2]) << 32)) == address;
+            if (header == 0xc0042700u)
+                draw_ok = words[at + 1] == 6 && words[at + 4] == 6 &&
+                          (words[at + 2] | (std::uint64_t(words[at + 3]) << 32)) == address;
+            at += length;
+        }
+        const bool packets = size_ok && base_ok && draw_ok;
+        log.event("r19_index_packets", packets ? "PASS" : "FAIL", packets ? 0 : -1,
+                  "UINT32 packet, firstIndex byte offset 12, bounds clamp to six indices");
+        exact = packets && exact;
+        exact = check_solid_frame(const_cast<void *>(triangle.target), 0xffffffffu, frame, log) &&
+                exact;
+    }
+    if (status == PS5VK_TRIANGLE_OK && test.capture)
+        log_driver_stages(triangle.device, log);
+    outcome.command_built = status == PS5VK_TRIANGLE_OK;
+    outcome.passed = outcome.command_built && exact;
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        outcome.stage_in_use = true;
+    else
+        ps5vk_triangle_finish(&triangle);
+    log.event("r19_index32", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1,
+              "high indices, firstIndex 3 and six-element bounds across three draw paths");
+}
+
 // Phase V0-formats: the three-component integer vertex formats, through the
 // Vulkan driver. docs/V0_FORMATS_AUDIT.md lists R32G32B32_SINT and
 // R32G32B32_UINT as missing VERTEX_BUFFER alone, and they are the last two such
@@ -24209,6 +24294,8 @@ constexpr RunnerTest kRunnerTests[] = {
     // Phase C2: the indexed square of the m3-vertex canary, drawn through the
     // Vulkan driver from a vertex and an index buffer.
     {"c2-indexed", "m3-vertex", run_vulkan_indexed_frame},
+    {"r19-index32", "m3-vertex", run_vulkan_index32},
+    {"r19-index16-after", "m3-vertex", run_vulkan_indexed_frame},
     // V0-formats: the three-component integer vertex formats, drawn as the
     // m3-vertex square with the third component read back as the alpha
     // (run_vulkan_integer_vertex_frame).
