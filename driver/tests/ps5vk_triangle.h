@@ -599,6 +599,8 @@ struct ps5vk_triangle_input {
    VkIndexType index_type;
    /* Copy the acquired display image to host memory before presentation. */
    bool display_readback;
+   /* Draw the same geometry again without a depth attachment in one submission. */
+   bool detach_depth;
 };
 
 
@@ -672,6 +674,8 @@ struct ps5vk_triangle {
    VkImageView views[PS5VK_TRIANGLE_MAX_IMAGES];
    VkRenderPass first_pass;
    VkRenderPass load_pass;
+   VkRenderPass detached_pass;
+   VkFramebuffer detached_framebuffer;
    VkFramebuffer framebuffers[PS5VK_TRIANGLE_MAX_IMAGES];
    VkPipelineLayout layout;
    VkShaderModule vertex[PS5VK_TRIANGLE_MAX_PIPELINES];

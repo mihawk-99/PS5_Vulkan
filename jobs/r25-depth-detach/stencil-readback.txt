@@ -1,0 +1,199 @@
+[PS5VK] {"schema":2,"event":"run_start","pid":245}
+[PS5VK] {"schema":2,"event":"value","probe":"runner_queue","field":"tests","value":2}
+[PS5VK] {"schema":2,"event":"value","probe":"runner_queue","field":"hold_vblanks","value":1}
+[PS5VK] {"schema":2,"event":"value","probe":"runner_queue","field":"capture","value":1}
+[PS5VK] {"schema":2,"event":"value","probe":"runner_queue","field":"compile","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"runner_queue","field":"exit","value":1}
+[PS5VK] {"schema":2,"event":"probe","probe":"runner_queue","status":"PASS","result":0,"detail":"/app0/jobs/queue.txt"}
+[PS5VK] {"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":0,"detail":"v0-stencil"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_frame","field":"expected","value":4278255360}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_frame","field":"matching","value":8294400}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_frame","field":"total","value":8294400}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_stencil_plane","field":"depth_texel_0_0","value":"0x3e800000"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"depth_tile_clear_1_0","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"depth_tile_setup_0_75","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"depth_tile_other","value":16384}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"stencil_tile_reference","value":65536}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"stencil_tile_zero","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"stencil_tile_other","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_entry","field":"reference","value":90}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_entry","field":"expected","value":4278255360}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_stencil","status":"PASS","result":0,"detail":"the plane held the reference the setup pass stored and the depth test passed"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_frame","field":"expected","value":4278190335}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_frame","field":"matching","value":8294400}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_frame","field":"total","value":8294400}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_stencil_plane","field":"depth_texel_0_0","value":"0x3f400000"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"depth_tile_clear_1_0","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"depth_tile_setup_0_75","value":16384}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"depth_tile_other","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"stencil_tile_reference","value":65536}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"stencil_tile_zero","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"stencil_tile_other","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_entry","field":"reference","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_entry","field":"expected","value":4278190335}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_stencil","status":"PASS","result":0,"detail":"the stencil test rejected every fragment: the plane does not hold 0x00"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_frame","field":"expected","value":4278190335}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_frame","field":"matching","value":8294400}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_frame","field":"total","value":8294400}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_stencil_plane","field":"depth_texel_0_0","value":"0x3f400000"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"depth_tile_clear_1_0","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"depth_tile_setup_0_75","value":16384}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"depth_tile_other","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"stencil_tile_reference","value":65536}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"stencil_tile_zero","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"stencil_tile_other","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_entry","field":"reference","value":90}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_entry","field":"expected","value":4278190335}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_stencil","status":"PASS","result":0,"detail":"the test pass's depth is behind the plane's: the depth test rejected every fragment"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_frame","field":"expected","value":4278255360}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_frame","field":"matching","value":8294400}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_frame","field":"total","value":8294400}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_stencil_plane","field":"depth_texel_0_0","value":"0x3e800000"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"depth_tile_clear_1_0","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"depth_tile_setup_0_75","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"depth_tile_other","value":16384}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"stencil_tile_reference","value":65536}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"stencil_tile_zero","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_plane","field":"stencil_tile_other","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_entry","field":"reference","value":90}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil_entry","field":"expected","value":4278255360}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_stencil","status":"PASS","result":0,"detail":"the control: with no stencil test the test pass draws the whole target"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_stencil","status":"PASS","result":0,"detail":"the combined format's stencil plane holds what a pass stored, its compare rejects what it does not hold, and its depth plane still resolves"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil","field":"frames_passed","value":4}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_stencil","field":"frames_total","value":4}
+[PS5VK] {"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"v0-stencil"}
+[PS5VK] {"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":1,"detail":"v0-depth-bias"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_depth_bias_frame","status":"INFO","result":0,"detail":"flat at 0.25, no bias"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"drawn","value":2880}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"of","value":2880}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"centre_word","value":"0xffffff00"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"clear_word","value":"0xffff8040"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_clear_texels","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_sampled","value":64}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"depth_centre_bits","value":"0x3e800000"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_biased_texels","value":0}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_0","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_1","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_2","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_3","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_4","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_5","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_depth_bias_frame","status":"PASS","result":0,"detail":"the frame recorded and its pixels were read"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_depth_bias_frame","status":"INFO","result":0,"detail":"flat at the clear, no bias"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"drawn","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"of","value":2880}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"centre_word","value":"0xffff8040"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"clear_word","value":"0xffff8040"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_clear_texels","value":64}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_sampled","value":64}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"depth_centre_bits","value":"0x3f000000"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_biased_texels","value":0}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_0","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_1","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_2","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_3","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_4","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_5","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_depth_bias_frame","status":"PASS","result":0,"detail":"the frame recorded and its pixels were read"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_depth_bias_frame","status":"INFO","result":0,"detail":"constant -4096, LESS"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"drawn","value":2880}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"of","value":2880}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"centre_word","value":"0xffffff00"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"clear_word","value":"0xffff8040"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_clear_texels","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_sampled","value":64}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"depth_centre_bits","value":"0x3effe000"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_biased_texels","value":64}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_0","value":"0x1e9"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_1","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_2","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_3","value":"0xc5800000"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_4","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_5","value":"0xc5800000"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_depth_bias_frame","status":"PASS","result":0,"detail":"the frame recorded and its pixels were read"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_depth_bias_frame","status":"INFO","result":0,"detail":"constant +4096, GREATER"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"drawn","value":2880}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"of","value":2880}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"centre_word","value":"0xffffff00"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"clear_word","value":"0xffff8040"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_clear_texels","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_sampled","value":64}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"depth_centre_bits","value":"0x3f001000"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_biased_texels","value":64}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_0","value":"0x1e9"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_1","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_2","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_3","value":"0x45800000"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_4","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_5","value":"0x45800000"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_depth_bias_frame","status":"PASS","result":0,"detail":"the frame recorded and its pixels were read"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_depth_bias_frame","status":"INFO","result":0,"detail":"0.0002 past the clear, no clamp"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"drawn","value":2880}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"of","value":2880}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"centre_word","value":"0xffffff00"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"clear_word","value":"0xffff8040"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_clear_texels","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_sampled","value":64}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"depth_centre_bits","value":"0x3efffa36"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_biased_texels","value":0}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_0","value":"0x1e9"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_1","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_2","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_3","value":"0xc5800000"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_4","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_5","value":"0xc5800000"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_depth_bias_frame","status":"PASS","result":0,"detail":"the frame recorded and its pixels were read"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_depth_bias_frame","status":"INFO","result":0,"detail":"0.0002 past the clear, clamp 2e-5, refused"}
+[PS5VK] {"schema":2,"event":"probe","probe":"b7_vk_message","status":"FAIL","result":0,"detail":"drawing with a depth bias clamped to a non-zero value: the clamp needs a runner probe, because this hardware's PA_SU_POLY_OFFSET_CLAMP (0x2df) measured inert on the D32 float path and capping the bias in the driver would report a wrong depth as a success (PS5_VULKAN_REQUESTSv2.md, the clamp decision) (VK_ERROR_UNKNOWN)"}
+[PS5VK] {"schema":2,"event":"probe","probe":"b7_vk_message","status":"FAIL","result":0,"detail":"VK_ERROR_UNKNOWN"}
+[PS5VK] {"schema":2,"event":"probe","probe":"b7_record_command_buffer","status":"FAIL","result":-13,"detail":"one draw"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_depth_bias_frame","status":"INFO","result":1,"detail":"the clamped draw was refused, as the clamp decision requires"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_depth_bias_frame","status":"INFO","result":0,"detail":"slope -4 on the ramp"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"drawn","value":3}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"of","value":2880}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"centre_word","value":"0xffff8040"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"clear_word","value":"0xffff8040"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_clear_texels","value":56}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_sampled","value":64}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"depth_centre_bits","value":"0x3f000000"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_biased_texels","value":0}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_0","value":"0x1e9"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_1","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_2","value":"0xc2800000"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_3","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_4","value":"0xc2800000"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_5","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_depth_bias_frame","status":"PASS","result":0,"detail":"the frame recorded and its pixels were read"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_depth_bias_frame","status":"INFO","result":0,"detail":"slope +4 on the ramp"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"drawn","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"of","value":2880}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"centre_word","value":"0xffff8040"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"clear_word","value":"0xffff8040"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_clear_texels","value":64}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_sampled","value":64}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"depth_centre_bits","value":"0x3f000000"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias_frame","field":"depth_biased_texels","value":0}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_0","value":"0x1e9"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_1","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_2","value":"0x42800000"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_3","value":"0x0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_4","value":"0x42800000"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias_frame","field":"register_5","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_depth_bias_frame","status":"PASS","result":0,"detail":"the frame recorded and its pixels were read"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias","field":"bracket_drawn","value":2880}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias","field":"no_bias_drawn","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias","field":"near_drawn","value":2880}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias","field":"far_drawn","value":2880}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias","field":"past_unclamped_drawn","value":2880}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias","field":"clamp_refused","value":1}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias","field":"slope_pull_drawn","value":3}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias","field":"slope_push_drawn","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias","field":"biased_texels","value":64}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_depth_bias","field":"sampled","value":2880}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias","field":"near_bits","value":"0x3effe000"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_depth_bias","field":"far_bits","value":"0x3f001000"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_depth_bias","status":"PASS","result":0,"detail":"the bracket frame kept 2880 of 2880 samples, no bias 0, the constant factor 2880 and 2880, past the clear 2880 unclamped, the clamp refused by name, and the ramp 3 under a pull and 0 under a push"}
+[PS5VK] {"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"v0-depth-bias"}
+[PS5VK] {"schema":2,"event":"value","probe":"runner_summary","field":"ran","value":2}
+[PS5VK] {"schema":2,"event":"probe","probe":"runner_summary","status":"PASS","result":0,"detail":"2 of 2 queued tests passed"}
+[PS5VK] {"schema":2,"event":"run_end"}

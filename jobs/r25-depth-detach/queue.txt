@@ -1,0 +1,10 @@
+hold 1
+capture
+m2-solid
+c5-depth-detach
+c5-depth-detach-16
+c5-depth
+c5-depth-16
+c5-depth-nodepth
+c1-readback
+exit

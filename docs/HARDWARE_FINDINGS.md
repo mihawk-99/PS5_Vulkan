@@ -3235,3 +3235,13 @@ driver build, host/cache checks, eleven gates, port five gates/scan and template
 relink pass. Lint/unit/runner and console build pass after the harness-only fix.
 Archive e662f699…; two deployed ELF reads/all load segments match, title closes
 and idle is verified. Goldens: golden/r23-display-readback.
+
+## 2026-09-23 — depth state persists across an attachment change
+
+R25's depth-attached then colour-only passes prove that omitting DB_DEPTH_CONTROL
+from the second pass does not disable the first pass's test: 518,400 overlapping
+pixels retain the wrong colour, while depth samples remain correct. Explicitly
+writing zero when the depth/stencil rendering ends fixes D32 and D16 overlays
+and preserves ordinary depth, stencil, bias and display readbacks. The reset uses
+the existing AGC indirect context-register helper. Evidence: jobs/r25-depth-detach,
+PIDs 243–245. No hardware-layout or firmware-derived data is introduced.

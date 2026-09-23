@@ -1,0 +1,15 @@
+lint PASS
+test PASS
+audit-commands PASS
+audit-limits PASS
+audit-formats PASS
+migration PASS
+mip-layout PASS
+psbc-link PASS
+probe-packages PASS
+vulkan-runtime PASS
+runner-cases PASS
+Explicit driver rebuild and 170 host arms/cache checks PASS.
+Archive 14,450,602 bytes, SHA-256 e172ce0fedc9ec002e74c9ec0a727f13c9fe9452b26ebcf696984e3a75e9c924.
+Port five gates/shader scan and template relink PASS.
+24 new submissions compare exactly; no new comparison tolerance.

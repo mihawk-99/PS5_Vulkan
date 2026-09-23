@@ -63,7 +63,12 @@ R23 now proves swapchain TRANSFER_SRC: PID 229, 238 PASS / zero FAIL; four
 copies each match all 8,294,400 pixels, 16 strict replays. Original presentation
 regression passes. Archive e662f699…; eleven gates, port/template pass. Host
 replay corrections are explicit in jobs/r23-display-readback/replay-notes.txt.
-Next: inspect actual game screenshots and local map connection, then optimize.
+R25 fixes depth/stencil state leaking into colour-only passes. PID 243 reproduces
+518,400 wrong overlay pixels; PID 244 has 439 PASS/zero FAIL for D32/D16 detach,
+original depth and swapchain readback. PID 245 stencil/bias regressions pass
+(including the intentional nonzero-clamp refusal). 24 new streams replay exactly.
+170 host/cache, eleven gates, port/template pass. Archive e172ce0f…. Evidence:
+jobs/r25-depth-detach. Next: inspect relinked game HUD, then live-map performance.
 ## Standing work
 - Graphics R7 rounds 1-4, R8 dynamic depth bias, the first batch's R9 (push
   pointers), and the R4 clear/refusal coverage are in `docs/M5_PHASE_C.md`; the
@@ -81,12 +86,7 @@ Next: inspect actual game screenshots and local map connection, then optimize.
   by `tools/check-runner-cases.sh`: 97 limits, 55 features, 184 core formats,
   307 image-format combinations. The 3D dimension claim versus no 3D images and
   cube-query inconsistencies remain inventory findings.
-- The pinned CTS and seven externals are fetched. `dEQP-VK.info.*` is 16 pass /
-  0 fail; the latest `dEQP-VK.api.info.*` is **2542 pass / 2 fail**. The open
-  driver item is compressed-format reporting; `extension_core_versions` is
-  labelled HARNESS/PORT after four candidate inputs were eliminated. The
-  console CTS payload remains outstanding. Details: `docs/CTS.md` and the
-  phase log's CTS rounds 6-12.
+- CTS remains outside this user-requested game work; prior status is in docs/CTS.md.
 - Upstream AGC tile equations agree with the measured maps; the resource-slot
   table remains an untaken diagnostic opportunity (`docs/AGC_UPSTREAM_NOTES.md`).
 - Imported driver/host/vendor/tooling trees retain their own style with

@@ -3231,6 +3231,39 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
          return PS5VK_TRIANGLE_FAILED;
    }
 
+   if (input->detach_depth) {
+      assert(input->depth && input->pipeline_count == 1 && !display &&
+             triangle->colour_attachment_count == 1);
+      triangle->depth = false;
+      const VkResult created = create_render_pass(triangle, triangle->format,
+         VK_ATTACHMENT_LOAD_OP_LOAD, target_layout, 1, &triangle->detached_pass);
+      triangle->depth = true;
+      if (!step(triangle, "create_detached_pass", created, "colour only after depth"))
+         return PS5VK_TRIANGLE_FAILED;
+      const VkFramebufferCreateInfo framebuffer = {
+         .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+         .renderPass = triangle->detached_pass,
+         .attachmentCount = 1,
+         .pAttachments = &triangle->views[0],
+         .width = PS5VK_TRIANGLE_WIDTH,
+         .height = PS5VK_TRIANGLE_HEIGHT,
+         .layers = 1,
+      };
+      if (!step(triangle, "create_detached_framebuffer",
+                CALL(triangle, CreateFramebuffer)(triangle->device, &framebuffer, NULL,
+                                                  &triangle->detached_framebuffer), NULL))
+         return PS5VK_TRIANGLE_FAILED;
+      struct ps5vk_triangle_input colour_input = *input;
+      colour_input.depth = false;
+      const VkRenderPass saved = triangle->first_pass;
+      triangle->first_pass = triangle->detached_pass;
+      const bool pipeline_ok = create_pipeline(triangle, PS5VK_TRIANGLE_MAX_PIPELINES - 1,
+                                                &input->shaders[0], &colour_input);
+      triangle->first_pass = saved;
+      if (!pipeline_ok)
+         return PS5VK_TRIANGLE_FAILED;
+   }
+
    /* Two command buffers, a fence, and for the display the two semaphores. */
    const VkCommandPoolCreateInfo pool_info = {
       .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -3545,6 +3578,18 @@ record(struct ps5vk_triangle *triangle, VkCommandBuffer command, VkRenderPass pa
    CALL(triangle, CmdBeginRenderPass)(command, &pass_begin, VK_SUBPASS_CONTENTS_INLINE);
    record_body(triangle, command, pipeline, then);
    CALL(triangle, CmdEndRenderPass)(command);
+   if (triangle->detached_pass != VK_NULL_HANDLE) {
+      const VkRenderPassBeginInfo detached = {
+         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+         .renderPass = triangle->detached_pass,
+         .framebuffer = triangle->detached_framebuffer,
+         .renderArea = {{0, 0}, {PS5VK_TRIANGLE_WIDTH, PS5VK_TRIANGLE_HEIGHT}},
+      };
+      CALL(triangle, CmdBeginRenderPass)(command, &detached, VK_SUBPASS_CONTENTS_INLINE);
+      record_body(triangle, command, triangle->pipelines[PS5VK_TRIANGLE_MAX_PIPELINES - 1],
+                    VK_NULL_HANDLE);
+      CALL(triangle, CmdEndRenderPass)(command);
+   }
    if (triangle->two_passes) {
       /* R6: a *second* render pass in the same command buffer, over the same
        * framebuffer and with the same clear, which is what a renderer that
@@ -4060,6 +4105,8 @@ ps5vk_triangle_finish(struct ps5vk_triangle *triangle)
          CALL(triangle, DestroyShaderModule)(device, triangle->vertex[index], NULL);
       }
       CALL(triangle, DestroyPipelineLayout)(device, triangle->layout, NULL);
+      CALL(triangle, DestroyFramebuffer)(device, triangle->detached_framebuffer, NULL);
+      CALL(triangle, DestroyRenderPass)(device, triangle->detached_pass, NULL);
       /* The caller's uniform buffer (Phase C3): every handle is zero when it
        * supplied no uniform data, and the driver's destroys and frees ignore
        * zero. The set goes with its pool, and the pool and the set layout are

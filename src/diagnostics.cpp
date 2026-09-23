@@ -14068,7 +14068,7 @@ void driver_depth_frame_pixel(std::uint32_t x, std::uint32_t y, DriverDepthVaria
 // sample must hold what the geometry and the clear say, through the two tiled
 // layouts above.
 bool check_driver_depth_frame(void *colour, void *depth, DriverDepthVariant variant,
-                              VkFormat depth_format, JsonLog &log) noexcept
+                              VkFormat depth_format, JsonLog &log, bool detached = false) noexcept
 {
     const bool depth16 = depth_format == VK_FORMAT_D16_UNORM;
     const std::size_t depth_size = depth16 ? (std::size_t)kDepthBytes / 2u : kDepthBytes;
@@ -14107,6 +14107,13 @@ bool check_driver_depth_frame(void *colour, void *depth, DriverDepthVariant vari
             // showed the far rectangle drawn with).
             driver_depth_frame_pixel(x, kOutputHeight - 1u - y, variant, depth16, expected_colour,
                                      expected_depth);
+            if (detached)
+            {
+                std::uint32_t ignored_depth = 0;
+                driver_depth_frame_pixel(x, kOutputHeight - 1u - y,
+                                         DriverDepthVariant::NoAttachment, depth16, expected_colour,
+                                         ignored_depth);
+            }
             const std::uint32_t pixel = view.word(x, y);
             if (pixel == expected_colour)
                 ++colour_matching;
@@ -14208,7 +14215,8 @@ bool check_driver_depth_frame(void *colour, void *depth, DriverDepthVariant vari
 
 void run_driver_depth_frames(const TestContext &test, TestOutcome &outcome,
                              DriverDepthVariant variant,
-                             VkFormat depth_format = VK_FORMAT_D32_SFLOAT) noexcept
+                             VkFormat depth_format = VK_FORMAT_D32_SFLOAT,
+                             bool detached = false) noexcept
 {
     JsonLog &log = test.log;
     const ps5vk_triangle_report report{&log, log_vulkan_step};
@@ -14259,6 +14267,7 @@ void run_driver_depth_frames(const TestContext &test, TestOutcome &outcome,
             : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
         kDriverDepthClear,
         depth_format};
+    input.detach_depth = detached;
     if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
         return;
 
@@ -14278,9 +14287,10 @@ void run_driver_depth_frames(const TestContext &test, TestOutcome &outcome,
                 variant == DriverDepthVariant::NoAttachment ||
                 triangle.depth_target_bytes >=
                     (depth_format == VK_FORMAT_D16_UNORM ? kDepthBytes / 2u : kDepthBytes);
-            passed = triangle.target_bytes >= kFramebufferBytes && depth_ready &&
-                     check_driver_depth_frame(const_cast<void *>(triangle.target),
-                                              triangle.depth_target, variant, depth_format, log);
+            passed =
+                triangle.target_bytes >= kFramebufferBytes && depth_ready &&
+                check_driver_depth_frame(const_cast<void *>(triangle.target), triangle.depth_target,
+                                         variant, depth_format, log, detached);
         }
     }
     outcome.command_built = status != PS5VK_TRIANGLE_FAILED;
@@ -16420,6 +16430,16 @@ void run_vulkan_depth_frames(const TestContext &test, TestOutcome &outcome) noex
 void run_vulkan_depth_16_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
     run_driver_depth_frames(test, outcome, DriverDepthVariant::Tested, VK_FORMAT_D16_UNORM);
+}
+
+void run_vulkan_depth_detached_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_driver_depth_frames(test, outcome, DriverDepthVariant::Tested, VK_FORMAT_D32_SFLOAT, true);
+}
+
+void run_vulkan_depth_detached_16_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_driver_depth_frames(test, outcome, DriverDepthVariant::Tested, VK_FORMAT_D16_UNORM, true);
 }
 
 void run_vulkan_depth_notest_frames(const TestContext &test, TestOutcome &outcome) noexcept
@@ -24589,6 +24609,8 @@ constexpr RunnerTest kRunnerTests[] = {
     // rectangles over a D32_SFLOAT attachment the frame clears through
     // vk_meta, testing and writing depth with LESS.
     {"c5-depth", "m4-depth", run_vulkan_depth_frames},
+    {"c5-depth-detach", "m4-depth", run_vulkan_depth_detached_frames},
+    {"c5-depth-detach-16", "m4-depth", run_vulkan_depth_detached_16_frames},
     // Round 12: the stencil path. The mixed format's depth and stencil planes,
     // written and read back by the frame's own two passes.
     {"v0-stencil", "v0-stencil-setup", run_vulkan_stencil_frames},

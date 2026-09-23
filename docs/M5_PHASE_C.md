@@ -8925,3 +8925,37 @@ driver build, host/cache checks, eleven gates, port five gates/scan and template
 relink pass. Lint/unit/runner and console build pass after the harness-only fix.
 Archive e662f699…; two deployed ELF reads/all load segments match, title closes
 and idle is verified. Goldens: golden/r23-display-readback.
+
+## 2026-09-23 — R25 depth state after detaching the attachment
+
+vkQuake screenshots isolate a missing overlay: the opaque HUD appears outside
+the world viewport, while transparent HUD/FPS elements over the world disappear.
+New c5-depth-detach draws the same near/far rectangles in a depth-tested pass,
+then in a colour-only pass in one submission. PID 243 reads 518,400 wrong colour
+pixels (the overlap stays near/red rather than far/green), zero wrong depth
+samples. The original C5 control passes. Both captures are retained. PID 242 was
+an earlier fixture error: queue-before.txt was not the queue.txt the runner reads,
+so the default battery started; it was stopped and is not acceptance.
+
+CmdEndRendering now writes DB_DEPTH_CONTROL=0 through the existing AGC indirect
+context helper before leaving a depth/stencil rendering. Every bound draw still
+programs its own depth/stencil state. Ending a rendering also closes command
+buffer/submission boundaries, so no extra writes are needed in colour-only draws.
+
+PID 244: 439 PASS/zero FAIL. D32 and D16 detached overlays each match every colour
+pixel and retained depth sample. Original D32/D16 depth, no-depth control and four
+swapchain readbacks pass. PID 245 passes existing stencil and depth-bias cases;
+three FAIL-labelled messages are the deliberate nonzero depthBiasClamp refusal,
+with clamp_refused=1 and both runner tests PASS. Twenty-four fresh draw/flip
+streams compare exactly. The first C5 historical host comparison correctly
+rejected the added reset; its gate now uses the fresh PID 244 C5 golden, retaining
+the old capture without a new comparison tolerance. PID 245 lacks a native
+defaults canary, so its replay explicitly reuses PID 244's same-build m2-solid
+host-input defaults; its captured commands/tables still compare word for word.
+
+Explicit driver rebuild: 14,450,602-byte archive e172ce0fedc9ec002e74c9ec0a727f13c9fe9452b26ebcf696984e3a75e9c924.
+170 host/cache checks, eleven gates, port five gates/scan and template relink PASS.
+Two deployed ELF reads match all five segments, probe title closed and idle.
+Readback records, failed setup notes, proofs and reproduction live in
+jobs/r25-depth-detach; goldens retain before, after and stencil/bias batteries.
+Game visual regression of the relinked artifact follows separately.

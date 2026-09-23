@@ -1,0 +1,70 @@
+{
+  "pid": 244,
+  "ended": true,
+  "statuses": {
+    "PASS": 439,
+    "INFO": 217,
+    "NOT_REQUIRED": 28,
+    "ARMED": 1,
+    "WARN": 1
+  },
+  "source_sha256": "a198d8bc24e79c92d25c12d231affde7a5a5b2b01eedc571ebd47eb522c6546b",
+  "tests": [
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "m2-solid"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "c5-depth-detach"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "c5-depth-detach-16"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "c5-depth"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "c5-depth-16"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "c5-depth-nodepth"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "c1-readback"
+    }
+  ]
+}

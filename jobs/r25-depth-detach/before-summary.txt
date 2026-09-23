@@ -1,0 +1,30 @@
+{
+  "pid": 243,
+  "ended": true,
+  "statuses": {
+    "PASS": 141,
+    "INFO": 78,
+    "NOT_REQUIRED": 8,
+    "FAIL": 4,
+    "INCONCLUSIVE": 1
+  },
+  "source_sha256": "11c4fbd3cacdc646a35c0e15eff208c24a9549e47121b6fc708ba27e8d4b9366",
+  "tests": [
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "c5-depth"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "FAIL",
+      "result": -1,
+      "detail": "c5-depth-detach"
+    }
+  ]
+}

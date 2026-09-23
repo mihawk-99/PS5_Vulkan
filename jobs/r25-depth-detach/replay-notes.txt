@@ -1,0 +1,23 @@
+The first fixture was mistakenly named queue-before.txt. The uploader preserved
+that basename and the runner, which only reads jobs/queue.txt, began its default
+battery. PID 242 was stopped; its incomplete raw log is retained in ignored
+Klog_Logs/r25-depth-fixture-failed.log. It is not regression acceptance.
+
+Corrected PID 243 reproduces 518,400 wrong colour pixels after detaching depth,
+with zero wrong depth samples. Its golden command stream is retained separately.
+PID 244 fixes that same case and passes D16, original depth and display readback.
+
+The first historical C5 host comparison rejected the new reset packet, as it
+should. check-driver.sh now uses PID 244's fresh C5 capture; the historical
+capture stays unchanged. No packet/register comparison tolerance was added.
+
+Thirteen PID 244 draw/flip streams compare exactly. The first attempt to replay
+PID 245's stencil/bias battery lacked a native register-defaults canary. Its
+replay now explicitly uses PID 244's same-build m2-solid default values as host
+input; all eleven PID 245 command streams and their tables compare exactly.
+The display replay seeds its flip counter from the captured counter word, as
+R23 already does. Original failure logs remain under ignored build/.
+
+PID 245's three FAIL-labelled messages are the existing depthBiasClamp negative
+case: a nonzero clamp is deliberately refused, then clamp_refused=1 and both
+runner tests PASS. The retained records include the refusal and acceptance.

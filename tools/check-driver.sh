@@ -214,7 +214,9 @@ want v0_multiset_quake &&
 # mapping and the allocations its replay hands out. The golden's own probe
 # recorded the tables that carry the depth registers, and the test asserts their
 # values against the M4 canary's (docs/M5_REFERENCE.md, C5).
-depth_run="$root/golden/c5-depth/run-1.json"
+# R25 repeats C5 on hardware after the explicit depth-state reset. The old
+# capture remains archived; the new stream is compared without tolerances.
+depth_run="$root/golden/r25-depth-detach/run-1.json"
 want c5_depth &&
     python3 "$root/tools/golden.py" replay "$depth_run" "$work/c5-depth.replay" --test c5-depth
 # Round 12's stencil frame is the same shape: its combined depth/stencil

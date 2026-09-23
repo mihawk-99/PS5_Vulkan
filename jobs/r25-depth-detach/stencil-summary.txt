@@ -1,0 +1,29 @@
+{
+  "pid": 245,
+  "ended": true,
+  "statuses": {
+    "PASS": 542,
+    "INFO": 33,
+    "NOT_REQUIRED": 8,
+    "FAIL": 3
+  },
+  "source_sha256": "83b8eb99ca4051b43bfd76d7e2d9b4fe9e0b87b3987deef735b1b3facdfc997c",
+  "tests": [
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "v0-stencil"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "v0-depth-bias"
+    }
+  ]
+}

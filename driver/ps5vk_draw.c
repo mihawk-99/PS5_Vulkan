@@ -954,6 +954,36 @@ VKAPI_ATTR void VKAPI_CALL
 ps5vk_CmdEndRendering(VkCommandBuffer commandBuffer)
 {
    VK_FROM_HANDLE(ps5vk_cmd_buffer, cmd_buffer, commandBuffer);
+   /* Depth/stencil state belongs to this rendering's attachment. Colour-only
+    * draws omit its register block, so explicitly disable it before leaving a
+    * depth rendering, including at command-buffer/submission boundaries. */
+   if (cmd_buffer->depth_bound && !vk_command_buffer_has_error(&cmd_buffer->vk)) {
+      struct ps5vk_agc_register *const reset =
+         ps5vk_cmd_buffer_table(cmd_buffer, sizeof(*reset), 8);
+      if (reset != NULL) {
+         *reset = (struct ps5vk_agc_register){.offset = PS5VK_DEPTH_CONTROL_REGISTER, .value = 0};
+         ps5vk_flush_cpu_cache(reset, sizeof(*reset));
+         uint32_t words[8];
+         struct ps5vk_agc_command_buffer command = {
+            .bottom = words, .top = words + 8, .up = words, .down = words + 8,
+            .callback = (uintptr_t)ps5vk_agc_out_of_space,
+         };
+         if (!sceAgcDcbSetCxRegistersIndirect(&command, reset, 1)) {
+            ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                                    "the AGC helper did not encode the depth-state reset");
+         } else {
+            const uint32_t count = (uint32_t)(command.up - command.bottom);
+            uint32_t *const recorded = util_dynarray_grow(&cmd_buffer->words, uint32_t, count);
+            if (recorded != NULL)
+               memcpy(recorded, words, count * sizeof(*words));
+            else
+               ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
+                                       "no memory for the depth-state reset");
+         }
+      }
+   }
+   cmd_buffer->depth_bound = false;
+   cmd_buffer->stencil_bound = false;
    cmd_buffer->rendering = false;
 }
 
