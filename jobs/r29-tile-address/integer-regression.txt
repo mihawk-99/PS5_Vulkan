@@ -1,0 +1,16 @@
+{"schema":2,"event":"run_start","pid":264}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"m2-solid"}
+{"schema":2,"event":"value","probe":"r16_mip_texels","field":"mismatches","value":0}
+{"schema":2,"event":"probe","probe":"r16_mip_texels","status":"PASS","result":0,"detail":"all 87040 lower-level texels equal the filtered checker average"}
+{"schema":2,"event":"value","probe":"r16_mip_texels","field":"mismatches","value":0}
+{"schema":2,"event":"probe","probe":"r16_mip_texels","status":"PASS","result":0,"detail":"all 87040 lower-level texels equal the filtered checker average"}
+{"schema":2,"event":"value","probe":"r16_mip_texels","field":"mismatches","value":0}
+{"schema":2,"event":"probe","probe":"r16_mip_texels","status":"PASS","result":0,"detail":"all 87040 lower-level texels equal the filtered checker average"}
+{"schema":2,"event":"value","probe":"r16_mip_texels","field":"mismatches","value":0}
+{"schema":2,"event":"probe","probe":"r16_mip_texels","status":"PASS","result":0,"detail":"all 87040 lower-level texels equal the filtered checker average"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"r16-mip-blit"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c7-mip-upload"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c7-copy"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c7-blit-formats"}
+{"schema":2,"event":"value","probe":"runner_summary","field":"ran","value":5}
+{"schema":2,"event":"probe","probe":"runner_summary","status":"PASS","result":0,"detail":"5 of 5 queued tests passed"}

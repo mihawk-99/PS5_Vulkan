@@ -1,0 +1,84 @@
+{"schema":2,"event":"run_start","pid":267}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"width","value":3840}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"height","value":2160}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"frame","value":0}
+{"schema":2,"event":"hex","probe":"agc_solid_readback","field":"expected_word","value":"0xff20a0ff"}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"raw_nonzero_words","value":8294400}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"drawn_pixels","value":8294400}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"matching_pixels","value":8294400}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"full_rows","value":2160}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"first_mismatch_x","value":-1}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"first_mismatch_y","value":-1}
+{"schema":2,"event":"hex","probe":"agc_solid_readback","field":"first_mismatch_word","value":"0x0"}
+{"schema":2,"event":"probe","probe":"agc_solid_coverage","status":"PASS","result":0,"detail":"8294400 of 8294400 target pixels drawn"}
+{"schema":2,"event":"probe","probe":"agc_solid_colour","status":"PASS","result":0,"detail":"8294400 of 8294400 drawn pixels equal 0xff20a0ff"}
+{"schema":2,"event":"probe","probe":"agc_solid_readback","status":"PASS","result":0,"detail":"CPU readback of the own-shader native-size frame"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"m2-solid"}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"width","value":3840}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"height","value":2160}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"frame","value":2}
+{"schema":2,"event":"hex","probe":"agc_solid_readback","field":"expected_word","value":"0xff7f7f7f"}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"raw_nonzero_words","value":8294400}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"drawn_pixels","value":8294400}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"matching_pixels","value":8294400}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"full_rows","value":2160}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"first_mismatch_x","value":-1}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"first_mismatch_y","value":-1}
+{"schema":2,"event":"hex","probe":"agc_solid_readback","field":"first_mismatch_word","value":"0x0"}
+{"schema":2,"event":"probe","probe":"agc_solid_coverage","status":"PASS","result":0,"detail":"8294400 of 8294400 target pixels drawn"}
+{"schema":2,"event":"probe","probe":"agc_solid_colour","status":"PASS","result":0,"detail":"8294400 of 8294400 drawn pixels equal 0xff7f7f7f"}
+{"schema":2,"event":"probe","probe":"agc_solid_readback","status":"PASS","result":0,"detail":"CPU readback of the own-shader native-size frame"}
+{"schema":2,"event":"value","probe":"r16_mip_texels","field":"mismatches","value":0}
+{"schema":2,"event":"probe","probe":"r16_mip_texels","status":"PASS","result":0,"detail":"all 87040 lower-level texels equal the filtered checker average"}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"width","value":3840}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"height","value":2160}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"frame","value":3}
+{"schema":2,"event":"hex","probe":"agc_solid_readback","field":"expected_word","value":"0xff7f7f7f"}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"raw_nonzero_words","value":8294400}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"drawn_pixels","value":8294400}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"matching_pixels","value":8294400}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"full_rows","value":2160}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"first_mismatch_x","value":-1}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"first_mismatch_y","value":-1}
+{"schema":2,"event":"hex","probe":"agc_solid_readback","field":"first_mismatch_word","value":"0x0"}
+{"schema":2,"event":"probe","probe":"agc_solid_coverage","status":"PASS","result":0,"detail":"8294400 of 8294400 target pixels drawn"}
+{"schema":2,"event":"probe","probe":"agc_solid_colour","status":"PASS","result":0,"detail":"8294400 of 8294400 drawn pixels equal 0xff7f7f7f"}
+{"schema":2,"event":"probe","probe":"agc_solid_readback","status":"PASS","result":0,"detail":"CPU readback of the own-shader native-size frame"}
+{"schema":2,"event":"value","probe":"r16_mip_texels","field":"mismatches","value":0}
+{"schema":2,"event":"probe","probe":"r16_mip_texels","status":"PASS","result":0,"detail":"all 87040 lower-level texels equal the filtered checker average"}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"width","value":3840}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"height","value":2160}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"frame","value":4}
+{"schema":2,"event":"hex","probe":"agc_solid_readback","field":"expected_word","value":"0xff7f7f7f"}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"raw_nonzero_words","value":8294400}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"drawn_pixels","value":8294400}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"matching_pixels","value":8294400}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"full_rows","value":2160}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"first_mismatch_x","value":-1}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"first_mismatch_y","value":-1}
+{"schema":2,"event":"hex","probe":"agc_solid_readback","field":"first_mismatch_word","value":"0x0"}
+{"schema":2,"event":"probe","probe":"agc_solid_coverage","status":"PASS","result":0,"detail":"8294400 of 8294400 target pixels drawn"}
+{"schema":2,"event":"probe","probe":"agc_solid_colour","status":"PASS","result":0,"detail":"8294400 of 8294400 drawn pixels equal 0xff7f7f7f"}
+{"schema":2,"event":"probe","probe":"agc_solid_readback","status":"PASS","result":0,"detail":"CPU readback of the own-shader native-size frame"}
+{"schema":2,"event":"value","probe":"r16_mip_texels","field":"mismatches","value":0}
+{"schema":2,"event":"probe","probe":"r16_mip_texels","status":"PASS","result":0,"detail":"all 87040 lower-level texels equal the filtered checker average"}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"width","value":3840}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"height","value":2160}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"frame","value":5}
+{"schema":2,"event":"hex","probe":"agc_solid_readback","field":"expected_word","value":"0xff7f7f7f"}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"raw_nonzero_words","value":8294400}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"drawn_pixels","value":8294400}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"matching_pixels","value":8294400}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"full_rows","value":2160}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"first_mismatch_x","value":-1}
+{"schema":2,"event":"value","probe":"agc_solid_readback","field":"first_mismatch_y","value":-1}
+{"schema":2,"event":"hex","probe":"agc_solid_readback","field":"first_mismatch_word","value":"0x0"}
+{"schema":2,"event":"probe","probe":"agc_solid_coverage","status":"PASS","result":0,"detail":"8294400 of 8294400 target pixels drawn"}
+{"schema":2,"event":"probe","probe":"agc_solid_colour","status":"PASS","result":0,"detail":"8294400 of 8294400 drawn pixels equal 0xff7f7f7f"}
+{"schema":2,"event":"probe","probe":"agc_solid_readback","status":"PASS","result":0,"detail":"CPU readback of the own-shader native-size frame"}
+{"schema":2,"event":"value","probe":"r16_mip_texels","field":"mismatches","value":0}
+{"schema":2,"event":"probe","probe":"r16_mip_texels","status":"PASS","result":0,"detail":"all 87040 lower-level texels equal the filtered checker average"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"r16-mip-blit"}
+{"schema":2,"event":"value","probe":"runner_summary","field":"ran","value":2}
+{"schema":2,"event":"probe","probe":"runner_summary","status":"PASS","result":0,"detail":"2 of 2 queued tests passed"}
+{"schema":2,"event":"run_end"}

@@ -1,0 +1,8 @@
+# Exact 2:1 reduction and unchanged upload/copy/scaled-blit paths.
+hold 1
+m2-solid
+r16-mip-blit
+c7-mip-upload
+c7-copy
+c7-blit-formats
+exit

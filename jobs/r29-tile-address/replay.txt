@@ -1,0 +1,5 @@
+/home/mihawk/Desktop/PS5_Homebrews/PS5_Vulkan/golden/r29-tile-address/run-1.json: register defaults from m2-solid-1.json, the same run
+submission.dump r16-mip-blit pinned level 1: identical to r16-mip-blit-1.json: 17 packets, 6 register tables
+submission.dump r16-mip-blit pinned level 2: identical to r16-mip-blit-2.json: 17 packets, 6 register tables
+submission.dump r16-mip-blit pinned level 3: identical to r16-mip-blit-3.json: 17 packets, 6 register tables
+submission.dump r16-mip-blit pinned level 4: identical to r16-mip-blit-4.json: 17 packets, 6 register tables

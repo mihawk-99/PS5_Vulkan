@@ -7,56 +7,30 @@ Volatile by design. Keep this file under about 120 lines. Specifications are in
 _Updated: 2026-09-23_
 
 ## Now
-**Persistent SPIR-V shader cache accepted on PS5.** User requested much faster
-vkQuake startup. The shared graphics/compute compiler boundary now saves each
-successful output atomically in /app0/ps5vk-shader-cache and reuses it across
-launches, including after an application crash. The key covers shader bytes,
-entry point, every compile option, specialization maps/data, compiler archive,
-relevant driver sources/headers and build flags. Corrupt, stale or unavailable
-entries fall back to compilation. No GPU pointers or live resources are saved.
+**vkQuake stability and performance are the priority; no CTS work.**
+The user authorized uninterrupted autonomous work while unavailable for eight
+hours. No visual/audio/control question is needed during this period.
 
-**Same-binary vkQuake measurement:** identity 78bd43a2…; PID 202 cold first
-present 30.410 s, 99 SPIR-V compiles + 433 hits, 99 files stored. PID 203 warm
-first present 13.018 s, zero SPIR-V compiles + 532 hits, zero stores. Eight
-internal NIR stages still compile in each. One-second trace polling; these are
-presentation-return timings, not optical measurements. Both traces were read
-twice and PID-correlated; console idle. jobs/shader-cache/README.md and its
-cold/warm-startup.txt contain exact evidence and reproduction.
+Persistent SPIR-V outputs survive launches and crashes. Same-binary cold/warm
+PIDs 202/203: first present 30.410/13.018 s, 99/0 compiles, 433/532 hits.
+Eight internal NIR stages still compile per launch. Exact evidence, cache rules
+and reproduction: jobs/shader-cache. M2 was human-confirmed earlier.
 
-R17 descriptor arrays and R18 padded mip chains pass on console. Their complete
-readbacks/replays and failed attempts are retained in jobs/r17-descriptor-array
-and jobs/r18-padded-mips. R18 PID 214: 531 PASS, 19 mip frames, 21 exact replays.
-R19 now passes PID 216: 257 PASS, zero FAIL; three UINT32 full-frame pixel
-checks and UINT16 before/after regression. Five streams replay exactly.
-Each draw writes its index size; bounds and firstIndex use the element width.
-Host 170 arms, eleven gates, port five gates/scan and template relink PASS.
-Archive 14,434,594 bytes, SHA-256 f2666ab8…; deployed ELF segments match,
-title closed, count=0. jobs/r19-index32 and golden/r19-index32 hold evidence.
-Port PID 217 then ran 180 seconds without refusal/Quake error, progressing
-from Necropolis to The Door To Chthon; harness closed it, count=0 verified.
-R20 d8080dc retires R10's quarter-width diagnosis: the old probe misread tiled
-bytes and never mapped its writer. PID 219 matches every writer/reader pixel
-in two frames; no production driver change. jobs/r20-subpass retains evidence.
+R17/R18 descriptor arrays and padded mips pass (3be25f1/aafd697). R19 UINT32
+indices pass (8d11392): PID 216, 257 checks, full pixels and five strict replays.
+Game PID 217 then runs 180 seconds without refusal or Quake error. R20 d8080dc
+retires the old quarter-width diagnosis: its probe misread tiled bytes; corrected
+writer/reader match every pixel. Detailed evidence lives in each jobs/r*-*.
 
-**Port:** M2 human-confirmed earlier; input adapter opens DualSense. Audio
-now feeds native 48 kHz stereo PCM, PID 222 alive 300 seconds, 6,335 presents,
-zero refusal/Quake/audio errors. Port d537cbc; physical/audible checks pending.
-**R21 profiler verified:** default-off queue timing leaves packets unchanged.
-PID 222 averages 509.54 MiB target flushes/frame, 7.87 ms flush, 15.20 ms
-queue, 2.85 ms native-submit/marker and 7.79 ms flip waiting (overlapping
-metrics). Archive dae28c8a…; 170 arms/cache checks, eleven gates, port and
-template relinks pass. Two R20 streams replay exactly with profiling enabled.
-See jobs/r21-profile. R22 now skips identical target address/size entries within
-one flush, preserving each step and every wait/barrier/copy boundary. PID 224:
-1,043 PASS, zero FAIL, 14 exact replays; incomplete timeout PID 223 retained.
-Host 170/cache, eleven gates, port/template PASS. Archive b95beefd….
-Game PID 225 ran 300 seconds without error: 6,557 presents. First 27 intervals
-reduce flush 7.872 -> 5.788 ms and 509.54 -> 373.73 MiB/frame; flip wait grows,
-FPS remains about 20–30. No FPS improvement claimed. jobs/r22-target-flush.
-R23 now proves swapchain TRANSFER_SRC: PID 229, 238 PASS / zero FAIL; four
-copies each match all 8,294,400 pixels, 16 strict replays. Original presentation
-regression passes. Archive e662f699…; eleven gates, port/template pass. Host
-replay corrections are explicit in jobs/r23-display-readback/replay-notes.txt.
+Port native input opens DualSense; audio feeds 48 kHz stereo with no reported
+errors during repeated 300-second runs. Physical/audible acceptance is pending.
+R21 5925f03 adds default-off timing. R22 a85010a deduplicates identical target
+flushes: PID 224, 1,043 PASS, 14 exact replays. Game flush cost 7.872 -> 5.788 ms,
+without useful FPS gain. R23 4f8037f proves swapchain TRANSFER_SRC: PID 229,
+238 PASS, four entire-frame copies, 16 strict replays. Port PNG allocation and
+native shell exit are fixed; screenshots now provide actual console readback.
+All landed driver rounds have explicit builds, full host/cache and eleven gates,
+plus port gates/scan and template relinks. Per-round jobs retain exact proofs.
 R25 fixes depth/stencil state leaking into colour-only passes. PID 243 reproduces
 518,400 wrong overlay pixels; PID 244 has 439 PASS/zero FAIL for D32/D16 detach,
 original depth and swapchain readback. PID 245 stencil/bias regressions pass
@@ -76,7 +50,28 @@ correct menu/HUD blending in five PNGs and normal exit.
 R28 splits CPU-copy/wait/signal timing. Game PID 261: start copy 24.095 ms,
 E1M1 copy 0.041 ms; both sync operations 0.021 ms each. Full gates/relinks and
 five profiler-enabled strict replays pass. jobs/r28-copy-profile records it.
-Next game bottleneck candidate: exact 2:1 water-mipmap CPU blits.
+R29 common tile-address evaluation passes: PID 267 has 178 PASS, four complete
+4K mip frames and every generated mip texel correct; four strict replays.
+PID 268 has 3,501 PASS across mip/upload/copy/format regressions. Host checks
+compare 2,441,216 addresses against the old map and 144 random-colour blits.
+Full driver/cache, eleven gates, port/template pass. jobs/r29-tile-address.
+The earlier integer filter was rolled back: PID 265 copy 22.657 vs 24.095 ms,
+no FPS gain. Its patch and partial/full probe runs remain in the R29 job.
+
+**Console unavailable since about 09:24 UTC.** Deployment of game candidate
+identity e3525e30… failed before FTP connected. FTP/control/klog return no route;
+local route exists, neighbor failed, PS5 discovery returned no response. Last
+probe PID 268 completed and closed normally. No new game fixture was uploaded.
+Next: deploy/read back the already-built R29 game, stage its saved benchmark,
+scan shaders, launch with listener; then movement/fire/save/load/all eight maps.
+Port build/r29b-* and build/r30-* hold the prepared artifacts. Do not overwrite
+existing saves/configs. The last game PID 265 exited normally; fixtures absent.
+
+While hardware is offline, a NIR-cache candidate reuses Mesa serialization and
+the existing output cache. Host fresh-process cold/warm/disabled outputs match;
+warm compilation count zero. Eight captured mip submissions replay exactly.
+Full checks are in progress; console cache/readback and game startup remain
+unverified. Keep this candidate separate from the saved R29 game binary.
 ## Standing work
 - Graphics R7 rounds 1-4, R8 dynamic depth bias, the first batch's R9 (push
   pointers), and the R4 clear/refusal coverage are in `docs/M5_PHASE_C.md`; the

@@ -1702,6 +1702,18 @@ ps5vk_tiled_texel_offset(uint32_t x, uint32_t y, uint32_t level_width, uint32_t 
                          uint32_t tile_height, uint32_t element_bytes, uint32_t samples,
                          uint64_t *swizzle)
 {
+   /* The common RGBA8 one-sample map has a fixed 128x128 tile. Keep the
+    * measured equation, but avoid table interpretation and variable integer
+    * division at every source tap of CPU copies and mip blits. */
+   if (element_bytes == 4u && samples == 1u && tile_width == 128u && tile_height == 128u) {
+      const uint32_t sx = x & 127u, sy = y & 127u;
+      *swizzle = ((sx << 2) & 0x0cu) ^ ((sx << 5) & 0x380u) ^
+                 ((sx << 4) & 0x400u) ^ ((sx << 6) & 0x800u) ^
+                 ((sx << 9) & 0xa000u) ^ ((sy << 4) & 0x70u) ^
+                 ((sy << 5) & 0xf00u) ^ ((sy << 9) & 0x1000u) ^
+                 ((sy << 8) & 0x4000u);
+      return ((uint64_t)(y >> 7) * DIV_ROUND_UP(level_width, 128u) + (x >> 7)) * PS5VK_TILE_BYTES;
+   }
    uint32_t in_x = x & (tile_width - 1u);
    uint32_t in_y = y & (tile_height - 1u);
    if (samples == 4u) {

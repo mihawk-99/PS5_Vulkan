@@ -9000,3 +9000,25 @@ submissions replay exactly with profiling enabled; explicit rebuild, full host/
 cache, eleven gates, port gates/scan and template pass. Deployment and final
 reads/PID verified; fixture/profile removed, console idle.
 Evidence/reproduction: jobs/r28-copy-profile and port m6-copy-profile.
+
+
+## 2026-09-23 — R29 common tile-address evaluation
+
+The common 128x128, one-sample, four-byte tile now evaluates the existing nine
+terms directly, replacing per-texel interpretation and variable division.
+The fallback and mip-tail XOR are unchanged. Host comparison checks 2,441,216
+addresses against the original helper and 144 random-colour reductions,
+including offsets, tails and untouched bytes. PID 267 has 178 PASS/zero FAIL:
+four complete 4K mip frames and all lower-level texels match. Four streams
+replay exactly. PID 268 repeats five mip/upload/copy/format cases without
+verbose capture: 3,501 PASS/zero FAIL. Explicit build, full host/cache suite,
+eleven gates, port five gates/scan and template relink pass. Two served ELF
+reads/all five segments match, both titles closed and idle verified.
+
+The first integer-filter candidate remains only as a patch: PID 265 copy time
+fell 24.095 to 22.657 ms without an FPS gain, so it was rolled back. PID 263's
+partial verbose capture and PID 264's complete regression are retained.
+Game measurement of the shared address change is pending: at 09:24 UTC the
+console stopped answering FTP/control/klog; no new game binary or fixture was
+uploaded. No FPS improvement is claimed. jobs/r29-tile-address has evidence
+and reproduction; port identity e3525e30… is built for the next benchmark.

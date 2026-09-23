@@ -1,0 +1,54 @@
+diff --git a/driver/ps5vk_queue.c b/driver/ps5vk_queue.c
+index 74bf979..d89b234 100644
+--- a/driver/ps5vk_queue.c
++++ b/driver/ps5vk_queue.c
+@@ -567,6 +567,49 @@ ps5vk_blit_execute(const struct ps5vk_memory_copy *copy)
+    uint64_t destination_low = UINT64_MAX;
+    uint64_t destination_high = 0;
+ 
++   /* A same-format 2:1 linear reduction samples the centre of each 2x2
++    * group: four equal weights. Integer averaging is exact for UNORM bytes,
++    * including the half-up rounding used by the general filter below. */
++   const bool half = copy->linear && copy->source_step_x == 2.0f &&
++                     copy->source_step_y == 2.0f &&
++                     copy->source_format == copy->destination_format &&
++                     source_texel_bytes == 4 && destination_texel_bytes == 4 &&
++                     copy->source_format == VK_FORMAT_R8G8B8A8_UNORM;
++   if (half) {
++      for (uint32_t row = 0; row < copy->height; row++) {
++         const int32_t y = copy->source_y + 2 * (int32_t)row;
++         for (uint32_t column = 0; column < copy->width; column++) {
++            const int32_t x = copy->source_x + 2 * (int32_t)column;
++            const uint64_t at[4] = {
++               ps5vk_image_copy_address(&copy->source_side, x, y, 4, 0),
++               ps5vk_image_copy_address(&copy->source_side, x + 1, y, 4, 0),
++               ps5vk_image_copy_address(&copy->source_side, x, y + 1, 4, 0),
++               ps5vk_image_copy_address(&copy->source_side, x + 1, y + 1, 4, 0),
++            };
++            const uint64_t destination = ps5vk_image_copy_address(
++               &copy->destination_side, (int32_t)(copy->destination_x + column),
++               (int32_t)(copy->destination_y + row), 4, 0);
++            for (unsigned byte = 0; byte < 4; byte++) {
++               unsigned sum = 2;
++               for (unsigned tap = 0; tap < 4; tap++)
++                  sum += ((const uint8_t *)(uintptr_t)at[tap])[byte];
++               ((uint8_t *)(uintptr_t)destination)[byte] = sum / 4;
++            }
++            for (unsigned tap = 0; tap < 4; tap++) {
++               source_low = MIN2(source_low, at[tap]);
++               source_high = MAX2(source_high, at[tap] + 4);
++            }
++            destination_low = MIN2(destination_low, destination);
++            destination_high = MAX2(destination_high, destination + 4);
++         }
++      }
++      if (source_low < source_high)
++         ps5vk_flush_cpu_cache((const void *)(uintptr_t)source_low, (size_t)(source_high - source_low));
++      if (destination_low < destination_high)
++         ps5vk_flush_cpu_cache((const void *)(uintptr_t)destination_low, (size_t)(destination_high - destination_low));
++      return;
++   }
++
+    for (uint32_t row = 0; row < copy->height; row++) {
+       const float sample_y = top + ((float)row + 0.5f) * copy->source_step_y - 0.5f;
+       for (uint32_t column = 0; column < copy->width; column++) {

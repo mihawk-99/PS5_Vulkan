@@ -1,0 +1,2 @@
+PASS: 2441216 addresses match the pre-optimization map
+PASS: 144 random-colour reductions, row/tile combinations, offsets, tails and untouched bytes
