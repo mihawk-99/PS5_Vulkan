@@ -84,6 +84,7 @@ ps5vk_cmd_buffer_clear_state(struct ps5vk_cmd_buffer *cmd_buffer)
     * follows is a new command buffer's, and a stale set there would be one the
     * application never bound in it (ps5vk_descriptor_set.c). */
    memset(cmd_buffer->descriptor_sets, 0, sizeof(cmd_buffer->descriptor_sets));
+   memset(cmd_buffer->descriptor_set_offsets, 0, sizeof(cmd_buffer->descriptor_set_offsets));
    cmd_buffer->rendering = false;
 }
 

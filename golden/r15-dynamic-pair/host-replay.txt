@@ -1,0 +1,6 @@
+golden/r15-dynamic-pair/run-1.json: register defaults from m2-solid-1.json, the same run
+d1-dynamic-ubo.dump d1-dynamic-ubo offset 0: identical to d1-dynamic-ubo-1.json: 8 packets, 3 register tables
+d1-dynamic-ubo.dump d1-dynamic-ubo offset 16: identical to d1-dynamic-ubo-2.json: 8 packets, 3 register tables
+golden/r15-dynamic-pair/run-1.json: register defaults from m2-solid-1.json, the same run
+r15-dynamic-pair.dump r15-dynamic-pair offset 0: identical to r15-dynamic-pair-1.json: 8 packets, 3 register tables
+r15-dynamic-pair.dump r15-dynamic-pair offset 16: identical to r15-dynamic-pair-2.json: 8 packets, 3 register tables

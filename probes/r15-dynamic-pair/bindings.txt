@@ -1,0 +1,3 @@
+address32_hi 2
+pixel_user_sgpr_count 3
+pixel_descriptor_set0_dword 2

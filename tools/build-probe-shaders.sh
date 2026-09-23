@@ -100,6 +100,15 @@ m3-uniform)
     vertex_flags=(--address32-hi 2)
     pixel_flags=(--address32-hi 2 --descriptor-binding 0:0:uniform_buffer:1:0:16)
     ;;
+r15-dynamic-pair)
+    vertex_source=shaders/m2/fullscreen.vert
+    pixel_source=shaders/r15/dynamic_pair.frag
+    output=probes/r15-dynamic-pair
+    vertex_flags=(--address32-hi 2)
+    pixel_flags=(--address32-hi 2 --descriptor-binding 0:0:uniform_buffer:1:0:16
+        --descriptor-binding 0:2:uniform_buffer:1:16:16
+        --descriptor-binding 0:5:uniform_buffer:1:32:16)
+    ;;
 c8-sampleid)
     # Kept for the record, and it does NOT build: gl_SamplePosition and
     # gl_SampleID need SpvCapabilitySampleRateShading, which the compiler's
@@ -932,6 +941,14 @@ if set_name == "m3-uniform":
     if vertex.get("descriptor_bindings"):
         fail("vertex stage unexpectedly declares descriptor bindings")
     bindings = [("address32_hi", expected_hi), *pixel_descriptor(16)]
+elif set_name == "r15-dynamic-pair":
+    declared = pixel.get("descriptor_bindings") or []
+    got = sorted((b["set"], b["binding"], b["offset"], b["stride"]) for b in declared)
+    if got != [(0, 0, 0, 16), (0, 2, 16, 16), (0, 5, 32, 16)]:
+        fail(f"unexpected dynamic pair bindings: {got!r}")
+    bindings = [("address32_hi", expected_hi),
+                ("pixel_user_sgpr_count", pixel["user_sgpr_count"]),
+                ("pixel_descriptor_set0_dword", dword(pixel, "descriptor_set0_user_data_dword", "pixel"))]
 elif set_name == "v0-robust":
     if vertex.get("descriptor_bindings"):
         fail("vertex stage unexpectedly declares descriptor bindings")

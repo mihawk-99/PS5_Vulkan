@@ -96,9 +96,14 @@ ps5vk_CreateDescriptorSetLayout(VkDevice _device, const VkDescriptorSetLayoutCre
    }
 
    uint32_t offset = 0;
+   uint32_t dynamic_index = 0;
    for (uint32_t index = 0; index < binding_count; index++) {
       struct ps5vk_descriptor_binding *const binding = &layout->bindings[index];
       binding->offset = offset;
+      if (binding->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC) {
+         binding->dynamic_index = dynamic_index;
+         dynamic_index += binding->count;
+      }
       offset += binding->count * binding->stride;
    }
    layout->table_bytes = offset;

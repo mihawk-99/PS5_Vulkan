@@ -329,6 +329,7 @@ struct ps5vk_triangle_input {
     * (Phase D1): 0 keeps the static type every earlier frame used, and a
     * nonzero offset declares the binding dynamic. */
    uint32_t uniform_dynamic_offset;
+   bool uniform_dynamic_pair;
    /* The count the frame's draws ask for, when it differs from the buffers it
     * bound (V0-robust): 0 draws the vertices and indices the buffers hold, and
     * a larger count is a draw that reaches past its bound. */
@@ -936,6 +937,7 @@ struct ps5vk_triangle {
    bool texture_tiled;
    uint32_t uniform_range_bytes;
    uint32_t uniform_dynamic_offset;
+   bool uniform_dynamic_pair;
    bool uniform_dynamic;
    uint32_t draw_index_count;
    float texture_max_lod;

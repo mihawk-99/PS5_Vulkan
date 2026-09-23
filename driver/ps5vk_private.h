@@ -468,6 +468,8 @@ struct ps5vk_table_chunk {
    struct ps5vk_table_chunk *next_in_device;
 };
 
+#define PS5VK_DYNAMIC_UNIFORM_COUNT 8
+
 struct ps5vk_cmd_buffer {
    struct vk_command_buffer vk;
    /* The PM4 words recorded into it, which submission copies into the
@@ -484,7 +486,7 @@ struct ps5vk_cmd_buffer {
     * (vkCmdBindDescriptorSets; ps5vk_descriptor_set.c), and the dynamic offset
     * each was bound with (VkBindDescriptorSetsInfo.pDynamicOffsets, D1). */
    struct ps5vk_descriptor_set *descriptor_sets[PS5VK_DESCRIPTOR_SET_COUNT];
-   uint32_t descriptor_set_offsets[PS5VK_DESCRIPTOR_SET_COUNT];
+   uint32_t descriptor_set_offsets[PS5VK_DESCRIPTOR_SET_COUNT][PS5VK_DYNAMIC_UNIFORM_COUNT];
    /* The compute pipeline vkCmdBindPipeline bound for the next dispatches
     * (Phase D2). */
    struct ps5vk_pipeline *compute_pipeline;
@@ -559,6 +561,7 @@ struct ps5vk_meta_saved_state {
    struct ps5vk_pipeline *pipeline;
    struct ps5vk_vertex_buffer vertex_buffers[PS5VK_MAX_VERTEX_BINDINGS];
    struct ps5vk_descriptor_set *descriptor_sets[PS5VK_DESCRIPTOR_SET_COUNT];
+   uint32_t descriptor_set_offsets[PS5VK_DESCRIPTOR_SET_COUNT][PS5VK_DYNAMIC_UNIFORM_COUNT];
    uint8_t push_constants[PS5VK_MAX_PUSH_CONSTANT_BYTES];
    struct vk_dynamic_graphics_state dynamic;
 };
@@ -902,6 +905,7 @@ struct ps5vk_descriptor_binding {
     * can use yet. */
    uint32_t offset;
    uint32_t stride;
+   uint32_t dynamic_index;
 };
 
 /* A descriptor set layout: bindings indexed by binding number. */

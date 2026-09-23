@@ -1,0 +1,7 @@
+# Independent dynamic uniform offsets plus corrected scalar baseline.
+hold 1
+capture
+m2-solid
+d1-dynamic-ubo
+r15-dynamic-pair
+exit

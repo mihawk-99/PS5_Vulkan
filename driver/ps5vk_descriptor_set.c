@@ -412,17 +412,7 @@ ps5vk_CmdBindDescriptorSets2KHR(VkCommandBuffer commandBuffer,
    const VkBindDescriptorSetsInfo *const info = pBindDescriptorSetsInfo;
    if (vk_command_buffer_has_error(&cmd_buffer->vk))
       return;
-   /* One dynamic offset per set, which is what the sets this driver records
-    * have: one binding, one descriptor, and the offset is added to the address
-    * the descriptor names when a draw writes its table (ps5vk_draw.c). */
-   if (info->dynamicOffsetCount > 0 &&
-       (info->descriptorSetCount != 1 || info->dynamicOffsetCount != 1)) {
-      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                              "a bind of %u sets with %u dynamic offsets; this driver records one "
-                              "dynamic uniform buffer per set (docs/M5_REFERENCE.md, D1)",
-                              info->descriptorSetCount, info->dynamicOffsetCount);
-      return;
-   }
+   uint32_t next_offset = 0;
    for (uint32_t i = 0; i < info->descriptorSetCount; i++) {
       const uint32_t index = info->firstSet + i;
       if (index >= PS5VK_DESCRIPTOR_SET_COUNT) {
@@ -435,7 +425,29 @@ ps5vk_CmdBindDescriptorSets2KHR(VkCommandBuffer commandBuffer,
       }
       VK_FROM_HANDLE(ps5vk_descriptor_set, set, info->pDescriptorSets[i]);
       cmd_buffer->descriptor_sets[index] = set;
-      cmd_buffer->descriptor_set_offsets[index] =
-         info->dynamicOffsetCount != 0 ? info->pDynamicOffsets[0] : 0;
+      memset(cmd_buffer->descriptor_set_offsets[index], 0,
+             sizeof(cmd_buffer->descriptor_set_offsets[index]));
+      if (set == NULL)
+         continue;
+      /* Vulkan orders offsets by set, then binding, then array element.
+       * The descriptor writer currently accepts scalar bindings only. */
+      for (uint32_t b = 0; b < set->layout->binding_count; b++) {
+         const struct ps5vk_descriptor_binding *binding = &set->layout->bindings[b];
+         if (binding->count == 0 || binding->type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC)
+            continue;
+         if (binding->count != 1 || binding->dynamic_index >= PS5VK_DYNAMIC_UNIFORM_COUNT ||
+             next_offset >= info->dynamicOffsetCount) {
+            ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                                    "set %u binding %u: unsupported dynamic uniform array/count",
+                                    index, b);
+            return;
+         }
+         cmd_buffer->descriptor_set_offsets[index][binding->dynamic_index] =
+            info->pDynamicOffsets[next_offset++];
+      }
    }
+   if (next_offset != info->dynamicOffsetCount)
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                              "bind consumed %u dynamic offsets but received %u",
+                              next_offset, info->dynamicOffsetCount);
 }

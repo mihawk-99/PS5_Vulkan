@@ -636,6 +636,8 @@ ps5vk_meta_save(struct ps5vk_cmd_buffer *cmd_buffer, struct ps5vk_meta_saved_sta
    saved->dynamic = cmd_buffer->vk.dynamic_graphics_state;
    memcpy(saved->vertex_buffers, cmd_buffer->vertex_buffers, sizeof(saved->vertex_buffers));
    memcpy(saved->descriptor_sets, cmd_buffer->descriptor_sets, sizeof(saved->descriptor_sets));
+   memcpy(saved->descriptor_set_offsets, cmd_buffer->descriptor_set_offsets,
+          sizeof(saved->descriptor_set_offsets));
    memcpy(saved->push_constants, cmd_buffer->push_constants, sizeof(saved->push_constants));
 }
 
@@ -646,6 +648,8 @@ ps5vk_meta_restore(struct ps5vk_cmd_buffer *cmd_buffer, const struct ps5vk_meta_
    cmd_buffer->vk.dynamic_graphics_state = saved->dynamic;
    memcpy(cmd_buffer->vertex_buffers, saved->vertex_buffers, sizeof(cmd_buffer->vertex_buffers));
    memcpy(cmd_buffer->descriptor_sets, saved->descriptor_sets, sizeof(cmd_buffer->descriptor_sets));
+   memcpy(cmd_buffer->descriptor_set_offsets, saved->descriptor_set_offsets,
+          sizeof(cmd_buffer->descriptor_set_offsets));
    memcpy(cmd_buffer->push_constants, saved->push_constants, sizeof(cmd_buffer->push_constants));
 }
 
@@ -1581,6 +1585,7 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
                      written->type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER ||
                      written->type == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
                   if (written->type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER &&
+                      written->type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC &&
                       written->type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER && !texel_buffer) {
                      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                                              "set %u binding %u: the compiler reads a 16-byte buffer "
@@ -1604,7 +1609,8 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
                      return false;
                   }
                   if (written->size == 0 ||
-                      (written->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER &&
+                      ((written->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||
+                        written->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC) &&
                        written->size % binding->stride != 0)) {
                      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                                              "set %u binding %u covers %" PRIu64 " bytes, not a whole "
@@ -1726,8 +1732,14 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
              * the bound range (VkBindDescriptorSetsInfo.pDynamicOffsets, D1). The
              * bound range itself does not change, so the record count does not
              * either. */
-            const uint64_t address =
-               written->address + cmd_buffer->descriptor_set_offsets[binding->set];
+            uint64_t address = written->address;
+            if (written->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC) {
+               const struct ps5vk_descriptor_set_layout *layout =
+                  cmd_buffer->descriptor_sets[binding->set]->layout;
+               const uint32_t dynamic_index = layout->bindings[binding->binding].dynamic_index;
+               assert(dynamic_index < PS5VK_DYNAMIC_UNIFORM_COUNT);
+               address += cmd_buffer->descriptor_set_offsets[binding->set][dynamic_index];
+            }
             descriptor[0] = (uint32_t)address;
             descriptor[1] = (uint32_t)(address >> 32) | (binding->stride << 16);
             descriptor[2] = (uint32_t)(written->size / binding->stride);

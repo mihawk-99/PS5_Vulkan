@@ -95,7 +95,7 @@ ps5vk_get_properties(struct vk_properties *p)
       .maxPerStageResources = 44,
       .maxDescriptorSetSamplers = PS5VK_SHADER_STAGES * 16,
       .maxDescriptorSetUniformBuffers = PS5VK_SHADER_STAGES * 12,
-      .maxDescriptorSetUniformBuffersDynamic = 8,
+      .maxDescriptorSetUniformBuffersDynamic = PS5VK_DYNAMIC_UNIFORM_COUNT,
       .maxDescriptorSetStorageBuffers = PS5VK_SHADER_STAGES * 4,
       .maxDescriptorSetStorageBuffersDynamic = 4,
       .maxDescriptorSetSampledImages = PS5VK_SHADER_STAGES * 16,

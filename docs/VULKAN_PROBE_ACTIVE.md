@@ -31,12 +31,16 @@ SHA-256 e089e060… . PS5 probe PIDs 200 and 201 each returned 241 PASS/zero FAI
 twelve submissions replay exactly, goldens in golden/shader-cache-cold and
 -warm. Driver probe stdout is not a hit-count witness; vkQuake's trace is.
 
-**M6 resumed by user; R14 stride fix accepted.** Single-draw count=1/stride=0
-now records; indexed/non-indexed host checks PASS. PS5 PID 204: 121 PASS,
-zero FAIL, indirect triangle pixels and exact submission replay PASS.
-Six check-driver arms, eleven gates, port five gates and template relink PASS.
-Evidence: jobs/r14-indirect-stride/README.md; golden/r14-indirect-stride.
-No port retry yet; next are the named dynamic-offset and tiled-chain refusals.
+**M6 resumed by user; R14 and R15 accepted.** R14 stride fix is 2925ff6;
+PS5 PID 204 has indirect pixels and exact replay. R15 independently applies
+multiple dynamic UBO offsets and leaves static buffers fixed. PID 205: 196
+PASS, zero FAIL, all four frames and four exact replays. Eleven driver gates,
+port five gates and template relink PASS; host subpass regression fixed before
+deployment. Evidence: jobs/r15-dynamic-pair and golden/r15-dynamic-pair.
+The phase log explicitly corrects old D1 coverage: its write used the static
+type despite a dynamic layout. Corrected writes now pass unchanged streams.
+No new vkQuake run yet. Next named refusal is the water-texture blit: 512x512,
+five mip levels, linear downsampling in gl_warp.c. Console idle.
 
 **Port M2 met:** PID 197, QueuePresent success and human-confirmed Quake
 menu/console; port evidence/m2-first-frame. M3–M6 remain open. Input/audio

@@ -13537,7 +13537,8 @@ void run_vulkan_cull_frames(const TestContext &test, TestOutcome &outcome) noexc
 constexpr std::uint32_t kDynamicColours = 2;
 constexpr std::uint32_t kDynamicColourBytes = 16;
 
-void run_vulkan_dynamic_uniform_frames(const TestContext &test, TestOutcome &outcome) noexcept
+void run_vulkan_dynamic_uniform_frames_impl(const TestContext &test, TestOutcome &outcome,
+                                            bool pair) noexcept
 {
     JsonLog &log = test.log;
     const ps5vk_triangle_report report{&log, log_vulkan_step};
@@ -13562,6 +13563,7 @@ void run_vulkan_dynamic_uniform_frames(const TestContext &test, TestOutcome &out
     // dynamic offset moves it to the buffer's second half.
     input.uniform_range_bytes = kDynamicColourBytes;
     input.uniform_dynamic_offset = kDynamicColourBytes;
+    input.uniform_dynamic_pair = pair;
     input.uniform_stages = VK_SHADER_STAGE_FRAGMENT_BIT;
     if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
         return;
@@ -13580,11 +13582,28 @@ void run_vulkan_dynamic_uniform_frames(const TestContext &test, TestOutcome &out
         status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
         if (status != PS5VK_TRIANGLE_OK)
             break;
+        if (pair)
+        {
+            ps5vk_debug_table tables[2]{};
+            const auto count = ps5vk_debug_descriptor_tables(triangle.device, tables, 2);
+            const auto *words = count == 1 && tables[0].bytes >= 48 ? tables[0].words : nullptr;
+            const bool correct = words && words[0] == words[4] + frame * kDynamicColourBytes &&
+                                 words[8] == words[4] + (1 - frame) * kDynamicColourBytes &&
+                                 words[1] == words[5] && words[9] == words[5] && words[2] == 1 &&
+                                 words[6] == 1 && words[10] == 1;
+            log.event("r15_dynamic_tables", correct ? "PASS" : "FAIL", correct ? 0 : -1,
+                      "bindings 0 and 5 have independent offsets; static binding 2 stays fixed");
+            if (!correct)
+            {
+                status = PS5VK_TRIANGLE_FAILED;
+                break;
+            }
+        }
         if (test.capture)
             log_driver_submission(triangle.device, frame == 0 ? "offset 0" : "offset 16", log);
-        const std::uint32_t expected =
-            rgba_bytes_word(kUniformFrameColours[frame][0], kUniformFrameColours[frame][1],
-                            kUniformFrameColours[frame][2]);
+        const std::uint32_t expected = rgba_bytes_word(
+            kUniformFrameColours[frame][0], kUniformFrameColours[pair ? 1 - frame : frame][1],
+            kUniformFrameColours[pair ? 0 : frame][2]);
         log.number("agc_dynamic_frame", "frame", frame);
         log.number("agc_dynamic_frame", "dynamic_offset", frame * kDynamicColourBytes);
         log.hex("agc_dynamic_frame", "expected_word", expected);
@@ -13605,8 +13624,18 @@ void run_vulkan_dynamic_uniform_frames(const TestContext &test, TestOutcome &out
     ps5vk_triangle_finish(&triangle);
     outcome.passed = frames == kDynamicColours;
     log.event("agc_d1_dynamic", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1,
-              "one buffer and one descriptor read both colours, chosen by the dynamic offset the "
-              "application bound");
+              pair ? "two dynamic bindings and one static binding read their independent offsets"
+                   : "one dynamic binding read both colours");
+}
+
+void run_vulkan_dynamic_uniform_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_vulkan_dynamic_uniform_frames_impl(test, outcome, false);
+}
+
+void run_vulkan_dynamic_pair_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_vulkan_dynamic_uniform_frames_impl(test, outcome, true);
 }
 
 // V0-robust: the out-of-bounds buffer access Vulkan 1.0 requires to be safe.
@@ -24041,6 +24070,7 @@ constexpr RunnerTest kRunnerTests[] = {
     // with two dynamic offsets, so each frame reads the other half
     // (run_vulkan_dynamic_uniform_frames).
     {"d1-dynamic-ubo", "m3", run_vulkan_dynamic_uniform_frames},
+    {"r15-dynamic-pair", "r15-dynamic-pair", run_vulkan_dynamic_pair_frames},
     // V0-formats: every required sampled format this driver reports, one frame
     // each, fetched by the hardware (run_vulkan_format_sample_frames).
     {"v0-formats-sampled", "m3-texture", run_vulkan_format_sample_frames},

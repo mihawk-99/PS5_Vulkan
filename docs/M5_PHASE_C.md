@@ -8580,3 +8580,21 @@ eleven gates, port five gates and template relink PASS. PS5 PID 204: 121 PASS,
 zero FAIL, pixel readback PASS, one exact replay; closed. Evidence and commands:
 jobs/r14-indirect-stride/README.md, golden/r14-indirect-stride. No port retry;
 dynamic-offset and tiled-chain refusals are the next named gaps.
+
+## 2026-09-22 — R15 independent dynamic UBO offsets accepted
+
+PS5 PID 205: 196 PASS, zero FAIL. Corrected scalar D1 and the new pair/static
+probe pass all four frames; four streams replay exactly. Full host run had
+165/167 passing arms; debugger found a null set in the new binding walk, fixed
+before deployment. Final nine D1/subpass/present arms and eleven gates PASS;
+port five gates and template relink PASS. Title closed. Implementation,
+readback, hashes and reproduction: jobs/r15-dynamic-pair/README.md and
+golden/r15-dynamic-pair. No port retry; the named water mip blit remains.
+
+### Correction: earlier D1 test wrote a mismatched descriptor type
+
+The old shared harness wrote UNIFORM_BUFFER into its dynamic-UBO layout.
+Those runs established address-offset pixels/streams, not acceptance of a
+correctly typed dynamic write. R15 corrects the harness and the driver's type
+check and re-runs D1 on PS5; old streams still compare unchanged. This is a
+coverage correction; earlier evidence and log entries remain unmodified.

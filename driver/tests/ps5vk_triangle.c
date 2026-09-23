@@ -572,15 +572,23 @@ update_uniform_descriptor(const struct ps5vk_triangle *triangle)
       .range = triangle->uniform_range_bytes != 0 ? triangle->uniform_range_bytes
                                                  : triangle->uniform_bytes,
    };
-   const VkWriteDescriptorSet write = {
+   VkWriteDescriptorSet write = {
       .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
       .dstSet = triangle->descriptor_set,
       .dstBinding = 0,
       .descriptorCount = 1,
-      .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      .descriptorType = triangle->uniform_dynamic ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
+                                                 : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       .pBufferInfo = &buffer_info,
    };
    CALL(triangle, UpdateDescriptorSets)(triangle->device, 1, &write, 0, NULL);
+   if (triangle->uniform_dynamic_pair) {
+      write.dstBinding = 5;
+      CALL(triangle, UpdateDescriptorSets)(triangle->device, 1, &write, 0, NULL);
+      write.dstBinding = 2;
+      write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+      CALL(triangle, UpdateDescriptorSets)(triangle->device, 1, &write, 0, NULL);
+   }
 }
 
 /* The caller's uniform buffer and the descriptor set that names it (Phase C3),
@@ -631,10 +639,15 @@ create_uniform(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
        * ps5vk_descriptor_options). */
       .stageFlags = input->uniform_stages,
    };
+   VkDescriptorSetLayoutBinding pair_bindings[3] = {binding, binding, binding};
+   pair_bindings[0].binding = 5;
+   pair_bindings[1].binding = 2;
+   pair_bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+   /* Deliberately unsorted: dynamic offsets follow binding number, not input order. */
    const VkDescriptorSetLayoutCreateInfo set_info = {
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      .bindingCount = 1,
-      .pBindings = &binding,
+      .bindingCount = input->uniform_dynamic_pair ? 3u : 1u,
+      .pBindings = input->uniform_dynamic_pair ? pair_bindings : &binding,
    };
    if (!step(triangle, "create_descriptor_set_layout",
              CALL(triangle, CreateDescriptorSetLayout)(triangle->device, &set_info, NULL,
@@ -644,16 +657,16 @@ create_uniform(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
    /* One uniform-buffer descriptor, for the one set a frame binds, of the type
     * the set's layout declares: a dynamic binding draws its pool entry from
     * UNIFORM_BUFFER_DYNAMIC (Phase D1). */
-   const VkDescriptorPoolSize pool_size = {
+   const VkDescriptorPoolSize pool_sizes[2] = {{
       .type = input->uniform_dynamic_offset != 0 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
                                                  : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      .descriptorCount = 1,
-   };
+      .descriptorCount = input->uniform_dynamic_pair ? 2u : 1u,
+   }, {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
    const VkDescriptorPoolCreateInfo pool_info = {
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
       .maxSets = 1,
-      .poolSizeCount = 1,
-      .pPoolSizes = &pool_size,
+      .poolSizeCount = input->uniform_dynamic_pair ? 2u : 1u,
+      .pPoolSizes = pool_sizes,
    };
    if (!step(triangle, "create_descriptor_pool",
              CALL(triangle, CreateDescriptorPool)(triangle->device, &pool_info, NULL,
@@ -671,6 +684,7 @@ create_uniform(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
                   "the bound range is longer than the uniform buffer");
    triangle->uniform_range_bytes = input->uniform_range_bytes;
    triangle->uniform_dynamic = input->uniform_dynamic_offset != 0;
+   triangle->uniform_dynamic_pair = input->uniform_dynamic_pair;
    /* The index count a frame's draws ask for, which V0-robust raises past what
     * the buffer holds (ps5vk_triangle_set_draw_index_count). Zero keeps the
     * buffer's own count: this runs before the geometry exists, so the count is
@@ -3421,12 +3435,15 @@ record_body(struct ps5vk_triangle *triangle, VkCommandBuffer command, VkPipeline
     * depend on what an earlier draw left bound (Phase C3, as the C2 vertex
     * buffers). No descriptors leaves the recording exactly as it was. */
    if (triangle->set_count != 0) {
-      const uint32_t dynamic_offset = triangle->uniform_dynamic_offset;
+      const uint32_t dynamic_offsets[2] = {
+         triangle->uniform_dynamic_offset,
+         PS5VK_TRIANGLE_UNIFORM_BYTES - triangle->uniform_dynamic_offset,
+      };
       CALL(triangle, CmdBindDescriptorSets)(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                             triangle->layout, 0, triangle->set_count,
                                             triangle->descriptor_sets,
-                                            triangle->uniform_dynamic ? 1u : 0u,
-                                            triangle->uniform_dynamic ? &dynamic_offset : NULL);
+                                            triangle->uniform_dynamic_pair ? 2u : triangle->uniform_dynamic ? 1u : 0u,
+                                            triangle->uniform_dynamic ? dynamic_offsets : NULL);
    }
    draw(triangle, command);
    if (triangle->subpass_input && then != VK_NULL_HANDLE) {

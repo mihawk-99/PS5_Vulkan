@@ -1,0 +1,170 @@
+{
+  "pid": 205,
+  "ended": true,
+  "statuses": {
+    "PASS": 196,
+    "INFO": 17,
+    "NOT_REQUIRED": 12,
+    "ARMED": 1,
+    "WARN": 1
+  },
+  "tests": [
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "m2-solid"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "d1-dynamic-ubo"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "r15-dynamic-pair"
+    }
+  ],
+  "records": [
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_dynamic_frame",
+      "field": "frame",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_dynamic_frame",
+      "field": "dynamic_offset",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_dynamic_frame",
+      "field": "expected_word",
+      "value": "0xff8040ff"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_dynamic_frame",
+      "field": "frame",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_dynamic_frame",
+      "field": "dynamic_offset",
+      "value": 16
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_dynamic_frame",
+      "field": "expected_word",
+      "value": "0xff60d030"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_d1_dynamic",
+      "status": "PASS",
+      "result": 0,
+      "detail": "one dynamic binding read both colours"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "r15_dynamic_tables",
+      "status": "PASS",
+      "result": 0,
+      "detail": "bindings 0 and 5 have independent offsets; static binding 2 stays fixed"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_dynamic_frame",
+      "field": "frame",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_dynamic_frame",
+      "field": "dynamic_offset",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_dynamic_frame",
+      "field": "expected_word",
+      "value": "0xff80d0ff"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "r15_dynamic_tables",
+      "status": "PASS",
+      "result": 0,
+      "detail": "bindings 0 and 5 have independent offsets; static binding 2 stays fixed"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_dynamic_frame",
+      "field": "frame",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_dynamic_frame",
+      "field": "dynamic_offset",
+      "value": 16
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_dynamic_frame",
+      "field": "expected_word",
+      "value": "0xff804030"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_d1_dynamic",
+      "status": "PASS",
+      "result": 0,
+      "detail": "two dynamic bindings and one static binding read their independent offsets"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "runner_summary",
+      "field": "ran",
+      "value": 3
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_summary",
+      "status": "PASS",
+      "result": 0,
+      "detail": "3 of 3 queued tests passed"
+    }
+  ]
+}
