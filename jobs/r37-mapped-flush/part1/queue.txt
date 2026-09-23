@@ -1,0 +1,30 @@
+# R37 battery part 1/6: every non-faulting runner test, in table order.
+hold 1
+c1-flip
+m2-solid
+m3-uniform
+m3-vertex
+m3-texture
+m4-depth
+m4-blend
+m4-rtt
+b4-marker
+b4-headless
+b4-timing
+b5-empty
+b5-order
+c1-present
+c0-dispatch
+v0-timestamp
+e2-module-load
+b7-triangle
+b7-corner
+c2-indexed
+r19-index32
+r19-index16-after
+v0-vertex-sint
+v0-vertex-uint
+v0-array-layers
+v0-cube-faces
+unknowns-depth4x-map
+exit

@@ -1,0 +1,30 @@
+# R37 battery part 2/6: every non-faulting runner test, in table order.
+hold 1
+unknowns-depth4x-less
+unknowns-depth4x-ramp
+unknowns-depth4x-single
+unknowns-depth4x-rects
+c2-base-vertex
+c2-instancing
+c2-staging
+c3-uniform
+v0-robust
+d1-dynamic-ubo
+r15-dynamic-pair
+v0-formats-sampled
+v0-formats-sampled-uint
+v0-formats-sampled-sint
+v0-formats-texel-buffer
+v0-formats-texel-buffer-uint
+v0-formats-texel-buffer-sint
+v0-formats-storage-image
+v0-formats-storage-image-uint
+v0-formats-storage-image-sint
+v0-formats-storage-image-atomic
+v0-formats-sampled-depth
+v0-targets
+v0-targets-uint
+v0-targets-sint
+v0-targets-float
+v0-wide16-ramp
+exit

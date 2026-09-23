@@ -362,6 +362,11 @@ struct ps5vk_agc_register {
  * CPU and the GPU share, and for a swapchain image the VideoOut handle and
  * buffer whose wait packet starts the submission (video is -1 otherwise). */
 struct ps5vk_render_target {
+   /* The memory a colour attachment is bound to (NULL for a swapchain image,
+    * which the application cannot map), and whether the range is flushed
+    * whatever that memory's state: a query pool's counters are. */
+   const struct ps5vk_device_memory *memory;
+   bool always;
    void *address;
    size_t bytes;
    int video;
@@ -442,6 +447,11 @@ struct ps5vk_memory_copy {
     * run (ps5vk_queue.c, ps5vk_blit_execute). */
    bool blit;
    bool linear;
+   /* A blit's or a resolve's whole source image, invalidated before its texels
+    * are read: the GPU may have rendered it, and the CPU must not read a line
+    * it cached before that (ps5vk_blit_execute, ps5vk_resolve_execute). */
+   uint64_t source_span;
+   uint64_t source_span_bytes;
    /* A resolve (vkCmdResolveImage): the queue averages the four sample words of
     * each source texel into the destination's one (ps5vk_resolve_execute). */
    bool resolve;
@@ -749,6 +759,11 @@ struct ps5vk_device_memory {
    struct vk_device_memory vk;
    /* vk.size rounded up to the direct-memory page. */
    struct ps5vk_direct_mapping direct;
+   /* Whether the application has ever mapped this memory. Only then can the CPU
+    * hold its lines outside the driver's own CPU paths, which flush what they
+    * touch, so only then do the colour targets in it need the whole-range flush
+    * around each submission step (ps5vk_queue.c, ps5vk_queue_flush_targets). */
+   bool host_mapped;
 };
 
 /* A range of one allocation; vk.device_address is its GPU address once bound. */

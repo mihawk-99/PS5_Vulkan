@@ -106,6 +106,13 @@ ps5vk_MapMemory2(VkDevice _device, const VkMemoryMapInfo *pMemoryMapInfo, void *
     * exposed; valid usage leaves offset and size inside the allocation. */
    assert(pMemoryMapInfo->flags == 0);
    assert(pMemoryMapInfo->offset < memory->vk.size);
+   /* The first map evicts the whole allocation: until now the CPU reached it
+    * only through the driver's own paths, and from now on the application may
+    * read it directly, so no line cached before this may be what it reads. */
+   if (!memory->host_mapped) {
+      ps5vk_flush_cpu_cache(memory->direct.address, memory->direct.bytes);
+      memory->host_mapped = true;
+   }
    *ppData = (uint8_t *)memory->direct.address + pMemoryMapInfo->offset;
    return VK_SUCCESS;
 }

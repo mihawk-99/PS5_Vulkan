@@ -868,9 +868,13 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
                                  "no memory to track colour targets");
          return;
       }
-      *target = (struct ps5vk_render_target){(void *)(uintptr_t)image->address,
-                                             (size_t)image->size, image->video,
-                                             image->buffer_index};
+      *target = (struct ps5vk_render_target){
+         .memory = image->memory,
+         .address = (void *)(uintptr_t)image->address,
+         .bytes = (size_t)image->size,
+         .video = image->video,
+         .buffer_index = image->buffer_index,
+      };
    }
    if (colour_count != 0) {
       cmd_buffer->colour_attachment_count = colour_count;

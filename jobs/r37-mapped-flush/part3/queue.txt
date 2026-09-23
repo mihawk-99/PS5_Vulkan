@@ -1,0 +1,30 @@
+# R37 battery part 3/6: every non-faulting runner test, in table order.
+hold 1
+v0-transfer-16
+v0-transfer-formats
+v0-vertex-formats
+v0-vertex-formats-16
+v0-vertex-formats-8888
+v0-blit-dst
+v0-blend-constant
+c3-quad
+c4-texture
+c4-padded
+c4-rtt
+c7-copy
+c7-blit-formats
+c7-blit-depth
+c8-msaa
+c8-resolve
+v0-two-passes
+v0-sampler-address
+v0-cull
+v0-strip
+v0-lines
+v0-resolve-usage
+device-report
+v0-colour-clear
+v0-two-sets
+v0-multiset-quake
+v0-separated-pair
+exit

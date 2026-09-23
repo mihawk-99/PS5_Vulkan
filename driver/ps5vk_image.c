@@ -2163,7 +2163,8 @@ ps5vk_cmd_buffer_blit_image_region(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t
                                    const struct ps5vk_image_copy_side *source,
                                    const struct ps5vk_image_copy_side *destination,
                                    const struct ps5vk_image_copy *region, VkFilter filter,
-                                   VkFormat source_format, VkFormat destination_format)
+                                   VkFormat source_format, VkFormat destination_format,
+                                   uint64_t source_span, uint64_t source_span_bytes)
 {
    struct ps5vk_memory_copy *record =
       util_dynarray_grow(&cmd_buffer->copies, struct ps5vk_memory_copy, 1);
@@ -2174,6 +2175,8 @@ ps5vk_cmd_buffer_blit_image_region(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t
    *record = (struct ps5vk_memory_copy){
       .blit = true,
       .linear = filter == VK_FILTER_LINEAR,
+      .source_span = source_span,
+      .source_span_bytes = source_span_bytes,
       .source_side = *source,
       .destination_side = *destination,
       .source_x = region->source_offset.x,
@@ -2297,6 +2300,8 @@ ps5vk_CmdResolveImage2KHR(VkCommandBuffer commandBuffer, const VkResolveImageInf
       }
       *record = (struct ps5vk_memory_copy){
          .resolve = true,
+         .source_span = source->address,
+         .source_span_bytes = source->size,
          .source_side = source_side,
          .destination_side = destination_side,
          .destination_x = (uint32_t)region->dstOffset.x,
@@ -2546,7 +2551,7 @@ ps5vk_CmdBlitImage2KHR(VkCommandBuffer commandBuffer, const VkBlitImageInfo2 *pB
       region.destination_texel_bytes = destination_texels;
       ps5vk_cmd_buffer_blit_image_region(cmd_buffer, after_words, &source_side, &destination_side,
                                          &region, pBlitImageInfo->filter, source->vk.format,
-                                         destination->vk.format);
+                                         destination->vk.format, source->address, source->size);
    }
    free(regions);
 }
@@ -2557,6 +2562,12 @@ ps5vk_debug_image_storage(VkImage _image, size_t *bytes)
    VK_FROM_HANDLE(ps5vk_image, image, _image);
    const bool stored = image && image->address != 0;
    *bytes = stored ? (size_t)image->size : 0;
+   /* The caller reads what the GPU rendered through this pointer, and the queue
+    * no longer evicts a target the application never mapped after each step
+    * (ps5vk_queue_flush_targets), so the range is invalidated here, when it is
+    * handed over to be read. */
+   if (stored)
+      ps5vk_flush_cpu_cache((const void *)(uintptr_t)image->address, (size_t)image->size);
    return stored ? (void *)(uintptr_t)image->address : NULL;
 }
 

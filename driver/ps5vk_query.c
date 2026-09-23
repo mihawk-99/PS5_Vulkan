@@ -90,6 +90,7 @@ ps5vk_cmd_buffer_occlusion_sample(struct ps5vk_cmd_buffer *cmd_buffer,
    memcpy(recorded, words, sizeof(words));
 
    const struct ps5vk_render_target target = {
+      .always = true,
       .address = pool->mapping.address,
       .bytes = pool->mapping.bytes,
       .video = -1,
@@ -122,6 +123,7 @@ ps5vk_cmd_buffer_timestamp_sample(struct ps5vk_cmd_buffer *cmd_buffer,
    memcpy(recorded, words, sizeof(words));
 
    const struct ps5vk_render_target target = {
+      .always = true,
       .address = pool->mapping.address,
       .bytes = pool->mapping.bytes,
       .video = -1,

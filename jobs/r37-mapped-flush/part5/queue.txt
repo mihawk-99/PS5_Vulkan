@@ -1,0 +1,28 @@
+# R37 battery part 5/6: every non-faulting runner test, in table order.
+hold 1
+c7-mip-tiled
+c7-mip-pages
+c7-mip-pages-six
+c7-mip-upload
+r16-mip-blit
+r27-menu-alpha-raw
+r27-menu-alpha
+r26-lod-bias
+r18-padded-mips
+r18-mip-addresses
+r18-small-mips
+r18-aligned-mips
+v0-query-masked
+v0-query-full
+v0-query-half
+v0-timestamp-driver
+b5-events
+c2-transfers
+c2-indirect
+b8-secondary
+c7-clear
+v0-subpass
+b8-groups
+c1-triangle
+c1-readback
+exit

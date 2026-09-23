@@ -230,7 +230,17 @@ ps5vk_target_already_flushed(const struct vk_queue_submit *submit, uint32_t buff
    return false;
 }
 
-/* Evicts every distinct target range, before and after each submission step. */
+/* Evicts every distinct target range the CPU can have cached outside the
+ * driver's own CPU paths, before and after each submission step: a query
+ * pool's counters, and colour targets in memory the application has mapped.
+ *
+ * A colour target in memory it never mapped is skipped. The CPU touches such a
+ * range only through this driver's copies, blits, resolves, clears and uploads,
+ * and each of those flushes what it wrote once it has written it and
+ * invalidates what it reads before reading it (the blits and resolves over
+ * their whole source image), so no line of it is dirty before a step or stale
+ * after one. That was measured as 256 MiB and 3.9 ms a frame at E1M1 (driver
+ * R36) for targets the game never maps. */
 static void
 ps5vk_queue_flush_targets(struct ps5vk_queue *queue, const struct vk_queue_submit *submit)
 {
@@ -239,6 +249,8 @@ ps5vk_queue_flush_targets(struct ps5vk_queue *queue, const struct vk_queue_submi
       const struct ps5vk_cmd_buffer *const cmd_buffer =
          container_of(submit->command_buffers[i], struct ps5vk_cmd_buffer, vk);
       util_dynarray_foreach (&cmd_buffer->targets, struct ps5vk_render_target, target) {
+         if (!target->always && (target->memory == NULL || !target->memory->host_mapped))
+            continue;
          if (ps5vk_target_already_flushed(submit, i, target))
             continue;
          ps5vk_flush_cpu_cache(target->address, target->bytes);
@@ -627,6 +639,9 @@ ps5vk_clear_execute(const struct ps5vk_memory_copy *copy)
 static void
 ps5vk_resolve_execute(const struct ps5vk_memory_copy *copy)
 {
+   if (copy->source_span_bytes != 0)
+      ps5vk_flush_cpu_cache((const void *)(uintptr_t)copy->source_span,
+                            (size_t)copy->source_span_bytes);
    const uint32_t sample_bytes = copy->source_texel_bytes / 4u;
    uint64_t source_low = UINT64_MAX;
    uint64_t source_high = 0;
@@ -678,6 +693,9 @@ ps5vk_resolve_execute(const struct ps5vk_memory_copy *copy)
 void
 ps5vk_blit_execute(const struct ps5vk_memory_copy *copy)
 {
+   if (copy->source_span_bytes != 0)
+      ps5vk_flush_cpu_cache((const void *)(uintptr_t)copy->source_span,
+                            (size_t)copy->source_span_bytes);
    const uint32_t source_texel_bytes = copy->source_texel_bytes;
    const uint32_t destination_texel_bytes = copy->destination_texel_bytes;
    const float left = (float)copy->source_x;

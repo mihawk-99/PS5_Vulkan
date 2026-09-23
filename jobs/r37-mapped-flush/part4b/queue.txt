@@ -1,0 +1,29 @@
+# R37 battery part 4b: part 4 without v0-mrt, after which the runner stopped reporting: every non-faulting runner test, in table order.
+hold 1
+v0-r9
+v0-sampler-anisotropy
+v0-push-constant
+v0-dynamic-depth-bias
+v0-depth-bias
+v0-stencil-clear
+d2-compute
+d2-compute-images
+r17-descriptor-array
+c5-depth
+c5-depth-detach
+c5-depth-detach-16
+v0-stencil
+v0-fragmentless
+c5-depth-16
+c5-depth-clear
+c8-depth-clear
+c8-depth4-copy
+c5-depth-notest
+c5-depth-noclear
+c5-depth-nodepth
+c5-depth-nostate
+v0-formats
+v0-query
+c7-mip-nearest
+c7-mip-linear
+exit

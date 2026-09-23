@@ -1,0 +1,9 @@
+# R37 battery part 6/6: the tests parts 1-5 missed.
+hold 1
+c1-clear
+v0-formats-storage-image-atomic-sint
+v0-formats-texel-buffer-atomic
+v0-formats-texel-buffer-store
+v0-formats-texel-buffer-store-sint
+v0-formats-texel-buffer-store-uint
+exit
