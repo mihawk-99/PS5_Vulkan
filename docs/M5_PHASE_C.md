@@ -8424,3 +8424,33 @@ PASS and the PS5 archive reproduced exactly as
 `65550cae897ee2fab14224d07b7cf6766e986be21c9e5ba81359b0a0535c75ce`.
 `git apply --check parked/r12-row-pitch/row-pitch.patch` PASS verifies the
 parked candidate can be reapplied; it does not validate its implementation.
+
+
+## 2026-09-22 — R12 resumed: padded 32-wide texture readback passes
+
+User explicitly resumed the parked step. Replaced unavailable ALIGN with the
+existing Mesa align(uint32_t,uint32_t), then explicitly built the driver before
+checking it. `tools/build-driver.sh` PASS, zero warnings; full check-driver
+PASS (55 loader, 55 direct, 55 PS5 links, two negative arms). All eleven
+build/gates.sh gates PASS. Template tools/verify.sh PASS in all five gates.
+Archive: 14,385,036 bytes, SHA-256
+`c37afdec4f7bc8fe107e18b5be21bd63fbf2231201d6e1aa16121a15966e89a2`.
+
+Source witness: ps5-opengl ps5_screen.c and Mesa ac_descriptors.c encode custom
+single-level, non-array 2D linear pitch in word 4. The driver computes the
+256-byte row pitch using the format's texel size and writes pitch texels minus
+one. Padded array/mip layouts remain refused by name. The runner adds c4-padded
+using the existing pattern/readback and width 32, plus unchanged width 64.
+
+One console run: PPSA99988 PID 196, jobs/r12-pitch/queue.txt, 224 PASS / 0 FAIL.
+Both nearest frames were exact; both bilinear frames met the existing tolerance.
+Known benign VideoOut unregister-busy warning occurred, then title closure.
+The initial prelaunch SELF byte comparison failed because the console converts
+it to ELF; two reads and every local PT_LOAD byte matched, so this was resolved
+before the single launch. Full segment proof and readback records are committed
+with six new goldens at golden/r12-pitch. All four driver streams replay exactly
+using this run's m2-solid register defaults. No old golden changed.
+
+Reproduce with the commands in golden/r12-pitch/README.md. The original parked
+patch remains a historical correction record, labelled superseded. Next: relink
+vkQuake and measure its own first frame. No port presentation claim yet.

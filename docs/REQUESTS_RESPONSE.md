@@ -1096,3 +1096,10 @@ the resulting correction to C1's direct-only surface-refusal assertion.
 | --- | --- | --- |
 | R11, actual vkQuake boot | Negative diagnostic criterion met; positive presentation still open. PID 195 reached 540 successful compiles and a named padded-row refusal, no frame. | Port identity `6b437103…`, `../PS5_vkQuake/evidence/m2-texture-row-pitch/`; runner PID 194 remains the secondary replay proof. |
 | R12, 32-wide sampled image with 256-byte row stride | Unverified candidate parked; no deployment. Initial host PASS used the old archive and was incorrectly described as validating new code; explicit build failed on ALIGN. | Separate correction in M5_PHASE_C.md. `parked/r12-row-pitch/` records exact patch, queue, source witness and resumption plan. Mission stop rule applied. |
+
+
+### 2026-09-22 — R12 resumed response
+
+| Request | Result | Evidence |
+| --- | --- | --- |
+| R12, padded 32-wide sampled image | Driver hardware criterion PASS: both nearest and bilinear frames pass beside the tight 64-wide baseline. Explicit rebuild and all gates pass. Padded mip/array layouts remain guarded. Port acceptance awaits relink/boot. | PPSA99988 PID 196; golden/r12-pitch/README.md; jobs/r12-pitch/queue.txt; archive c37afdec… |

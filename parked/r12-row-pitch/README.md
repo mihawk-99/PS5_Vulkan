@@ -1,4 +1,9 @@
-# R12 padded texture row pitch — unverified, not deployed
+# R12 padded texture row pitch — historical parked candidate
+
+Resumed on 2026-09-22 with explicit user authorization. The active implementation
+uses Mesa `align()`, builds explicitly and passed console PID 196. Current
+evidence: `../../golden/r12-pitch/README.md`. The patch below remains the original
+unverified snapshot for the correction record; do not reapply it to current source.
 
 The port's PID 195 (build 6b437103…) reached a named refusal for a 32-wide
 sampled image with 256-byte stored rows. The candidate follows the local

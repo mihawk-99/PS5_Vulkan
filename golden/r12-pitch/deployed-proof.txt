@@ -1,0 +1,39 @@
+{
+  "two_reads_identical": true,
+  "deployed_bytes": 17732080,
+  "deployed_sha256": "6ad80f7a362c09d15b37c7f9b3ba849ae90641bff0461b0e69dc2ab003191c47",
+  "elf_headers_identical": true,
+  "load_segments_identical": [
+    {
+      "index": 0,
+      "offset": 16384,
+      "bytes": 6298583,
+      "sha256": "befdf981f8ddb1376cd95aa6fcfd11dc8fcf60b56ed0d050cbf95d47d33b7a87"
+    },
+    {
+      "index": 1,
+      "offset": 6324224,
+      "bytes": 10366688,
+      "sha256": "2884b4cdb152f95f7272f5930b60c20c4bdf1a93605fb682fcd89544e97dbae1"
+    },
+    {
+      "index": 2,
+      "offset": 16695296,
+      "bytes": 422272,
+      "sha256": "9a9f09a846ead0f4799894117739e34a2f0631d2337ba131d349424d795195b8"
+    },
+    {
+      "index": 4,
+      "offset": 17416192,
+      "bytes": 11224,
+      "sha256": "abed60834016cb0b283cdda934d6117e81d9dff9340010df5455cc1b5df11462"
+    },
+    {
+      "index": 9,
+      "offset": 17438576,
+      "bytes": 293136,
+      "sha256": "39145beeb0ff57f2c6ac2488205c84f2cd9d021caa7125f7958864652dcec067"
+    }
+  ],
+  "note": "Console transforms SELF; trailing non-load metadata differs. Every PT_LOAD byte equals build/eboot.elf."
+}

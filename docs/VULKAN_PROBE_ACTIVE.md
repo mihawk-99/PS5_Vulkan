@@ -32,13 +32,18 @@ image has 256-byte padded rows. No frame presented; the harness ended with
 count=0. R11 diagnostics work, but its positive presentation criterion is open.
 Port evidence: `../PS5_vkQuake/evidence/m2-texture-row-pitch/`.
 
-**Stopped at the mission's contradiction rule.** The R12 pitch candidate's
-first host check was reported as testing new code but used the old archive.
-The explicit rebuild failed on an undeclared ALIGN macro. The candidate was
-removed from source and parked at `parked/r12-row-pitch/` with the exact patch,
-probe queue and resumption plan. It was never deployed. A separate correction
-is appended to the phase log. The restored archive still hashes to `65550cae…`;
-the R11 driver remains the active implementation. M2–M6 remain unaccepted.
+**R12 resumed and hardware-proven.** Mesa `align()` replaces the unavailable
+macro; sampled single-level, single-layer 2D images encode padded row pitch in
+word 4. Explicit driver build PASS; full 167-arm check PASS; all eleven gates
+PASS. Template five-gate regression PASS. Archive: 14,385,036 bytes, SHA-256
+`c37afdec…`. No new advertised format or mip/array layout claim.
+
+**Console PID 196, PPSA99988:** m2-solid, c4-texture, c4-padded PASS. Both 64-wide
+and 32-wide textures passed nearest and bilinear pixel readback: 224 PASS,
+zero FAIL, one known benign VideoOut-busy close warning. Title closed. Four
+streams replay identically with same-run defaults. `golden/r12-pitch/README.md`
+has commands, deployment segment proof and readback data. The port relink/boot
+is next; no M2–M6 acceptance is inferred from this driver probe.
 
 **Still open from R10:** the subpass read is correct only through x=960 of 3840;
 the row-stored input descriptor needs its own readback fix. `v0-lines` still

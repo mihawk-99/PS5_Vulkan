@@ -217,9 +217,6 @@
  * ps5vk_queue.c has the queue's copy of the same packet). */
 #define PS5VK_COLOUR_BARRIER_EVENT 45
 #define PS5VK_COLOUR_BARRIER_CONTROL 12
-/* The texels one 256-byte row of RGBA8 holds: the M3 canary's texture is 64 of
- * them wide, which is the padded row pitch the untiled descriptor encodes. */
-#define PS5VK_TEXTURE_ROW_TEXELS 64
 /* The most words one draw records: three 5-word register-table loads, both
  * stages' user data at the 16-dword maximum and a 14-word indexed draw (the
  * index size, base, count and DRAW_INDEX_2 packets), which is more than
@@ -1000,6 +997,7 @@ struct ps5vk_sampled_image {
    /* The image's IMG_DATA_FORMAT, which the descriptor's FORMAT field carries
     * (V0-formats: one per format, ps5vk_image.c's table). */
    uint32_t format_word;
+   uint32_t pitch_texels;
    /* The format's DST_SEL channel selectors, which word 3's low twelve bits
     * carry: they are what fills a format's missing channels with zero and one
     * the way Vulkan's fetch rule says, since the hardware aliases them
@@ -1140,16 +1138,19 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
       return false;
    }
    const bool tiled = image->storage == PS5VK_IMAGE_STORAGE_TILES;
-   /* An untiled image's rows pad to 256 bytes (ps5vk_image.c) and the canary's
-    * descriptor leaves word 4 zero, where ps5-opengl puts a row pitch wider
-    * than the width, so only a width that is whole rows has a recorded
-    * descriptor (docs/M5_REFERENCE.md, C4). */
-   if (!tiled && image->vk.extent.width % PS5VK_TEXTURE_ROW_TEXELS != 0) {
+   /* Row storage aligns bytes, not texels. Word 4 can encode a custom
+    * pitch for a single-level 2D image (ps5-opengl ps5_screen.c); arrays
+    * use that field for layers, and mip chains have their own layout. */
+   const uint32_t texel_bytes = vk_format_get_blocksize(image->vk.format);
+   const uint32_t pitch_texels = align(image->vk.extent.width * texel_bytes, 256) / texel_bytes;
+   const bool padded = !tiled && pitch_texels != image->vk.extent.width;
+   if (padded && (view->view_type != VK_IMAGE_VIEW_TYPE_2D || image->vk.array_layers != 1 ||
+                  image->vk.mip_levels != 1 || pitch_texels > 0x4000)) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                              "set %u binding %u samples a %u-texel-wide image whose rows are "
-                              "padded to 256 bytes; the descriptor's row pitch needs a runner "
-                              "probe (docs/M5_REFERENCE.md, C4)",
-                              (unsigned)set, binding, image->vk.extent.width);
+                              "set %u binding %u needs a padded texture pitch of %u texels; "
+                              "only single-level, single-layer 2D images up to 16384 texels "
+                              "have a custom-pitch descriptor probe (C4)",
+                              (unsigned)set, binding, pitch_texels);
       return false;
    }
    /* Sampling a target this command buffer rendered into needs both the
@@ -1180,6 +1181,7 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
    sampled->address = image->address;
    sampled->extent = (VkExtent2D){image->vk.extent.width, image->vk.extent.height};
    sampled->format_word = entry->image_format << 20;
+   sampled->pitch_texels = padded ? pitch_texels : 0;
    sampled->dst_sel = entry->dst_sel;
    /* Only a combined image sampler carries a sampler's words; a storage image's
     * 32 bytes leave them out (ps5vk_write_image_descriptor). */
@@ -1279,7 +1281,7 @@ ps5vk_input_attachment_descriptor(struct ps5vk_cmd_buffer *cmd_buffer,
 }
 
 /* The 48 bytes of a combined image sampler, as write_image_descriptor writes
- * them (src/diagnostics.cpp): words 4, 6, 7 and 11 stay zero. */
+ * them (src/diagnostics.cpp), with word 4 also carrying a custom row pitch. */
 static void
 ps5vk_write_image_descriptor(uint32_t *descriptor, const struct ps5vk_sampled_image *sampled)
 {
@@ -1314,6 +1316,10 @@ ps5vk_write_image_descriptor(uint32_t *descriptor, const struct ps5vk_sampled_im
     * is every descriptor before this step. */
    descriptor[4] = (sampled->layer_count > 0 ? (sampled->layer_count - 1u) & 0x1fffu : 0u) |
                    ((sampled->base_layer & 0x1fffu) << 16);
+   /* GFX10.3 custom linear pitch: DEPTH and PITCH_MSB form bits 0-13.
+    * Only the guarded non-array 2D case uses this instead of layer fields. */
+   if (sampled->pitch_texels != 0)
+      descriptor[4] = sampled->pitch_texels - 1;
    descriptor[5] = PS5VK_TEXTURE_SINGLE_LEVEL | (sampled->image_last_mip_level << 4);
    descriptor[8] = sampled->address_word;
    descriptor[9] = sampled->image_last_mip_level == 0 ? PS5VK_TEXTURE_LOD_RANGE : sampled->lod_word;

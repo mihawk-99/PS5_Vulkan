@@ -3001,3 +3001,14 @@ single-storage-buffer shader under both direct and indirect dispatch.
 This proves the two-set sampled/storage-image compute path for this linear
 RGBA8 allocation. It does not establish additional formats, descriptor arrays,
 or the vkQuake lightmap pass. Goldens: `golden/d2-compute-images/`.
+
+
+## 2026-09-22: single-level padded texture pitch (R12)
+
+PPSA99988 PID 196: a 32x36 RGBA8 sampled image has 128-byte source rows and
+256-byte stored rows. Setting the non-array, single-level 2D descriptor's word 4
+to 63 (64 texels of pitch minus one) reproduced the texture exactly with nearest
+sampling and within the established bilinear tolerance. The 64x36 baseline
+passed in the same run. Evidence: golden/r12-pitch, jobs/r12-pitch/queue.txt.
+This proves the narrow padded 2D case; it does not prove padded array or mip-chain
+placement, which remains guarded. Four submissions replay identically on host.

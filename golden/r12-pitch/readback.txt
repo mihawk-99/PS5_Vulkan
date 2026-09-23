@@ -1,0 +1,922 @@
+{
+  "pid": 196,
+  "statuses": {
+    "PASS": 224,
+    "INFO": 49,
+    "NOT_REQUIRED": 12,
+    "ARMED": 1,
+    "WARN": 1
+  },
+  "records": [
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_live_video_unregister",
+      "status": "WARN",
+      "result": -2144796663,
+      "detail": "VideoOut busy 0x80290009 (known benign); close follows"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "m2-solid"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_c4_texture",
+      "field": "texture_width",
+      "value": 64
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "frame",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "nearest"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "red_shift",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "rows_bottom_up",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=960 y=540 word=0xffe0f500 expected=0xffe0f500"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=989 y=569 word=0xffe0f500 expected=0xffe0f500"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=990 y=570 word=0xffe0ee04 expected=0xffe0ee04"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=2879 y=1619 word=0xffe000fc expected=0xffe000fc"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=1920 y=1080 word=0xffe07780 expected=0xffe07780"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "raw_nonzero_words",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "inside_drawn",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "outside_drawn",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "matching_pixels",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_0",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_1",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_2",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_3_or_more",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "max_error",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_undrawn_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_undrawn_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_stray_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_stray_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_expected",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "undrawn per 128-row band: 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "undrawn per 128-column band: 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the textured square"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "frame",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "bilinear"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "red_shift",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "rows_bottom_up",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=960 y=540 word=0xffe0f500 expected=0xffe0f500"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=989 y=569 word=0xff80f202 expected=0xff80f202"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=990 y=570 word=0xff80f102 expected=0xff80f102"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=2879 y=1619 word=0xffe000fc expected=0xffe000fc"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=1920 y=1080 word=0xff807a7e expected=0xff807a7e"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "raw_nonzero_words",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "inside_drawn",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "outside_drawn",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "matching_pixels",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_0",
+      "value": 1864860
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_1",
+      "value": 208740
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_2",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_3_or_more",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "max_error",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_undrawn_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_undrawn_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_stray_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_stray_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_expected",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "undrawn per 128-row band: 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "undrawn per 128-column band: 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the textured square"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_c4_texture",
+      "status": "PASS",
+      "result": 0,
+      "detail": "2 of 2 filtered frames read back their texels"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "c4-texture"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_c4_texture",
+      "field": "texture_width",
+      "value": 32
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "frame",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "nearest"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "red_shift",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "rows_bottom_up",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=960 y=540 word=0xffe0f500 expected=0xffe0f500"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=989 y=569 word=0xffe0f500 expected=0xffe0f500"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=990 y=570 word=0xff20ee00 expected=0xff20ee00"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=2879 y=1619 word=0xffe0007c expected=0xffe0007c"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=1920 y=1080 word=0xffe07740 expected=0xffe07740"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "raw_nonzero_words",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "inside_drawn",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "outside_drawn",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "matching_pixels",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_0",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_1",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_2",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_3_or_more",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "max_error",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_undrawn_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_undrawn_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_stray_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_stray_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_expected",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "undrawn per 128-row band: 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "undrawn per 128-column band: 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the textured square"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "frame",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "bilinear"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "red_shift",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "rows_bottom_up",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=960 y=540 word=0xffe0f500 expected=0xffe0f500"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=989 y=569 word=0xff83f200 expected=0xff83f200"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=990 y=570 word=0xff7df100 expected=0xff7df100"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=2879 y=1619 word=0xffe0007c expected=0xffe0007c"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_sample",
+      "status": "INFO",
+      "result": 0,
+      "detail": "x=1920 y=1080 word=0xff807a3e expected=0xff807a3e"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "raw_nonzero_words",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "inside_drawn",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "outside_drawn",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "matching_pixels",
+      "value": 2073600
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_0",
+      "value": 1753975
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_1",
+      "value": 319625
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_2",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "error_3_or_more",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "max_error",
+      "value": 1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_undrawn_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_undrawn_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_stray_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_stray_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_x",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_y",
+      "value": -1
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_word",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "hex",
+      "probe": "agc_texture_readback",
+      "field": "first_mismatch_expected",
+      "value": "0x0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "undrawn per 128-row band: 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "INFO",
+      "result": 0,
+      "detail": "undrawn per 128-column band: 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_texture_readback",
+      "status": "PASS",
+      "result": 0,
+      "detail": "CPU readback of the textured square"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "agc_c4_texture",
+      "status": "PASS",
+      "result": 0,
+      "detail": "2 of 2 filtered frames read back their texels"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "c4-padded"
+    }
+  ]
+}

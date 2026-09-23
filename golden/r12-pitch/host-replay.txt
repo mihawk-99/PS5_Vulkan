@@ -1,0 +1,6 @@
+golden/r12-pitch/run-1.json: register defaults from m2-solid-1.json, the same run
+c4-texture.dump c4-texture draw 1: identical to c4-texture-1.json: 11 packets, 3 register tables
+c4-texture.dump c4-texture draw 2: identical to c4-texture-2.json: 10 packets, 3 register tables
+golden/r12-pitch/run-1.json: register defaults from m2-solid-1.json, the same run
+c4-padded.dump c4-padded draw 1: identical to c4-padded-1.json: 11 packets, 3 register tables
+c4-padded.dump c4-padded draw 2: identical to c4-padded-2.json: 10 packets, 3 register tables

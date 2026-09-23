@@ -4260,18 +4260,19 @@ std::uint32_t bilinear_level(std::uint32_t top_left, std::uint32_t top_right,
 // that target row y holds is flipped where the target turned the geometry over,
 // so the texture's rows land the other way up.
 std::uint32_t expected_texture_word(std::uint32_t x, std::uint32_t y, TargetPacking packing,
-                                    bool bilinear) noexcept
+                                    bool bilinear,
+                                    std::uint32_t texture_width = kTextureWidth) noexcept
 {
     const std::uint32_t width = kSquareRight - kSquareLeft;
     const std::uint32_t height = kSquareBottom - kSquareTop;
     const std::uint32_t row = packing.rows_bottom_up ? height - 1u - y : y;
     Texel texel{};
     if (!bilinear)
-        texel = texel_at((2u * x + 1u) * kTextureWidth / (2u * width),
+        texel = texel_at((2u * x + 1u) * texture_width / (2u * width),
                          (2u * row + 1u) * kTextureHeight / (2u * height));
     else
     {
-        const AxisSample u = axis_sample(x, width, kTextureWidth);
+        const AxisSample u = axis_sample(x, width, texture_width);
         const AxisSample v = axis_sample(row, height, kTextureHeight);
         const Texel a = texel_at(u.first, v.first);
         const Texel b = texel_at(u.second, v.first);
@@ -4373,7 +4374,7 @@ std::uint32_t colour_error(std::uint32_t actual, std::uint32_t expected) noexcep
 // match the clamp-to-edge float blend within kBilinearTolerance per channel,
 // with the error distribution logged.
 bool check_texture_frame(void *framebuffer, TargetPacking packing, bool bilinear, unsigned frame,
-                         JsonLog &log) noexcept
+                         JsonLog &log, std::uint32_t texture_width = kTextureWidth) noexcept
 {
     flush_gpu_data(framebuffer, kFramebufferBytes);
     const auto *const words = static_cast<const std::uint32_t *>(framebuffer);
@@ -4446,8 +4447,8 @@ bool check_texture_frame(void *framebuffer, TargetPacking packing, bool bilinear
                 continue;
             }
             ++inside_drawn;
-            const std::uint32_t expected =
-                expected_texture_word(x - kSquareLeft, y - kSquareTop, packing, bilinear);
+            const std::uint32_t expected = expected_texture_word(x - kSquareLeft, y - kSquareTop,
+                                                                 packing, bilinear, texture_width);
             const std::uint32_t error = colour_error(pixel, expected);
             ++error_histogram[error < 3 ? error : 3];
             max_error = error > max_error ? error : max_error;
@@ -4476,7 +4477,7 @@ bool check_texture_frame(void *framebuffer, TargetPacking packing, bool bilinear
         std::snprintf(detail, sizeof(detail), "x=%u y=%u word=0x%08x expected=0x%08x", sample[0],
                       sample[1], view.word(sample[0], sample[1]),
                       expected_texture_word(sample[0] - kSquareLeft, sample[1] - kSquareTop,
-                                            packing, bilinear));
+                                            packing, bilinear, texture_width));
         log.event("agc_texture_sample", "INFO", 0, detail);
     }
 
@@ -19231,14 +19232,23 @@ void run_vulkan_fragmentless_frames(const TestContext &test, TestOutcome &outcom
                     "state predict");
 }
 
-void run_vulkan_texture_frames(const TestContext &test, TestOutcome &outcome) noexcept
+void run_vulkan_texture_width(const TestContext &test, TestOutcome &outcome,
+                              std::uint32_t texture_width) noexcept
 {
     JsonLog &log = test.log;
     const ps5vk_triangle_report report{&log, log_vulkan_step};
     // The canary's texels: red encodes the column, green the row and blue a
     // two-level checker, uploaded as R,G,B,A bytes row by row.
     std::array<std::uint8_t, kTextureWidth * kTextureHeight * 4> texels{};
-    upload_texture(texels.data());
+    for (std::uint32_t row = 0; row < kTextureHeight; ++row)
+        for (std::uint32_t column = 0; column < texture_width; ++column)
+        {
+            const Texel texel = texel_at(column, row);
+            const std::uint32_t word =
+                0xff000000u | (texel.blue << 16) | (texel.green << 8) | texel.red;
+            std::memcpy(texels.data() + (row * texture_width + column) * 4, &word, 4);
+        }
+    log.number("agc_c4_texture", "texture_width", texture_width);
     // The m3-texture vertex shader's layout: location 0 R32G32_SFLOAT position
     // at offset 0 and location 1 R32G32_SFLOAT texture coordinate at offset 8,
     // stride 16 (probes/m3-texture/compile.txt, bindings.txt).
@@ -19264,7 +19274,7 @@ void run_vulkan_texture_frames(const TestContext &test, TestOutcome &outcome) no
                                0,
                                0,
                                texels.data(),
-                               kTextureWidth,
+                               texture_width,
                                kTextureHeight,
                                false};
     if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
@@ -19292,7 +19302,7 @@ void run_vulkan_texture_frames(const TestContext &test, TestOutcome &outcome) no
             log_driver_submission(triangle.device, bilinear ? "draw 2" : "draw 1", log);
         if (triangle.target_bytes >= kFramebufferBytes &&
             check_texture_frame(const_cast<void *>(triangle.target), kRgba8ImagePacking, bilinear,
-                                frame, log))
+                                frame, log, texture_width))
             frames++;
     }
     outcome.command_built = status != PS5VK_TRIANGLE_FAILED;
@@ -19311,6 +19321,18 @@ void run_vulkan_texture_frames(const TestContext &test, TestOutcome &outcome) no
     std::snprintf(detail, sizeof(detail), "%u of %u filtered frames read back their texels", frames,
                   kTextureFrameCount);
     log.event("agc_c4_texture", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1, detail);
+}
+
+void run_vulkan_texture_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_vulkan_texture_width(test, outcome, kTextureWidth);
+}
+
+// R12: 32 RGBA8 texels occupy 128 bytes; each stored row occupies 256.
+// Every sampled pixel must still agree with the tight source pattern.
+void run_vulkan_texture_padded(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_vulkan_texture_width(test, outcome, 32);
 }
 
 // Phase C4's render-to-texture case, the last item of its console criterion:
@@ -24116,6 +24138,7 @@ constexpr RunnerTest kRunnerTests[] = {
     // buffer with vkCmdCopyBufferToImage, sampled through a combined image
     // sampler and read back, nearest exactly and bilinear within tolerance.
     {"c4-texture", "m3-texture", run_vulkan_texture_frames},
+    {"c4-padded", "m3-texture", run_vulkan_texture_padded},
     // Phase C4's render-to-texture case: the same canary frame, with the image
     // its pixel shader samples rendered by the frame itself in the same command
     // buffer, which is the draw the driver's colour barrier is written for.
