@@ -941,6 +941,21 @@ int sceVideoOutIsFlipPending(std::int32_t)
     return 0;
 }
 
+// The output-mode selector. There is no panel behind the PC host, so the
+// truthful answers are that no such mode is offered and that configuring one is
+// refused; the R31 probe then reports that and measures nothing, which is what
+// it should do here. The console's own answers are what the console run records.
+int sceVideoOutIsOutputSupported(std::int32_t, std::uint32_t, const void *, const void *,
+                                 const void *)
+{
+    return 0;
+}
+
+int sceVideoOutConfigureOutput(std::int32_t, std::uint32_t, const void *, const void *, const void *)
+{
+    return -1;
+}
+
 int sceSystemServiceHideSplashScreen(void)
 {
     return 0;

@@ -231,8 +231,10 @@ struct ps5vk_queue_profile {
    uint64_t submit_call_ns; /* SubmitDcb + SuspendPoint, with no polling */
    uint64_t poll_ns, polls, poll_first_hits, submit_calls;
    /* The application's own time, attributed by which instrumented entry point
-    * last handed control back (PS5VK_PROFILE_SLOTS). */
+    * last handed control back (PS5VK_PROFILE_SLOTS), and how long those calls
+    * themselves took. */
    uint64_t gap_ns[PS5VK_PROFILE_SLOTS], gap_count[PS5VK_PROFILE_SLOTS];
+   uint64_t call_ns[PS5VK_PROFILE_SLOTS];
    uint64_t gap_from_ns, interval_from_ns;
    unsigned gap_slot;
    uint64_t flip_status_calls, flip_status_ns, flip_vblank_waits, flip_vblank_ns;
@@ -1585,6 +1587,17 @@ sceVideoOutWaitVblank(int32_t handle);
 
 int
 sceVideoOutIsFlipPending(int32_t handle);
+
+/* The output-mode selector, declared here rather than taken from a header, as
+ * the rest of this block is. Only the R31 probe calls them, and what they are
+ * asked for is never reported as a capability: the measured refresh period is. */
+int
+sceVideoOutIsOutputSupported(int32_t handle, uint32_t mode, const void *a, const void *b,
+                             const void *c);
+
+int
+sceVideoOutConfigureOutput(int32_t handle, uint32_t mode, const void *a, const void *b,
+                           const void *c);
 
 int
 sceKernelUsleep(uint32_t microseconds);

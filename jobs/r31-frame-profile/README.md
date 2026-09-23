@@ -248,3 +248,47 @@ was left on the console is this one.
   agreement, which is what a change to a CPU address helper should look like.
 - Everything from section 12 of the assignment -- movement, firing, save/load,
   all eight shareware maps, a long soak -- is still not done.
+
+## The display is 60 Hz, and the high-frame-rate mode is refused
+
+The console was moved to the owner's 4K120 Hz TV, so the display path was
+measured rather than assumed. Two short runs, no fixture and no driver
+profiling, with only the probe flags staged.
+
+**Measured refresh: 16.6831 ms, 59.941 Hz**, spread 0.049 ms over 60 intervals.
+The console negotiates 4K60 with a 120 Hz panel. Nothing about the TV's
+capability reaches VideoOut on its own.
+
+`sceVideoOutIsOutputSupported(handle, 15, NULL, NULL, NULL)` returns **1**, so
+the console says the mode is available. `sceVideoOutConfigureOutput(handle, 15,
+NULL, NULL, NULL)` is **refused with 0x80290016**, and refused identically
+before the framebuffers are registered and after them, so the point in the
+port's life is not what decides it. What 0x80290016 means is not known and is
+not guessed here; what is known is that the mode did not take effect, and the
+probe measures the period after configuring precisely so that a return code
+cannot be mistaken for a mode change.
+
+The value 15 is a hypothesis taken from the publicly released ps5-opengl runtime
+this project already vendors, not a documented constant of this driver, and the
+probe records it as asked-for rather than as understood. The mode is restored in
+the same call because that runtime records that a high-frame-rate port outlives
+the process that opened it; a probe that could leave a panel in a mode it never
+restored would be a worse instrument than no probe.
+
+The driver reports 60000 millihertz and does not change it. A 120 Hz claim needs
+the measured period to halve, and it did not.
+
+Next for this thread, in order: read what the console offers, by asking
+`IsOutputSupported` over a bounded range of modes and configuring only those it
+reports -- reported support is the console's own gate, so that stays inside
+supported interfaces; and settle the console-side setting, because a title
+cannot select a mode the system has not enabled and that is not readable from
+inside the title.
+
+`call_begin_ms` is 2.4 ms per frame. The first version of the call timing put
+the stretch chain in thread-local storage, which is wrong: the engine records on
+one thread and presents on another, so two per-thread chains measure overlapping
+wall-clock and their sum exceeded the frame it was meant to partition (929 ms of
+"named" time in a 50 ms frame). The chain is shared again; only the enter/leave
+pairing of a single call is per thread, which is what makes the call durations
+valid.

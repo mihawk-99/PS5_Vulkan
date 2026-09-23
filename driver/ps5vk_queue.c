@@ -73,13 +73,25 @@
 #define PS5VK_MARKER_POLLS 2000
 #define PS5VK_MARKER_POLL_MICROSECONDS 1000
 
-/* R31's attribution of the application's own time. Three entry points are
- * enough to say which part of a frame the application spends its CPU on: the
- * acquire starts a frame, the submit ends its recording, the present ends the
- * frame. The gap closed here is the time between the previous one of these
- * returning and this one being entered, so the three add up to the application
- * time the queue and flip intervals do not cover. Nothing is reported by the
- * application and nothing is measured unless profiling is opted into. */
+/* R31's attribution of the application's own time. Each instrumented entry
+ * point closes the stretch since the previous one returned and opens its own, so
+ * the stretches partition the wall clock that the queue and flip intervals do
+ * not cover.
+ *
+ * The stretch chain is deliberately NOT per thread. The engine records a frame
+ * on one thread and presents it on another (r_tasks 1), and a per-thread chain
+ * then measures two overlapping wall-clock stretches, so their sum exceeds the
+ * frame it is meant to partition -- measured at 929 ms of "named" time in a
+ * 50 ms frame when this was tried. One shared chain keeps the partition exact
+ * at the cost of attributing a stretch to whichever thread called next; the
+ * totals are what to read, not the labels.
+ *
+ * The *call* pairing can be per thread, because an enter and its leave are the
+ * same call on the same thread. That is what separates the driver's own time
+ * from the application's: without it, a stretch that is long because a call is
+ * long reads as application work. */
+static _Thread_local uint64_t ps5vk_profile_call_from;
+
 void
 ps5vk_profile_enter(struct ps5vk_queue *queue, unsigned slot)
 {
@@ -87,12 +99,15 @@ ps5vk_profile_enter(struct ps5vk_queue *queue, unsigned slot)
    if (!p->enabled)
       return;
    const uint64_t now = os_time_get_nano();
-   if (p->gap_from_ns != 0 && slot < PS5VK_PROFILE_SLOTS) {
+   if (slot >= PS5VK_PROFILE_SLOTS)
+      slot = PS5VK_PROFILE_AFTER_PRESENT;
+   if (p->gap_from_ns != 0 && now > p->gap_from_ns) {
       p->gap_ns[p->gap_slot] += now - p->gap_from_ns;
       p->gap_count[p->gap_slot]++;
    }
    p->gap_from_ns = 0;
-   p->gap_slot = slot < PS5VK_PROFILE_SLOTS ? slot : 0;
+   p->gap_slot = slot;
+   ps5vk_profile_call_from = now;
 }
 
 void
@@ -101,7 +116,11 @@ ps5vk_profile_leave(struct ps5vk_queue *queue, unsigned slot)
    struct ps5vk_queue_profile *const p = &queue->profile;
    if (!p->enabled || slot >= PS5VK_PROFILE_SLOTS)
       return;
-   p->gap_from_ns = os_time_get_nano();
+   const uint64_t now = os_time_get_nano();
+   if (ps5vk_profile_call_from != 0 && now > ps5vk_profile_call_from)
+      p->call_ns[slot] += now - ps5vk_profile_call_from;
+   ps5vk_profile_call_from = 0;
+   p->gap_from_ns = now;
    p->gap_slot = slot;
 }
 
@@ -1164,6 +1183,15 @@ ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now, char *l
    const double summed_ms = (double)(p->app_pre_submit_ns + p->queue_ns + p->app_pre_present_ns +
                                      p->flip_ns) *
                             per_present;
+   /* Everything the chain accounted for, against the application time the
+    * present boundaries measured: named_ms that differs from
+    * app_pre + app_post means a stretch is missing from the chain. */
+   uint64_t named_ns = 0;
+   for (unsigned slot = 0; slot < PS5VK_PROFILE_SLOTS; slot++)
+      named_ns += p->gap_ns[slot] + p->call_ns[slot];
+   const double named_ms = (double)named_ns * per_present;
+   const double unnamed_ms =
+      (p->app_pre_submit_ns + p->app_pre_present_ns) * per_present - named_ms;
    char periods[256];
    size_t at = 0;
    for (unsigned bucket = 0; bucket < PS5VK_PERIOD_BUCKETS; bucket++) {
@@ -1184,7 +1212,9 @@ ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now, char *l
             "submit_calls/frame=%.2f poll_ms=%.3f polls/step=%.2f poll_first=%.0f%% "
             "flip_status/present=%.2f flip_status_ms=%.3f vblank/present=%.2f "
             "vblank_ms=%.3f vblank_first=%.0f%% frame_ms=%.3f frame_min_ms=%.3f "
-            "frame_max_ms=%.3f residual_ms=%.3f presents=%" PRIu64 "/%" PRIu64
+            "frame_max_ms=%.3f residual_ms=%.3f call_acquire_ms=%.3f call_query_ms=%.3f "
+            "call_begin_ms=%.3f call_end_ms=%.3f named_ms=%.3f unnamed_ms=%.3f "
+            "presents=%" PRIu64 "/%" PRIu64
             " periods=%s elapsed_ms=%.0f\n",
             p->app_pre_submit_ns * per_present, p->app_pre_present_ns * per_present,
             p->gap_ns[PS5VK_PROFILE_AFTER_PRESENT] * per_present,
@@ -1203,6 +1233,10 @@ ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now, char *l
             p->frames != 0 ? 100.0 * (double)p->flip_first_hits / (double)p->frames : 0.0,
             frame_ms, (double)p->present_gap_min_ns / 1000000.0,
             (double)p->present_gap_max_ns / 1000000.0, summed_ms - frame_ms,
+            p->call_ns[PS5VK_PROFILE_AFTER_ACQUIRE] * per_present,
+            p->call_ns[PS5VK_PROFILE_AFTER_QUERY] * per_present,
+            p->call_ns[PS5VK_PROFILE_AFTER_BEGIN] * per_present,
+            p->call_ns[PS5VK_PROFILE_AFTER_END] * per_present, named_ms, unnamed_ms,
             p->present_index[0], p->present_index[1], periods,
             (double)(now - p->since) / 1000000.0);
    fputs(line, stderr);

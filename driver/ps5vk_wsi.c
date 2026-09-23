@@ -324,20 +324,21 @@ struct ps5vk_video_out_buffer {
  * call returns at the next vblank whatever the phase, so its interval is
  * discarded. Opt-in through a file the fixture stages or an environment
  * variable, and off by default: it delays startup by the refresh times the
- * count below and measures nothing the rest of the driver uses. */
+ * count below and measures nothing the rest of the driver uses.
+ *
+ * One line per stage, one write each: this driver's consumer reopens stderr
+ * unbuffered onto a file in the title's folder, so a message written as one
+ * call per field costs the frame budget it is measuring (ps5vk_queue.c). */
 #define PS5VK_VBLANK_PROBE_INTERVALS 60
 
+/* A stage's measured refresh period, one line. */
 static void
-ps5vk_video_out_probe_vblank(int handle)
+ps5vk_video_out_report_cadence(int handle, const char *stage)
 {
-   FILE *flag = fopen("/app0/ps5vk-vblank-probe.txt", "rb");
-   const bool enabled = flag != NULL || getenv("PS5VK_VBLANK_PROBE") != NULL;
-   if (flag)
-      fclose(flag);
-   if (!enabled)
+   if (sceVideoOutWaitVblank(handle) != 0) {
+      fputs("[ps5vk] vblank probe: the first wait failed\n", stderr);
       return;
-   if (sceVideoOutWaitVblank(handle) != 0)
-      return;
+   }
    uint64_t previous = os_time_get_nano();
    uint64_t sum = 0, low = UINT64_MAX, high = 0;
    unsigned counted = 0;
@@ -353,14 +354,82 @@ ps5vk_video_out_probe_vblank(int handle)
       counted++;
    }
    if (counted == 0) {
-      fprintf(stderr, "[ps5vk] vblank probe: no interval measured\n");
+      fprintf(stderr, "[ps5vk] vblank probe stage=%s: no interval measured\n", stage);
       return;
    }
    const double mean = (double)sum / (double)counted;
-   fprintf(stderr, "[ps5vk] vblank probe intervals=%u mean_ms=%.4f min_ms=%.4f max_ms=%.4f "
-                   "spread_ms=%.4f equivalent_hz=%.3f\n",
-           counted, mean / 1000000.0, (double)low / 1000000.0, (double)high / 1000000.0,
-           (double)(high - low) / 1000000.0, mean > 0.0 ? 1e9 / mean : 0.0);
+   char line[256];
+   snprintf(line, sizeof(line),
+            "[ps5vk] vblank probe stage=%s intervals=%u mean_ms=%.4f min_ms=%.4f max_ms=%.4f "
+            "spread_ms=%.4f equivalent_hz=%.3f\n",
+            stage, counted, mean / 1000000.0, (double)low / 1000000.0, (double)high / 1000000.0,
+            (double)(high - low) / 1000000.0, mean > 0.0 ? 1e9 / mean : 0.0);
+   fputs(line, stderr);
+}
+
+/* Whether VideoOut is driving the panel faster than the 60000 millihertz this
+ * driver reports, and whether it can be asked to.
+ *
+ * What is being asked and what is being claimed are kept apart. The value 15 is
+ * a hypothesis about this console's output-mode selector, taken from the
+ * publicly released ps5-opengl runtime that this project already vendors, and it
+ * is not reported as anything until the refresh period it produces has been
+ * measured. If the period halves, the mode is real and the measurement is the
+ * proof; if it does not change, the mode does nothing here whatever the support
+ * call says and that is what gets written down. The mode is restored in the same
+ * call, because the vendored runtime records that a high-frame-rate port
+ * survives the process that opened it.
+ *
+ * Two calls carry it: whether the console offers the mode at all, and whether
+ * configuring it changes the measured period. Neither is a claimed capability
+ * on its own. */
+#define PS5VK_VIDEO_OUT_MODE_HIGH_FRAME_RATE 15
+#define PS5VK_VIDEO_OUT_MODE_RESTORE 1
+
+/* Tried at two points, because the point in the port's life is itself a
+ * variable: the console may accept the mode only before framebuffers are
+ * registered, and a refusal after registration would say nothing about a
+ * refusal before it. The vendored runtime configures before it sets its surface
+ * up, which is where the hypothesis comes from; only the measurement decides. */
+static void
+ps5vk_video_out_probe_output_mode(int handle, const char *stage)
+{
+   FILE *flag = fopen("/app0/ps5vk-hfr-probe.txt", "rb");
+   const bool enabled = flag != NULL || getenv("PS5VK_HFR_PROBE") != NULL;
+   if (flag)
+      fclose(flag);
+   if (!enabled)
+      return;
+   const int support = sceVideoOutIsOutputSupported(handle, PS5VK_VIDEO_OUT_MODE_HIGH_FRAME_RATE, NULL,
+                                                    NULL, NULL);
+   const int configured =
+      support > 0
+         ? sceVideoOutConfigureOutput(handle, PS5VK_VIDEO_OUT_MODE_HIGH_FRAME_RATE, NULL, NULL, NULL)
+         : 0;
+   char line[256];
+   snprintf(line, sizeof(line),
+            "[ps5vk] hfr probe stage=%s support=0x%08x configure=0x%08x (asked for mode %d)\n",
+            stage, (unsigned)support, (unsigned)configured, PS5VK_VIDEO_OUT_MODE_HIGH_FRAME_RATE);
+   fputs(line, stderr);
+   if (configured != 0)
+      return;
+   ps5vk_video_out_report_cadence(handle, "hfr");
+   const int restored = sceVideoOutConfigureOutput(handle, PS5VK_VIDEO_OUT_MODE_RESTORE, NULL, NULL, NULL);
+   snprintf(line, sizeof(line), "[ps5vk] hfr probe stage=%s restore=0x%08x\n", stage,
+            (unsigned)restored);
+   fputs(line, stderr);
+   ps5vk_video_out_report_cadence(handle, "restored");
+}
+
+static void
+ps5vk_video_out_probe_vblank(int handle)
+{
+   FILE *flag = fopen("/app0/ps5vk-vblank-probe.txt", "rb");
+   const bool enabled = flag != NULL || getenv("PS5VK_VBLANK_PROBE") != NULL;
+   if (flag)
+      fclose(flag);
+   if (enabled)
+      ps5vk_video_out_report_cadence(handle, "as-opened");
 }
 
 static void
@@ -402,6 +471,7 @@ ps5vk_video_out_open(struct ps5vk_device *device, struct ps5vk_video_out *video)
       return vk_errorf(device, VK_ERROR_INITIALIZATION_FAILED,
                        "sceVideoOutSetFlipRate failed: 0x%08x", (unsigned)result);
    }
+   ps5vk_video_out_probe_output_mode(video->handle, "before-register");
    const size_t bytes = (size_t)(PS5VK_SWAPCHAIN_IMAGES * PS5VK_SWAPCHAIN_IMAGE_BYTES);
    result = ps5vk_direct_mapping_create(&video->buffers, bytes, PS5VK_SWAPCHAIN_ALIGNMENT);
    if (result != 0) {
@@ -430,6 +500,7 @@ ps5vk_video_out_open(struct ps5vk_device *device, struct ps5vk_video_out *video)
    }
    video->registered = true;
    ps5vk_video_out_probe_vblank(video->handle);
+   ps5vk_video_out_probe_output_mode(video->handle, "after-register");
    return VK_SUCCESS;
 }
 
