@@ -240,6 +240,13 @@ struct ps5vk_queue_profile {
     * themselves took. */
    uint64_t gap_ns[PS5VK_PROFILE_SLOTS], gap_count[PS5VK_PROFILE_SLOTS];
    uint64_t call_ns[PS5VK_PROFILE_SLOTS];
+   /* What a vkBeginCommandBuffer spends its time on. Only a secondary keeps a
+    * Mesa command queue (its commands are encoded when a primary executes it),
+    * and resetting that queue frees and recreates a linear allocator, so the
+    * begins are split by level, and a begin's reset into Mesa's common part and
+    * this driver's own state. */
+   uint64_t begin_secondary_calls, begin_secondary_ns;
+   uint64_t resets, reset_common_ns, reset_driver_ns;
    uint64_t gap_from_ns, interval_from_ns;
    unsigned gap_slot;
    uint64_t flip_status_calls, flip_status_ns, flip_vblank_waits, flip_vblank_ns;

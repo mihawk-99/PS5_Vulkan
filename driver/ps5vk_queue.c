@@ -1215,6 +1215,8 @@ ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now, char *l
             "frame_max_ms=%.3f residual_ms=%.3f call_acquire_ms=%.3f call_query_ms=%.3f "
             "call_begin_ms=%.3f call_end_ms=%.3f named_ms=%.3f unnamed_ms=%.3f "
             "draws/frame=%.1f begins/frame=%.1f call_draw_ms=%.3f between_draws_ms=%.3f "
+            "secondary_begins/frame=%.1f call_begin_secondary_ms=%.3f resets/frame=%.1f "
+            "reset_common_ms=%.3f reset_driver_ms=%.3f "
             "presents=%" PRIu64 "/%" PRIu64
             " periods=%s elapsed_ms=%.0f\n",
             p->app_pre_submit_ns * per_present, p->app_pre_present_ns * per_present,
@@ -1242,6 +1244,10 @@ ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now, char *l
             p->frames != 0 ? (double)p->gap_count[PS5VK_PROFILE_AFTER_BEGIN] / (double)p->frames : 0.0,
             p->call_ns[PS5VK_PROFILE_AFTER_DRAW] * per_present,
             p->gap_ns[PS5VK_PROFILE_AFTER_DRAW] * per_present,
+            p->frames != 0 ? (double)p->begin_secondary_calls / (double)p->frames : 0.0,
+            p->begin_secondary_ns * per_present,
+            p->frames != 0 ? (double)p->resets / (double)p->frames : 0.0,
+            p->reset_common_ns * per_present, p->reset_driver_ns * per_present,
             p->present_index[0], p->present_index[1], periods,
             (double)(now - p->since) / 1000000.0);
    fputs(line, stderr);
@@ -1337,7 +1343,7 @@ ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, in
                   const double ms = 1.0 / ((double)p->frames * 1000000.0);
                   /* Both summary lines go out as one write: see the note on
                    * ps5vk_queue_profile_report2 for what a second one costs. */
-                  char line[1024];
+                  char line[2048];
                   snprintf(line, sizeof(line),
                           "[ps5vk] profile frames=%" PRIu64 " steps/frame=%.2f "
                           "queue_ms=%.3f flush_ms=%.3f gpu_ms=%.3f flip_ms=%.3f "
