@@ -9038,3 +9038,23 @@ Production source was restored to c3e51f6, then explicitly rebuilt. The PS5
 archive matches the console-tested R29 archive byte for byte. The complete
 candidate and remaining console acceptance are in parked/nir-shader-cache.
 Finish the prepared R29 game measurement before applying that patch.
+
+## 2026-09-23 — vkQuake owner confirmation and README refresh
+
+The owner confirms the deployed R29 game works and estimates 15–30 FPS. This
+adds human gameplay confirmation, not a controlled R29 benchmark or full release
+acceptance. Manual testing remains active; no hardware action was taken.
+
+Update README.md to describe the working game, persistent shader cache, R20's
+corrected subpass readback and R25–R29 pixel proofs. Remove stale transfer and
+application blockers and distinguish audit coverage from conformance. Add the
+missing explicit Vulkan-runtime build step. Explain R28's CPU-copy/cache costs,
+timing overlap, the current 4K60 FIFO display limit and the driver-first path to
+better performance with engine profiling and eventual 120 Hz validation.
+The internal NIR-cache candidate remains parked, outside production R29.
+
+Verification: python3 tools/command_audit.py --check, format_audit.py --check
+and limits_audit.py --check each exit 0. README local links checked against the
+checkout; git diff --check passes. Port format/evidence checks pass with 48
+capture replays. Documentation-only change; no rebuild or new hardware/FPS
+claim. The user's README request takes priority over deferred console fixtures.

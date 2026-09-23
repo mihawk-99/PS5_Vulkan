@@ -8,10 +8,11 @@ _Updated: 2026-09-23_
 
 ## Now
 **vkQuake stability and performance are the priority; no CTS work.**
-The user has returned and requested the latest build for manual testing.
+The user confirms the deployed R29 game works, estimates 15–30 FPS and requests
+README updates plus performance advice. Detailed acceptance remains pending.
 Heartbeat PAUSED; do not launch automated tests or close their game. Services
 returned; R29 game e3525e30… is deployed with two matching ELF reads/all five
-segments. Manual launch is left to the user; port evidence/manual-r29-deployment.
+segments. The user has now launched it; port evidence/manual-r29-deployment proves deployment.
 
 Persistent SPIR-V outputs survive launches and crashes. Same-binary cold/warm
 PIDs 202/203: first present 30.410/13.018 s, 99/0 compiles, 433/532 hits.
@@ -60,16 +61,12 @@ Full driver/cache, eleven gates, port/template pass. jobs/r29-tile-address.
 The earlier integer filter was rolled back: PID 265 copy 22.657 vs 24.095 ms,
 no FPS gain. Its patch and partial/full probe runs remain in the R29 job.
 
-**Console unavailable since about 09:24 UTC.** Deployment of game candidate
-identity e3525e30… failed before FTP connected. FTP/control/klog return no route;
-local route exists, neighbor failed, PS5 discovery returned no response. Last
-probe PID 268 completed and closed normally. No new game fixture was uploaded.
-Next: deploy/read back the already-built R29 game, stage its saved benchmark,
-scan shaders, launch with listener; then movement/fire/save/load/all eight maps.
-Port build/r29b-* and build/r30-* hold the prepared artifacts. Do not overwrite
-existing saves/configs. The last game PID 265 exited normally; fixtures absent.
+The earlier 09:24 UTC network outage ended before the verified manual deployment.
+Automated R29 benchmarking and movement/fire/save/load/all-map acceptance remain
+paused during manual testing. Port build/r29b-* and build/r30-* hold the prepared
+artifacts; preserve existing saves/configs when automated work resumes.
 
-While hardware is offline, a NIR-cache candidate reuses Mesa serialization and
+During the earlier outage, a NIR-cache candidate reuses Mesa serialization and
 the existing output cache. Host fresh-process cold/warm/disabled outputs match;
 warm compilation count zero. Eight captured mip submissions replay exactly.
 Full host/cache checks and eleven gates pass. Production source is restored;
@@ -114,12 +111,10 @@ Keep it separate from the saved R29 game binary.
   `occlusionQueryPrecise` is false.
 - `kFaultingTests` keeps `b8-indirect` out of the default and `all` queues: a PM4
   `INDIRECT_BUFFER` into title memory faults the GPU.
-- No command refuses by name any more (90 driver, 0 refused, 0 gap). The paths
-  that still refuse are the ones whose placement or decode no probe has recorded:
-  a tiled copy or readback of a chain, a depth image read back to a buffer and an
-  upload from one, a multi-sample copy/blit/resolve, a subset of array layers, a
-  scaled blit whose format has no recorded decode, a filtered blit, and an image
-  clear whose format or aspect is not the recorded one.
+- Entry-point accounting is complete (90 driver, 0 refused, 0 gap), but that
+  does not prove every parameter combination. R16–R29 now cover the game's
+  tiled mip/readback and filtered-copy paths. Other shapes/formats/aspects still
+  need focused proofs; do not treat historical refusal lists as current coverage.
 - The AGC compiler has no bounds-checking option and refuses uniform blocks
   larger than 16 bytes, which is why robustness is the driver's index-count clamp
   rather than a shader-side check.

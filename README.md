@@ -15,13 +15,14 @@ companion to the [PS5 OpenGL SDK](https://github.com/blackbearreloaded/ps5-openg
 the public [ps5-payload-dev/sdk](https://github.com/ps5-payload-dev/sdk)
 toolchain.
 
-> The physical device reports Vulkan **1.0**, and the report is now audited
-> true: every required command, limit and format is accounted for and every
-> capability the device advertises is proven by a console run. The version rises
-> only when a conformance subset says it may, and that subset is the next gate.
+> The physical device reports Vulkan **1.0**. Command, limit and format audits
+> and targeted console probes document its coverage; they do not establish full
+> Vulkan conformance. Known semantic limitations remain. Current work prioritizes
+> stable, playable and faster vkQuake; console CTS is outside that work.
 
 **Contents:**
 [Progress and roadmap](#progress-and-roadmap) ·
+[vkQuake and performance](#vkquake-and-performance) ·
 [What this is](#what-this-is--and-what-it-is-not) ·
 [How it works](#how-it-works) ·
 [Findings](#what-has-been-established) ·
@@ -55,6 +56,14 @@ toolchain.
   30-second watch recording zero refusals
   ([evidence](evidence/fragment-inputs/),
   [findings](docs/HARDWARE_FINDINGS.md)).
+- ✅ **vkQuake runs on the console.** The owner confirmed the deployed R29 game
+  works on September 23, 2026. Console readbacks already verify textured worlds,
+  menu alpha and HUD rendering. The owner estimates 15–30 FPS; systematic
+  gameplay acceptance and performance work continue. See
+  [vkQuake and performance](#vkquake-and-performance).
+- ✅ **Input attachments read the complete frame correctly.** R20 corrected the
+  probe's tiled-memory reader; the earlier quarter-width diagnosis was a probe
+  error, not a remaining descriptor-width defect ([R20 proof](jobs/r20-subpass/)).
 - ✅ **A shader the compiler cannot lower is refused, not fatal.** The console's
   own failure was a title gone minutes into start-up: the fork's SPIR-V front end
   or its ACO printed one line and raised. The driver now reads a module's
@@ -106,10 +115,10 @@ toolchain.
 
 ### ❌ Not yet
 
-- ❌ **No conformance run.** A Vulkan CTS subset (Phase E1) is the gate for every
-  version rise; the recipe and the selection policy are written
-  ([`docs/CTS.md`](docs/CTS.md)). Rung 1.0's own requirements are met, so this is
-  the next gate rather than a blocker behind one.
+- ❌ **No console CTS acceptance or conformance certification.** Host results
+  and the console payload's outstanding work are recorded in
+  [docs/CTS.md](docs/CTS.md). Audits do not substitute for semantic conformance;
+  CTS is deferred while game stability and performance are the priority.
 - ❌ **Rungs 1.1 → 1.4.** The goal is a Vulkan 1.4 device; each rung is its own
   commit, gated by a CTS subset for that version.
 - ✅ **The SDK fork's compiler is migrated.** The driver links ps5-opengl
@@ -118,17 +127,11 @@ toolchain.
   `patched_tree` by
   [`tools/check-sdk-fork-migration.sh`](tools/check-sdk-fork-migration.sh)
   ([`docs/M5_PHASE_C.md`](docs/M5_PHASE_C.md)).
-- ❌ **Some transfer shapes still refuse by name.** A tiled copy or readback of a
-  mip chain, a multi-sample colour copy or blit (the resolve owns that), a
-  subset of array layers, a scaled blit whose format has no recorded decode, a
-  filtered blit, and a clear whose format or aspect is not the recorded one.
-- ❌ **An input attachment read is half-proven.** A two-subpass render pass whose
-  second subpass reads the first's colour attachment as its input attachment
-  compiles, draws and reads on the console — but only the first quarter-width of
-  the picture comes back: past 960 texels the fetch behaves as if the row-stored
-  attachment were that wide, which is one descriptor field
-  (`SQ_RSRC_IMG_WORD2`) and not the subpass machinery. The open item, with the
-  measurement, is in [`docs/M5_PHASE_C.md`](docs/M5_PHASE_C.md).
+- ❌ **Transfer coverage is not universal.** Padded pitches, tiled mip chains,
+  filtered mip generation and the copy/readback cases needed by vkQuake now have
+  console proofs. Unproven format, aspect and multisample combinations still
+  require their own cases; supported paths are bounded by the measured layouts.
+  See [R29 regression coverage](jobs/r29-tile-address/).
 - ❌ **Line-list rendering does not draw right.** The topology is linked,
   compiled and programmed (DI_PT_LINELIST, the line's own registers), yet the
   console case's segments do not match the rectangles they must cover: a core
@@ -137,19 +140,17 @@ toolchain.
 - ❌ **Buffer device address is not advertised.** Shaders that need it —
   physical storage buffer addresses, `buffer_reference`, and the bindless image
   store that comes with them — are refused by name rather than compiled into a
-  fault, which is how six of a game port's kernels currently stop.
+  fault. The vkQuake port uses compatible paths instead of requiring these
+  kernels to compile.
 - ❌ **A title cannot load a graphics module at run time.** Every `dlopen` and
   `sceKernelLoadStartModule` of a repository-built `.so` is refused by the
   console, so the driver is delivered *linked* into the title; the untried route
   is publishing application exports from the module writer.
 - ❌ **Occlusion queries are coarse.** One `ZPASS_DONE` count is 16 samples, so
   `occlusionQueryPrecise` is reported false.
-- ❌ **Real applications are barely exercised.** RetroArch runs through the
-  driver, and a **vkQuake port** is the second: it creates its 267 pipelines and
-  compiles its 528 shaders on the console, and each capability it still needs is
-  its own measured round
-  ([`docs/REQUESTS_RESPONSE.md`](docs/REQUESTS_RESPONSE.md)). Emulators and other
-  frontends are untried, and each one is a new source of findings — and of work.
+- ❌ **Broad application acceptance is incomplete.** RetroArch and vkQuake run;
+  vkQuake still needs systematic movement/fire/save/load, all-map and long-soak
+  acceptance. Other applications remain separate compatibility work.
 
 ### The ladder
 
@@ -161,12 +162,80 @@ toolchain.
 | M5 A | SPIR-V → AGC package, console and PC byte-identical | ✅ |
 | M5 B–C | The Vulkan driver and the tutorial ladder | ✅ |
 | M5 D | Breadth: dynamic state, compute, more formats | ✅ |
-| **Rung 1.0** | Every capability the device reports, proven on the console | ✅ closed: commands 90/47/0/0, limits 0 missing, formats 0 missing |
+| **Rung 1.0 audits** | Entry-point, limit and format accounting; targeted console probes | ✅ audits: commands 90/47/0/0, limits 0 missing, formats 0 missing; semantic limitations remain |
 | M5 E | The SDK fork's compiler (metadata 14) migrated and re-proven | ✅ migrated and re-proven |
 | — | The console SIGFPE at `jobs/aco-min` | ✅ fixed: the runner's sampled-format table ran a row it never filled in |
 | Rung 1.1–1.4 | One commit a rung, each gated by a CTS subset | ❌ |
 | Phase E1 | CTS-style semantic validation against the advertised set | ❌ recipe written |
-| Real applications | RetroArch ✅ · a vkQuake port 🔄 · emulators and other frontends ❌ | 🔄 in progress |
+| Real applications | RetroArch ✅ · vkQuake runs, optimization/acceptance 🔄 · other frontends ❌ | 🔄 in progress |
+
+## vkQuake and performance
+
+The native PS5 vkQuake port in the sibling `../PS5_vkQuake` checkout links this
+repository's static driver archives. Its README covers installation and controls. Its owner confirmed the deployed R29 game
+works; the current 15–30 FPS figure is a manual estimate. Stable, faster gameplay
+is the immediate goal. See [active state](docs/VULKAN_PROBE_ACTIVE.md) for the
+exact tested driver and pending work.
+
+The compatibility rounds now cover vertex stride, dynamic UBO offsets,
+descriptor arrays, padded pitches/mip tails and 32-bit indices. Later rounds
+fixed depth state leaking into colour-only UI, sampler LOD bias and menu blend
+control. Swapchain readback provides complete screenshots as evidence, rather
+than treating a successful present call as proof of a correct image.
+
+| Evidence | What it establishes |
+| --- | --- |
+| [Persistent shader cache](jobs/shader-cache/) | Same-binary cold/warm first present 30.410/13.018 s, 99/0 SPIR-V compilations and 433/532 hits |
+| [R25 depth detach](jobs/r25-depth-detach/) | Correct depth transitions and colour-only UI |
+| [R26 LOD bias](jobs/r26-lod-bias/) | Signed/fractional sampler bias and mip sampling |
+| [R27 menu alpha](jobs/r27-menu-alpha/) | Complete 4K alpha frames and constant blending |
+| [R28 CPU-copy profile](jobs/r28-copy-profile/) | Separates CPU copies, cache flushes, submission and present costs |
+| [R29 tile addressing](jobs/r29-tile-address/) | Direct evaluation of the existing common tile equation; 3,501 console mip/upload/copy/format checks pass |
+
+Cache entries live in the application's `/app0/ps5vk-shader-cache` directory,
+survive title restarts/crashes and are preserved by normal game deployments.
+Changed shader/compiler inputs invalidate their keys. Eight internal NIR stages
+still compile per launch. A [parked NIR-cache candidate](parked/nir-shader-cache/)
+has host cold/warm equality and replay checks, but is **not enabled in the
+production R29 driver**; console startup and gameplay validation remain pending.
+Startup improvements must not be presented as steady-frame-rate improvements.
+
+### Measured bottlenecks and the 4K120 target
+
+Before the R29 address optimization, the [R28 baseline](jobs/r28-copy-profile/metrics.txt)
+measured these per-frame means:
+
+| Cost | Start map | E1M1 spawn |
+| --- | ---: | ---: |
+| CPU image copies | 24.095 ms | 0.041 ms |
+| Cache flush | 5.954 ms | 3.974 ms |
+| Queue total | 33.222 ms | 6.905 ms |
+| Flip path | 14.415 ms | 7.431 ms |
+| Flushed target bytes | 384.09 MiB | 256.06 MiB |
+
+Queue time includes other categories, so the rows cannot all be summed. The
+`gpu_ms` field includes native submission/completion waiting; it is not isolated
+GPU execution time. The start-map copy cost points toward water mip generation,
+which needs finer attribution before selecting an implementation. R29's console
+pixel proofs establish correctness; its controlled game benchmark is pending.
+The previous integer-filter experiment reduced copy cost without improving FPS
+and was rolled back. Engine `r_scale 2` and `tasks 0` also failed to improve FPS.
+
+120 FPS allows **8.33 ms for an entire frame**. Work should start with measured
+CPU image/mip paths, possible GPU blits, excessive cache work and opportunities
+for correct CPU/GPU overlap. Engine-side water passes, uploads and scheduling
+also deserve profiling. Neither missing synchronization nor smaller render
+resolution is an established fix. Each optimization needs image comparisons,
+repeatable game timing and stability checks.
+
+There is a separate output limit: [the current WSI](driver/ps5vk_wsi.c) exposes
+**one 3840×2160 mode at 60 Hz, FIFO only**. 120 distinct displayed frames per
+second require implementing and validating a real 120 Hz VideoOut mode and frame
+pacing, plus a suitable display/HDMI setup. PS5 supports 4K120 output in general
+([Sony's guide](https://www.playstation.com/en-ca/support/hardware/ps5-4k-resolution-guide/));
+that does not establish support in this driver. Stable 4K60 is the next practical
+performance milestone; 4K120 remains a target requiring both driver and
+application measurement, not a promised result.
 
 ## What this is — and what it is not
 
@@ -178,17 +247,16 @@ PS5-specific AGC and VideoOut backend.
 **It is not** a Sony SDK, a retail-package builder, an exploit, or a conformance
 submission. It ships no Sony file, no key and no game content. It needs a
 homebrew-enabled console that you own, and it never configures that console for
-you. The device reports the highest version whose requirements it has proven. Today
-that is 1.0, and its requirements are answered command by command, limit by limit
-and format by format; what is still missing is the conformance subset that would
-let the report be called *conformant* rather than merely *true*.
+you. The device reports 1.0, with coverage recorded command by command, limit
+by limit and format by format. The audits, targeted pixel proofs and working
+applications are evidence of progress, not a claim of certified conformance.
 
 ## How it works
 
 ### The stack
 
 ```text
-  application (RetroArch, the Vulkan Tutorial, the probe runner)
+  application (vkQuake, RetroArch, Vulkan Tutorial, probe runner)
         |
   Vulkan 1.0 frontend ......... Mesa's common runtime (vk_* entry points) +
         |                       this repository's driver (driver/ps5vk_*.c)
@@ -299,7 +367,7 @@ assumption. The evidence for every one is in
 | [`src/`](src/) | The probe application: the case table, the AGC canaries, and the diagnostics that produce the structured records |
 | [`host/`](host/) | Host-side shims for the PC replay (the AGC host model and the runner host) |
 | [`probes/`](probes/), [`shaders/`](shaders/) | GLSL sources and their compiled AGC shader packages, one set per probe canary |
-| [`jobs/`](jobs/) | Job queues — one directory per probe battery, 110 of them |
+| [`jobs/`](jobs/) | Job queues and results — one directory per probe battery |
 | [`golden/`](golden/) | Golden command streams extracted from console runs |
 | [`evidence/`](evidence/) | Captured evidence for app-level findings |
 | [`docs/`](docs/) | The plan, the phase logs, the audit tables and the hardware findings |
@@ -385,7 +453,8 @@ python3 tools/ps5_console.py payload           # -> ok ps5vkctl 1 pid=<n>
 ```bash
 tools/fetch-mesa.sh            # pinned Mesa 26.2.0, checksum-verified, into .deps/
 tools/build-psbc-ps5.sh        # the SPIR-V -> AGC shader compiler for the console
-tools/build-driver.sh          # the driver: host and PS5 archives
+tools/build-vulkan-runtime.sh # Mesa runtime: host and PS5 archives
+tools/build-driver.sh         # the driver: host and PS5 archives
 tools/build-probe-shaders.sh   # GLSL -> SPIR-V -> AGC packages (needs glslang)
 tools/build-all-titles.sh      # all five titles, warning-free, aligned segments
 ```
@@ -409,7 +478,7 @@ python3 tools/ps5_console.py battery PPSA99988 jobs/format-items/queue.txt \
 ```
 
 A queue is a small text file — `capture`, `hold <vblanks>`, the case names,
-`m2-solid` as the canary, `exit` — and [`jobs/`](jobs/) holds 110 examples, one per
+`m2-solid` as the canary, `exit` — and [`jobs/`](jobs/) holds examples, one per
 battery, each with the run it belongs to in its comments. The
 battery exits `0` when the run ended and passed, `3` when the run never ended,
 and `2` when no run arrived. To watch a run you launch yourself, use
