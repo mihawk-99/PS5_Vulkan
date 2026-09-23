@@ -465,6 +465,11 @@ ps5vk_video_out_open(struct ps5vk_device *device, struct ps5vk_video_out *video)
    if (video->handle < 0)
       return vk_errorf(device, VK_ERROR_INITIALIZATION_FAILED, "sceVideoOutOpen failed: 0x%08x",
                        (unsigned)video->handle);
+   /* The vendored runtime configures the output mode before it sets the flip
+    * rate, so the order is itself a variable worth measuring: a rate already
+    * set may be what makes the mode refused. This is the earliest the mode can
+    * be asked for, on a handle that has been opened and nothing more. */
+   ps5vk_video_out_probe_output_mode(video->handle, "right-after-open");
    int result = sceVideoOutSetFlipRate(video->handle, 0);
    if (result != 0) {
       ps5vk_video_out_close(video);
