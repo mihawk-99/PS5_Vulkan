@@ -21358,6 +21358,91 @@ void run_vulkan_mip_frames(const TestContext &test, TestOutcome &outcome, std::u
     log.event("agc_c7_mip", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1, detail);
 }
 
+// R26: implicit derivatives select LOD 2; sampler bias selects the level/blend.
+// Every output pixel is compared, including both triangles' shared edge.
+void run_vulkan_lod_bias_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const float vertices[] = {-1, -1, 0, 0, 1, -1, 1, 0, 1, 1, 1, 1, -1, 1, 0, 1};
+    const std::uint16_t indices[] = {0, 1, 2, 2, 3, 0};
+    std::array<std::uint8_t, 20> colours{};
+    for (unsigned level = 0; level < 5; ++level)
+    {
+        for (unsigned channel = 0; channel < 3; ++channel)
+            colours[level * 4 + channel] = kMipLevelGreys[level];
+        colours[level * 4 + 3] = 255;
+    }
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    input.vertex_data = vertices;
+    input.vertex_count = 4;
+    input.vertex_stride = 16;
+    input.index_data = indices;
+    input.index_count = 6;
+    input.attribute_count = 2;
+    input.attributes[0] = {0, 0, VK_FORMAT_R32G32_SFLOAT, 0};
+    input.attributes[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, 8};
+    input.texture_data = colours.data();
+    input.texture_width = input.texture_height = 256;
+    input.texture_levels = 5;
+    input.texture_level_colours = colours.data();
+    input.texture_mip_linear = true;
+    input.texture_max_lod = 4;
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    ps5vk_triangle triangle{};
+    auto status = ps5vk_triangle_create(&triangle, &input);
+    constexpr float biases[] = {-2, -1, -0.5f, 0, 0.5f, 1, 2, 0};
+    constexpr unsigned greys[] = {10, 100, 150, 200, 120, 40, 60, 200};
+    unsigned passed = 0;
+    for (unsigned frame = 0; frame < std::size(biases) && status == PS5VK_TRIANGLE_OK; ++frame)
+    {
+        if (!ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, biases[frame]))
+        {
+            status = PS5VK_TRIANGLE_FAILED;
+            break;
+        }
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (status != PS5VK_TRIANGLE_OK || triangle.target_bytes < kFramebufferBytes)
+            break;
+        char label[64]{};
+        std::snprintf(label, sizeof(label), "LOD bias %g frame %u", biases[frame], frame);
+        if (test.capture)
+            log_driver_submission(triangle.device, label, log);
+        const FramebufferView view{static_cast<const std::uint32_t *>(triangle.target),
+                                   kTiledRgba8Layout};
+        const std::uint32_t expected = 0xff000000u | greys[frame] * 0x010101u;
+        unsigned mismatches = 0;
+        for (unsigned y = 0; y < kOutputHeight; ++y)
+            for (unsigned x = 0; x < kOutputWidth; ++x)
+                mismatches += view.word(x, y) != expected;
+        log.number("r26_lod_bias", "frame", frame);
+        log.hex("r26_lod_bias", "expected", expected);
+        log.hex("r26_lod_bias", "center", view.word(kOutputWidth / 2, kOutputHeight / 2));
+        log.number("r26_lod_bias", "mismatches", mismatches);
+        log.number("r26_lod_bias", "pixels", kOutputWidth * kOutputHeight);
+        log.event("r26_lod_bias", mismatches == 0 ? "PASS" : "FAIL", mismatches == 0 ? 0 : -1,
+                  label);
+        passed += mismatches == 0;
+    }
+    outcome.command_built = status != PS5VK_TRIANGLE_FAILED;
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        outcome.stage_in_use = true;
+        return;
+    }
+    if (test.capture && status == PS5VK_TRIANGLE_OK)
+        log_driver_stages(triangle.device, log);
+    ps5vk_triangle_finish(&triangle);
+    outcome.passed = passed == std::size(biases);
+    log.number("r26_lod_bias", "passed_frames", passed);
+}
+
 // R18: the exact non-power-of-two mip chain named by vkQuake PID 210.
 void run_vulkan_padded_mips(const TestContext &test, TestOutcome &outcome, bool addresses = false,
                             unsigned width = 224, unsigned height = 195,
@@ -24670,6 +24755,7 @@ constexpr RunnerTest kRunnerTests[] = {
     // (run_vulkan_tiled_upload_frames).
     {"c7-mip-upload", "c7-mip", run_vulkan_tiled_upload_frames},
     {"r16-mip-blit", "c7-mip", run_vulkan_mip_blit_frames},
+    {"r26-lod-bias", "r26-lod-bias", run_vulkan_lod_bias_frames},
     {"r18-padded-mips", "c7-mip", run_vulkan_padded_mip_frames},
     {"r18-mip-addresses", "c7-mip", run_vulkan_padded_mip_addresses},
     {"r18-small-mips", "c7-mip", run_vulkan_small_padded_mips},

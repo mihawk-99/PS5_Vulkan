@@ -8959,3 +8959,18 @@ Two deployed ELF reads match all five segments, probe title closed and idle.
 Readback records, failed setup notes, proofs and reproduction live in
 jobs/r25-depth-detach; goldens retain before, after and stencil/bias batteries.
 Game visual regression of the relinked artifact follows separately.
+
+## 2026-09-23 — R26 sampler bias for vkQuake scaling
+
+Game PID 248 exits when r_scale 2 creates a sampler with mipLodBias 1. The
+driver reports maxSamplerLodBias 2 but refused nonzero values. Encode the public
+GFX10 signed 8-fraction-bit field in sampler word 2, retaining refusal outside
+the reported range and for non-finite values. Zero bias preserves old words.
+
+PID 250 has 383 PASS/zero FAIL: eight full RGBA readbacks (8,294,400 pixels each)
+for -2/-1/-0.5/0/0.5/1/2/0 bias, plus original nearest/linear mip cases. Their
+twenty command streams replay exactly. Explicit rebuild, full host/cache suite,
+eleven gates, port five gates/scan and template relink pass. Two served ELF
+reads/all five segments match, title closed and idle verified. Archive
+b83fc4ac3d20a07d38ab0f64087a57e8dc7eb5d632988b533a51a7172d8cc942 (14,450,682 bytes).
+Evidence and reproduction: jobs/r26-lod-bias and golden/r26-lod-bias.

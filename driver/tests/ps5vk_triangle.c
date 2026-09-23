@@ -1806,6 +1806,13 @@ ps5vk_triangle_set_texture_view(struct ps5vk_triangle *triangle, uint32_t level)
 bool
 ps5vk_triangle_set_texture_lod(struct ps5vk_triangle *triangle, float min_lod, float max_lod)
 {
+   return ps5vk_triangle_set_texture_lod_bias(triangle, min_lod, max_lod, 0.0f);
+}
+
+bool
+ps5vk_triangle_set_texture_lod_bias(struct ps5vk_triangle *triangle, float min_lod, float max_lod,
+                                  float bias)
+{
    if (triangle->texture_view == VK_NULL_HANDLE || triangle->texture_set == VK_NULL_HANDLE)
       return false;
    const VkSamplerCreateInfo info = {
@@ -1817,6 +1824,7 @@ ps5vk_triangle_set_texture_lod(struct ps5vk_triangle *triangle, float min_lod, f
       .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
       .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
       .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+      .mipLodBias = bias,
       .minLod = min_lod,
       .maxLod = max_lod,
    };

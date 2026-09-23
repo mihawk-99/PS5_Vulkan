@@ -1,0 +1,51 @@
+{"schema":2,"event":"run_start","pid":250}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"frame","value":0}
+{"schema":2,"event":"hex","probe":"r26_lod_bias","field":"expected","value":"0xff0a0a0a"}
+{"schema":2,"event":"hex","probe":"r26_lod_bias","field":"center","value":"0xff0a0a0a"}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r26_lod_bias","status":"PASS","result":0,"detail":"LOD bias -2 frame 0"}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"frame","value":1}
+{"schema":2,"event":"hex","probe":"r26_lod_bias","field":"expected","value":"0xff646464"}
+{"schema":2,"event":"hex","probe":"r26_lod_bias","field":"center","value":"0xff646464"}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r26_lod_bias","status":"PASS","result":0,"detail":"LOD bias -1 frame 1"}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"frame","value":2}
+{"schema":2,"event":"hex","probe":"r26_lod_bias","field":"expected","value":"0xff969696"}
+{"schema":2,"event":"hex","probe":"r26_lod_bias","field":"center","value":"0xff969696"}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r26_lod_bias","status":"PASS","result":0,"detail":"LOD bias -0.5 frame 2"}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"frame","value":3}
+{"schema":2,"event":"hex","probe":"r26_lod_bias","field":"expected","value":"0xffc8c8c8"}
+{"schema":2,"event":"hex","probe":"r26_lod_bias","field":"center","value":"0xffc8c8c8"}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r26_lod_bias","status":"PASS","result":0,"detail":"LOD bias 0 frame 3"}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"frame","value":4}
+{"schema":2,"event":"hex","probe":"r26_lod_bias","field":"expected","value":"0xff787878"}
+{"schema":2,"event":"hex","probe":"r26_lod_bias","field":"center","value":"0xff787878"}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r26_lod_bias","status":"PASS","result":0,"detail":"LOD bias 0.5 frame 4"}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"frame","value":5}
+{"schema":2,"event":"hex","probe":"r26_lod_bias","field":"expected","value":"0xff282828"}
+{"schema":2,"event":"hex","probe":"r26_lod_bias","field":"center","value":"0xff282828"}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r26_lod_bias","status":"PASS","result":0,"detail":"LOD bias 1 frame 5"}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"frame","value":6}
+{"schema":2,"event":"hex","probe":"r26_lod_bias","field":"expected","value":"0xff3c3c3c"}
+{"schema":2,"event":"hex","probe":"r26_lod_bias","field":"center","value":"0xff3c3c3c"}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r26_lod_bias","status":"PASS","result":0,"detail":"LOD bias 2 frame 6"}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"frame","value":7}
+{"schema":2,"event":"hex","probe":"r26_lod_bias","field":"expected","value":"0xffc8c8c8"}
+{"schema":2,"event":"hex","probe":"r26_lod_bias","field":"center","value":"0xffc8c8c8"}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r26_lod_bias","status":"PASS","result":0,"detail":"LOD bias 0 frame 7"}
+{"schema":2,"event":"value","probe":"r26_lod_bias","field":"passed_frames","value":8}
+{"schema":2,"event":"run_end"}

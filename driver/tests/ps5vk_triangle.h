@@ -1068,6 +1068,10 @@ ps5vk_triangle_destroy_query_pool(struct ps5vk_triangle *triangle, VkQueryPool p
 bool
 ps5vk_triangle_set_texture_lod(struct ps5vk_triangle *triangle, float min_lod, float max_lod);
 
+bool
+ps5vk_triangle_set_texture_lod_bias(struct ps5vk_triangle *triangle, float min_lod, float max_lod,
+                                  float bias);
+
 /* Phase C7: points the texture's set at a view of one level of the chain, level
  * 0 being the image itself. Returns false when no view could be created. */
 bool

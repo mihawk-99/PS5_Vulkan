@@ -527,6 +527,15 @@ v0-texel-buffer-sint)
     pixel_flags=(--address32-hi 2 --descriptor-binding 0:0:uniform_texel_buffer:1:0:16)
     pixel_compiler="$root/build/host/opengnm-psbc-probe"
     ;;
+r26-lod-bias)
+    vertex_source=shaders/c7/band.vert
+    pixel_source=shaders/c7/lod-bias.frag
+    output=probes/r26-lod-bias
+    vertex_flags=(--address32-hi 2
+        --vertex-attribute 0:r32g32_float:0:0:16:4
+        --vertex-attribute 1:r32g32_float:0:8:16:4)
+    pixel_flags=(--address32-hi 2 --descriptor-binding 0:0:combined_image_sampler:1:0:48)
+    ;;
 c7-mip)
     vertex_source=shaders/c7/band.vert
     pixel_source=shaders/c7/nearest.frag
@@ -1150,7 +1159,7 @@ elif set_name == "c7-diag":
     bindings = [("address32_hi", expected_hi),
                 *vertex_input("vertex attributes: location 0 r32g32_float offset 0, "
                               "location 1 r32g32_float offset 8, stride 16, binding 0")]
-elif set_name in ("c7-mip", "c7-mip-linear"):
+elif set_name in ("c7-mip", "c7-mip-linear", "r26-lod-bias"):
     bindings = [("address32_hi", expected_hi),
                 *vertex_input("vertex attributes: location 0 r32g32_float offset 0, "
                               "location 1 r32g32_float offset 8, stride 16, binding 0"),

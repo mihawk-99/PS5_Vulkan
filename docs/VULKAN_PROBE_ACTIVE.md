@@ -68,7 +68,12 @@ R25 fixes depth/stencil state leaking into colour-only passes. PID 243 reproduce
 original depth and swapchain readback. PID 245 stencil/bias regressions pass
 (including the intentional nonzero-clamp refusal). 24 new streams replay exactly.
 170 host/cache, eleven gates, port/template pass. Archive e172ce0f…. Evidence:
-jobs/r25-depth-detach. Next: inspect relinked game HUD, then live-map performance.
+jobs/r25-depth-detach. Port PID 246 now shows all tested HUD styles correctly.
+R26 fixes sampler LOD bias: game scaling requested bias 1 and previously exited.
+PID 250: 383 PASS/zero FAIL; eight complete frames match every pixel for signed
+and fractional bias, plus original mip tests. Twenty streams replay exactly.
+Full host/cache, eleven gates, port/template pass. Archive b83fc4ac….
+Evidence: jobs/r26-lod-bias. Game scaling retest and black menu background remain.
 ## Standing work
 - Graphics R7 rounds 1-4, R8 dynamic depth bias, the first batch's R9 (push
   pointers), and the R4 clear/refusal coverage are in `docs/M5_PHASE_C.md`; the

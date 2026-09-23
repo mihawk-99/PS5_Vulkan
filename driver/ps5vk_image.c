@@ -1311,10 +1311,11 @@ ps5vk_CreateSampler(VkDevice _device, const VkSamplerCreateInfo *pCreateInfo,
                        "sampler filters %d and %d are neither the nearest/nearest nor the "
                        "linear/linear the texture canary ran; a mixed pair needs a runner probe "
                        "(docs/M5_REFERENCE.md, C4)", (int)info->minFilter, (int)info->magFilter);
-   if (info->mipLodBias != 0.0f)
+   const float bias_limit = device->vk.physical->properties.maxSamplerLodBias;
+   if (!(info->mipLodBias >= -bias_limit && info->mipLodBias <= bias_limit))
       return vk_errorf(device, VK_ERROR_UNKNOWN,
-                       "sampler LOD bias %f is not the none the texture canary ran; a bias needs a "
-                       "runner probe (docs/M5_REFERENCE.md, C4)", (double)info->mipLodBias);
+                       "sampler LOD bias %f exceeds the reported +/- %f range",
+                       (double)info->mipLodBias, (double)bias_limit);
    /* maxAnisotropy and compareOp are ignored while their enable flags are
     * VK_FALSE (Valid Usage), so the flags are the whole of that state. With the
     * flag set, Vulkan's valid usage puts maxAnisotropy inside
@@ -1372,6 +1373,10 @@ ps5vk_CreateSampler(VkDevice _device, const VkSamplerCreateInfo *pCreateInfo,
     * mode names -- which the first C7 run read as a wrong level. */
    sampler->word = info->maxLod > 0.0f ? ((word & ~(UINT32_C(3) << 26)) | (mip_filter << 26))
                                        : word;
+   /* GFX10 sampler word 2 carries signed 8-fraction-bit LOD bias in bits
+    * 0..13 (Mesa ac_build_sampler_descriptor). R26 measures implicit LOD
+    * selection for both signs and fractional biases on the console. */
+   sampler->word |= (uint32_t)(int32_t)(info->mipLodBias * 256.0f) & 0x3fffu;
    sampler->lod_word = ps5vk_sampler_unsigned_lod(info->minLod) |
                        (ps5vk_sampler_unsigned_lod(info->maxLod) << 12);
    sampler->address_word = address_word;

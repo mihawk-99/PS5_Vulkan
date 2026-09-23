@@ -41,6 +41,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <stdlib.h>
+#include <math.h>
 
 #include "ps5vk_test.h"
 #include "ps5vk_triangle.h"
@@ -253,6 +254,18 @@ main(void)
             frames++;
       }
       check(frames == 2, "two frames submitted the textured square with different samplers");
+      if (status == PS5VK_TRIANGLE_OK) {
+         check(ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, -2.0f) &&
+                  ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, -0.5f) &&
+                  ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, 0.5f) &&
+                  ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, 2.0f),
+               "sampler biases of both signs and fractions inside the advertised range create");
+         check(!ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, 2.01f) &&
+                  !ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, -2.01f) &&
+                  !ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, NAN) &&
+                  !ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, INFINITY),
+               "out-of-range and non-finite sampler biases are refused");
+      }
       if (status != PS5VK_TRIANGLE_IN_FLIGHT)
          ps5vk_triangle_finish(&triangle);
 

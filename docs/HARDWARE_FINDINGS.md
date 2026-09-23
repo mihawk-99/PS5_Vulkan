@@ -3245,3 +3245,13 @@ writing zero when the depth/stencil rendering ends fixes D32 and D16 overlays
 and preserves ordinary depth, stencil, bias and display readbacks. The reset uses
 the existing AGC indirect context-register helper. Evidence: jobs/r25-depth-detach,
 PIDs 243–245. No hardware-layout or firmware-derived data is introduced.
+
+## 2026-09-23 — sampler LOD bias readback (R26)
+
+PID 250 measures the sampler word-2 signed bias field with implicit derivatives
+selecting level 2. Bias -2/-1/-0.5/0/0.5/1/2/0 produces exact RGBA greys
+10/100/150/200/120/40/60/200 across eight entire 3840x2160 frames. The fractional
+cases use linear mip filtering; all 66,355,200 pixels match without tolerance.
+The encoding follows public Mesa ac_build_sampler_descriptor. This covers the
+driver's advertised +/-2 range endpoints and the fractions used here, not an
+exhaustive test of every fractional bit pattern. jobs/r26-lod-bias holds evidence.
