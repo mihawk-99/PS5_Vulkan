@@ -1,0 +1,54 @@
+{"schema":2,"event":"value","probe":"runner_queue","field":"tests","value":19}
+{"schema":2,"event":"value","probe":"runner_queue","field":"hold_vblanks","value":1}
+{"schema":2,"event":"value","probe":"runner_queue","field":"capture","value":0}
+{"schema":2,"event":"value","probe":"runner_queue","field":"compile","value":0}
+{"schema":2,"event":"value","probe":"runner_queue","field":"exit","value":1}
+{"schema":2,"event":"probe","probe":"runner_queue","status":"PASS","result":0,"detail":"/app0/jobs/queue.txt"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":0,"detail":"m2-solid"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"m2-solid"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":1,"detail":"r16-mip-blit"}
+{"schema":2,"event":"value","probe":"r16_mip_texels","field":"mismatches","value":0}
+{"schema":2,"event":"probe","probe":"r16_mip_texels","status":"PASS","result":0,"detail":"all 87040 lower-level texels equal the filtered checker average"}
+{"schema":2,"event":"value","probe":"r16_mip_texels","field":"mismatches","value":0}
+{"schema":2,"event":"probe","probe":"r16_mip_texels","status":"PASS","result":0,"detail":"all 87040 lower-level texels equal the filtered checker average"}
+{"schema":2,"event":"value","probe":"r16_mip_texels","field":"mismatches","value":0}
+{"schema":2,"event":"probe","probe":"r16_mip_texels","status":"PASS","result":0,"detail":"all 87040 lower-level texels equal the filtered checker average"}
+{"schema":2,"event":"value","probe":"r16_mip_texels","field":"mismatches","value":0}
+{"schema":2,"event":"probe","probe":"r16_mip_texels","status":"PASS","result":0,"detail":"all 87040 lower-level texels equal the filtered checker average"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"r16-mip-blit"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":2,"detail":"c7-blit-formats"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c7-blit-formats"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":3,"detail":"c7-blit-depth"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c7-blit-depth"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":4,"detail":"v0-blit-dst"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"v0-blit-dst"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":5,"detail":"c7-mip-nearest"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c7-mip-nearest"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":6,"detail":"c7-mip-linear"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c7-mip-linear"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":7,"detail":"c7-mip-tiled"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c7-mip-tiled"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":8,"detail":"c7-mip-pages"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c7-mip-pages"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":9,"detail":"c7-mip-pages-six"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c7-mip-pages-six"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":10,"detail":"c7-mip-upload"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c7-mip-upload"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":11,"detail":"r18-padded-mips"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"r18-padded-mips"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":12,"detail":"r18-mip-addresses"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"r18-mip-addresses"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":13,"detail":"r18-small-mips"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"r18-small-mips"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":14,"detail":"r18-aligned-mips"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"r18-aligned-mips"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":15,"detail":"c8-resolve"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c8-resolve"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":16,"detail":"c8-msaa"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c8-msaa"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":17,"detail":"v0-resolve-usage"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"v0-resolve-usage"}
+{"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":18,"detail":"c7-copy"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c7-copy"}
+{"schema":2,"event":"value","probe":"runner_summary","field":"ran","value":19}
+{"schema":2,"event":"probe","probe":"runner_summary","status":"PASS","result":0,"detail":"19 of 19 queued tests passed"}

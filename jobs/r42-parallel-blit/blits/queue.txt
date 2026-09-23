@@ -1,0 +1,22 @@
+# R42: every runner test that runs a blit, a mip chain or a resolve.
+hold 1
+m2-solid
+r16-mip-blit
+c7-blit-formats
+c7-blit-depth
+v0-blit-dst
+c7-mip-nearest
+c7-mip-linear
+c7-mip-tiled
+c7-mip-pages
+c7-mip-pages-six
+c7-mip-upload
+r18-padded-mips
+r18-mip-addresses
+r18-small-mips
+r18-aligned-mips
+c8-resolve
+c8-msaa
+v0-resolve-usage
+c7-copy
+exit

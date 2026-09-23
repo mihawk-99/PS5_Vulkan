@@ -2164,7 +2164,8 @@ ps5vk_cmd_buffer_blit_image_region(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t
                                    const struct ps5vk_image_copy_side *destination,
                                    const struct ps5vk_image_copy *region, VkFilter filter,
                                    VkFormat source_format, VkFormat destination_format,
-                                   uint64_t source_span, uint64_t source_span_bytes)
+                                   uint64_t source_span, uint64_t source_span_bytes,
+                                   uint64_t destination_span, uint64_t destination_span_bytes)
 {
    struct ps5vk_memory_copy *record =
       util_dynarray_grow(&cmd_buffer->copies, struct ps5vk_memory_copy, 1);
@@ -2177,6 +2178,8 @@ ps5vk_cmd_buffer_blit_image_region(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t
       .linear = filter == VK_FILTER_LINEAR,
       .source_span = source_span,
       .source_span_bytes = source_span_bytes,
+      .destination_span = destination_span,
+      .destination_span_bytes = destination_span_bytes,
       .source_side = *source,
       .destination_side = *destination,
       .source_x = region->source_offset.x,
@@ -2551,7 +2554,8 @@ ps5vk_CmdBlitImage2KHR(VkCommandBuffer commandBuffer, const VkBlitImageInfo2 *pB
       region.destination_texel_bytes = destination_texels;
       ps5vk_cmd_buffer_blit_image_region(cmd_buffer, after_words, &source_side, &destination_side,
                                          &region, pBlitImageInfo->filter, source->vk.format,
-                                         destination->vk.format, source->address, source->size);
+                                         destination->vk.format, source->address, source->size,
+                                         destination->address, destination->size);
    }
    free(regions);
 }

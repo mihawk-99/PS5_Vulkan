@@ -295,6 +295,17 @@ struct ps5vk_queue {
    uint32_t *step_capture;
    size_t step_capture_words;
    struct ps5vk_queue_profile profile;
+   /* The workers that resample blits in parallel (ps5vk_queue.c), started on
+    * first use; refused when none could start. */
+   struct ps5vk_blit_pool *blit_pool;
+   bool blit_pool_refused;
+};
+
+/* A range of rows of one blit, and the bytes resampling them touched. */
+struct ps5vk_blit_part {
+   const struct ps5vk_memory_copy *copy;
+   uint32_t row_begin, row_end;
+   uint64_t source_low, source_high, destination_low, destination_high;
 };
 
 /* Closes the application stretch since the previous instrumented entry point
@@ -456,6 +467,10 @@ struct ps5vk_memory_copy {
     * it cached before that (ps5vk_blit_execute, ps5vk_resolve_execute). */
    uint64_t source_span;
    uint64_t source_span_bytes;
+   /* A blit's whole destination image: two blits that touch no common image
+    * may run at once (ps5vk_queue.c, ps5vk_blit_wave_execute). */
+   uint64_t destination_span;
+   uint64_t destination_span_bytes;
    /* A resolve (vkCmdResolveImage): the queue averages the four sample words of
     * each source texel into the destination's one (ps5vk_resolve_execute). */
    bool resolve;

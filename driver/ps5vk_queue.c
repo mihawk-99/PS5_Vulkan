@@ -55,6 +55,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <immintrin.h>
 
 #include "util/os_time.h"
@@ -697,12 +699,10 @@ ps5vk_resolve_execute(const struct ps5vk_memory_copy *copy)
  * to four-byte texels (and R8G8B8A8_UNORM for the filtered case,
  * ps5vk_image.c). The touched ranges are flushed around the write: the GPU
  * wrote the source and reads the destination. */
-void
-ps5vk_blit_execute(const struct ps5vk_memory_copy *copy)
+static void
+ps5vk_blit_rows(struct ps5vk_blit_part *part)
 {
-   if (copy->source_span_bytes != 0)
-      ps5vk_flush_cpu_cache((const void *)(uintptr_t)copy->source_span,
-                            (size_t)copy->source_span_bytes);
+   const struct ps5vk_memory_copy *const copy = part->copy;
    const uint32_t source_texel_bytes = copy->source_texel_bytes;
    const uint32_t destination_texel_bytes = copy->destination_texel_bytes;
    const float left = (float)copy->source_x;
@@ -719,8 +719,16 @@ ps5vk_blit_execute(const struct ps5vk_memory_copy *copy)
    uint64_t source_high = 0;
    uint64_t destination_low = UINT64_MAX;
    uint64_t destination_high = 0;
+   /* Whatever happens below, the part reports the bytes it touched. */
+#define PS5VK_BLIT_REPORT()                                                                      \
+   do {                                                                                          \
+      part->source_low = source_low;                                                             \
+      part->source_high = source_high;                                                           \
+      part->destination_low = destination_low;                                                   \
+      part->destination_high = destination_high;                                                 \
+   } while (0)
 
-   for (uint32_t row = 0; row < copy->height; row++) {
+   for (uint32_t row = part->row_begin; row < part->row_end; row++) {
       const float sample_y = top + ((float)row + 0.5f) * copy->source_step_y - 0.5f;
       for (uint32_t column = 0; column < copy->width; column++) {
          const float sample_x = left + ((float)column + 0.5f) * copy->source_step_x - 0.5f;
@@ -738,7 +746,10 @@ ps5vk_blit_execute(const struct ps5vk_memory_copy *copy)
              * the same format copies its words, and any other decode the
              * recording has already accepted (ps5vk_texel_to_rgba8). */
             if (!ps5vk_texel_to_rgba8(copy->source_format, texel, rgba))
-               return;
+               {
+                  PS5VK_BLIT_REPORT();
+                  return;
+               }
          } else {
             /* Four texels around the sample point, each weighted by how close
              * the point is to it. A sample outside the rectangle clamps, so a
@@ -782,17 +793,267 @@ ps5vk_blit_execute(const struct ps5vk_memory_copy *copy)
             (int32_t)(copy->destination_y + row), destination_texel_bytes, 0);
          const uint32_t encoded = ps5vk_rgba8_to_texel(copy->destination_format, rgba, texel);
          if (encoded == 0)
-            return;
+            {
+               PS5VK_BLIT_REPORT();
+               return;
+            }
          memcpy((void *)(uintptr_t)destination_at, texel, encoded);
          destination_low = MIN2(destination_low, destination_at);
          destination_high = MAX2(destination_high, destination_at + destination_texel_bytes);
       }
    }
-   if (source_low < source_high)
-      ps5vk_flush_cpu_cache((const void *)(uintptr_t)source_low, (size_t)(source_high - source_low));
-   if (destination_low < destination_high)
-      ps5vk_flush_cpu_cache((const void *)(uintptr_t)destination_low,
-                            (size_t)(destination_high - destination_low));
+   PS5VK_BLIT_REPORT();
+#undef PS5VK_BLIT_REPORT
+}
+
+/* Flushes what a part touched: the GPU wrote the source and reads the
+ * destination. */
+static void
+ps5vk_blit_part_flush(const struct ps5vk_blit_part *part)
+{
+   if (part->source_low < part->source_high)
+      ps5vk_flush_cpu_cache((const void *)(uintptr_t)part->source_low,
+                            (size_t)(part->source_high - part->source_low));
+   if (part->destination_low < part->destination_high)
+      ps5vk_flush_cpu_cache((const void *)(uintptr_t)part->destination_low,
+                            (size_t)(part->destination_high - part->destination_low));
+}
+
+/* One blit, on the calling thread: the whole region as one part. */
+void
+ps5vk_blit_execute(const struct ps5vk_memory_copy *copy)
+{
+   if (copy->source_span_bytes != 0)
+      ps5vk_flush_cpu_cache((const void *)(uintptr_t)copy->source_span,
+                            (size_t)copy->source_span_bytes);
+   struct ps5vk_blit_part part = {
+      .copy = copy,
+      .row_begin = 0,
+      .row_end = copy->height,
+   };
+   ps5vk_blit_rows(&part);
+   ps5vk_blit_part_flush(&part);
+}
+
+/* ---------------------------------------------------------------------------
+ * Blits in parallel. vkQuake generates every warp texture's mip chain with a
+ * linear vkCmdBlitImage per level, and this driver resamples blits on the CPU:
+ * R41 measured 2.3-8.2 ms a frame of it while walking the start map, enough to
+ * push the frame past the display's ~20.8 ms VRR window. The texels a part
+ * computes are exactly ps5vk_blit_execute's -- the same function over a range of
+ * rows -- so the output does not depend on how the rows are divided.
+ *
+ * Consecutive blit records at one split point form a wave while no two of them
+ * touch the same image: a later record may read what an earlier one wrote (the
+ * next mip level of the same image), and those stay in record order. A wave's
+ * records are cut into row ranges that a small pool of workers and the
+ * submitting thread take from a shared counter.
+ * ------------------------------------------------------------------------- */
+#define PS5VK_BLIT_WORKERS 4
+/* Rows below this are not worth another thread's wake-up. */
+#define PS5VK_BLIT_MIN_ROWS 16u
+
+struct ps5vk_blit_pool {
+   pthread_mutex_t lock;
+   pthread_cond_t wake;
+   pthread_t threads[PS5VK_BLIT_WORKERS];
+   unsigned started;
+   bool quit;
+   unsigned generation;
+   /* The published round: parts and count are written under the lock before
+    * generation moves, and a worker reads them only after it has seen that. */
+   struct ps5vk_blit_part *parts;
+   unsigned count;
+   _Atomic unsigned next;
+   _Atomic unsigned done;
+   /* Workers inside a round. They join under the lock when they wake, so the
+    * submitter, which waits for none, never republishes under one. */
+   _Atomic unsigned active;
+};
+
+static void
+ps5vk_blit_pool_run(struct ps5vk_blit_pool *pool)
+{
+   for (;;) {
+      const unsigned index = atomic_fetch_add(&pool->next, 1u);
+      if (index >= pool->count)
+         return;
+      ps5vk_blit_rows(&pool->parts[index]);
+      atomic_fetch_add(&pool->done, 1u);
+   }
+}
+
+static void *
+ps5vk_blit_worker(void *argument)
+{
+   struct ps5vk_blit_pool *const pool = argument;
+   pthread_mutex_lock(&pool->lock);
+   unsigned seen = pool->generation;
+   for (;;) {
+      while (!pool->quit && pool->generation == seen)
+         pthread_cond_wait(&pool->wake, &pool->lock);
+      if (pool->quit)
+         break;
+      seen = pool->generation;
+      atomic_fetch_add(&pool->active, 1u);
+      pthread_mutex_unlock(&pool->lock);
+      ps5vk_blit_pool_run(pool);
+      atomic_fetch_sub(&pool->active, 1u);
+      pthread_mutex_lock(&pool->lock);
+   }
+   pthread_mutex_unlock(&pool->lock);
+   return NULL;
+}
+
+/* The queue's pool, started on first use; NULL when no worker could start, in
+ * which case blits run on the calling thread. */
+static struct ps5vk_blit_pool *
+ps5vk_blit_pool_get(struct ps5vk_queue *queue)
+{
+   if (queue->blit_pool != NULL || queue->blit_pool_refused)
+      return queue->blit_pool;
+   struct ps5vk_blit_pool *const pool = calloc(1, sizeof(*pool));
+   if (pool == NULL || pthread_mutex_init(&pool->lock, NULL) != 0) {
+      free(pool);
+      queue->blit_pool_refused = true;
+      return NULL;
+   }
+   pthread_cond_init(&pool->wake, NULL);
+   for (unsigned i = 0; i < PS5VK_BLIT_WORKERS; i++) {
+      if (pthread_create(&pool->threads[i], NULL, ps5vk_blit_worker, pool) != 0)
+         break;
+      pool->started++;
+   }
+   if (pool->started == 0) {
+      fputs("[ps5vk] blit workers refused; blits stay on the submitting thread\n", stderr);
+      pthread_cond_destroy(&pool->wake);
+      pthread_mutex_destroy(&pool->lock);
+      free(pool);
+      queue->blit_pool_refused = true;
+      return NULL;
+   }
+   queue->blit_pool = pool;
+   return pool;
+}
+
+static void
+ps5vk_blit_pool_destroy(struct ps5vk_queue *queue)
+{
+   struct ps5vk_blit_pool *const pool = queue->blit_pool;
+   if (pool == NULL)
+      return;
+   pthread_mutex_lock(&pool->lock);
+   pool->quit = true;
+   pthread_cond_broadcast(&pool->wake);
+   pthread_mutex_unlock(&pool->lock);
+   for (unsigned i = 0; i < pool->started; i++)
+      pthread_join(pool->threads[i], NULL);
+   pthread_cond_destroy(&pool->wake);
+   pthread_mutex_destroy(&pool->lock);
+   free(pool->parts);
+   free(pool);
+   queue->blit_pool = NULL;
+}
+
+static bool
+ps5vk_spans_overlap(uint64_t a, uint64_t a_bytes, uint64_t b, uint64_t b_bytes)
+{
+   return a < b + b_bytes && b < a + a_bytes;
+}
+
+/* Whether a blit record may not run beside the wave's records: it touches an
+ * image one of them touches, or it lacks the spans that would say. */
+static bool
+ps5vk_blit_conflicts(const struct ps5vk_memory_copy *copy, const struct ps5vk_copy_split *wave,
+                     unsigned count)
+{
+   if (copy->source_span_bytes == 0 || copy->destination_span_bytes == 0)
+      return true;
+   for (unsigned i = 0; i < count; i++) {
+      const struct ps5vk_memory_copy *const other = wave[i].copy;
+      if (other->source_span_bytes == 0 || other->destination_span_bytes == 0)
+         return true;
+      const uint64_t mine[2][2] = {{copy->source_span, copy->source_span_bytes},
+                                   {copy->destination_span, copy->destination_span_bytes}};
+      const uint64_t theirs[2][2] = {{other->source_span, other->source_span_bytes},
+                                     {other->destination_span, other->destination_span_bytes}};
+      for (unsigned a = 0; a < 2; a++)
+         for (unsigned b = 0; b < 2; b++)
+            if (ps5vk_spans_overlap(mine[a][0], mine[a][1], theirs[b][0], theirs[b][1]))
+               return true;
+   }
+   return false;
+}
+
+/* The rows each part of a blit takes: about two parts per thread, never fewer
+ * than PS5VK_BLIT_MIN_ROWS. */
+static uint32_t
+ps5vk_blit_part_rows(uint32_t height, unsigned threads)
+{
+   return MAX2(PS5VK_BLIT_MIN_ROWS, DIV_ROUND_UP(height, 2u * threads));
+}
+
+/* Runs a wave of independent blits, divided into row ranges, and returns false
+ * when it could not (no workers, no memory), leaving the caller to run them in
+ * turn. */
+static bool
+ps5vk_blit_wave_execute(struct ps5vk_queue *queue, const struct ps5vk_copy_split *wave,
+                        unsigned count)
+{
+   struct ps5vk_blit_pool *const pool = ps5vk_blit_pool_get(queue);
+   if (pool == NULL)
+      return false;
+   const unsigned threads = pool->started + 1u;
+   unsigned total = 0;
+   for (unsigned i = 0; i < count; i++) {
+      const struct ps5vk_memory_copy *const copy = wave[i].copy;
+      total += MAX2(1u, DIV_ROUND_UP(copy->height, ps5vk_blit_part_rows(copy->height, threads)));
+      ps5vk_flush_cpu_cache((const void *)(uintptr_t)copy->source_span,
+                            (size_t)copy->source_span_bytes);
+   }
+   /* The round is published under the lock and only while no worker is inside
+    * one: a worker that woke late for the previous round may still be reading
+    * the parts, which the realloc below would free under it. Workers join a
+    * round only under this lock, so none can start while it is held. */
+   pthread_mutex_lock(&pool->lock);
+   while (atomic_load(&pool->active) != 0) {
+      pthread_mutex_unlock(&pool->lock);
+      _mm_pause();
+      pthread_mutex_lock(&pool->lock);
+   }
+   struct ps5vk_blit_part *const parts = realloc(pool->parts, total * sizeof(*parts));
+   if (parts == NULL) {
+      pthread_mutex_unlock(&pool->lock);
+      return false;
+   }
+   pool->parts = parts;
+   unsigned at = 0;
+   for (unsigned i = 0; i < count; i++) {
+      const struct ps5vk_memory_copy *const copy = wave[i].copy;
+      const uint32_t rows = ps5vk_blit_part_rows(copy->height, threads);
+      uint32_t row = 0;
+      do {
+         parts[at++] = (struct ps5vk_blit_part){
+            .copy = copy,
+            .row_begin = row,
+            .row_end = MIN2(copy->height, row + rows),
+         };
+         row += rows;
+      } while (row < copy->height);
+   }
+   assert(at == total);
+   pool->count = total;
+   atomic_store(&pool->done, 0u);
+   atomic_store(&pool->next, 0u);
+   pool->generation++;
+   pthread_cond_broadcast(&pool->wake);
+   pthread_mutex_unlock(&pool->lock);
+   ps5vk_blit_pool_run(pool);
+   while (atomic_load(&pool->done) < total || atomic_load(&pool->active) != 0)
+      _mm_pause();
+   for (unsigned i = 0; i < total; i++)
+      ps5vk_blit_part_flush(&parts[i]);
+   return true;
 }
 
 /* Submits the words [start, end) of the stream with the colour-buffer barrier
@@ -1037,7 +1298,19 @@ ps5vk_queue_run_copy_steps(struct ps5vk_queue *queue, const struct vk_queue_subm
             continue;
          }
          if (copy->blit) {
-            ps5vk_blit_execute(copy);
+            /* The run of independent blits from here is one wave. */
+            unsigned wave = 1;
+            while (at + wave < split_count && split[at + wave].offset == end &&
+                   split[at + wave].copy->blit &&
+                   !ps5vk_blit_conflicts(split[at + wave].copy, &split[at], wave))
+               wave++;
+            const bool parallel = (wave > 1 || copy->height >= 2u * PS5VK_BLIT_MIN_ROWS) &&
+                                  !ps5vk_blit_conflicts(copy, NULL, 0) &&
+                                  ps5vk_blit_wave_execute(queue, &split[at], wave);
+            if (!parallel)
+               for (unsigned i = 0; i < wave; i++)
+                  ps5vk_blit_execute(split[at + i].copy);
+            at += wave - 1;
             continue;
          }
          /* An upload into tiled storage is a region of texels, not a range of
@@ -1861,6 +2134,7 @@ void
 ps5vk_queue_finish(struct ps5vk_queue *queue)
 {
    vk_queue_finish(&queue->vk);
+   ps5vk_blit_pool_destroy(queue);
    ps5vk_direct_mapping_destroy(&queue->submission);
    free(queue->step_capture);
 }
