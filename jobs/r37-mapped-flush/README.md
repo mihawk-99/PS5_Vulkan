@@ -54,3 +54,15 @@ Display note, added after the run: the owner reports that VRR "Apply to
 Unsupported Games" was only now enabled, so none of the runs above had VRR, and
 the variable-refresh model in `jobs/r33-begin-split` does not explain the
 29.25 ms E1M1 period. Later runs are under a different display setting.
+
+## R38: a bounded spin before the marker poll's first sleep
+
+With VRR for unsupported games now on (port `m6-r38-vrr-baseline`: a bare
+vblank is 20.872 ms, the present no longer waits, E1M1 50.65 FPS at 19.52 ms of
+work), the frame rate is the work. The completion marker is now checked in a
+loop for up to 1.5 ms before the first 1 ms sleep; past that the wait is the
+sleeping one it was. On the console every step found the marker inside the spin
+(poll_first 100%): poll 1.12 -> 0.13-0.15 ms a step, gpu_ms 2.5 -> 0.7-0.8 a
+frame. E1M1 50.65 -> 55.76 FPS (work 19.52 -> 17.74 ms), start map 31.11 ->
+33.08 FPS (work 31.92 -> 30.00). Port evidence `m6-r38-marker-spin`. Host: build
+clean, 11 gates, check-driver and check-shader-cache PASS.

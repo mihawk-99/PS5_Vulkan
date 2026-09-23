@@ -55,6 +55,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <immintrin.h>
 
 #include "util/os_time.h"
 
@@ -73,6 +74,12 @@
 /* The test runner's marker wait: 1 ms sleeps for up to 2 s. */
 #define PS5VK_MARKER_POLLS 2000
 #define PS5VK_MARKER_POLL_MICROSECONDS 1000
+/* Before the first of those sleeps, the marker is checked in a loop for up to
+ * this long. R36 measured every E1M1 step missing the marker at the first check
+ * and finding it after one 1 ms sleep, which costs a system call (~20 us here)
+ * and the sleep's whole granularity for a GPU that is done well inside it. The
+ * spin is bounded, and past it the wait is exactly the sleeping one it was. */
+#define PS5VK_MARKER_SPIN_NS UINT64_C(1500000)
 
 /* R31's attribution of the application's own time. Each instrumented entry
  * point closes the stretch since the previous one returned and opens its own, so
@@ -859,6 +866,13 @@ ps5vk_queue_run_step(struct ps5vk_queue *queue, const struct vk_queue_submit *su
     * whether a "gpu" interval is the GPU or the check granularity. */
    const uint64_t submitted = queue->profile.enabled ? ps5vk_profile_now() : 0;
 
+   /* The bounded spin: a marker seen here counts as found at the first check. */
+   for (const uint64_t until = ps5vk_profile_now() + PS5VK_MARKER_SPIN_NS;;) {
+      ps5vk_flush_cpu_cache(marker, sizeof(*marker));
+      if (*marker == value || ps5vk_profile_now() >= until)
+         break;
+      _mm_pause();
+   }
    for (unsigned poll = 0; poll < PS5VK_MARKER_POLLS; poll++) {
       ps5vk_flush_cpu_cache(marker, sizeof(*marker));
       if (*marker == value) {
