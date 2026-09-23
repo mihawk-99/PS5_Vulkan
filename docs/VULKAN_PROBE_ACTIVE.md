@@ -9,8 +9,9 @@ _Updated: 2026-09-23_
 ## Now
 **vkQuake stability and performance are the priority; no CTS work.**
 The user has returned and requested the latest build for manual testing.
-Heartbeat PAUSED; do not launch automated tests or close their game. FTP/control
-currently refuse connections. Port ACTIVE.md records the deployment preflight.
+Heartbeat PAUSED; do not launch automated tests or close their game. Services
+returned; R29 game e3525e30… is deployed with two matching ELF reads/all five
+segments. Manual launch is left to the user; port evidence/manual-r29-deployment.
 
 Persistent SPIR-V outputs survive launches and crashes. Same-binary cold/warm
 PIDs 202/203: first present 30.410/13.018 s, 99/0 compiles, 433/532 hits.
