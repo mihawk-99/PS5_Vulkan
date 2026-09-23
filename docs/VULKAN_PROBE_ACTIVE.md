@@ -8,8 +8,9 @@ _Updated: 2026-09-23_
 
 ## Now
 **vkQuake stability and performance are the priority; no CTS work.**
-The user authorized uninterrupted autonomous work while unavailable for eight
-hours. No visual/audio/control question is needed during this period.
+The user has returned and requested the latest build for manual testing.
+Heartbeat PAUSED; do not launch automated tests or close their game. FTP/control
+currently refuse connections. Port ACTIVE.md records the deployment preflight.
 
 Persistent SPIR-V outputs survive launches and crashes. Same-binary cold/warm
 PIDs 202/203: first present 30.410/13.018 s, 99/0 compiles, 433/532 hits.
