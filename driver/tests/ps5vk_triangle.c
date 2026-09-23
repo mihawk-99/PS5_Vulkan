@@ -1228,7 +1228,8 @@ create_texture(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
        * what round 21's depth pair samples and blits from. */
       .usage = input->texture_upload && !texture_is_depth(input->texture_format)
                   ? VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                       VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                       VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                       (input->texture_blit_mips ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0)
               : input->texture_tiled && !texture_is_depth(input->texture_format)
                   ? VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
                   : VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
@@ -2801,6 +2802,7 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
    triangle->texture_is_rendered = input->texture_is_rendered;
    triangle->texture_tiled = input->texture_tiled;
    triangle->texture_upload = input->texture_upload;
+   triangle->texture_blit_mips = input->texture_blit_mips;
    /* Phase C5's depth attachment, and what a frame's passes do with it. */
    triangle->depth = input->depth;
    triangle->depth_clear_image = triangle->depth && input->depth_clear_image;
@@ -3704,6 +3706,27 @@ record_uploads(struct ps5vk_triangle *triangle, VkCommandBuffer command)
                                                  triangle->texture_image,
                                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
          }
+      }
+   }
+   if (triangle->texture_blit_mips) {
+      const VkMemoryBarrier barrier = {
+         .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+         .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+         .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
+      };
+      for (uint32_t level = 1; level < triangle->texture_levels; level++) {
+         CALL(triangle, CmdPipelineBarrier)(command, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &barrier, 0, NULL, 0, NULL);
+         const VkImageBlit region = {
+            .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level - 1, 0, 1},
+            .srcOffsets = {{0, 0, 0}, {(int32_t)(triangle->texture_extent.width >> (level - 1)),
+                                     (int32_t)(triangle->texture_extent.height >> (level - 1)), 1}},
+            .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1},
+            .dstOffsets = {{0, 0, 0}, {(int32_t)(triangle->texture_extent.width >> level),
+                                     (int32_t)(triangle->texture_extent.height >> level), 1}},
+         };
+         CALL(triangle, CmdBlitImage)(command, triangle->texture_image, VK_IMAGE_LAYOUT_GENERAL,
+            triangle->texture_image, VK_IMAGE_LAYOUT_GENERAL, 1, &region, VK_FILTER_LINEAR);
       }
    }
    if (triangle->texture_copied || triangle->texture_blitted || triangle->texture_blit_scaled) {

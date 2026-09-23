@@ -256,6 +256,7 @@ struct ps5vk_triangle_input {
     * command buffer records one copy a level, which is the driver's tiled
     * upload. Zero keeps the probe-written chain. */
    bool texture_upload;
+   bool texture_blit_mips;
    /* The mip chain the sampled image is created with (Phase C7): 0 or 1 for the
     * single level every frame before that phase sampled, and N > 1 for a chain
     * whose level L holds texture_level_colours[L] in every texel, in R, G, B, A
@@ -920,6 +921,7 @@ struct ps5vk_triangle {
    /* Whether a tiled chain's texels are uploaded by the frame's own copies
     * (input.texture_upload). */
    bool texture_upload;
+   bool texture_blit_mips;
    /* Phase V0-query's timestamps: the pool a frame writes its clock into --
     * query 0 before the frame's draws and query 1 after them -- when the caller
     * set one with ps5vk_triangle_set_timestamp_pool. */

@@ -39,16 +39,15 @@ port five gates and template relink PASS; host subpass regression fixed before
 deployment. Evidence: jobs/r15-dynamic-pair and golden/r15-dynamic-pair.
 The phase log explicitly corrects old D1 coverage: its write used the static
 type despite a dynamic layout. Corrected writes now pass unchanged streams.
-No new vkQuake run yet. R16's 512x512/five-level water blit candidate failed
-full-frame sampling at the 64x64 tail level (PID 206). Whole-chain AddrLib
-queries prove XOR is required rather than addition; the earlier centre checks
-missed 2,048 wrong texel addresses. Correction is recorded separately in
-HARDWARE_FINDINGS.md. The corrected shared address/cache-flush candidate passed an explicit rebuild,
-fifteen host/link arms, all eleven gates, port five gates and template relink.
-It is parked in parked/r16-mip-tail.patch; jobs/r16-mip-blit/README.md gives
-reproduction and acceptance. PID 206 contradicts earlier whole-chain coverage,
-triggering the mission stop rule. Accepted R15 code and links are restored;
-no corrected-candidate or new port launch. Console idle.
+**R16 accepted after user resumption.** Corrected XOR mip-tail addressing
+and mapped 512x512/five-level blits pass PS5 PID 207: 277 PASS, zero FAIL.
+All four lower-mip frames match every pixel; independent CPU checks cover
+87,040 lower texels. Ten exact replays; title closed and count=0 confirmed.
+Fifteen host/link arms, eleven gates, port five gates/scan and template relink
+PASS. Archive 14,428,778 bytes, SHA-256 8d5206d5… . Evidence/reproduction:
+jobs/r16-mip-blit and golden/r16-mip-blit-corrected. Failed PID 206 and the
+separate correction to earlier centre-only C7 coverage remain preserved.
+User requested vkQuake relink and launch next; port result is pending.
 
 **Port M2 met:** PID 197, QueuePresent success and human-confirmed Quake
 menu/console; port evidence/m2-first-frame. M3–M6 remain open. Input/audio

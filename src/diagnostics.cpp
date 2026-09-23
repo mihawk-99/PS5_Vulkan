@@ -20835,7 +20835,8 @@ bool check_mip_pinned(const void *target, std::uint32_t levels, std::uint32_t le
 constexpr std::uint32_t kMipTilePixels = 128;
 constexpr std::uint32_t kMipTileBytes = 0x10000;
 
-std::size_t tiled_level_offset(std::uint32_t x, std::uint32_t y, std::uint32_t side) noexcept
+std::size_t tiled_level_offset(std::uint32_t x, std::uint32_t y, std::uint32_t side,
+                               std::uint64_t base = 0) noexcept
 {
     const std::size_t sx = x;
     const std::size_t sy = y;
@@ -20844,7 +20845,7 @@ std::size_t tiled_level_offset(std::uint32_t x, std::uint32_t y, std::uint32_t s
                               ((sx << 4) & 0x400u) ^ ((sx << 6) & 0x800u) ^ ((sx << 9) & 0xa000u);
     const std::size_t blocks_per_row = (side + kMipTilePixels - 1u) / kMipTilePixels;
     const std::size_t block = (sy / kMipTilePixels) * blocks_per_row + sx / kMipTilePixels;
-    return block * kMipTileBytes + local;
+    return (base & ~UINT64_C(0xffff)) + block * kMipTileBytes + (local ^ (base & 0xffffu));
 }
 
 // Every texel of every level of a tiled chain: level L's tiles hold the grey
@@ -20894,7 +20895,7 @@ bool fill_tiled_mip_chain(void *storage, std::size_t bytes, std::uint32_t levels
         const std::uint32_t texel = grey * 0x00010101u | 0xff000000u;
         for (std::uint32_t y = 0; y < side; ++y)
             for (std::uint32_t x = 0; x < side; ++x)
-                *reinterpret_cast<std::uint32_t *>(base + at + tiled_level_offset(x, y, side)) =
+                *reinterpret_cast<std::uint32_t *>(base + tiled_level_offset(x, y, side, at)) =
                     texel;
         log.number("agc_mip_tiled", "level", level);
         log.number("agc_mip_tiled", "level_base", static_cast<long long>(at));
@@ -20927,7 +20928,8 @@ bool fill_tiled_addresses(void *storage, std::size_t bytes, std::uint32_t levels
 }
 
 void run_vulkan_mip_frames(const TestContext &test, TestOutcome &outcome, std::uint32_t levels,
-                           bool linear, bool tiled, bool blocks, bool upload = false) noexcept
+                           bool linear, bool tiled, bool blocks, bool upload = false,
+                           bool blit = false) noexcept
 {
     JsonLog &log = test.log;
     const ps5vk_triangle_report report{&log, log_vulkan_step};
@@ -20991,8 +20993,8 @@ void run_vulkan_mip_frames(const TestContext &test, TestOutcome &outcome, std::u
     // level, and the mip filter the frame is about. Every frame of this probe
     // samples the whole chain through a view of all five levels.
     input.texture_data = colours.data();
-    input.texture_width = kMipChainExtent;
-    input.texture_height = kMipChainExtent;
+    input.texture_width = blit ? 512 : kMipChainExtent;
+    input.texture_height = blit ? 512 : kMipChainExtent;
     input.texture_bilinear = false;
     input.texture_levels = levels;
     input.texture_level_colours = colours.data();
@@ -21004,11 +21006,20 @@ void run_vulkan_mip_frames(const TestContext &test, TestOutcome &outcome, std::u
      * the level bases the measured table holds (input.texture_upload, C7). */
     input.texture_tiled = tiled;
     input.texture_upload = upload;
+    input.texture_blit_mips = blit;
     if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
         return;
 
     ps5vk_triangle triangle{};
     ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+    if (status == PS5VK_TRIANGLE_OK && blit)
+    {
+        auto *texels = static_cast<std::uint32_t *>(triangle.texture_staging_mapped);
+        for (unsigned y = 0; y < 512; ++y)
+            for (unsigned x = 0; x < 512; ++x)
+                texels[y * 512 + x] = ((x ^ y) & 1) ? 0xfffefefeu : 0xff000000u;
+        flush_gpu_data(texels, 512 * 512 * 4);
+    }
     if (status == PS5VK_TRIANGLE_OK && tiled && !upload)
     {
         size_t texture_bytes = 0;
@@ -21027,7 +21038,8 @@ void run_vulkan_mip_frames(const TestContext &test, TestOutcome &outcome, std::u
     bool bands_read = false;
     std::uint32_t pinned_read = 0;
     std::vector<std::uint32_t> pinned_blocks(levels, 0u);
-    for (std::uint32_t frame = 0; frame < levels + 1 && status == PS5VK_TRIANGLE_OK; ++frame)
+    for (std::uint32_t frame = blit ? 2 : 0; frame < levels + 1 && status == PS5VK_TRIANGLE_OK;
+         ++frame)
     {
         if (frame > 0 && !ps5vk_triangle_set_texture_lod(&triangle, static_cast<float>(frame - 1),
                                                          static_cast<float>(frame - 1)))
@@ -21080,7 +21092,44 @@ void run_vulkan_mip_frames(const TestContext &test, TestOutcome &outcome, std::u
                     grid.word((kOutputWidth - 1) / 2, (kOutputHeight - 1) / 2) & 0x00ffffffu;
             continue;
         }
-        if (frame == 0)
+        if (blit)
+        {
+            // Black/254 checker texels average to 127 exactly at every lower level.
+            pinned_read +=
+                check_solid_frame(const_cast<void *>(triangle.target), 0xff7f7f7fu, frame, log)
+                    ? 1u
+                    : 0u;
+            // Read every generated texel independently of the GPU's LOD selection.
+            constexpr std::uint64_t bases[] = {0x60000, 0x20000, 0x10000, 0x8400, 0x4800};
+            size_t bytes = 0;
+            const auto *storage = static_cast<const std::uint8_t *>(
+                ps5vk_debug_image_storage(triangle.texture_image, &bytes));
+            unsigned mismatches = 0;
+            for (unsigned level = 1; level < levels; ++level)
+            {
+                const unsigned side = 512 >> level;
+                for (unsigned y = 0; y < side; ++y)
+                    for (unsigned x = 0; x < side; ++x)
+                    {
+                        const auto at = level < 3
+                                            ? bases[level] + tiled_level_offset(x, y, side)
+                                            : tiled_level_offset(x + (level == 3 ? 64 : 0),
+                                                                 y + (level == 4 ? 64 : 0), 128);
+                        if (!storage || at + 4 > bytes ||
+                            *reinterpret_cast<const std::uint32_t *>(storage + at) != 0xff7f7f7fu)
+                            ++mismatches;
+                    }
+            }
+            log.number("r16_mip_texels", "mismatches", mismatches);
+            log.event("r16_mip_texels", mismatches == 0 ? "PASS" : "FAIL", mismatches == 0 ? 0 : -1,
+                      "all 87040 lower-level texels equal the filtered checker average");
+            if (mismatches != 0)
+            {
+                status = PS5VK_TRIANGLE_FAILED;
+                break;
+            }
+        }
+        else if (frame == 0)
             bands_read = check_mip_bands(triangle.target, levels, linear, log);
         else
             pinned_read += check_mip_pinned(triangle.target, levels, frame - 1, log) ? 1u : 0u;
@@ -21136,9 +21185,15 @@ void run_vulkan_mip_frames(const TestContext &test, TestOutcome &outcome, std::u
         return;
     }
     ps5vk_triangle_finish(&triangle);
+    if (blit)
+        bands_read = status == PS5VK_TRIANGLE_OK && pinned_read == levels - 1;
     outcome.passed = bands_read;
     char detail[224]{};
-    if (blocks)
+    if (blit)
+        std::snprintf(detail, sizeof(detail),
+                      "filtered mip generation: %u of %u pinned levels read correctly", pinned_read,
+                      levels - 1);
+    else if (blocks)
         std::snprintf(detail, sizeof(detail),
                       "the address map read %u of %u addresses, one per pinned LOD",
                       bands_read ? levels : 0u, levels);
@@ -21169,6 +21224,11 @@ void run_vulkan_mip_nearest_frames(const TestContext &test, TestOutcome &outcome
 void run_vulkan_tiled_upload_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
     run_vulkan_mip_frames(test, outcome, kMipChainLevels, false, true, false, true);
+}
+
+void run_vulkan_mip_blit_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_vulkan_mip_frames(test, outcome, 5, false, true, false, true, true);
 }
 
 void run_vulkan_mip_linear_frames(const TestContext &test, TestOutcome &outcome) noexcept
@@ -24330,6 +24390,7 @@ constexpr RunnerTest kRunnerTests[] = {
     // C7's tiled upload: the chain the driver fills itself, level by level
     // (run_vulkan_tiled_upload_frames).
     {"c7-mip-upload", "c7-mip", run_vulkan_tiled_upload_frames},
+    {"r16-mip-blit", "c7-mip", run_vulkan_mip_blit_frames},
 #endif
 // V0-query through the driver: the same three regions asked of
 // vkCmdBeginQuery and vkGetQueryPoolResults, so the driver's own counter

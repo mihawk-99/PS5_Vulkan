@@ -883,6 +883,7 @@ const struct ps5vk_tiled_chain {
    {256, 256, 5, 0x60000, {0x20000, 0x10000, 0x8400, 0x4800, 0x800}},
    {256, 256, 6, 0x60000, {0x20000, 0x10000, 0x8400, 0x4800, 0x800, 0x400}},
    {128, 128, 4, 0x20000, {0x10000, 0x8400, 0x4800, 0x800}},
+   {512, 512, 5, 0x160000, {0x60000, 0x20000, 0x10000, 0x8400, 0x4800}},
    {512, 512, 7, 0x160000, {0x60000, 0x20000, 0x10000, 0x8400, 0x4800, 0x800, 0x400}},
    {1024, 1024, 8, 0x560000,
     {0x160000, 0x60000, 0x20000, 0x10000, 0x8400, 0x4800, 0x800, 0x400}},
@@ -1546,7 +1547,8 @@ ps5vk_CmdCopyMemoryToImageKHR(VkCommandBuffer commandBuffer,
             .source_pitch = source_pitch,
             .destination_side =
                {
-                  .address = image->address + level_base,
+                  .address = image->address + (level_base & ~UINT64_C(0xffff)),
+                  .tile_xor = (uint32_t)(level_base & UINT64_C(0xffff)),
                   .level_width = level_extent.width,
                   .tile_width = tile_width,
                   .tile_height = tile_height,
@@ -1873,7 +1875,8 @@ ps5vk_image_copy_side(struct ps5vk_image *image, const VkImageSubresourceLayers 
             (uint32_t)MAX2(image->vk.extent.width >> subresource->mipLevel, 1u),
             (uint32_t)MAX2(image->vk.extent.height >> subresource->mipLevel, 1u)};
          *side = (struct ps5vk_image_copy_side){
-            .address = image->address + base,
+            .address = image->address + (base & ~UINT64_C(0xffff)),
+            .tile_xor = (uint32_t)(base & UINT64_C(0xffff)),
             .row_pitch = 0,
             .level_width = extent.width,
             .tile_width = tile_width,
@@ -1953,7 +1956,7 @@ ps5vk_image_copy_address(const struct ps5vk_image_copy_side *side, int32_t x, in
          side->samples, &swizzle);
       const uint64_t plane =
          side->samples == 4 ? (uint64_t)(sample & 3u) * PS5VK_SAMPLE_PLANE_BYTES : 0;
-      return side->address + tile + plane + swizzle;
+      return side->address + tile + plane + (swizzle ^ side->tile_xor);
    }
    return side->address + (uint64_t)y * side->row_pitch + (uint64_t)x * texel_bytes;
 }
@@ -2060,26 +2063,25 @@ ps5vk_image_transfer_check(struct ps5vk_cmd_buffer *cmd_buffer, struct ps5vk_ima
                               destination_depth ? "depth or stencil" : "colour");
       return false;
    }
-   /* A tiled side needs a map: an element size the map covers and one level. A
-    * two-byte element is mapped for one sample (a four-sample two-byte texel is
-    * two sample planes no probe has walked), and a four-byte one for one or
-    * four. The other side may be any format, since a resampler decodes it. */
-   const bool tiled = source->storage == PS5VK_IMAGE_STORAGE_TILES ||
-                      destination->storage == PS5VK_IMAGE_STORAGE_TILES;
-   const struct ps5vk_image *const tiled_image =
-      source->storage == PS5VK_IMAGE_STORAGE_TILES ? source : destination;
-   const unsigned tiled_element_bytes = vk_format_get_blocksize(tiled_image->vk.format);
-   const bool mapped = tiled_element_bytes == 4 || tiled_element_bytes == 8 ||
-                       tiled_element_bytes == 16 ||
-                       ((tiled_element_bytes == 1 || tiled_element_bytes == 2) &&
-                        tiled_image->vk.samples == VK_SAMPLE_COUNT_1_BIT);
-   if (tiled && (!mapped || source->vk.mip_levels != 1 || destination->vk.mip_levels != 1)) {
-      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                              "%s into or out of a tiled image whose element has no map (a "
-                              "two-byte element is mapped for one sample, a four-byte one for one "
-                              "or four) or that is not single-level; the map a chain's levels sit "
-                              "at is C7's open piece (docs/HARDWARE_FINDINGS.md)", what);
-      return false;
+   /* Each tiled side needs its measured element map and, for a chain, the
+    * measured per-level bases already used by uploads and readback. */
+   const struct ps5vk_image *images[2] = {source, destination};
+   for (unsigned i = 0; i < 2; i++) {
+      const struct ps5vk_image *image = images[i];
+      if (image->storage != PS5VK_IMAGE_STORAGE_TILES)
+         continue;
+      const unsigned bytes = vk_format_get_blocksize(image->vk.format);
+      const bool mapped = bytes == 4 || bytes == 8 || bytes == 16 ||
+         ((bytes == 1 || bytes == 2) && image->vk.samples == VK_SAMPLE_COUNT_1_BIT);
+      const bool chain_mapped = image->vk.mip_levels == 1 ||
+         (!vk_format_has_depth(image->vk.format) && ps5vk_tiled_chain_of(image) != NULL);
+      if (!mapped || !chain_mapped) {
+         ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+            "%s of a %ux%u %u-level tiled image, format %u: no measured element/chain map",
+            what, image->vk.extent.width, image->vk.extent.height,
+            image->vk.mip_levels, (unsigned)image->vk.format);
+         return false;
+      }
    }
    return true;
 }

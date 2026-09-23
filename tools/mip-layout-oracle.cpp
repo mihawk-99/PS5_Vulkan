@@ -20,6 +20,7 @@
 // and every level outside the tail sits at its macroBlockOffset, which is what
 // the measured bases agree with to the byte.
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -79,13 +80,13 @@ struct Chain {
 /* One shape's chain, from AddrLib. */
 static bool
 computeChain(ADDR_HANDLE lib, unsigned width, unsigned height, unsigned levels, unsigned elementBytes,
-             Chain *chain)
+             Chain *chain, AddrSwizzleMode mode = ADDR_SW_64KB_S)
 {
     ADDR2_COMPUTE_SURFACE_INFO_INPUT in;
     std::memset(&in, 0, sizeof(in));
     std::memset(chain, 0, sizeof(*chain));
     in.size = sizeof(in);
-    in.swizzleMode = ADDR_SW_64KB_S;
+    in.swizzleMode = mode;
     in.resourceType = ADDR_RSRC_TEX_2D;
     in.flags.texture = 1;
     in.bpp = 32;
@@ -732,6 +733,57 @@ printShape(ADDR_HANDLE lib, unsigned width, unsigned height, unsigned levels, bo
                 kTileTexels);
 }
 
+/* Check complete mip levels, not only their origins/centres. The tail's
+ * coordinate is part of the XOR swizzle; adding its swizzled origin can carry. */
+static bool checkChainTexels(ADDR_HANDLE lib, unsigned width, unsigned height, unsigned levels)
+{
+    Chain chain;
+    if (!computeChain(lib, width, height, levels, 4, &chain, ADDR_SW_64KB_R_X))
+        return false;
+    unsigned long long checked = 0, wrongAdd = 0, wrongXor = 0;
+    for (unsigned level = 0; level < levels; ++level)
+    {
+        const unsigned w = std::max(width >> level, 1u);
+        const unsigned h = std::max(height >> level, 1u);
+        const auto base = levelBase(chain, level);
+        for (unsigned y = 0; y < h; ++y)
+        {
+            for (unsigned x = 0; x < w; ++x)
+            {
+                ADDR2_COMPUTE_SURFACE_ADDRFROMCOORD_INPUT in = {};
+                ADDR2_COMPUTE_SURFACE_ADDRFROMCOORD_OUTPUT out = {};
+                in.size = sizeof(in);
+                in.x = x;
+                in.y = y;
+                in.mipId = level;
+                in.swizzleMode = ADDR_SW_64KB_R_X;
+                in.resourceType = ADDR_RSRC_TEX_2D;
+                in.bpp = 32;
+                in.unalignedWidth = width;
+                in.unalignedHeight = height;
+                in.numSlices = 1;
+                in.numMipLevels = levels;
+                in.numSamples = 1;
+                in.numFrags = 1;
+                in.flags = derivationFlags(false);
+                out.size = sizeof(out);
+                if (Addr2ComputeSurfaceAddrFromCoord(lib, &in, &out) != ADDR_OK)
+                    return false;
+                const auto tile = (y / 128 * ((w + 127) / 128) + x / 128) * 0x10000ull;
+                const auto swizzle = blockOffset(x % 128, y % 128);
+                const auto added = base + tile + swizzle;
+                const auto xored = (base & ~0xffffull) + tile + ((base & 0xffffull) ^ swizzle);
+                wrongAdd += added != out.addr;
+                wrongXor += xored != out.addr;
+                ++checked;
+            }
+        }
+    }
+    std::printf("%ux%u %u levels: %llu texels; additive mismatches=%llu, XOR mismatches=%llu\n",
+                width, height, levels, checked, wrongAdd, wrongXor);
+    return wrongXor == 0;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -846,6 +898,15 @@ main(int argc, char **argv)
         findMeasuredMode(create_out.hLib);
         AddrDestroy(create_out.hLib);
         return 0;
+    }
+    if (argc == 5 && std::strcmp(argv[1], "chain-texels") == 0)
+    {
+        const bool good = checkChainTexels(
+            create_out.hLib, static_cast<unsigned>(std::strtoul(argv[2], nullptr, 0)),
+            static_cast<unsigned>(std::strtoul(argv[3], nullptr, 0)),
+            static_cast<unsigned>(std::strtoul(argv[4], nullptr, 0)));
+        AddrDestroy(create_out.hLib);
+        return good ? 0 : 1;
     }
     if (argc >= 4) {
         printShape(create_out.hLib, static_cast<unsigned>(std::strtoul(argv[1], nullptr, 0)),

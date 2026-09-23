@@ -155,7 +155,8 @@ fill_chain(VkInstance instance, VkDevice device, VkDeviceMemory memory, size_t b
          return false;
       for (uint32_t y = 0; y < side; y++)
          for (uint32_t x = 0; x < side; x++)
-            *(uint32_t *)(storage + kLevelBases[level] + tiled_level_offset(x, y, side)) = texel;
+            *(uint32_t *)(storage + (kLevelBases[level] & ~UINT64_C(0xffff)) +
+                           (tiled_level_offset(x, y, side) ^ (kLevelBases[level] & 0xffffu))) = texel;
    }
    unmap_memory(device, memory);
    return true;
@@ -207,7 +208,8 @@ bases_keep_every_texel_inside_the_chain(void)
       const uint32_t side = C7_EXTENT >> level;
       for (uint32_t y = 0; y < side && ok; y++) {
          for (uint32_t x = 0; x < side && ok; x++) {
-            const uint64_t at = kLevelBases[level] + tiled_level_offset(x, y, side);
+            const uint64_t at = (kLevelBases[level] & ~UINT64_C(0xffff)) +
+                                (tiled_level_offset(x, y, side) ^ (kLevelBases[level] & 0xffffu));
             if (at + 4u > C7_CHAIN_BYTES || seen[at / 4u] != 0)
                ok = false;
             else

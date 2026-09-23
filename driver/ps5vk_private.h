@@ -278,6 +278,8 @@ struct ps5vk_image_copy_side {
    uint64_t address;
    uint64_t row_pitch;
    uint32_t level_width;
+   /* A packed mip tail combines its origin with the texel swizzle by XOR. */
+   uint32_t tile_xor;
    /* The tile the map walks: 128x128 texels of a four-byte element, 256x128 of
     * a two-byte one, and 64x64 of the sixteen-byte texel a four-sample image
     * has (ps5vk_tile_extent). */

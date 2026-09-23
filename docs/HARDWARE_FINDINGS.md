@@ -3035,3 +3035,24 @@ centres did not establish every texel in a packed tail. The earlier narrative
 about the shifted tail coordinate was correct; its implementation as addition
 and the matching CPU probe were not. Earlier entries/goldens are retained.
 The corrected candidate is still awaiting its hardware rerun at this entry.
+
+
+## 2026-09-22 — R16 corrected mip readback accepted, PID 207
+
+The user explicitly resumed corrected readback, then vkQuake relink/launch.
+PS5 PID 207 returns 277 PASS, zero FAIL. m2-solid, c7-mip-upload and the new
+r16-mip-blit pass; every pinned lower mip matches 8,294,400/8,294,400 pixels,
+including the formerly failing 64x64 level. Independent shifted-coordinate
+CPU checks match all 87,040 lower texels in each frame. Ten streams replay
+exactly. Known benign VideoOut unregister-busy warning; title closed and
+count=0 confirmed. Failed PID 206 evidence and its separate correction remain.
+
+Explicit rebuild reproduces 14,428,778-byte archive SHA-256
+8d5206d5d4fc1535c342916b71c81e57d62ae4086d14fcd993074bc4c2fc8c67.
+Fifteen targeted loader/direct/link arms, cache package checks, eleven driver
+gates, port five gates/scan and template relink PASS. Two deployed ELF reads
+and all five PT_LOAD segments match local content. No visual settings changed.
+
+Source is accepted; checkpoint edb8ebd retains the original parked patch.
+Evidence: golden/r16-mip-blit-corrected; reproduction: jobs/r16-mip-blit/README.md.
+This accepts mip transfer/sampling, not M6. vkQuake relink/launch follows.

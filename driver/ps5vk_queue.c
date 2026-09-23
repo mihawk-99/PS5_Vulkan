@@ -1092,6 +1092,7 @@ ps5vk_image_write_execute(const struct ps5vk_memory_copy *copy)
    const uint32_t texel_bytes = copy->destination_texel_bytes;
    ps5vk_flush_cpu_cache(source, (size_t)(copy->source_pitch * (copy->height - 1u) +
                                           (uint64_t)copy->width * texel_bytes));
+   uint64_t low = UINT64_MAX, high = 0;
    for (uint32_t row = 0; row < copy->height; row++) {
       const uint8_t *const row_source = source + (uint64_t)row * copy->source_pitch;
       for (uint32_t x = 0; x < copy->width; x++) {
@@ -1099,6 +1100,8 @@ ps5vk_image_write_execute(const struct ps5vk_memory_copy *copy)
             (uint8_t *)(uintptr_t)ps5vk_image_copy_address(
                &copy->destination_side, (int32_t)(copy->destination_x + x),
                (int32_t)(copy->destination_y + row), texel_bytes, 0);
+         low = MIN2(low, (uint64_t)(uintptr_t)destination);
+         high = MAX2(high, (uint64_t)(uintptr_t)destination + texel_bytes);
          const uint8_t *const texel = row_source + (uint64_t)x * texel_bytes;
          if (copy->reverse_texel_bytes == 0) {
             memcpy(destination, texel, texel_bytes);
@@ -1109,9 +1112,8 @@ ps5vk_image_write_execute(const struct ps5vk_memory_copy *copy)
       }
    }
    /* The sampler reads these texels once the words after the split have run. */
-   ps5vk_flush_cpu_cache((const void *)(uintptr_t)copy->destination_side.address,
-                         (size_t)copy->destination_side.level_width *
-                            (size_t)copy->destination_side.level_width * texel_bytes);
+   if (low < high)
+      ps5vk_flush_cpu_cache((const void *)(uintptr_t)low, (size_t)(high - low));
 }
 
 /* The inverse of ps5vk_texel_to_rgba8 for the formats the driver can write a

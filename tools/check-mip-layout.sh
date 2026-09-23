@@ -91,6 +91,10 @@ if ! "$output" 256 256 5 | grep -Fq "{256, 256, 5, 0x60000, {0x20000, 0x10000, 0
 fi
 echo "PASS: AddrLib lays the measured chain out at the measured bases"
 
+echo "== Whole-chain texel addresses, including packed mip tails"
+"$output" chain-texels 256 256 5
+"$output" chain-texels 512 512 5
+
 echo "== The table each user of it holds"
 # The probe's table fills the chain the console samples and the C7 test's fills
 # the one the PC draws; both are this measurement, and neither may keep a base
@@ -116,7 +120,7 @@ if not entries or len(entries) != declared:
     raise SystemExit(f"  driver/ps5vk_image.c: parsed {len(entries)} of {declared} chain entries")
 failed = False
 for width, height, levels, size, bases in entries:
-    out = subprocess.run([oracle, width, height], check=True, capture_output=True, text=True).stdout
+    out = subprocess.run([oracle, width, height, levels], check=True, capture_output=True, text=True).stdout
     want = None
     for line in out.splitlines():
         m = re.match(r"\{%s, %s, %s, (0x[0-9a-f]+), \{([^}]*)\}\}" % (width, height, levels), line.strip())

@@ -1,4 +1,4 @@
-# R16 water-texture mip blit — corrected candidate parked
+# R16 water-texture mip blit — accepted on PS5
 
 Question: can the driver generate and sample all four lower levels of vkQuake's
 512x512, five-level water texture using linear same-image blits? The probe
@@ -24,9 +24,9 @@ Earlier C7 origin/centre checks did not establish whole-chain correctness.
 The correction is appended separately in HARDWARE_FINDINGS.md and M5_PHASE_C.md;
 old records and failed evidence remain intact.
 
-## Corrected candidate, host only
+## Host verification before resumption
 
-../../parked/r16-mip-tail.patch applies to driver b838832. It adds the measured
+The checkpoint patch at edb8ebd:parked/r16-mip-tail.patch applies to b838832. It adds the measured
 512x512/five-level chain, permits mapped colour-chain transfers, uses XOR for
 tail addressing in shared upload/copy/blit paths, and flushes the range actually
 written. The independent CPU witness uses shifted tail coordinates. Probe and
@@ -37,19 +37,17 @@ eleven gates passed. Port five gates and template relink passed. Upload metadata
 remains one record per region: 64 records use 18,432 bytes, below the 32 KiB
 heap. See validation.txt, oracle.txt, host-check.txt and candidate-archive.txt.
 host-check-before.txt deliberately retains the misleading old CPU witness.
-The corrected candidate has NOT run on PS5 and is NOT accepted.
+At that checkpoint the corrected candidate had NOT run on PS5.
 
 The mission says to stop when a run contradicts an earlier claim. PID 206
-triggers that rule. The patch is parked, accepted R15 source/archive and port
-links are restored, and no further console launch is authorized by this cycle.
+triggers that rule. The patch was parked and accepted R15 source/archive and port links restored.
+The user then explicitly resumed corrected readback and the vkQuake launch.
 
-## Resume and acceptance
+## Reproduction
 
 From PS5_Vulkan:
 
 ```sh
-git apply --check parked/r16-mip-tail.patch
-git apply parked/r16-mip-tail.patch
 bash tools/build-driver.sh
 PS5VK_SHADER_CACHE_DIR="$PWD/build/host-regression-cache" bash tools/check-driver.sh c7_mip_upload c7_tiled_mip c7_copy c7_blit_formats c4_texture
 bash build/gates.sh
@@ -71,3 +69,18 @@ Require all four pinned mip frames and all independent CPU checks to pass,
 no refusal, correct PID, exact replay, and idle closure. Do not overwrite the
 failed goldens. Only then accept the driver change, relink/deploy vkQuake by
 content, and run it to find the next measured M6 issue.
+
+## 2026-09-22 — Corrected hardware acceptance
+
+PS5 PID 207: 277 PASS, zero FAIL, all three queued cases PASS. All four pinned
+lower mip frames matched 8,294,400/8,294,400 pixels. The independent CPU check
+matched all 87,040 lower texels in each frame. Ten captured submissions replay
+exactly (six C7 upload, four R16 blit). Known benign VideoOut unregister-busy
+warning; title closed and count=0 confirmed. Evidence is
+../../golden/r16-mip-blit-corrected; the earlier failed evidence is retained.
+
+Explicit rebuild reproduces candidate-archive.txt byte-for-byte. Fifteen
+check-driver arms, cache checks, all eleven gates, port five gates, shader scan
+and template relink passed before launch. Two deployed ELF reads and all five
+PT_LOAD segments matched. The actual source change is now accepted; the parked
+patch remains available in checkpoint edb8ebd. Next: relink and launch vkQuake.
