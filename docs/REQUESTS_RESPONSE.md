@@ -1231,3 +1231,28 @@ and all five PT_LOAD segments match local content. No visual settings changed.
 Source is accepted; checkpoint edb8ebd retains the original parked patch.
 Evidence: golden/r16-mip-blit-corrected; reproduction: jobs/r16-mip-blit/README.md.
 This accepts mip transfer/sampling, not M6. vkQuake relink/launch follows.
+
+
+## 2026-09-22 — R16 vkQuake consumption, PID 208
+
+Port identity b6a1e9540a03996b94a42346de7e0868fb339b883ea0ddab6e84d1407c6f126f
+links accepted driver c7f6f95; port five gates and shader scan PASS, two deployed
+ELF reads match all PT_LOAD segments. PID 208 presents and reaches the Necropolis
+map recording. Previous tiled-chain blit, dynamic-offset and indirect-stride
+failures are absent. New named refusals: set 0 binding 2 holds three descriptors;
+set 0 binding 0 needs a padded pitch of 256 texels beyond current custom-pitch
+coverage. EndCommandBuffer returns -13; Quake exits 1 and takes the known SIGSYS
+exit path. No stable-map/input/audio acceptance.
+
+The lightmap compute layout declares three sampled images at binding 2. R17
+must implement shared per-element storage/write/copy/emission and prove distinct
+entries on host and PS5; removing its guard alone is insufficient. R18 first
+needs the padded image's extent/format/mips/layers, absent from the refusal,
+then a measured descriptor/layout probe. Do not assume which condition failed.
+Port docs/PS5_VULKAN_REQUESTS.md records the precise next witnesses.
+
+Two final trace reads agree: SHA-256
+49f3bf8d243b8a07d8b9dcc63afd757bff1656f9a36bd334bc32e030c22a5fd4;
+kernel PID 208 matches. Two-minute harness finishes count=0, console idle.
+Evidence: ../PS5_vkQuake/evidence/m2-r16-map-recording (24 captures, zero
+replay failures). On-screen question pending; no new visual acceptance claimed.

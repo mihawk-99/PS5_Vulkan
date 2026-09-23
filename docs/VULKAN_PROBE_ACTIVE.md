@@ -47,7 +47,12 @@ Fifteen host/link arms, eleven gates, port five gates/scan and template relink
 PASS. Archive 14,428,778 bytes, SHA-256 8d5206d5… . Evidence/reproduction:
 jobs/r16-mip-blit and golden/r16-mip-blit-corrected. Failed PID 206 and the
 separate correction to earlier centre-only C7 coverage remain preserved.
-User requested vkQuake relink and launch next; port result is pending.
+vkQuake relink/launch completed: PID 208, identity b6a1e954…, first present
+success, then new descriptor-array (three sampled images) and padded-pitch
+(256 texels) recording refusals. Prior stride/offset/tiled-blit failures absent.
+EndCommandBuffer -13; exit 1 then known SIGSYS. Both trace reads agree; console
+idle. Port evidence/m2-r16-map-recording names the next R17/R18 witnesses.
+Full padded-image shape is not yet measured. M6 remains open.
 
 **Port M2 met:** PID 197, QueuePresent success and human-confirmed Quake
 menu/console; port evidence/m2-first-frame. M3–M6 remain open. Input/audio
