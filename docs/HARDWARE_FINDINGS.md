@@ -3255,3 +3255,18 @@ cases use linear mip filtering; all 66,355,200 pixels match without tolerance.
 The encoding follows public Mesa ac_build_sampler_descriptor. This covers the
 driver's advertised +/-2 range endpoints and the fractions used here, not an
 exhaustive test of every fractional bit pattern. jobs/r26-lod-bias holds evidence.
+
+## 2026-09-23 — a system call costs ~20 us; colour targets need no blanket flush
+
+R34's cost probe (port evidence m6-r34-cost-probe), 10,000 calls each on the
+console: clock_gettime 20.3 us, getpid 20.1 us, sceKernelReadTsc 11.8 ns,
+sceKernelGetProcessTimeCounter 12.1 ns, an uncontended mutex pair 16.3 ns. The
+TSC ticks at the reported 1,596,300,232 Hz (32,167,462 ticks over 20.150 ms).
+Anything on a per-frame path that enters the kernel pays ~20 us. Whether this is
+the firmware or the homebrew environment is not known.
+
+R37 (jobs/r37-mapped-flush): with every CPU access to a colour target going
+through driver paths that flush what they write and invalidate what they read,
+the per-step whole-target flush is needed only for memory the application maps;
+the full runner battery is identical with and without it. The completion marker
+of a vkQuake step is written within ~0.15 ms of the submission (R38).
