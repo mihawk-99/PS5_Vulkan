@@ -980,7 +980,7 @@ ps5vk_compile_worker(void *argument)
  * before this existed -- so a platform that refuses one of them keeps working
  * and the fault stays a possibility rather than becoming a new failure. */
 static PsbcResult
-ps5vk_compile_shader_uncached(struct nir_shader *nir, const uint32_t *words, size_t size,
+ps5vk_compile_shader_uncached_untimed(struct nir_shader *nir, const uint32_t *words, size_t size,
                           const PsbcCompileOptions *options, PsbcShaderOutput *output,
                           bool *aborted)
 {
@@ -1028,6 +1028,18 @@ ps5vk_compile_shader_uncached(struct nir_shader *nir, const uint32_t *words, siz
    if (aborted != NULL)
       *aborted = call.aborted;
    return call.result;
+}
+
+/* Timed for the hitch report (ps5vk_queue.c). */
+static PsbcResult
+ps5vk_compile_shader_uncached(struct nir_shader *nir, const uint32_t *words, size_t size,
+                          const PsbcCompileOptions *options, PsbcShaderOutput *output,
+                          bool *aborted)
+{
+   const uint64_t hitch = ps5vk_hitch_begin();
+   const PsbcResult result = ps5vk_compile_shader_uncached_untimed(nir, words, size, options, output, aborted);
+   ps5vk_hitch_end(PS5VK_HITCH_COMPILE, hitch);
+   return result;
 }
 
 /* Both callers hold ps5vk_compile_mutex. Only immutable compiler output is
@@ -2001,8 +2013,8 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
    return VK_SUCCESS;
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL
-ps5vk_CreateGraphicsPipelines(VkDevice _device, VkPipelineCache pipelineCache, uint32_t createInfoCount,
+static VkResult
+ps5vk_CreateGraphicsPipelines_untimed(VkDevice _device, VkPipelineCache pipelineCache, uint32_t createInfoCount,
                               const VkGraphicsPipelineCreateInfo *pCreateInfos,
                               const VkAllocationCallbacks *pAllocator, VkPipeline *pPipelines)
 {
@@ -2024,6 +2036,18 @@ ps5vk_CreateGraphicsPipelines(VkDevice _device, VkPipelineCache pipelineCache, u
    }
    for (; index < createInfoCount; index++)
       pPipelines[index] = VK_NULL_HANDLE;
+   return result;
+}
+
+/* Timed for the hitch report (ps5vk_queue.c). */
+VKAPI_ATTR VkResult VKAPI_CALL
+ps5vk_CreateGraphicsPipelines(VkDevice _device, VkPipelineCache pipelineCache, uint32_t createInfoCount,
+                              const VkGraphicsPipelineCreateInfo *pCreateInfos,
+                              const VkAllocationCallbacks *pAllocator, VkPipeline *pPipelines)
+{
+   const uint64_t hitch = ps5vk_hitch_begin();
+   const VkResult result = ps5vk_CreateGraphicsPipelines_untimed(_device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+   ps5vk_hitch_end(PS5VK_HITCH_PIPELINE, hitch);
    return result;
 }
 

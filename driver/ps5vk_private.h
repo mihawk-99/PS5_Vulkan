@@ -188,6 +188,27 @@ struct ps5vk_pipeline_cache {
  * first PS5VK_MAX_SUBMISSION_STEPS of them, which is what the capture reports. */
 #define PS5VK_MAX_SUBMISSION_STEPS 8
 
+/* What the hitch report counts per frame (ps5vk_queue.c): entry points that
+ * create or allocate, and the shader compiles that miss the cache. Counted
+ * process-wide with atomics, only while the profile is armed. */
+enum ps5vk_hitch_kind {
+   PS5VK_HITCH_PIPELINE,
+   PS5VK_HITCH_COMPILE,
+   PS5VK_HITCH_MEMORY,
+   PS5VK_HITCH_IMAGE,
+   PS5VK_HITCH_BUFFER,
+   PS5VK_HITCH_DESCRIPTOR,
+   PS5VK_HITCH_SHADER_MODULE,
+   PS5VK_HITCH_KINDS
+};
+
+/* 0 when the profile is not armed; otherwise the time, for ps5vk_hitch_end. */
+uint64_t
+ps5vk_hitch_begin(void);
+
+void
+ps5vk_hitch_end(enum ps5vk_hitch_kind kind, uint64_t begun);
+
 /* Which application stretch a gap belongs to: the time between one of the
  * instrumented Vulkan entry points returning and the next one being entered
  * (ps5vk_queue.c). It splits the application's own CPU time the way the queue
@@ -255,6 +276,11 @@ struct ps5vk_queue_profile {
     * and what one os_time_get_nano costs (measured once when profiling is
     * enabled), which bounds how much the probes themselves add to a frame. */
    uint64_t report_write_ns, clock_ns_x1000;
+   /* The previous present's snapshot of the window's running totals and of the
+    * hitch counters, so a slow frame's own share can be reported. */
+   uint64_t frame_app_ns, frame_queue_ns, frame_copy_ns, frame_flip_ns;
+   uint64_t frame_hitch_calls[PS5VK_HITCH_KINDS], frame_hitch_ns[PS5VK_HITCH_KINDS];
+   uint64_t hitches, hitch_lines;
    uint64_t gap_from_ns, interval_from_ns;
    unsigned gap_slot;
    uint64_t flip_status_calls, flip_status_ns, flip_vblank_waits, flip_vblank_ns;

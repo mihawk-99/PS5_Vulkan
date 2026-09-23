@@ -102,6 +102,78 @@
  * long reads as application work. */
 static _Thread_local uint64_t ps5vk_profile_call_from;
 
+/* The hitch counters: process-wide, because the calls they count reach no
+ * queue, and armed with the profile. */
+static bool ps5vk_hitch_armed;
+static uint64_t ps5vk_hitch_calls[PS5VK_HITCH_KINDS];
+static uint64_t ps5vk_hitch_ns[PS5VK_HITCH_KINDS];
+static const char *const ps5vk_hitch_names[PS5VK_HITCH_KINDS] = {
+   "pipelines", "compiles", "memory", "images", "buffers", "descriptors", "modules",
+};
+
+uint64_t
+ps5vk_hitch_begin(void)
+{
+   return ps5vk_hitch_armed ? ps5vk_profile_now() : 0;
+}
+
+void
+ps5vk_hitch_end(enum ps5vk_hitch_kind kind, uint64_t begun)
+{
+   if (begun == 0)
+      return;
+   p_atomic_inc(&ps5vk_hitch_calls[kind]);
+   p_atomic_add(&ps5vk_hitch_ns[kind], ps5vk_profile_now() - begun);
+}
+
+/* A present whose period exceeds this is a hitch, and gets a line of its own:
+ * that frame's share of the application, queue, copy and flip time and of
+ * every hitch counter. At most this many lines a window, each one write. */
+#define PS5VK_HITCH_NS UINT64_C(40000000)
+#define PS5VK_HITCH_LINES 20
+
+static void
+ps5vk_hitch_frame(struct ps5vk_queue_profile *p, uint64_t period)
+{
+   const uint64_t app = p->app_pre_submit_ns + p->app_pre_present_ns;
+   uint64_t calls[PS5VK_HITCH_KINDS], ns[PS5VK_HITCH_KINDS];
+   for (unsigned k = 0; k < PS5VK_HITCH_KINDS; k++) {
+      calls[k] = p_atomic_read(&ps5vk_hitch_calls[k]);
+      ns[k] = p_atomic_read(&ps5vk_hitch_ns[k]);
+   }
+   if (period > PS5VK_HITCH_NS) {
+      p->hitches++;
+      if (p->hitch_lines < PS5VK_HITCH_LINES) {
+         p->hitch_lines++;
+         char line[512];
+         int at = snprintf(line, sizeof(line),
+                           "[ps5vk] hitch period_ms=%.3f app_ms=%.3f queue_ms=%.3f copy_ms=%.3f "
+                           "flip_ms=%.3f",
+                           (double)period / 1e6, (double)(app - p->frame_app_ns) / 1e6,
+                           (double)(p->queue_ns - p->frame_queue_ns) / 1e6,
+                           (double)(p->copy_ns - p->frame_copy_ns) / 1e6,
+                           (double)(p->flip_ns - p->frame_flip_ns) / 1e6);
+         for (unsigned k = 0; k < PS5VK_HITCH_KINDS && at > 0 && (size_t)at < sizeof(line); k++)
+            at += snprintf(line + at, sizeof(line) - (size_t)at, " %s=%" PRIu64 "/%.3fms",
+                           ps5vk_hitch_names[k], calls[k] - p->frame_hitch_calls[k],
+                           (double)(ns[k] - p->frame_hitch_ns[k]) / 1e6);
+         if (at > 0 && (size_t)at < sizeof(line) - 1) {
+            line[at++] = '\n';
+            fflush(stderr);
+            const int descriptor = fileno(stderr);
+            if (descriptor >= 0)
+               (void)!write(descriptor, line, (size_t)at);
+         }
+      }
+   }
+   p->frame_app_ns = app;
+   p->frame_queue_ns = p->queue_ns;
+   p->frame_copy_ns = p->copy_ns;
+   p->frame_flip_ns = p->flip_ns;
+   memcpy(p->frame_hitch_calls, calls, sizeof(calls));
+   memcpy(p->frame_hitch_ns, ns, sizeof(ns));
+}
+
 uint64_t
 ps5vk_profile_now(void)
 {
@@ -1592,7 +1664,7 @@ ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now, char *l
             "call_begin_ms=%.3f call_end_ms=%.3f named_ms=%.3f unnamed_ms=%.3f "
             "draws/frame=%.1f begins/frame=%.1f call_draw_ms=%.3f between_draws_ms=%.3f "
             "secondary_begins/frame=%.1f call_begin_secondary_ms=%.3f resets/frame=%.1f "
-            "reset_common_ms=%.3f reset_driver_ms=%.3f last_write_ms=%.3f clock_ns=%.1f "
+            "reset_common_ms=%.3f reset_driver_ms=%.3f last_write_ms=%.3f clock_ns=%.1f hitches=%" PRIu64 " "
             "executes/frame=%.1f executed/frame=%.1f call_execute_ms=%.3f "
             "presents=%" PRIu64 "/%" PRIu64
             " periods=%s elapsed_ms=%.0f\n",
@@ -1626,6 +1698,7 @@ ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now, char *l
             p->frames != 0 ? (double)p->resets / (double)p->frames : 0.0,
             p->reset_common_ns * per_present, p->reset_driver_ns * per_present,
             (double)p->report_write_ns / 1000000.0, (double)p->clock_ns_x1000 / 1000.0,
+            p->hitches,
             p->frames != 0 ? (double)p->execute_calls / (double)p->frames : 0.0,
             p->frames != 0 ? (double)p->execute_buffers / (double)p->frames : 0.0,
             p->execute_ns * per_present,
@@ -1733,6 +1806,7 @@ ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, in
                   p->present_gap_min_ns = gap;
                if (gap > p->present_gap_max_ns)
                   p->present_gap_max_ns = gap;
+               ps5vk_hitch_frame(p, gap);
                p->present_period[bucket < PS5VK_PERIOD_BUCKETS ? bucket
                                                                : PS5VK_PERIOD_BUCKETS - 1]++;
             }
@@ -1755,12 +1829,19 @@ ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, in
                }
                /* last_return_ns and last_present_ns carry across a window: the
                 * first interval after one is still a real one. */
+               /* The hitch counters are process-wide and cumulative, so their
+                * snapshot outlives the window. */
+               uint64_t hitch_calls[PS5VK_HITCH_KINDS], hitch_ns[PS5VK_HITCH_KINDS];
+               memcpy(hitch_calls, p->frame_hitch_calls, sizeof(hitch_calls));
+               memcpy(hitch_ns, p->frame_hitch_ns, sizeof(hitch_ns));
                *p = (struct ps5vk_queue_profile){.enabled = true,
                                                  .since = now,
                                                  .last_return_ns = now,
                                                  .last_present_ns = now,
                                                  .report_write_ns = p->report_write_ns,
                                                  .clock_ns_x1000 = p->clock_ns_x1000};
+               memcpy(p->frame_hitch_calls, hitch_calls, sizeof(hitch_calls));
+               memcpy(p->frame_hitch_ns, hitch_ns, sizeof(hitch_ns));
             }
          }
          return VK_SUCCESS;
@@ -2098,8 +2179,10 @@ ps5vk_queue_init(struct ps5vk_device *device, struct ps5vk_queue *queue,
                                                  getenv("PS5VK_PROFILE") != NULL};
    if (profile)
       fclose(profile);
-   if (queue->profile.enabled)
+   if (queue->profile.enabled) {
       ps5vk_queue_probe_costs(&queue->profile);
+      ps5vk_hitch_armed = true;
+   }
    queue->marker_value = 0;
    queue->last_words = 0;
    queue->last_stream = NULL;

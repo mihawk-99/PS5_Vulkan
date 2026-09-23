@@ -340,8 +340,8 @@ static VkResult ps5vk_compute_pipeline_create(struct ps5vk_device *device,
    return VK_SUCCESS;
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL
-ps5vk_CreateComputePipelines(
+static VkResult
+ps5vk_CreateComputePipelines_untimed(
    VkDevice _device, VkPipelineCache pipelineCache, uint32_t createInfoCount,
    const VkComputePipelineCreateInfo *pCreateInfos, const VkAllocationCallbacks *pAllocator,
    VkPipeline *pPipelines)
@@ -365,6 +365,19 @@ ps5vk_CreateComputePipelines(
    }
    for (; index < createInfoCount; index++)
       pPipelines[index] = VK_NULL_HANDLE;
+   return result;
+}
+
+/* Timed for the hitch report (ps5vk_queue.c). */
+VKAPI_ATTR VkResult VKAPI_CALL
+ps5vk_CreateComputePipelines(
+   VkDevice _device, VkPipelineCache pipelineCache, uint32_t createInfoCount,
+   const VkComputePipelineCreateInfo *pCreateInfos, const VkAllocationCallbacks *pAllocator,
+   VkPipeline *pPipelines)
+{
+   const uint64_t hitch = ps5vk_hitch_begin();
+   const VkResult result = ps5vk_CreateComputePipelines_untimed(_device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+   ps5vk_hitch_end(PS5VK_HITCH_PIPELINE, hitch);
    return result;
 }
 

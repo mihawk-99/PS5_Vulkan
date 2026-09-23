@@ -1058,8 +1058,8 @@ ps5vk_image_storage(const VkImageCreateInfo *info, enum ps5vk_image_storage *sto
    *alignment = PS5VK_ROW_ALIGNMENT;
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL
-ps5vk_CreateImage(VkDevice _device, const VkImageCreateInfo *pCreateInfo,
+static VkResult
+ps5vk_CreateImage_untimed(VkDevice _device, const VkImageCreateInfo *pCreateInfo,
                   const VkAllocationCallbacks *pAllocator, VkImage *pImage)
 {
    VK_FROM_HANDLE(ps5vk_device, device, _device);
@@ -1123,6 +1123,17 @@ ps5vk_CreateImage(VkDevice _device, const VkImageCreateInfo *pCreateInfo,
    return VK_SUCCESS;
 }
 
+/* Timed for the hitch report (ps5vk_queue.c). */
+VKAPI_ATTR VkResult VKAPI_CALL
+ps5vk_CreateImage(VkDevice _device, const VkImageCreateInfo *pCreateInfo,
+                  const VkAllocationCallbacks *pAllocator, VkImage *pImage)
+{
+   const uint64_t hitch = ps5vk_hitch_begin();
+   const VkResult result = ps5vk_CreateImage_untimed(_device, pCreateInfo, pAllocator, pImage);
+   ps5vk_hitch_end(PS5VK_HITCH_IMAGE, hitch);
+   return result;
+}
+
 VKAPI_ATTR void VKAPI_CALL
 ps5vk_DestroyImage(VkDevice _device, VkImage _image, const VkAllocationCallbacks *pAllocator)
 {
@@ -1180,8 +1191,8 @@ ps5vk_BindImageMemory2(VkDevice _device, uint32_t bindInfoCount,
 
 /* Image views are Mesa's common objects; rendering reads their image, format,
  * type and levels (ps5vk_draw.c). */
-VKAPI_ATTR VkResult VKAPI_CALL
-ps5vk_CreateImageView(VkDevice _device, const VkImageViewCreateInfo *pCreateInfo,
+static VkResult
+ps5vk_CreateImageView_untimed(VkDevice _device, const VkImageViewCreateInfo *pCreateInfo,
                       const VkAllocationCallbacks *pAllocator, VkImageView *pView)
 {
    VK_FROM_HANDLE(ps5vk_device, device, _device);
@@ -1191,6 +1202,17 @@ ps5vk_CreateImageView(VkDevice _device, const VkImageViewCreateInfo *pCreateInfo
       return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
    *pView = vk_image_view_to_handle(view);
    return VK_SUCCESS;
+}
+
+/* Timed for the hitch report (ps5vk_queue.c). */
+VKAPI_ATTR VkResult VKAPI_CALL
+ps5vk_CreateImageView(VkDevice _device, const VkImageViewCreateInfo *pCreateInfo,
+                      const VkAllocationCallbacks *pAllocator, VkImageView *pView)
+{
+   const uint64_t hitch = ps5vk_hitch_begin();
+   const VkResult result = ps5vk_CreateImageView_untimed(_device, pCreateInfo, pAllocator, pView);
+   ps5vk_hitch_end(PS5VK_HITCH_IMAGE, hitch);
+   return result;
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -1226,8 +1248,8 @@ ps5vk_sampler_unsigned_lod(float value)
 /* vkCreateSampler. Only the state the console's M3 texture canary ran is
  * accepted, and every refusal names C4, the step a runner probe that widens it
  * belongs to (docs/M5_REFERENCE.md). */
-VKAPI_ATTR VkResult VKAPI_CALL
-ps5vk_CreateSampler(VkDevice _device, const VkSamplerCreateInfo *pCreateInfo,
+static VkResult
+ps5vk_CreateSampler_untimed(VkDevice _device, const VkSamplerCreateInfo *pCreateInfo,
                     const VkAllocationCallbacks *pAllocator, VkSampler *pSampler)
 {
    VK_FROM_HANDLE(ps5vk_device, device, _device);
@@ -1383,6 +1405,17 @@ ps5vk_CreateSampler(VkDevice _device, const VkSamplerCreateInfo *pCreateInfo,
 
    *pSampler = ps5vk_sampler_to_handle(sampler);
    return VK_SUCCESS;
+}
+
+/* Timed for the hitch report (ps5vk_queue.c). */
+VKAPI_ATTR VkResult VKAPI_CALL
+ps5vk_CreateSampler(VkDevice _device, const VkSamplerCreateInfo *pCreateInfo,
+                    const VkAllocationCallbacks *pAllocator, VkSampler *pSampler)
+{
+   const uint64_t hitch = ps5vk_hitch_begin();
+   const VkResult result = ps5vk_CreateSampler_untimed(_device, pCreateInfo, pAllocator, pSampler);
+   ps5vk_hitch_end(PS5VK_HITCH_IMAGE, hitch);
+   return result;
 }
 
 VKAPI_ATTR void VKAPI_CALL

@@ -16,8 +16,8 @@
 
 #include "vk_alloc.h"
 
-VKAPI_ATTR VkResult VKAPI_CALL
-ps5vk_CreateShaderModule(VkDevice _device, const VkShaderModuleCreateInfo *pCreateInfo,
+static VkResult
+ps5vk_CreateShaderModule_untimed(VkDevice _device, const VkShaderModuleCreateInfo *pCreateInfo,
                          const VkAllocationCallbacks *pAllocator, VkShaderModule *pShaderModule)
 {
    VK_FROM_HANDLE(ps5vk_device, device, _device);
@@ -34,6 +34,17 @@ ps5vk_CreateShaderModule(VkDevice _device, const VkShaderModuleCreateInfo *pCrea
 
    *pShaderModule = ps5vk_shader_module_to_handle(module);
    return VK_SUCCESS;
+}
+
+/* Timed for the hitch report (ps5vk_queue.c). */
+VKAPI_ATTR VkResult VKAPI_CALL
+ps5vk_CreateShaderModule(VkDevice _device, const VkShaderModuleCreateInfo *pCreateInfo,
+                         const VkAllocationCallbacks *pAllocator, VkShaderModule *pShaderModule)
+{
+   const uint64_t hitch = ps5vk_hitch_begin();
+   const VkResult result = ps5vk_CreateShaderModule_untimed(_device, pCreateInfo, pAllocator, pShaderModule);
+   ps5vk_hitch_end(PS5VK_HITCH_SHADER_MODULE, hitch);
+   return result;
 }
 
 VKAPI_ATTR void VKAPI_CALL

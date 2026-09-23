@@ -38,8 +38,8 @@ ps5vk_device_memory_release(struct ps5vk_device *device, struct ps5vk_device_mem
    p_atomic_dec(&device->memory_allocation_count);
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL
-ps5vk_AllocateMemory(VkDevice _device, const VkMemoryAllocateInfo *pAllocateInfo,
+static VkResult
+ps5vk_AllocateMemory_untimed(VkDevice _device, const VkMemoryAllocateInfo *pAllocateInfo,
                      const VkAllocationCallbacks *pAllocator, VkDeviceMemory *pMemory)
 {
    VK_FROM_HANDLE(ps5vk_device, device, _device);
@@ -76,13 +76,33 @@ ps5vk_AllocateMemory(VkDevice _device, const VkMemoryAllocateInfo *pAllocateInfo
    return VK_SUCCESS;
 }
 
-VKAPI_ATTR void VKAPI_CALL
-ps5vk_FreeMemory(VkDevice _device, VkDeviceMemory _memory, const VkAllocationCallbacks *pAllocator)
+/* Timed for the hitch report (ps5vk_queue.c). */
+VKAPI_ATTR VkResult VKAPI_CALL
+ps5vk_AllocateMemory(VkDevice _device, const VkMemoryAllocateInfo *pAllocateInfo,
+                     const VkAllocationCallbacks *pAllocator, VkDeviceMemory *pMemory)
+{
+   const uint64_t hitch = ps5vk_hitch_begin();
+   const VkResult result = ps5vk_AllocateMemory_untimed(_device, pAllocateInfo, pAllocator, pMemory);
+   ps5vk_hitch_end(PS5VK_HITCH_MEMORY, hitch);
+   return result;
+}
+
+static void
+ps5vk_FreeMemory_untimed(VkDevice _device, VkDeviceMemory _memory, const VkAllocationCallbacks *pAllocator)
 {
    VK_FROM_HANDLE(ps5vk_device, device, _device);
    VK_FROM_HANDLE(ps5vk_device_memory, memory, _memory);
    if (memory)
       ps5vk_device_memory_release(device, memory, pAllocator);
+}
+
+/* Timed for the hitch report (ps5vk_queue.c). */
+VKAPI_ATTR void VKAPI_CALL
+ps5vk_FreeMemory(VkDevice _device, VkDeviceMemory _memory, const VkAllocationCallbacks *pAllocator)
+{
+   const uint64_t hitch = ps5vk_hitch_begin();
+   ps5vk_FreeMemory_untimed(_device, _memory, pAllocator);
+   ps5vk_hitch_end(PS5VK_HITCH_MEMORY, hitch);
 }
 
 VKAPI_ATTR void VKAPI_CALL

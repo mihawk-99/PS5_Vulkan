@@ -132,8 +132,8 @@ ps5vk_cmd_buffer_descriptor(const struct ps5vk_cmd_buffer *cmd_buffer, uint32_t 
    return buffer->type == VK_DESCRIPTOR_TYPE_MAX_ENUM ? NULL : buffer;
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL
-ps5vk_CreateDescriptorPool(VkDevice _device, const VkDescriptorPoolCreateInfo *pCreateInfo,
+static VkResult
+ps5vk_CreateDescriptorPool_untimed(VkDevice _device, const VkDescriptorPoolCreateInfo *pCreateInfo,
                            const VkAllocationCallbacks *pAllocator,
                            VkDescriptorPool *pDescriptorPool)
 {
@@ -166,6 +166,18 @@ ps5vk_CreateDescriptorPool(VkDevice _device, const VkDescriptorPoolCreateInfo *p
    return VK_SUCCESS;
 }
 
+/* Timed for the hitch report (ps5vk_queue.c). */
+VKAPI_ATTR VkResult VKAPI_CALL
+ps5vk_CreateDescriptorPool(VkDevice _device, const VkDescriptorPoolCreateInfo *pCreateInfo,
+                           const VkAllocationCallbacks *pAllocator,
+                           VkDescriptorPool *pDescriptorPool)
+{
+   const uint64_t hitch = ps5vk_hitch_begin();
+   const VkResult result = ps5vk_CreateDescriptorPool_untimed(_device, pCreateInfo, pAllocator, pDescriptorPool);
+   ps5vk_hitch_end(PS5VK_HITCH_DESCRIPTOR, hitch);
+   return result;
+}
+
 VKAPI_ATTR void VKAPI_CALL
 ps5vk_DestroyDescriptorPool(VkDevice _device, VkDescriptorPool _descriptorPool,
                             const VkAllocationCallbacks *pAllocator)
@@ -195,8 +207,8 @@ ps5vk_ResetDescriptorPool(VkDevice _device, VkDescriptorPool _descriptorPool,
    return VK_SUCCESS;
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL
-ps5vk_AllocateDescriptorSets(VkDevice _device, const VkDescriptorSetAllocateInfo *pAllocateInfo,
+static VkResult
+ps5vk_AllocateDescriptorSets_untimed(VkDevice _device, const VkDescriptorSetAllocateInfo *pAllocateInfo,
                              VkDescriptorSet *pDescriptorSets)
 {
    VK_FROM_HANDLE(ps5vk_device, device, _device);
@@ -249,6 +261,17 @@ ps5vk_AllocateDescriptorSets(VkDevice _device, const VkDescriptorSetAllocateInfo
          pDescriptorSets[allocated] = VK_NULL_HANDLE;
       }
    }
+   return result;
+}
+
+/* Timed for the hitch report (ps5vk_queue.c). */
+VKAPI_ATTR VkResult VKAPI_CALL
+ps5vk_AllocateDescriptorSets(VkDevice _device, const VkDescriptorSetAllocateInfo *pAllocateInfo,
+                             VkDescriptorSet *pDescriptorSets)
+{
+   const uint64_t hitch = ps5vk_hitch_begin();
+   const VkResult result = ps5vk_AllocateDescriptorSets_untimed(_device, pAllocateInfo, pDescriptorSets);
+   ps5vk_hitch_end(PS5VK_HITCH_DESCRIPTOR, hitch);
    return result;
 }
 
@@ -392,8 +415,8 @@ ps5vk_descriptor_set_copy(struct ps5vk_device *device, const VkCopyDescriptorSet
            copy->descriptorCount * sizeof(source->buffers[0]));
 }
 
-VKAPI_ATTR void VKAPI_CALL
-ps5vk_UpdateDescriptorSets(VkDevice _device, uint32_t descriptorWriteCount,
+static void
+ps5vk_UpdateDescriptorSets_untimed(VkDevice _device, uint32_t descriptorWriteCount,
                            const VkWriteDescriptorSet *pDescriptorWrites,
                            uint32_t descriptorCopyCount,
                            const VkCopyDescriptorSet *pDescriptorCopies)
@@ -403,6 +426,18 @@ ps5vk_UpdateDescriptorSets(VkDevice _device, uint32_t descriptorWriteCount,
       ps5vk_descriptor_set_write(device, &pDescriptorWrites[i]);
    for (uint32_t i = 0; i < descriptorCopyCount; i++)
       ps5vk_descriptor_set_copy(device, &pDescriptorCopies[i]);
+}
+
+/* Timed for the hitch report (ps5vk_queue.c). */
+VKAPI_ATTR void VKAPI_CALL
+ps5vk_UpdateDescriptorSets(VkDevice _device, uint32_t descriptorWriteCount,
+                           const VkWriteDescriptorSet *pDescriptorWrites,
+                           uint32_t descriptorCopyCount,
+                           const VkCopyDescriptorSet *pDescriptorCopies)
+{
+   const uint64_t hitch = ps5vk_hitch_begin();
+   ps5vk_UpdateDescriptorSets_untimed(_device, descriptorWriteCount, pDescriptorWrites, descriptorCopyCount, pDescriptorCopies);
+   ps5vk_hitch_end(PS5VK_HITCH_DESCRIPTOR, hitch);
 }
 
 /* vkCmdBindDescriptorSets reaches this through the runtime's common entry

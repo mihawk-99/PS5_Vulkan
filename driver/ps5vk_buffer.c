@@ -22,8 +22,8 @@
 #include "vk_alloc.h"
 #include "vk_util.h"
 
-VKAPI_ATTR VkResult VKAPI_CALL
-ps5vk_CreateBuffer(VkDevice _device, const VkBufferCreateInfo *pCreateInfo,
+static VkResult
+ps5vk_CreateBuffer_untimed(VkDevice _device, const VkBufferCreateInfo *pCreateInfo,
                    const VkAllocationCallbacks *pAllocator, VkBuffer *pBuffer)
 {
    VK_FROM_HANDLE(ps5vk_device, device, _device);
@@ -41,6 +41,17 @@ ps5vk_CreateBuffer(VkDevice _device, const VkBufferCreateInfo *pCreateInfo,
    device->buffers = buffer;
    *pBuffer = ps5vk_buffer_to_handle(buffer);
    return VK_SUCCESS;
+}
+
+/* Timed for the hitch report (ps5vk_queue.c). */
+VKAPI_ATTR VkResult VKAPI_CALL
+ps5vk_CreateBuffer(VkDevice _device, const VkBufferCreateInfo *pCreateInfo,
+                   const VkAllocationCallbacks *pAllocator, VkBuffer *pBuffer)
+{
+   const uint64_t hitch = ps5vk_hitch_begin();
+   const VkResult result = ps5vk_CreateBuffer_untimed(_device, pCreateInfo, pAllocator, pBuffer);
+   ps5vk_hitch_end(PS5VK_HITCH_BUFFER, hitch);
+   return result;
 }
 
 VKAPI_ATTR void VKAPI_CALL
