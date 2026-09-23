@@ -19,47 +19,21 @@ PIDs 202/203: first present 30.410/13.018 s, 99/0 compiles, 433/532 hits.
 Eight internal NIR stages still compile per launch. Exact evidence, cache rules
 and reproduction: jobs/shader-cache. M2 was human-confirmed earlier.
 
-R17/R18 descriptor arrays and padded mips pass (3be25f1/aafd697). R19 UINT32
-indices pass (8d11392): PID 216, 257 checks, full pixels and five strict replays.
-Game PID 217 then runs 180 seconds without refusal or Quake error. R20 d8080dc
-retires the old quarter-width diagnosis: its probe misread tiled bytes; corrected
-writer/reader match every pixel. Detailed evidence lives in each jobs/r*-*.
-
-Port native input opens DualSense; audio feeds 48 kHz stereo with no reported
-errors during repeated 300-second runs. Physical/audible acceptance is pending.
-R21 5925f03 adds default-off timing. R22 a85010a deduplicates identical target
-flushes: PID 224, 1,043 PASS, 14 exact replays. Game flush cost 7.872 -> 5.788 ms,
-without useful FPS gain. R23 4f8037f proves swapchain TRANSFER_SRC: PID 229,
-238 PASS, four entire-frame copies, 16 strict replays. Port PNG allocation and
-native shell exit are fixed; screenshots now provide actual console readback.
-All landed driver rounds have explicit builds, full host/cache and eleven gates,
-plus port gates/scan and template relinks. Per-round jobs retain exact proofs.
-R25 fixes depth/stencil state leaking into colour-only passes. PID 243 reproduces
-518,400 wrong overlay pixels; PID 244 has 439 PASS/zero FAIL for D32/D16 detach,
-original depth and swapchain readback. PID 245 stencil/bias regressions pass
-(including the intentional nonzero-clamp refusal). 24 new streams replay exactly.
-170 host/cache, eleven gates, port/template pass. Archive e172ce0f…. Evidence:
-jobs/r25-depth-detach. Port PID 246 now shows all tested HUD styles correctly.
-R26 fixes sampler LOD bias: game scaling requested bias 1 and previously exited.
-PID 250: 383 PASS/zero FAIL; eight complete frames match every pixel for signed
-and fractional bias, plus original mip tests. Twenty streams replay exactly.
-Full host/cache, eleven gates, port/template pass. Archive b83fc4ac….
-Evidence: jobs/r26-lod-bias. Port PID 251 scaling works; no FPS gain.
-R27 restores the blend-control assignment removed by cfab0b9. PID 256 reproduces
-full-frame alpha/constant-blend errors; PID 258 passes 285 checks, four exact
-4K alpha frames and constant blend. Five strict replays; 170 host/cache, eleven
-gates, port/template pass. Evidence: jobs/r27-menu-alpha. Port PID 259 verifies
-correct menu/HUD blending in five PNGs and normal exit.
-R28 splits CPU-copy/wait/signal timing. Game PID 261: start copy 24.095 ms,
-E1M1 copy 0.041 ms; both sync operations 0.021 ms each. Full gates/relinks and
-five profiler-enabled strict replays pass. jobs/r28-copy-profile records it.
-R29 common tile-address evaluation passes: PID 267 has 178 PASS, four complete
-4K mip frames and every generated mip texel correct; four strict replays.
-PID 268 has 3,501 PASS across mip/upload/copy/format regressions. Host checks
-compare 2,441,216 addresses against the old map and 144 random-colour blits.
-Full driver/cache, eleven gates, port/template pass. jobs/r29-tile-address.
-The earlier integer filter was rolled back: PID 265 copy 22.657 vs 24.095 ms,
-no FPS gain. Its patch and partial/full probe runs remain in the R29 job.
+R17-R29 are closed and each keeps its own proof in jobs/r*-*: descriptor arrays
+and padded mips (R17/R18 3be25f1/aafd697), UINT32 indices (R19 8d11392), the
+retired quarter-width diagnosis (R20 d8080dc), default-off timing (R21 5925f03),
+deduplicated target flushes (R22 a85010a, PID 224, 1,043 PASS, 14 replays; game
+flush 7.872 -> 5.788 ms with no useful FPS gain), swapchain TRANSFER_SRC (R23
+4f8037f, PID 229, four entire-frame copies), depth state leaking into colour-only
+passes (R25, PID 244), sampler LOD bias (R26, PID 250), the blend-control
+assignment (R27, PID 258), copy/wait/signal timing (R28, PID 261), and the common
+tile-address evaluation (R29 c3e51f6, PID 267/268, 3,501 regressions). Every
+landed round has an explicit build, the full host/cache suite, eleven gates, port
+gates/scan and template relinks. Port native input opens DualSense and audio feeds
+48 kHz stereo with no reported errors over repeated 300-second runs; physical and
+audible acceptance is still pending. Port PNG allocation and native shell exit are
+fixed, so screenshots give real console readback. R29's rolled-back integer filter
+(PID 265, copy 22.657 vs 24.095 ms, no FPS gain) stays in jobs/r29-tile-address.
 
 The earlier 09:24 UTC network outage ended before the verified manual deployment.
 Automated R29 benchmarking and movement/fire/save/load/all-map acceptance remain
