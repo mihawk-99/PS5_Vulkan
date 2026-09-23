@@ -188,10 +188,52 @@ struct ps5vk_pipeline_cache {
  * first PS5VK_MAX_SUBMISSION_STEPS of them, which is what the capture reports. */
 #define PS5VK_MAX_SUBMISSION_STEPS 8
 
+/* Which application stretch a gap belongs to: the time between one of three
+ * Vulkan entry points returning and the next one being entered (ps5vk_queue.c).
+ * It splits the application's own CPU time the way the queue timing splits the
+ * driver's, and the application reports nothing: vkAcquireNextImageKHR starts a
+ * frame's recording, vkQueueSubmit ends it, and vkQueuePresentKHR ends the
+ * frame, so the three gaps are "engine logic before the frame", "recording the
+ * frame" and "everything after the submission". */
+enum ps5vk_profile_slot {
+   PS5VK_PROFILE_AFTER_ACQUIRE = 0,
+   PS5VK_PROFILE_AFTER_SUBMIT,
+   PS5VK_PROFILE_AFTER_PRESENT,
+   PS5VK_PROFILE_SLOTS
+};
+
+/* The frame-period histogram's buckets: sixteen of 4 ms up to 64 ms, then a
+ * catch-all. 60 Hz puts a one-vblank frame in bucket 4, two in bucket 8 and four
+ * in bucket 16, so a period that clusters on bucket boundaries is a frame
+ * quantised to the refresh, not one whose work happens to take that long. */
+#define PS5VK_PERIOD_BUCKETS 17
+
 struct ps5vk_queue_profile {
    bool enabled;
    uint64_t since, frames, steps, queue_ns, flush_ns, gpu_ns, flip_ns, flush_bytes;
    uint64_t copy_ns, sync_wait_ns, sync_signal_ns;
+   /* R31 separates four things a mean frame time hides: the application's own
+    * CPU work before and after the submission, the submission call itself, the
+    * software polling that observes completion, and the presentation wait.
+    * app_pre_submit_ns + queue_ns + app_pre_present_ns + flip_ns is the frame
+    * period, so none of it is inferred by subtraction. Nothing here changes the
+    * submission, the flip or a wait; every sample is opt-in. */
+   uint64_t last_return_ns;  /* when the driver last handed control back */
+   uint64_t last_present_ns; /* when VideoOut last confirmed a flip */
+   uint64_t app_pre_submit_ns, app_pre_present_ns;
+   uint64_t submit_call_ns; /* SubmitDcb + SuspendPoint, with no polling */
+   uint64_t poll_ns, polls, poll_first_hits, submit_calls;
+   /* The application's own time, attributed by which instrumented entry point
+    * last handed control back (PS5VK_PROFILE_SLOTS). */
+   uint64_t gap_ns[PS5VK_PROFILE_SLOTS], gap_count[PS5VK_PROFILE_SLOTS];
+   uint64_t gap_from_ns, interval_from_ns;
+   unsigned gap_slot;
+   uint64_t flip_status_calls, flip_status_ns, flip_vblank_waits, flip_vblank_ns;
+   uint64_t flip_first_hits;
+   uint64_t present_gap_ns, present_gap_count, present_gap_min_ns, present_gap_max_ns;
+   /* One per swapchain image (PS5VK_SWAPCHAIN_IMAGES, ps5vk_wsi.c). */
+   uint64_t present_index[2];
+   uint32_t present_period[PS5VK_PERIOD_BUCKETS];
 };
 
 struct ps5vk_queue {
@@ -225,6 +267,15 @@ struct ps5vk_queue {
    size_t step_capture_words;
    struct ps5vk_queue_profile profile;
 };
+
+/* Closes the application stretch since the previous instrumented entry point
+ * left and opens this one's; ps5vk_profile_leave records when it handed control
+ * back. Both do nothing unless the queue's opt-in profiling is on. */
+void
+ps5vk_profile_enter(struct ps5vk_queue *queue, unsigned slot);
+
+void
+ps5vk_profile_leave(struct ps5vk_queue *queue, unsigned slot);
 
 /* One AGC register-table record: register offset and value. */
 struct ps5vk_agc_register {

@@ -35,9 +35,12 @@
 #include "ps5vk_private.h"
 
 #include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "util/log.h"
+#include "util/os_time.h"
 #include "vk_alloc.h"
 #include "vk_fence.h"
 #include "vk_semaphore.h"
@@ -312,6 +315,54 @@ struct ps5vk_video_out_buffer {
    void *reserved1;
 };
 
+/* R31: what the display's refresh actually is, measured rather than declared.
+ * The mode the driver reports is a constant; a configured refresh value is not
+ * evidence of scanout timing, and a throttled game's frame rate cannot give it
+ * either. A run of bare sceVideoOutWaitVblank calls with no flip pending
+ * returns once per refresh, so the interval between two returns is one refresh
+ * period and the spread says whether intervals are being skipped. The first
+ * call returns at the next vblank whatever the phase, so its interval is
+ * discarded. Opt-in through a file the fixture stages or an environment
+ * variable, and off by default: it delays startup by the refresh times the
+ * count below and measures nothing the rest of the driver uses. */
+#define PS5VK_VBLANK_PROBE_INTERVALS 60
+
+static void
+ps5vk_video_out_probe_vblank(int handle)
+{
+   FILE *flag = fopen("/app0/ps5vk-vblank-probe.txt", "rb");
+   const bool enabled = flag != NULL || getenv("PS5VK_VBLANK_PROBE") != NULL;
+   if (flag)
+      fclose(flag);
+   if (!enabled)
+      return;
+   if (sceVideoOutWaitVblank(handle) != 0)
+      return;
+   uint64_t previous = os_time_get_nano();
+   uint64_t sum = 0, low = UINT64_MAX, high = 0;
+   unsigned counted = 0;
+   for (unsigned interval = 0; interval < PS5VK_VBLANK_PROBE_INTERVALS; interval++) {
+      if (sceVideoOutWaitVblank(handle) != 0)
+         break;
+      const uint64_t now = os_time_get_nano();
+      const uint64_t delta = now - previous;
+      previous = now;
+      sum += delta;
+      low = MIN2(low, delta);
+      high = MAX2(high, delta);
+      counted++;
+   }
+   if (counted == 0) {
+      fprintf(stderr, "[ps5vk] vblank probe: no interval measured\n");
+      return;
+   }
+   const double mean = (double)sum / (double)counted;
+   fprintf(stderr, "[ps5vk] vblank probe intervals=%u mean_ms=%.4f min_ms=%.4f max_ms=%.4f "
+                   "spread_ms=%.4f equivalent_hz=%.3f\n",
+           counted, mean / 1000000.0, (double)low / 1000000.0, (double)high / 1000000.0,
+           (double)(high - low) / 1000000.0, mean > 0.0 ? 1e9 / mean : 0.0);
+}
+
 static void
 ps5vk_video_out_close(struct ps5vk_video_out *video)
 {
@@ -378,6 +429,7 @@ ps5vk_video_out_open(struct ps5vk_device *device, struct ps5vk_video_out *video)
                        "sceVideoOutRegisterBuffers2 failed: 0x%08x", (unsigned)result);
    }
    video->registered = true;
+   ps5vk_video_out_probe_vblank(video->handle);
    return VK_SUCCESS;
 }
 
@@ -591,7 +643,16 @@ ps5vk_AcquireNextImageKHR(VkDevice _device, VkSwapchainKHR _swapchain, uint64_t 
 {
    VK_FROM_HANDLE(ps5vk_device, device, _device);
    VK_FROM_HANDLE(ps5vk_swapchain, swapchain, _swapchain);
-   return ps5vk_swapchain_acquire(device, swapchain, timeout, semaphore, fence, pImageIndex);
+   /* The stretch attribution is the queue's (ps5vk_queue.c) and is a no-op
+    * unless its opt-in profiling is on; a queue-less device has none. */
+   struct ps5vk_queue *const queue = device->queue_initialized ? &device->queue : NULL;
+   if (queue)
+      ps5vk_profile_enter(queue, PS5VK_PROFILE_AFTER_ACQUIRE);
+   const VkResult result =
+      ps5vk_swapchain_acquire(device, swapchain, timeout, semaphore, fence, pImageIndex);
+   if (queue)
+      ps5vk_profile_leave(queue, PS5VK_PROFILE_AFTER_ACQUIRE);
+   return result;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL
@@ -600,8 +661,15 @@ ps5vk_AcquireNextImage2KHR(VkDevice _device, const VkAcquireNextImageInfoKHR *pA
 {
    VK_FROM_HANDLE(ps5vk_device, device, _device);
    VK_FROM_HANDLE(ps5vk_swapchain, swapchain, pAcquireInfo->swapchain);
-   return ps5vk_swapchain_acquire(device, swapchain, pAcquireInfo->timeout,
-                                  pAcquireInfo->semaphore, pAcquireInfo->fence, pImageIndex);
+   struct ps5vk_queue *const queue = device->queue_initialized ? &device->queue : NULL;
+   if (queue)
+      ps5vk_profile_enter(queue, PS5VK_PROFILE_AFTER_ACQUIRE);
+   const VkResult result = ps5vk_swapchain_acquire(device, swapchain, pAcquireInfo->timeout,
+                                                   pAcquireInfo->semaphore, pAcquireInfo->fence,
+                                                   pImageIndex);
+   if (queue)
+      ps5vk_profile_leave(queue, PS5VK_PROFILE_AFTER_ACQUIRE);
+   return result;
 }
 
 /* The more severe of two presentation results. */
@@ -621,6 +689,7 @@ ps5vk_QueuePresentKHR(VkQueue _queue, const VkPresentInfoKHR *pPresentInfo)
    VK_FROM_HANDLE(ps5vk_queue, queue, _queue);
    struct ps5vk_device *const device =
       container_of(queue->vk.base.device, struct ps5vk_device, vk);
+   ps5vk_profile_enter(queue, PS5VK_PROFILE_AFTER_PRESENT);
 
    /* Submission is synchronous, so the semaphores a present waits on were
     * signalled when their submissions returned; waiting confirms it, and the
@@ -653,6 +722,11 @@ ps5vk_QueuePresentKHR(VkQueue _queue, const VkPresentInfoKHR *pPresentInfo)
          pPresentInfo->pResults[i] = result;
       overall = ps5vk_present_result(overall, result);
    }
+   /* The frame ends here: the next submission's application stretch starts when
+    * this returns, not when the submission before the present did. */
+   if (queue->profile.enabled)
+      queue->profile.last_return_ns = os_time_get_nano();
+   ps5vk_profile_leave(queue, PS5VK_PROFILE_AFTER_PRESENT);
    return overall;
 }
 

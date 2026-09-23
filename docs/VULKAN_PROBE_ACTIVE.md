@@ -66,6 +66,34 @@ Automated R29 benchmarking and movement/fire/save/load/all-map acceptance remain
 paused during manual testing. Port build/r29b-* and build/r30-* hold the prepared
 artifacts; preserve existing saves/configs when automated work resumes.
 
+R31 adds default-off instrumentation for the four things the R28 means cannot
+separate: the application's own CPU time before and after a submission, the
+submission call itself apart from the polling that observes it, the software
+polling (unsuccessful marker checks per step, and whether the first check
+already saw the marker), and the presentation wait (flip-status calls, vblank
+waits with their durations, present-to-present period histogram, present marker
+slots). It also measures the display's real cadence with a run of bare
+sceVideoOutWaitVblank calls when /app0/ps5vk-vblank-probe.txt or
+PS5VK_VBLANK_PROBE opts in, and prints residual_ms, the sum of the four parts
+against the measured present period, so an incomplete attribution names itself
+instead of being averaged over. No packet, wait, flip or copy changes; with
+profiling off the golden replays are unchanged. Host build is clean, eleven
+gates and check-driver/shader-cache pass. Evidence: jobs/r31-frame-profile.
+
+The console is unreachable again (2026-09-23 12:36 UTC, no route to host on
+2121/3232/9111), so the R31 run and the R29 game baseline behind it are both
+pending. The 15-30 FPS estimate is still not an instrumented R29 benchmark, and
+R29's address change is still unmeasured against R28's game numbers.
+
+Watch this while reading R28/R29 as a work budget rather than an FPS: at E1M1
+the four R28 categories leave about 19.5 ms a frame the driver never sees, and
+the start map about 19.9 ms, almost identical across two very different scenes.
+If the period is pinned to a whole number of 60 Hz vblanks - 33.8 ms is two and
+67.5 ms is four - then no partial saving can raise FPS at all until the whole
+frame fits in one 16.667 ms interval, which is exactly what R22's 2 ms flush
+saving and R29's 1.4 ms copy saving both observed. R31's period histogram is
+what decides between that and a genuinely work-bound frame.
+
 During the earlier outage, a NIR-cache candidate reuses Mesa serialization and
 the existing output cache. Host fresh-process cold/warm/disabled outputs match;
 warm compilation count zero. Eight captured mip submissions replay exactly.

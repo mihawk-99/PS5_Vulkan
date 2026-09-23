@@ -1,0 +1,36 @@
+R31 host verification, 2026-09-23. No console run: the console was unreachable.
+
+Build
+  bash tools/build-driver.sh
+  23 sources compiled, 0 warnings, for host, ps5 and ps5-pic
+  build/driver/ps5/libps5vk.ps5.a 14492410 bytes
+    sha256 b7cc7e99b7be08fc6d9e200533a77515a94ba67bef8c4e6434bdf55901b2fc50
+  build/driver/ps5/libvulkan.so.1 16897760 bytes
+    sha256 d85ebf2b4fccac0c5a633e7eeae8b493eb0bf6565588d9d7666f0dfde4d52c1f
+  An earlier attempt of this build failed to compile two forward declarations,
+  and tools/build-driver.sh still exited 0 with the message above it. That it
+  failed was read from build/driver/build-host.log, not from the exit status.
+
+Gates - bash build/gates.sh, every log inspected for a FAIL line
+  lint test audit-commands audit-limits audit-formats migration mip-layout
+  psbc-link probe-packages vulkan-runtime runner-cases        all PASS
+  build/gates.sh prints PASS/FAIL itself and exits 0 either way, so its status
+  is not the evidence; build/gate-<name>.log is.
+
+Driver check - bash tools/check-driver.sh
+  loader, direct and PS5-link runs, negative cases (b3_window, b5_lost), every
+  golden submission replay and the c1 present test: PASS
+  "driver check: PASS"
+  This is what shows the instrumentation is inert with profiling off: the
+  replays compare recorded submission streams against the console runs.
+
+Shader cache - bash tools/check-shader-cache.sh
+  key participation, invalidation, corruption/truncation recovery, exact output,
+  fresh-process warm launch: PASS
+
+Port tools added alongside, none of them run on hardware yet
+  build/r29b-preserve.py     snapshot/restore of the user's console state
+  build/r29b-collect.py      read trace and screenshots twice, delete nothing
+  build/profile-metrics.py   per-phase means from a capture; reproduces
+                             jobs/r28-copy-profile/metrics.txt exactly
+  build/r29-run.sh           the whole console sequence, snapshot first

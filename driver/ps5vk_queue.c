@@ -73,6 +73,38 @@
 #define PS5VK_MARKER_POLLS 2000
 #define PS5VK_MARKER_POLL_MICROSECONDS 1000
 
+/* R31's attribution of the application's own time. Three entry points are
+ * enough to say which part of a frame the application spends its CPU on: the
+ * acquire starts a frame, the submit ends its recording, the present ends the
+ * frame. The gap closed here is the time between the previous one of these
+ * returning and this one being entered, so the three add up to the application
+ * time the queue and flip intervals do not cover. Nothing is reported by the
+ * application and nothing is measured unless profiling is opted into. */
+void
+ps5vk_profile_enter(struct ps5vk_queue *queue, unsigned slot)
+{
+   struct ps5vk_queue_profile *const p = &queue->profile;
+   if (!p->enabled)
+      return;
+   const uint64_t now = os_time_get_nano();
+   if (p->gap_from_ns != 0 && slot < PS5VK_PROFILE_SLOTS) {
+      p->gap_ns[p->gap_slot] += now - p->gap_from_ns;
+      p->gap_count[p->gap_slot]++;
+   }
+   p->gap_from_ns = 0;
+   p->gap_slot = slot < PS5VK_PROFILE_SLOTS ? slot : 0;
+}
+
+void
+ps5vk_profile_leave(struct ps5vk_queue *queue, unsigned slot)
+{
+   struct ps5vk_queue_profile *const p = &queue->profile;
+   if (!p->enabled || slot >= PS5VK_PROFILE_SLOTS)
+      return;
+   p->gap_from_ns = os_time_get_nano();
+   p->gap_slot = slot;
+}
+
 uint8_t
 ps5vk_agc_out_of_space(struct ps5vk_agc_command_buffer *buffer, uint32_t words, void *user_data)
 {
@@ -708,13 +740,23 @@ ps5vk_queue_run_step(struct ps5vk_queue *queue, const struct vk_queue_submit *su
    result = sceAgcSuspendPoint();
    if (result != 0)
       return vk_queue_set_lost(&queue->vk, "sceAgcSuspendPoint failed: 0x%08x", (unsigned)result);
+   /* Everything up to here is the submission call itself; the wait below is the
+    * driver's own polling, and the difference between the two is what says
+    * whether a "gpu" interval is the GPU or the check granularity. */
+   const uint64_t submitted = queue->profile.enabled ? os_time_get_nano() : 0;
 
    for (unsigned poll = 0; poll < PS5VK_MARKER_POLLS; poll++) {
       ps5vk_flush_cpu_cache(marker, sizeof(*marker));
       if (*marker == value) {
          if (queue->profile.enabled) {
-            queue->profile.steps++;
-            queue->profile.gpu_ns += os_time_get_nano() - started;
+            struct ps5vk_queue_profile *const p = &queue->profile;
+            const uint64_t now = os_time_get_nano();
+            p->steps++;
+            p->gpu_ns += now - started;
+            p->submit_call_ns += submitted - started;
+            p->poll_ns += now - submitted;
+            p->polls += poll;
+            p->poll_first_hits += poll == 0;
          }
          ps5vk_queue_flush_targets(queue, submit);
          return VK_SUCCESS;
@@ -1040,6 +1082,15 @@ ps5vk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
    struct vk_device *const device = vk_queue->base.device;
 
    const uint64_t started = queue->profile.enabled ? os_time_get_nano() : 0;
+   ps5vk_profile_enter(queue, PS5VK_PROFILE_AFTER_SUBMIT);
+   if (queue->profile.enabled) {
+      struct ps5vk_queue_profile *const p = &queue->profile;
+      /* The stretch of the frame the application owns: from the moment the
+       * previous present handed control back to this submission. */
+      if (p->last_return_ns != 0 && started > p->last_return_ns)
+         p->app_pre_submit_ns += started - p->last_return_ns;
+      p->submit_calls++;
+   }
    VkResult result = vk_sync_wait_many(device, submit->wait_count, submit->waits,
                                        VK_SYNC_WAIT_COMPLETE, UINT64_MAX);
    if (queue->profile.enabled)
@@ -1057,7 +1108,9 @@ ps5vk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
       const uint64_t finished = os_time_get_nano();
       queue->profile.sync_signal_ns += finished - signal_started;
       queue->profile.queue_ns += finished - started;
+      queue->profile.last_return_ns = finished;
    }
+   ps5vk_profile_leave(queue, PS5VK_PROFILE_AFTER_SUBMIT);
    return result;
 }
 
@@ -1070,13 +1123,73 @@ ps5vk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
 #define PS5VK_FLIP_STATUS_WORDS 16
 #define PS5VK_FLIP_STATUS_MARKER 3
 
+/* The second summary line: what the first one cannot show. A mean frame time
+ * hides whether the period is the work or the refresh, whether a "gpu" interval
+ * is execution or check granularity, and whether a present waited a vblank at
+ * all. Each mean is over the count its own label names, never over a total.
+ * The period histogram prints only the buckets that hold a sample, as
+ * bucket:count, with the bucket number its 4 ms lower bound.
+ *
+ * residual_ms is the check that the split is complete: the four parts summed
+ * per present against the measured present-to-present period. Anything but
+ * about zero means the frame spends time somewhere this profile does not name,
+ * and the attribution below it is not to be trusted. */
+static void
+ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now)
+{
+   const double per_present = p->frames != 0 ? 1.0 / ((double)p->frames * 1000000.0) : 0.0;
+   const double per_step = p->steps != 0 ? 1.0 / ((double)p->steps * 1000000.0) : 0.0;
+   const double frame_ms = p->present_gap_count != 0
+                              ? (double)p->present_gap_ns / ((double)p->present_gap_count * 1000000.0)
+                              : 0.0;
+   const double summed_ms = (double)(p->app_pre_submit_ns + p->queue_ns + p->app_pre_present_ns +
+                                     p->flip_ns) *
+                            per_present;
+   fprintf(stderr,
+           "[ps5vk] profile2 app_pre_ms=%.3f app_post_ms=%.3f app_after_present_ms=%.3f "
+           "app_after_acquire_ms=%.3f app_after_submit_ms=%.3f submit_ms=%.3f "
+           "submit_calls/frame=%.2f poll_ms=%.3f polls/step=%.2f poll_first=%.0f%% "
+           "flip_status/present=%.2f flip_status_ms=%.3f vblank/present=%.2f "
+           "vblank_ms=%.3f vblank_first=%.0f%% frame_ms=%.3f frame_min_ms=%.3f "
+           "frame_max_ms=%.3f residual_ms=%.3f presents=%" PRIu64 "/%" PRIu64 " periods=",
+           p->app_pre_submit_ns * per_present, p->app_pre_present_ns * per_present,
+           p->gap_ns[PS5VK_PROFILE_AFTER_PRESENT] * per_present,
+           p->gap_ns[PS5VK_PROFILE_AFTER_ACQUIRE] * per_present,
+           p->gap_ns[PS5VK_PROFILE_AFTER_SUBMIT] * per_present, p->submit_call_ns * per_step,
+           p->frames != 0 ? (double)p->submit_calls / (double)p->frames : 0.0,
+           p->poll_ns * per_step, p->steps != 0 ? (double)p->polls / (double)p->steps : 0.0,
+           p->steps != 0 ? 100.0 * (double)p->poll_first_hits / (double)p->steps : 0.0,
+           p->frames != 0 ? (double)p->flip_status_calls / (double)p->frames : 0.0,
+           p->flip_status_ns * per_present,
+           p->frames != 0 ? (double)p->flip_vblank_waits / (double)p->frames : 0.0,
+           p->flip_vblank_ns * per_present,
+           p->frames != 0 ? 100.0 * (double)p->flip_first_hits / (double)p->frames : 0.0,
+           frame_ms, (double)p->present_gap_min_ns / 1000000.0,
+           (double)p->present_gap_max_ns / 1000000.0, summed_ms - frame_ms,
+           p->present_index[0], p->present_index[1]);
+   for (unsigned bucket = 0; bucket < PS5VK_PERIOD_BUCKETS; bucket++) {
+      if (p->present_period[bucket] != 0)
+         fprintf(stderr, "%u:%u ", bucket * 4u, p->present_period[bucket]);
+   }
+   fprintf(stderr, "elapsed_ms=%.0f\n", (double)(now - p->since) / 1000000.0);
+}
+
 /* A flip in a stream of its own, as run pid 134 presented (c1-present):
  * submitted, through the suspend point, then confirmed when VideoOut's flip
  * status reaches marker, waiting a vblank at a time as the runner waits. */
 VkResult
 ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, int64_t marker)
 {
-   const uint64_t started = queue->profile.enabled ? os_time_get_nano() : 0;
+   struct ps5vk_queue_profile *const p = &queue->profile;
+   const uint64_t started = p->enabled ? os_time_get_nano() : 0;
+   if (p->enabled) {
+      /* The rest of the frame the application owns: from the submission's
+       * return to this present. */
+      if (p->last_return_ns != 0 && started > p->last_return_ns)
+         p->app_pre_present_ns += started - p->last_return_ns;
+      if (buffer_index < 2)
+         p->present_index[buffer_index]++;
+   }
    uint32_t *const stream = queue->submission.address;
    const size_t capacity = queue->submission.bytes / sizeof(uint32_t) - 1;
    struct ps5vk_agc_command_buffer command = {
@@ -1119,13 +1232,33 @@ ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, in
 
    uint64_t status[PS5VK_FLIP_STATUS_WORDS];
    for (unsigned wait = 0; wait < PS5VK_FLIP_WAITS; wait++) {
-      if (sceVideoOutGetFlipStatus(video, status) == 0 &&
-          (int64_t)status[PS5VK_FLIP_STATUS_MARKER] >= marker) {
-         struct ps5vk_queue_profile *const p = &queue->profile;
+      const uint64_t queried = p->enabled ? os_time_get_nano() : 0;
+      const int32_t flipped = sceVideoOutGetFlipStatus(video, status);
+      if (p->enabled) {
+         p->flip_status_calls++;
+         p->flip_status_ns += os_time_get_nano() - queried;
+      }
+      if (flipped == 0 && (int64_t)status[PS5VK_FLIP_STATUS_MARKER] >= marker) {
          if (p->enabled) {
             const uint64_t now = os_time_get_nano();
             p->frames++;
             p->flip_ns += now - started;
+            p->flip_first_hits += wait == 0;
+            /* The period of a presented frame, measured between two confirmed
+             * presents rather than derived from a throttled count. */
+            if (p->last_present_ns != 0 && now > p->last_present_ns) {
+               const uint64_t gap = now - p->last_present_ns;
+               const unsigned bucket = gap / UINT64_C(4000000);
+               p->present_gap_ns += gap;
+               p->present_gap_count++;
+               if (p->present_gap_min_ns == 0 || gap < p->present_gap_min_ns)
+                  p->present_gap_min_ns = gap;
+               if (gap > p->present_gap_max_ns)
+                  p->present_gap_max_ns = gap;
+               p->present_period[bucket < PS5VK_PERIOD_BUCKETS ? bucket
+                                                               : PS5VK_PERIOD_BUCKETS - 1]++;
+            }
+            p->last_present_ns = now;
             if (p->since == 0 || now - p->since >= UINT64_C(10000000000)) {
                if (p->since != 0) {
                   const double ms = 1.0 / ((double)p->frames * 1000000.0);
@@ -1136,13 +1269,24 @@ ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, in
                           p->gpu_ns * ms, p->flip_ns * ms,
                           (double)p->flush_bytes / (p->frames * 1048576.0),
                           p->copy_ns * ms, p->sync_wait_ns * ms, p->sync_signal_ns * ms);
+                  ps5vk_queue_profile_report2(p, now);
                }
-               *p = (struct ps5vk_queue_profile){.enabled = true, .since = now};
+               /* last_return_ns and last_present_ns carry across a window: the
+                * first interval after one is still a real one. */
+               *p = (struct ps5vk_queue_profile){.enabled = true,
+                                                 .since = now,
+                                                 .last_return_ns = now,
+                                                 .last_present_ns = now};
             }
          }
          return VK_SUCCESS;
       }
+      const uint64_t waited = p->enabled ? os_time_get_nano() : 0;
       sceVideoOutWaitVblank(video);
+      if (p->enabled) {
+         p->flip_vblank_waits++;
+         p->flip_vblank_ns += os_time_get_nano() - waited;
+      }
    }
    return vk_queue_set_lost(&queue->vk,
                             "flip %" PRId64 " of buffer %u did not reach VideoOut within %d "
