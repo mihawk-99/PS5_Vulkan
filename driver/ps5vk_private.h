@@ -296,6 +296,13 @@ struct ps5vk_queue {
 /* Closes the application stretch since the previous instrumented entry point
  * left and opens this one's; ps5vk_profile_leave records when it handed control
  * back. Both do nothing unless the queue's opt-in profiling is on. */
+/* The profile's clock: nanoseconds from the user-mode TSC on the console, where
+ * clock_gettime is a ~20 us system call and a TSC read ~12 ns (R34's cost probe),
+ * and os_time_get_nano on the PC. Every profile timestamp uses it, so all of
+ * them share one time base. */
+uint64_t
+ps5vk_profile_now(void);
+
 void
 ps5vk_profile_enter(struct ps5vk_queue *queue, unsigned slot);
 

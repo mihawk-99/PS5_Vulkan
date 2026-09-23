@@ -801,7 +801,7 @@ ps5vk_QueuePresentKHR(VkQueue _queue, const VkPresentInfoKHR *pPresentInfo)
    /* The frame ends here: the next submission's application stretch starts when
     * this returns, not when the submission before the present did. */
    if (queue->profile.enabled)
-      queue->profile.last_return_ns = os_time_get_nano();
+      queue->profile.last_return_ns = ps5vk_profile_now();
    ps5vk_profile_leave(queue, PS5VK_PROFILE_AFTER_PRESENT);
    return overall;
 }

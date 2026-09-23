@@ -128,9 +128,9 @@ ps5vk_cmd_buffer_reset(struct vk_command_buffer *vk_cmd_buffer, VkCommandBufferR
       ps5vk_device_profile_queue(container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk));
    struct ps5vk_queue_profile *const p = queue != NULL && queue->profile.enabled ? &queue->profile
                                                                                  : NULL;
-   const uint64_t started = p != NULL ? os_time_get_nano() : 0;
+   const uint64_t started = p != NULL ? ps5vk_profile_now() : 0;
    vk_command_buffer_reset(&cmd_buffer->vk);
-   const uint64_t common = p != NULL ? os_time_get_nano() : 0;
+   const uint64_t common = p != NULL ? ps5vk_profile_now() : 0;
    if (flags & VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT) {
       ps5vk_cmd_buffer_release_tables(cmd_buffer);
       util_dynarray_fini(&cmd_buffer->words);
@@ -140,7 +140,7 @@ ps5vk_cmd_buffer_reset(struct vk_command_buffer *vk_cmd_buffer, VkCommandBufferR
    if (p != NULL) {
       p->resets++;
       p->reset_common_ns += common - started;
-      p->reset_driver_ns += os_time_get_nano() - common;
+      p->reset_driver_ns += ps5vk_profile_now() - common;
    }
 }
 
@@ -229,7 +229,7 @@ ps5vk_BeginCommandBuffer(VkCommandBuffer commandBuffer, const VkCommandBufferBeg
    struct ps5vk_queue *const queue =
       ps5vk_device_profile_queue(container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk));
    const bool secondary = cmd_buffer->vk.level == VK_COMMAND_BUFFER_LEVEL_SECONDARY;
-   const uint64_t started = queue && queue->profile.enabled && secondary ? os_time_get_nano() : 0;
+   const uint64_t started = queue && queue->profile.enabled && secondary ? ps5vk_profile_now() : 0;
    if (queue)
       ps5vk_profile_enter(queue, PS5VK_PROFILE_AFTER_BEGIN);
    /* Resets a command buffer that is not in the initial state first. */
@@ -239,7 +239,7 @@ ps5vk_BeginCommandBuffer(VkCommandBuffer commandBuffer, const VkCommandBufferBeg
       ps5vk_profile_leave(queue, PS5VK_PROFILE_AFTER_BEGIN);
    if (started != 0) {
       queue->profile.begin_secondary_calls++;
-      queue->profile.begin_secondary_ns += os_time_get_nano() - started;
+      queue->profile.begin_secondary_ns += ps5vk_profile_now() - started;
    }
    return VK_SUCCESS;
 }

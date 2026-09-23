@@ -88,3 +88,34 @@ profile adds ~20-40 us, so R32's "23 us a draw" and much of R33's begin cost are
 the clock reads themselves; and anything, in the driver or the engine, that
 enters the kernel per frame (`mmap`, a contended lock, a condition wake,
 `usleep`, `write`, a clock read) pays ~20 us each time.
+
+## R36: the profile is nearly free, and the first trustworthy split
+
+Profile timestamps now come from `ps5vk_profile_now()`: the TSC converted to
+nanoseconds on the console (12 ns a read), `os_time_get_nano` on the PC. The
+summary leaves as one `write(2)` on `fileno(stderr)`. A first version wrote to
+`STDERR_FILENO` and its lines reached neither the trace nor the kernel log (port
+build d1b39125): the port's `freopen` does not keep descriptor 2 on this libc.
+
+Profiled E1M1 work is now 23.74 ms against 23.67 unprofiled, and the summary
+write 1.05 ms against R34's 1.6-5.8 s. Port evidence `m6-r36-cheap-profile`:
+
+| per frame                   | E1M1   | start map |
+| --------------------------- | ------ | --------- |
+| period                      | 29.25  | 37.60     |
+| application (`app_pre_ms`)  | 17.20  | 17.21     |
+| queue                       | 6.53   | 20.17     |
+|   flush                     | 3.92   | 5.82      |
+|   CPU copies                | 0      | 11.55     |
+|   submit + marker poll      | 2.53   | 2.69      |
+| flip                        | 5.51   | 0.21      |
+| `vkBeginCommandBuffer`      | 0.33   | 0.23      |
+| all draw encoding           | 0.075  | 0.091     |
+
+R32's 2.44 ms of begins and 23 us per draw, and most of R33's begin cost, were
+the 20 us clock reads. The E1M1 period is a constant 29.2 ms (frame_min 29.168)
+and the start map's is not a multiple of 16.68 ms either, so the display is not
+presenting on a fixed 60 Hz grid during gameplay; a variable-refresh model with a
+~48 Hz floor (20.83 ms) and 8.33 ms scan, 20.83 + 8.33 = 29.17 ms, fits every
+measured period, and predicts E1M1 work below ~20.8 ms presents without the
+wait. That is a model, to be tested by cutting work, not a finding.

@@ -93,13 +93,27 @@
  * long reads as application work. */
 static _Thread_local uint64_t ps5vk_profile_call_from;
 
+uint64_t
+ps5vk_profile_now(void)
+{
+   /* Written once with the same value by whichever thread gets here first. */
+   static uint64_t hz;
+   if (hz == 0) {
+      const uint64_t reported = sceKernelGetTscFrequency();
+      hz = reported > 1 ? reported : UINT64_MAX;
+   }
+   if (hz == UINT64_MAX)
+      return os_time_get_nano();
+   return (uint64_t)((unsigned __int128)sceKernelReadTsc() * UINT64_C(1000000000) / hz);
+}
+
 void
 ps5vk_profile_enter(struct ps5vk_queue *queue, unsigned slot)
 {
    struct ps5vk_queue_profile *const p = &queue->profile;
    if (!p->enabled)
       return;
-   const uint64_t now = os_time_get_nano();
+   const uint64_t now = ps5vk_profile_now();
    if (slot >= PS5VK_PROFILE_SLOTS)
       slot = PS5VK_PROFILE_AFTER_PRESENT;
    if (p->gap_from_ns != 0 && now > p->gap_from_ns) {
@@ -117,7 +131,7 @@ ps5vk_profile_leave(struct ps5vk_queue *queue, unsigned slot)
    struct ps5vk_queue_profile *const p = &queue->profile;
    if (!p->enabled || slot >= PS5VK_PROFILE_SLOTS)
       return;
-   const uint64_t now = os_time_get_nano();
+   const uint64_t now = ps5vk_profile_now();
    if (ps5vk_profile_call_from != 0 && now > ps5vk_profile_call_from)
       p->call_ns[slot] += now - ps5vk_profile_call_from;
    ps5vk_profile_call_from = 0;
@@ -220,7 +234,7 @@ ps5vk_target_already_flushed(const struct vk_queue_submit *submit, uint32_t buff
 static void
 ps5vk_queue_flush_targets(struct ps5vk_queue *queue, const struct vk_queue_submit *submit)
 {
-   const uint64_t started = queue->profile.enabled ? os_time_get_nano() : 0;
+   const uint64_t started = queue->profile.enabled ? ps5vk_profile_now() : 0;
    for (uint32_t i = 0; i < submit->command_buffer_count; i++) {
       const struct ps5vk_cmd_buffer *const cmd_buffer =
          container_of(submit->command_buffers[i], struct ps5vk_cmd_buffer, vk);
@@ -233,7 +247,7 @@ ps5vk_queue_flush_targets(struct ps5vk_queue *queue, const struct vk_queue_submi
       }
    }
    if (queue->profile.enabled)
-      queue->profile.flush_ns += os_time_get_nano() - started;
+      queue->profile.flush_ns += ps5vk_profile_now() - started;
 }
 
 /* One split of a submission and the stream offset its step ends at: the words
@@ -814,7 +828,7 @@ ps5vk_queue_run_step(struct ps5vk_queue *queue, const struct vk_queue_submit *su
       .words = stream + start,
       .word_count = word_count,
    };
-   const uint64_t started = queue->profile.enabled ? os_time_get_nano() : 0;
+   const uint64_t started = queue->profile.enabled ? ps5vk_profile_now() : 0;
    int32_t result = sceAgcDriverSubmitDcb(&description);
    if (result != 0)
       return vk_queue_set_lost(&queue->vk, "sceAgcDriverSubmitDcb failed: 0x%08x",
@@ -825,14 +839,14 @@ ps5vk_queue_run_step(struct ps5vk_queue *queue, const struct vk_queue_submit *su
    /* Everything up to here is the submission call itself; the wait below is the
     * driver's own polling, and the difference between the two is what says
     * whether a "gpu" interval is the GPU or the check granularity. */
-   const uint64_t submitted = queue->profile.enabled ? os_time_get_nano() : 0;
+   const uint64_t submitted = queue->profile.enabled ? ps5vk_profile_now() : 0;
 
    for (unsigned poll = 0; poll < PS5VK_MARKER_POLLS; poll++) {
       ps5vk_flush_cpu_cache(marker, sizeof(*marker));
       if (*marker == value) {
          if (queue->profile.enabled) {
             struct ps5vk_queue_profile *const p = &queue->profile;
-            const uint64_t now = os_time_get_nano();
+            const uint64_t now = ps5vk_profile_now();
             p->steps++;
             p->gpu_ns += now - started;
             p->submit_call_ns += submitted - started;
@@ -983,7 +997,7 @@ ps5vk_queue_run_copy_steps(struct ps5vk_queue *queue, const struct vk_queue_subm
        * and the marker waited for above have already done all the work of
        * (a draw that samples a target this submission rendered into,
        * ps5vk_draw.c). */
-      const uint64_t copy_started = queue->profile.enabled ? os_time_get_nano() : 0;
+      const uint64_t copy_started = queue->profile.enabled ? ps5vk_profile_now() : 0;
       for (; at < split_count && split[at].offset == end; at++) {
          const struct ps5vk_memory_copy *const copy = split[at].copy;
          if (copy->resolve) {
@@ -1061,7 +1075,7 @@ ps5vk_queue_run_copy_steps(struct ps5vk_queue *queue, const struct vk_queue_subm
       if (result != VK_SUCCESS)
          break;
       if (queue->profile.enabled)
-         queue->profile.copy_ns += os_time_get_nano() - copy_started;
+         queue->profile.copy_ns += ps5vk_profile_now() - copy_started;
       start = end;
    }
    free(saved);
@@ -1163,7 +1177,7 @@ ps5vk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
    struct ps5vk_queue *const queue = container_of(vk_queue, struct ps5vk_queue, vk);
    struct vk_device *const device = vk_queue->base.device;
 
-   const uint64_t started = queue->profile.enabled ? os_time_get_nano() : 0;
+   const uint64_t started = queue->profile.enabled ? ps5vk_profile_now() : 0;
    ps5vk_profile_enter(queue, PS5VK_PROFILE_AFTER_SUBMIT);
    if (queue->profile.enabled) {
       struct ps5vk_queue_profile *const p = &queue->profile;
@@ -1176,7 +1190,7 @@ ps5vk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
    VkResult result = vk_sync_wait_many(device, submit->wait_count, submit->waits,
                                        VK_SYNC_WAIT_COMPLETE, UINT64_MAX);
    if (queue->profile.enabled)
-      queue->profile.sync_wait_ns += os_time_get_nano() - started;
+      queue->profile.sync_wait_ns += ps5vk_profile_now() - started;
    if (result != VK_SUCCESS)
       return result;
    if (submit->command_buffer_count != 0) {
@@ -1184,10 +1198,10 @@ ps5vk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
       if (result != VK_SUCCESS)
          return result;
    }
-   const uint64_t signal_started = queue->profile.enabled ? os_time_get_nano() : 0;
+   const uint64_t signal_started = queue->profile.enabled ? ps5vk_profile_now() : 0;
    result = vk_sync_signal_many(device, submit->signal_count, submit->signals);
    if (queue->profile.enabled) {
-      const uint64_t finished = os_time_get_nano();
+      const uint64_t finished = ps5vk_profile_now();
       queue->profile.sync_signal_ns += finished - signal_started;
       queue->profile.queue_ns += finished - started;
       queue->profile.last_return_ns = finished;
@@ -1308,9 +1322,25 @@ ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now, char *l
             (double)p->report_write_ns / 1000000.0, (double)p->clock_ns_x1000 / 1000.0,
             p->present_index[0], p->present_index[1], periods,
             (double)(now - p->since) / 1000000.0);
-   const uint64_t written = os_time_get_nano();
-   fputs(line, stderr);
-   p->report_write_ns = os_time_get_nano() - written;
+   /* One write(2), not fputs: the port reopens stderr unbuffered, and the
+    * console's libc then hands an unbuffered fputs to the file in pieces -- R34
+    * measured this one line at 1.6-5.8 s, interleaved with other threads' lines,
+    * while the port's own fully buffered line to the same file cost nothing. */
+   const uint64_t written = ps5vk_profile_now();
+   /* The stream's own descriptor: the port reopens stderr onto its trace file,
+    * and on the console that stream does not keep descriptor 2 -- a first
+    * version wrote to STDERR_FILENO and its lines reached neither the trace nor
+    * the kernel log. */
+   fflush(stderr);
+   const int descriptor = fileno(stderr);
+   const size_t length = strlen(line);
+   for (size_t at = 0; descriptor >= 0 && at < length;) {
+      const ssize_t wrote = write(descriptor, line + at, length - at);
+      if (wrote <= 0)
+         break;
+      at += (size_t)wrote;
+   }
+   p->report_write_ns = ps5vk_profile_now() - written;
 }
 
 /* A flip in a stream of its own, as run pid 134 presented (c1-present):
@@ -1320,7 +1350,7 @@ VkResult
 ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, int64_t marker)
 {
    struct ps5vk_queue_profile *const p = &queue->profile;
-   const uint64_t started = p->enabled ? os_time_get_nano() : 0;
+   const uint64_t started = p->enabled ? ps5vk_profile_now() : 0;
    if (p->enabled) {
       /* The rest of the frame the application owns: from the submission's
        * return to this present. */
@@ -1371,15 +1401,15 @@ ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, in
 
    uint64_t status[PS5VK_FLIP_STATUS_WORDS];
    for (unsigned wait = 0; wait < PS5VK_FLIP_WAITS; wait++) {
-      const uint64_t queried = p->enabled ? os_time_get_nano() : 0;
+      const uint64_t queried = p->enabled ? ps5vk_profile_now() : 0;
       const int32_t flipped = sceVideoOutGetFlipStatus(video, status);
       if (p->enabled) {
          p->flip_status_calls++;
-         p->flip_status_ns += os_time_get_nano() - queried;
+         p->flip_status_ns += ps5vk_profile_now() - queried;
       }
       if (flipped == 0 && (int64_t)status[PS5VK_FLIP_STATUS_MARKER] >= marker) {
          if (p->enabled) {
-            const uint64_t now = os_time_get_nano();
+            const uint64_t now = ps5vk_profile_now();
             p->frames++;
             p->flip_ns += now - started;
             p->flip_first_hits += wait == 0;
@@ -1426,11 +1456,11 @@ ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, in
          }
          return VK_SUCCESS;
       }
-      const uint64_t waited = p->enabled ? os_time_get_nano() : 0;
+      const uint64_t waited = p->enabled ? ps5vk_profile_now() : 0;
       sceVideoOutWaitVblank(video);
       if (p->enabled) {
          p->flip_vblank_waits++;
-         p->flip_vblank_ns += os_time_get_nano() - waited;
+         p->flip_vblank_ns += ps5vk_profile_now() - waited;
       }
    }
    return vk_queue_set_lost(&queue->vk,
