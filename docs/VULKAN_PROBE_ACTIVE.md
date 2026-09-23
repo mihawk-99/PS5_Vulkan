@@ -73,7 +73,11 @@ R26 fixes sampler LOD bias: game scaling requested bias 1 and previously exited.
 PID 250: 383 PASS/zero FAIL; eight complete frames match every pixel for signed
 and fractional bias, plus original mip tests. Twenty streams replay exactly.
 Full host/cache, eleven gates, port/template pass. Archive b83fc4ac….
-Evidence: jobs/r26-lod-bias. Game scaling retest and black menu background remain.
+Evidence: jobs/r26-lod-bias. Port PID 251 scaling works; no FPS gain.
+R27 restores the blend-control assignment removed by cfab0b9. PID 256 reproduces
+full-frame alpha/constant-blend errors; PID 258 passes 285 checks, four exact
+4K alpha frames and constant blend. Five strict replays; 170 host/cache, eleven
+gates, port/template pass. Evidence: jobs/r27-menu-alpha. Game retest running.
 ## Standing work
 - Graphics R7 rounds 1-4, R8 dynamic depth bias, the first batch's R9 (push
   pointers), and the R4 clear/refusal coverage are in `docs/M5_PHASE_C.md`; the

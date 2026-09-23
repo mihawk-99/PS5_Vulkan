@@ -527,6 +527,21 @@ v0-texel-buffer-sint)
     pixel_flags=(--address32-hi 2 --descriptor-binding 0:0:uniform_texel_buffer:1:0:16)
     pixel_compiler="$root/build/host/opengnm-psbc-probe"
     ;;
+r27-menu-alpha)
+    vertex_source=shaders/r27-menu-alpha/vertex.vert
+    pixel_source=shaders/r27-menu-alpha/pixel.frag
+    output=probes/r27-menu-alpha
+    # Bootstrap package uses the CLI-supported BGRA layout; the Vulkan case
+    # compiles its actual RGBA layout. Both carry the same black RGB and alpha.
+    compiler="$root/build/host/opengnm-psbc-probe"
+    vertex_flags=(--address32-hi 2
+        --vertex-attribute 0:r32g32b32_float:0:0:24:4
+        --vertex-attribute 1:r32g32_float:0:12:24:4
+        --vertex-attribute 2:b8g8r8a8_unorm:0:20:24:4)
+    pixel_flags=(--address32-hi 2 --color-format 0x99999994)
+    pixel_compiler="$root/build/host/opengnm-psbc-probe"
+    expected_col_format=4
+    ;;
 r26-lod-bias)
     vertex_source=shaders/c7/band.vert
     pixel_source=shaders/c7/lod-bias.frag
@@ -1159,6 +1174,11 @@ elif set_name == "c7-diag":
     bindings = [("address32_hi", expected_hi),
                 *vertex_input("vertex attributes: location 0 r32g32_float offset 0, "
                               "location 1 r32g32_float offset 8, stride 16, binding 0")]
+elif set_name == "r27-menu-alpha":
+    bindings = [("address32_hi", expected_hi),
+                *vertex_input("vertex attributes: location 0 r32g32b32_float offset 0, "
+                              "location 1 r32g32_float offset 12, location 2 b8g8r8a8_unorm "
+                              "offset 20, stride 24, binding 0")]
 elif set_name in ("c7-mip", "c7-mip-linear", "r26-lod-bias"):
     bindings = [("address32_hi", expected_hi),
                 *vertex_input("vertex attributes: location 0 r32g32_float offset 0, "

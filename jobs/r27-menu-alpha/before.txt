@@ -1,0 +1,36 @@
+{"schema":2,"event":"run_start","pid":256}
+{"schema":2,"event":"value","probe":"r27_menu_alpha","field":"frame","value":0}
+{"schema":2,"event":"hex","probe":"r27_menu_alpha","field":"expected","value":"0x80000000"}
+{"schema":2,"event":"hex","probe":"r27_menu_alpha","field":"center","value":"0x80000000"}
+{"schema":2,"event":"value","probe":"r27_menu_alpha","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r27_menu_alpha","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r27_menu_alpha","status":"PASS","result":0,"detail":"menu alpha 128 blend 0"}
+{"schema":2,"event":"value","probe":"r27_menu_alpha","field":"frame","value":1}
+{"schema":2,"event":"hex","probe":"r27_menu_alpha","field":"expected","value":"0xffffffff"}
+{"schema":2,"event":"hex","probe":"r27_menu_alpha","field":"center","value":"0x0"}
+{"schema":2,"event":"value","probe":"r27_menu_alpha","field":"mismatches","value":8294400}
+{"schema":2,"event":"value","probe":"r27_menu_alpha","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r27_menu_alpha","status":"FAIL","result":-1,"detail":"menu alpha 0 blend 1"}
+{"schema":2,"event":"value","probe":"r27_menu_alpha","field":"frame","value":2}
+{"schema":2,"event":"hex","probe":"r27_menu_alpha","field":"expected","value":"0xbf7f7f7f"}
+{"schema":2,"event":"hex","probe":"r27_menu_alpha","field":"center","value":"0x80000000"}
+{"schema":2,"event":"value","probe":"r27_menu_alpha","field":"mismatches","value":8294400}
+{"schema":2,"event":"value","probe":"r27_menu_alpha","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r27_menu_alpha","status":"FAIL","result":-1,"detail":"menu alpha 128 blend 1"}
+{"schema":2,"event":"value","probe":"r27_menu_alpha","field":"frame","value":3}
+{"schema":2,"event":"hex","probe":"r27_menu_alpha","field":"expected","value":"0xff000000"}
+{"schema":2,"event":"hex","probe":"r27_menu_alpha","field":"center","value":"0xff000000"}
+{"schema":2,"event":"value","probe":"r27_menu_alpha","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r27_menu_alpha","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r27_menu_alpha","status":"PASS","result":0,"detail":"menu alpha 255 blend 1"}
+{"schema":2,"event":"value","probe":"r27_menu_alpha","field":"passed_frames","value":2}
+{"schema":2,"event":"hex","probe":"agc_v0_blend_constant","field":"expected_word","value":"0xff88586c"}
+{"schema":2,"event":"hex","probe":"agc_v0_blend_constant","field":"first_word","value":"0xff6030f0"}
+{"schema":2,"event":"value","probe":"agc_v0_blend_constant","field":"pixels","value":8294400}
+{"schema":2,"event":"value","probe":"agc_v0_blend_constant","field":"within_one","value":0}
+{"schema":2,"event":"value","probe":"agc_v0_blend_constant","field":"wrong","value":8294400}
+{"schema":2,"event":"value","probe":"agc_v0_blend_constant","field":"max_channel_error","value":132}
+{"schema":2,"event":"probe","probe":"agc_v0_blend_constant","status":"FAIL","result":-1,"detail":"every pixel of the target is the blend the four constants name"}
+{"schema":2,"event":"probe","probe":"agc_v0_blend_constant","status":"FAIL","result":-1,"detail":"a frame blended with the constant colour and alpha factors holds the blend the constants name"}
+{"schema":2,"event":"value","probe":"runner_summary","field":"ran","value":3}
+{"schema":2,"event":"probe","probe":"runner_summary","status":"FAIL","result":-1,"detail":"1 of 3 queued tests passed"}

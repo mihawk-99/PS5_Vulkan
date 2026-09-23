@@ -21360,6 +21360,106 @@ void run_vulkan_mip_frames(const TestContext &test, TestOutcome &outcome, std::u
 
 // R26: implicit derivatives select LOD 2; sampler bias selects the level/blend.
 // Every output pixel is compared, including both triangles' shared edge.
+// R27: vkQuake's 24-byte UI vertex, sparse fragment inputs and fade blend.
+void run_vulkan_menu_alpha(const TestContext &test, TestOutcome &outcome, bool blend) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    struct Vertex
+    {
+        float position[3];
+        float uv[2];
+        std::uint8_t colour[4];
+    };
+    static_assert(sizeof(Vertex) == 24);
+    Vertex vertices[] = {{{-1, -1, 0}, {0, 0}, {}},
+                         {{1, -1, 0}, {1, 0}, {}},
+                         {{1, 1, 0}, {1, 1}, {}},
+                         {{-1, 1, 0}, {0, 1}, {}}};
+    const std::uint16_t indices[] = {0, 1, 2, 2, 3, 0};
+    constexpr unsigned alphas[] = {128, 0, 128, 255};
+    constexpr std::uint32_t expected[] = {0x80000000, 0xffffffff, 0xbf7f7f7f, 0xff000000};
+    unsigned passed = 0;
+    for (unsigned frame = blend ? 1 : 0; frame < (blend ? std::size(alphas) : 1); ++frame)
+    {
+        for (auto &vertex : vertices)
+            vertex.colour[3] = alphas[frame];
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        for (auto &channel : input.clear_colour)
+            channel = 1.0f;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = vertices;
+        input.vertex_count = 4;
+        input.vertex_stride = sizeof(Vertex);
+        input.index_data = indices;
+        input.index_count = 6;
+        input.attribute_count = 3;
+        input.attributes[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0};
+        input.attributes[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, 12};
+        input.attributes[2] = {2, 0, VK_FORMAT_R8G8B8A8_UNORM, 20};
+        input.blend = frame != 0;
+        input.blend_src_colour = input.blend_src_alpha = VK_BLEND_FACTOR_SRC_ALPHA;
+        input.blend_dst_colour = input.blend_dst_alpha = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        input.blend_op_colour = input.blend_op_alpha = VK_BLEND_OP_ADD;
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+            return;
+        ps5vk_triangle triangle{};
+        auto status = ps5vk_triangle_create(&triangle, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            return;
+        }
+        if (status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes)
+        {
+            char label[64]{};
+            std::snprintf(label, sizeof(label), "menu alpha %u blend %u", alphas[frame],
+                          input.blend);
+            if (test.capture)
+            {
+                log_driver_submission(triangle.device, label, log);
+                log_driver_stages(triangle.device, log);
+            }
+            const FramebufferView view{static_cast<const std::uint32_t *>(triangle.target),
+                                       kTiledRgba8Layout};
+            unsigned mismatches = 0;
+            for (unsigned y = 0; y < kOutputHeight; ++y)
+                for (unsigned x = 0; x < kOutputWidth; ++x)
+                    mismatches += view.word(x, y) != expected[frame];
+            log.number("r27_menu_alpha", "frame", frame);
+            log.hex("r27_menu_alpha", "expected", expected[frame]);
+            log.hex("r27_menu_alpha", "center", view.word(kOutputWidth / 2, kOutputHeight / 2));
+            log.number("r27_menu_alpha", "mismatches", mismatches);
+            log.number("r27_menu_alpha", "pixels", kOutputWidth * kOutputHeight);
+            log.event("r27_menu_alpha", mismatches == 0 ? "PASS" : "FAIL", mismatches == 0 ? 0 : -1,
+                      label);
+            passed += mismatches == 0;
+        }
+        ps5vk_triangle_finish(&triangle);
+        if (status != PS5VK_TRIANGLE_OK)
+            break;
+    }
+    outcome.command_built = passed != 0;
+    outcome.passed = passed == (blend ? 3u : 1u);
+    log.number("r27_menu_alpha", "passed_frames", passed);
+}
+
+void run_vulkan_menu_alpha_raw(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_vulkan_menu_alpha(test, outcome, false);
+}
+
+void run_vulkan_menu_alpha_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_vulkan_menu_alpha(test, outcome, true);
+}
+
 void run_vulkan_lod_bias_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
     JsonLog &log = test.log;
@@ -24755,6 +24855,8 @@ constexpr RunnerTest kRunnerTests[] = {
     // (run_vulkan_tiled_upload_frames).
     {"c7-mip-upload", "c7-mip", run_vulkan_tiled_upload_frames},
     {"r16-mip-blit", "c7-mip", run_vulkan_mip_blit_frames},
+    {"r27-menu-alpha-raw", "r27-menu-alpha", run_vulkan_menu_alpha_raw},
+    {"r27-menu-alpha", "r27-menu-alpha", run_vulkan_menu_alpha_frames},
     {"r26-lod-bias", "r26-lod-bias", run_vulkan_lod_bias_frames},
     {"r18-padded-mips", "c7-mip", run_vulkan_padded_mip_frames},
     {"r18-mip-addresses", "c7-mip", run_vulkan_padded_mip_addresses},

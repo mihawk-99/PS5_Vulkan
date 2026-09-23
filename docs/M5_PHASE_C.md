@@ -8974,3 +8974,18 @@ eleven gates, port five gates/scan and template relink pass. Two served ELF
 reads/all five segments match, title closed and idle verified. Archive
 b83fc4ac3d20a07d38ab0f64087a57e8dc7eb5d632988b533a51a7172d8cc942 (14,450,682 bytes).
 Evidence and reproduction: jobs/r26-lod-bias and golden/r26-lod-bias.
+
+## 2026-09-23 — R27 pipeline blend control restored
+
+Port PID 253 isolates the black menu to its fade overlay. Driver inspection
+finds cfab0b9 removed the assignment of the calculated blend word. PID 256
+proves raw alpha is correct while alpha 0/128 blends each have 8,294,400 wrong
+pixels; the existing constant blend also fails. Restore the one assignment.
+PID 258 passes 285 checks, zero failures; four complete 4K alpha frames and
+constant blending match. Five captures replay exactly. Raw and blended exports
+use separate runner cases because the capture format retains one shader pair
+per case. The stale two-attribute harness guard now uses its existing four-entry
+limit. Baseline and final goldens retained; see jobs/r27-menu-alpha/README.md.
+Explicit driver rebuild, 170-arm host/cache suite, eleven gates, port five gates
+and shader scan, template relink pass. Deployed ELF read twice, all five load
+segments match; console closed and idle. Port visual retest is separate.

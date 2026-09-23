@@ -1925,6 +1925,7 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
    pipeline->rasterizer_word = rasterizer_word;
    pipeline->discard_rasterizer = raster->rasterizerDiscardEnable;
    pipeline->line_rasterizer = line;
+   pipeline->blend_control = blend_control;
    pipeline->blend_uses_constants = blend_uses_constants;
    for (unsigned index = 0; index < 4; index++) {
       const float value = blend_uses_constants ? info->pColorBlendState->blendConstants[index] : 0.0f;

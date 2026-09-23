@@ -493,9 +493,9 @@ create_geometry(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
    /* The pipeline declares one binding of at most two attributes: the probe
     * sets' shaders take a position and one other, and a third would be
     * dropped. */
-   if (input->attribute_count > 2)
+   if (input->attribute_count > PS5VK_TRIANGLE_MAX_ATTRIBUTES)
       return step(triangle, "vertex geometry", VK_ERROR_INITIALIZATION_FAILED,
-                  "at most two vertex attributes are supported");
+                  "vertex attribute count exceeds the harness limit");
    /* Vertex-less shaders generate their own triangle from gl_VertexIndex. */
    if (input->index_count == 0 && input->vertex_data == NULL)
       return true;

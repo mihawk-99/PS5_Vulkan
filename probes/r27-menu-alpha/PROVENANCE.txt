@@ -1,0 +1,17 @@
+PS5 Vulkan r27-menu-alpha shader packages, built by tools/build-probe-shaders.sh r27-menu-alpha.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 9a04f2b438821fd9d9aa1c30bf1283ee3a498c4a70a570add1f1b7b1771948de
+vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32b32_float:0:0:24:4 --vertex-attribute 1:r32g32_float:0:12:24:4 --vertex-attribute 2:b8g8r8a8_unorm:0:20:24:4; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2 --color-format 0x99999994; writer --allow-unresolved
+pixel SPI_SHADER_COL_FORMAT: 4
+vertex attributes: location 0 r32g32b32_float offset 0, location 1 r32g32_float offset 12, location 2 b8g8r8a8_unorm offset 20, stride 24, binding 0
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+6cd163f70af675a3be0be4e18040732a9942237f40eb174054fd9c8e4a08d5ef  shaders/r27-menu-alpha/vertex.vert
+1ac1e3e7c888176e7fbafe70ae84e6f133bb3383acaf87477175fd0e1c22aaf3  shaders/r27-menu-alpha/pixel.frag
+6bdf28c90e7f19a20e8f145b2c0f442af3159503b28b45112dc2135db8d00998  build/shaders/r27-menu-alpha/vertex.spv
+9e2bf9d029e3e3dc5ccaf52985c25ef8b3c999fc6b31b24beda657d28df0995a  build/shaders/r27-menu-alpha/pixel.spv
+d814aa65edf76c379ee9e8c15f44e3fcf9e84caedf40095204ff3de31bb14bb2  build/shaders/r27-menu-alpha/vertex.ngg.bin
+26798c5aac95a1977fcf440afb1facf3f7c6812456b901f2579668dd5a997a2a  build/shaders/r27-menu-alpha/vertex.hw.json
+5011cbe802b287bf9a18dd4c514ade32e0f72a0c0d4f0bb7e701042ddb928242  build/shaders/r27-menu-alpha/pixel.raw.bin
+a589fbf2889e1f0546f3f259222524b3626d44212ac23b86e978b43521aad253  build/shaders/r27-menu-alpha/pixel.hw.json

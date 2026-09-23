@@ -1,0 +1,7 @@
+hold 1
+capture
+m2-solid
+r27-menu-alpha-raw
+r27-menu-alpha
+v0-blend-constant
+exit
