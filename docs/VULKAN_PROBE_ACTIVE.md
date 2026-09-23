@@ -30,11 +30,11 @@ SHA-256 e089e060… . PS5 probe PIDs 200 and 201 each returned 241 PASS/zero FAI
 twelve submissions replay exactly, goldens in golden/shader-cache-cold and
 -warm. Driver probe stdout is not a hit-count witness; vkQuake's trace is.
 
-**R14–R18 accepted; vkQuake launch next.** R14 2925ff6 (single-draw stride), R15
+**R14–R18 accepted; R19 (32-bit indices) next.** R14 2925ff6 (single-draw stride), R15
 b838832 (independent dynamic UBO offsets), R16 c7f6f95 (mip-tail XOR/blits)
 passed PS5 probes. Port PID 208 presented past those three old failures, then
 named a three-element descriptor array and padded pitch 256. Its evidence is
-../PS5_vkQuake/evidence/m2-r16-map-recording; R18 shape identified below.
+../PS5_vkQuake/evidence/m2-r16-map-recording.
 
 R17 now passes PS5 PID 209: 104 PASS, zero FAIL. Three distinct sampled images
 survive full writes, copies, partial updates and later source changes; all
@@ -44,7 +44,7 @@ Full driver check initially 169/170 PASS; a cache hit skipped compiler stderr
 expected by the capability test. That test now disables cache and its three
 arms pass. Eleven gates, port five gates/scan and template relink PASS.
 Archive 14,434,234 bytes, SHA-256 aad0ebc7… . jobs/r17-descriptor-array and
-golden/r17-descriptor-array contain evidence/reproduction. Port PID 210 identified R18.
+golden/r17-descriptor-array contain evidence/reproduction.
 R18 identified by port PID 210: 224x195 RGBA8, eight mips, one layer, 2D,
 pitch 256. Array refusal absent; padded mip descriptor remains. Gates/port scan
 PASS, two trace reads match, console idle.
@@ -56,13 +56,15 @@ full gates, port gates/scan and template pass. Recorder-only correction also
 passes lint/unit/runner checks. Failed PID 211 and pixel-only PID 213 retained;
 PID 212 was a wrong queue filename, closed without an R18 conclusion.
 Goldens: golden/r18-padded-mips-complete; jobs/r18-padded-mips/README.md.
-Next: deploy/relaunch the already-relinked port. No title is running.
+Port PID 215 now presents past R17/R18, then refuses 32-bit indices in
+ps5vk_cmd_draw during Necropolis map recording. Port commit 1c65915 and
+evidence/m2-r18-map-recording; trace reads/PID match, count=0. Cache: 532 hits,
+zero SPIR-V compiles. Next: R19 shared index size/offset/bounds and PS5 probe.
 
 **Port M2 met:** PID 197, QueuePresent success and human-confirmed Quake
 menu/console; port evidence/m2-first-frame. M3–M6 remain open. Input/audio
 engine adapters are stubs. R10's quarter-width input-attachment read and the
 hardware line failure remain separate. No visual settings were changed.
-
 ## Standing work
 - Graphics R7 rounds 1-4, R8 dynamic depth bias, the first batch's R9 (push
   pointers), and the R4 clear/refusal coverage are in `docs/M5_PHASE_C.md`; the
@@ -90,7 +92,6 @@ hardware line failure remain separate. No visual settings were changed.
   table remains an untaken diagnostic opportunity (`docs/AGC_UPSTREAM_NOTES.md`).
 - Imported driver/host/vendor/tooling trees retain their own style with
   `DisableFormat: true`; the format gate enforces those markers.
-
 ## Open findings
 
 - **A title cannot load a graphics library at run time** (2026-09-18): every `.so`

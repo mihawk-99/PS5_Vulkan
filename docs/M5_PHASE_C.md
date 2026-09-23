@@ -8792,3 +8792,14 @@ and the driver archive is unchanged. PID 213's successful pixel-only capture,
 PID 211's failed candidate, and the misqueued PID 212 history are retained.
 Reproduction: jobs/r18-padded-mips/README.md and the fixed queue beside it.
 Next: vkQuake deployment and launch; M6 is not claimed.
+
+## 2026-09-23 — vkQuake consumes R18; R19 is 32-bit indices
+
+Port PID 215, identity b3aecd67… (port commit 1c65915), presents after relinking
+R17/R18. The old array and padded-pitch refusals are absent. Necropolis map
+recording next refuses UINT32 indices in ps5vk_cmd_draw; EndCommandBuffer -13,
+exit 1 and the known SIGSYS path. Two final trace reads and kernel PID match,
+count=0 verified; port evidence/m2-r18-map-recording, 26 captures/zero failures.
+Shader cache: 532 hits, zero SPIR-V compiles/stores, eight NIR compiles.
+Next: support 32-bit index size, bounds and firstIndex offsets in the shared
+path; host packet checks and PS5 pixels, then relink/launch.
