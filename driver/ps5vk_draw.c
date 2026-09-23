@@ -1827,6 +1827,16 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
                uint32_t first_vertex, uint32_t first_instance,
                const struct ps5vk_indexed_draw *indexed)
 {
+   /* R32: every draw in the driver passes through here, so one pair of probes
+    * counts them and times them. The count is what distinguishes a frame of
+    * many cheap draws from a frame of a few expensive ones, which aggregate
+    * queue timing cannot. The three exits below are the two refusals and the
+    * normal one; a refused draw is recorded by name elsewhere, so a stretch
+    * left open by one is not silent. */
+   struct ps5vk_queue *const draw_queue = ps5vk_device_profile_queue(
+      container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk));
+   if (draw_queue)
+      ps5vk_profile_enter(draw_queue, PS5VK_PROFILE_AFTER_DRAW);
    struct ps5vk_device *const device =
       container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk);
    struct ps5vk_pipeline *const pipeline = cmd_buffer->pipeline;
@@ -2301,14 +2311,22 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                               "the AGC helpers did not encode the draw in %u words",
                               PS5VK_DRAW_MAX_WORDS);
+      if (draw_queue) {
+         ps5vk_profile_leave(draw_queue, PS5VK_PROFILE_AFTER_DRAW);
+      }
       return;
    }
    uint32_t *const recorded = util_dynarray_grow(&cmd_buffer->words, uint32_t, draw_words);
    if (!recorded) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY, "no memory for a draw");
+      if (draw_queue) {
+         ps5vk_profile_leave(draw_queue, PS5VK_PROFILE_AFTER_DRAW);
+      }
       return;
    }
    memcpy(recorded, words, draw_words * sizeof(*words));
+   if (draw_queue)
+      ps5vk_profile_leave(draw_queue, PS5VK_PROFILE_AFTER_DRAW);
 }
 
 /* A non-indexed draw: the DRAW_INDEX_AUTO the recorded frames use. */

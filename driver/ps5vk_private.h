@@ -206,6 +206,11 @@ enum ps5vk_profile_slot {
    PS5VK_PROFILE_AFTER_QUERY,
    PS5VK_PROFILE_AFTER_BEGIN,
    PS5VK_PROFILE_AFTER_END,
+   /* Every draw the command buffers record funnels through ps5vk_cmd_draw, so
+    * one pair here counts them and times them. gap_count on this slot is the
+    * draw count, call_ns is the driver's own per-draw cost, and gap_ns is what
+    * the engine spends between two draws. */
+   PS5VK_PROFILE_AFTER_DRAW,
    PS5VK_PROFILE_SLOTS
 };
 

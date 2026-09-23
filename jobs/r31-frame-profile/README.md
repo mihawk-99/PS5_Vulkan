@@ -292,3 +292,46 @@ wall-clock and their sum exceeded the frame it was meant to partition (929 ms of
 "named" time in a 50 ms frame). The chain is shared again; only the enter/leave
 pairing of a single call is per thread, which is what makes the call durations
 valid.
+
+## R32: the draws are not the cost
+
+Every draw in the driver passes through `ps5vk_cmd_draw`, so one probe pair there
+counts them and times them. `gap_count` on that slot is the draw count, `call_ns`
+is the driver's own per-draw cost, and `gap_ns` is what the engine spends between
+two draws. Steady windows of a trimmed two-map fixture, first window of each
+phase dropped:
+
+| per frame                    | start map | E1M1  |
+| ---------------------------- | --------- | ----- |
+| draws                        | **40.2**  | **30.3** |
+| the driver's draw encoding   | 0.93 ms   | 0.71 ms |
+| between two draws            | 10.20 ms  | 8.71 ms |
+| `vkBeginCommandBuffer` calls | 2.44 ms   | 2.48 ms |
+| `vkEndCommandBuffer` calls   | 0.61 ms   | 0.61 ms |
+| acquire + query results      | 0.04 ms   | 0.04 ms |
+| the application's own CPU    | 24.66 ms  | 24.68 ms |
+
+**A Quake frame is thirty to forty draws.** Whatever costs the application
+twenty-odd milliseconds a frame, it is not proportional to draw count and it is
+not the driver's draw encoding: encoding every draw in the frame costs under a
+millisecond, about 23 microseconds each.
+
+What is disproportionate is `vkBeginCommandBuffer`. The driver spends 2.44 ms a
+frame there -- two and a half times what it spends encoding *all* the draws --
+for the handful of command buffers the engine begins. That is now the largest
+driver-side item inside the application's own time, and it is the next thing to
+read: `ps5vk_BeginCommandBuffer` and the `vk_command_buffer_begin` under it, for
+a per-begin cost of roughly a quarter of a millisecond, which nothing that
+function does on its face justifies.
+
+Caveat, because it matters: this run was slow again, at 16-18 FPS against the
+baseline's 19.7 and 29.6, with multi-second `frame_max_ms` in every window. The
+counts and the relative driver costs are sound; the absolute millisecond values
+are inflated by whatever it is that stalls this console run to run. The draw
+count is a count, and the draw encoding is measured with the same timestamps as
+everything else in the same window, so the comparison between them holds even
+though the window does not.
+
+`between_draws_ms` at 8.7-10.2 ms is the largest single stretch, but it is by
+construction "everything between two draws" -- engine code and every driver call
+that is not a draw -- so it narrows the search rather than naming a cause.
