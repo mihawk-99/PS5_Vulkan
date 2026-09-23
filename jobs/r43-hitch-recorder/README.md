@@ -9,7 +9,7 @@ one `[ps5vk] hitch` line (at most 20 a window, one write each) with that frame's
 share of application, queue, copy and flip time and of every counter;
 `profile2` carries `hitches=` per window.
 
-Console, the owner's case -- Single Player > New Game, twice, walking at once
+Console, the stutter I reported -- Single Player > New Game, twice, walking at once
 (port evidence m6-r43-newgame, m6-r43-newgame-svc): the 84-89 ms and 148-153 ms
 frames after New Game show zero pipelines, compiles, allocations, images and
 file reads. The port's own recorder (engine phase marks and per-server-command

@@ -12,8 +12,9 @@ R33-R46 left its full set behind). Now:
   `/app0/ps5vk-shader-cache-dir.txt` (a default-off test hook), or
   `/app0/ps5vk-shader-cache`.
 
-Old entries in the base are left where they are: they are harmless and nothing
-reads them, and deleting files on the owner's console is the owner's call.
+Old entries in the base were left in place by this round; nothing reads them.
+They were deleted afterwards (1,983 files, 11.1 MB; port evidence
+m6-r49-kstuff-paused).
 
 Host: build clean, check-shader-cache, NIR check.py, check-driver, 11 gates PASS.
 

@@ -45,7 +45,7 @@ after readback, PID correlation and idle closure.
 
 ## 2026-09-23 — R17 descriptor arrays accepted, PID 209
 
-The user requested R17 then R18. Each descriptor array element now has its own
+R17 was requested first, then R18. Each descriptor array element now has its own
 record; writes, copies and partial updates use binding record indices. Shared
 graphics/compute validation and emission walk elements at their declared stride.
 Dynamic offsets retain binding/element order. Input-attachment arrays remain

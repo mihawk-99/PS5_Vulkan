@@ -110,7 +110,7 @@ after a game session held it (`procs` reported `title=PPSA99010 count=1`) and
 before anything was staged. Nothing was uploaded, launched or closed.
 
 The port's own fixture and scripts for the run are `PS5_vkQuake/build/`:
-`r29b-preserve.py` snapshots and restores the user's configuration files
+`r29b-preserve.py` snapshots and restores my configuration files
 (present or absent, contents included) because `r29b-stage.py` and
 `r24-collect.py` were written when they were absent and `r24-collect.py`
 restores them by deleting them; `r29b-collect.py` collects without deleting;
@@ -123,7 +123,7 @@ the whole sequence with the snapshot first and the restore last.
 The console answered between 12:40 and 13:20 UTC on 2026-09-23 and was idle:
 `procs` reported `count=0`, from live kernel process enumeration. Four runs were
 made, each with the console's own state snapshotted first and restored exactly
-afterwards -- the two configuration files the owner has, `vkQuake.cfg` (1020
+afterwards -- my two configuration files, `vkQuake.cfg` (1020
 bytes) and `id1/vkQuake.cfg` (2510 bytes), were unchanged at the end, and the
 staged autoexec and flags were removed.
 
@@ -251,7 +251,7 @@ was left on the console is this one.
 
 ## The display is 60 Hz, and the high-frame-rate mode is refused
 
-The console was moved to the owner's 4K120 Hz TV, so the display path was
+The console was moved to my 4K120 Hz TV, so the display path was
 measured rather than assumed. Two short runs, no fixture and no driver
 profiling, with only the probe flags staged.
 

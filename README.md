@@ -52,14 +52,14 @@ toolchain.
   passes, pipelines, descriptors, fences, semaphores, swapchain and display, one
   driver step per Vulkan Tutorial chapter (M5 B, M5 C).
 - ✅ **A real application works.** RetroArch runs through the driver; a fragment
-  input location defect found through it is fixed and owner-confirmed, with a
+  input location defect found through it is fixed and confirmed on screen, with a
   30-second watch recording zero refusals
   ([evidence](evidence/fragment-inputs/),
   [findings](docs/HARDWARE_FINDINGS.md)).
-- ✅ **vkQuake runs on the console.** The owner confirmed the deployed R29 game
-  works on September 23, 2026. Console readbacks already verify textured worlds,
-  menu alpha and HUD rendering. The owner estimates 15–30 FPS; systematic
-  gameplay acceptance and performance work continue. See
+- ✅ **vkQuake runs at up to 120 FPS at 4K.** Walking the start map, every frame
+  takes 8.29–8.40 ms (119.88 FPS) on a 4K120 VRR display with kstuff paused;
+  4K readbacks verify textured worlds, warps, particles, menu alpha and the HUD.
+  Systematic gameplay acceptance continues. See
   [vkQuake and performance](#vkquake-and-performance).
 - ✅ **Input attachments read the complete frame correctly.** R20 corrected the
   probe's tiled-memory reader; the earlier quarter-width diagnosis was a probe
@@ -167,75 +167,63 @@ toolchain.
 | — | The console SIGFPE at `jobs/aco-min` | ✅ fixed: the runner's sampled-format table ran a row it never filled in |
 | Rung 1.1–1.4 | One commit a rung, each gated by a CTS subset | ❌ |
 | Phase E1 | CTS-style semantic validation against the advertised set | ❌ recipe written |
-| Real applications | RetroArch ✅ · vkQuake runs, optimization/acceptance 🔄 · other frontends ❌ | 🔄 in progress |
+| Real applications | RetroArch ✅ · vkQuake at up to 120 FPS at 4K, acceptance 🔄 · other frontends ❌ | 🔄 in progress |
 
 ## vkQuake and performance
 
 The native PS5 vkQuake port in the sibling `../PS5_vkQuake` checkout links this
-repository's static driver archives. Its README covers installation and controls. Its owner confirmed the deployed R29 game
-works; the current 15–30 FPS figure is a manual estimate. Stable, faster gameplay
-is the immediate goal. See [active state](docs/VULKAN_PROBE_ACTIVE.md) for the
-exact tested driver and pending work.
+repository's static driver archives; its README covers installation, controls
+and the console settings below. The exact tested driver and what is pending are
+in the [active state](docs/VULKAN_PROBE_ACTIVE.md).
 
-The compatibility rounds now cover vertex stride, dynamic UBO offsets,
-descriptor arrays, padded pitches/mip tails and 32-bit indices. Later rounds
-fixed depth state leaking into colour-only UI, sampler LOD bias and menu blend
-control. Swapchain readback provides complete screenshots as evidence, rather
-than treating a successful present call as proof of a correct image.
+The compatibility rounds cover vertex stride, dynamic UBO offsets, descriptor
+arrays, padded pitches and mip tails, 32-bit indices, depth state leaking into
+colour-only UI, sampler LOD bias and menu blend control. Swapchain readback
+provides complete screenshots as evidence, rather than treating a successful
+present call as proof of a correct image.
 
-| Evidence | What it establishes |
-| --- | --- |
-| [Persistent shader cache](jobs/shader-cache/) | Same-binary cold/warm first present 30.410/13.018 s, 99/0 SPIR-V compilations and 433/532 hits |
-| [R25 depth detach](jobs/r25-depth-detach/) | Correct depth transitions and colour-only UI |
-| [R26 LOD bias](jobs/r26-lod-bias/) | Signed/fractional sampler bias and mip sampling |
-| [R27 menu alpha](jobs/r27-menu-alpha/) | Complete 4K alpha frames and constant blending |
-| [R28 CPU-copy profile](jobs/r28-copy-profile/) | Separates CPU copies, cache flushes, submission and present costs |
-| [R29 tile addressing](jobs/r29-tile-address/) | Direct evaluation of the existing common tile equation; 3,501 console mip/upload/copy/format checks pass |
+### Where the time went, and what changed
 
-Cache entries live in the application's `/app0/ps5vk-shader-cache` directory,
-survive title restarts/crashes and are preserved by normal game deployments.
-Changed shader/compiler inputs invalidate their keys. Eight internal NIR stages
-still compile per launch. A [parked NIR-cache candidate](parked/nir-shader-cache/)
-has host cold/warm equality and replay checks, but is **not enabled in the
-production R29 driver**; console startup and gameplay validation remain pending.
-Startup improvements must not be presented as steady-frame-rate improvements.
+Measured on the console at 3840×2160 (port evidence, steady windows):
 
-### Measured bottlenecks and the 4K120 target
+| Round | Change | Effect |
+| --- | --- | --- |
+| [R29](jobs/r29-tile-address/) | Common tile-address evaluation | Start map 14.8 → 19.7 FPS |
+| [R33](jobs/r33-begin-split/)–R36 | A nearly free profile (TSC timestamps, one write) | Found that a system call costs ~20 µs with kstuff active, and that the profile's own write was the "unexplained" multi-second stall |
+| [R37](jobs/r37-mapped-flush/) | Flush colour targets only in memory the application maps | 256–384 MiB and 3.9–5.8 ms of cache flush a frame gone; full runner battery identical to before |
+| R38 | Bounded spin on the completion marker before sleeping | Poll 1.12 → 0.15 ms a step |
+| [R42](jobs/r42-parallel-blit/) | Blits resampled on five threads | Water-warp mips 2.3–8.2 → 0.4–1.2 ms; walking the start map 34–47 → 52–55 FPS |
+| [R43](jobs/r43-hitch-recorder/) | A per-frame hitch report | Located the port's New Game stutter (fixed in the port) |
+| [R46](jobs/r46-nir-cache/), [R47](jobs/r47-shipped-cache/) | Internal NIR cache; one cache directory per build, shippable | A launch compiles nothing |
 
-Before the R29 address optimization, the [R28 baseline](jobs/r28-copy-profile/metrics.txt)
-measured these per-frame means:
+With the console's kstuff paused at game launch (an etaHEN setting), a system
+call costs 0.73 µs instead of ~20 µs, and the same walk runs at the display's
+120 Hz ceiling: **119.88 FPS, 4.0–4.4 ms of work a frame**, application 2.4 ms,
+queue 2.1 ms. On a VRR display a frame presents as soon as it is ready, from 48
+to 120 Hz; a frame over the 48 Hz window (20.8 ms) is held to ~29.2 ms.
 
-| Cost | Start map | E1M1 spawn |
-| --- | ---: | ---: |
-| CPU image copies | 24.095 ms | 0.041 ms |
-| Cache flush | 5.954 ms | 3.974 ms |
-| Queue total | 33.222 ms | 6.905 ms |
-| Flip path | 14.415 ms | 7.431 ms |
-| Flushed target bytes | 384.09 MiB | 256.06 MiB |
+### Shader cache
 
-Queue time includes other categories, so the rows cannot all be summed. The
-`gpu_ms` field includes native submission/completion waiting; it is not isolated
-GPU execution time. The start-map copy cost points toward water mip generation,
-which needs finer attribution before selecting an implementation. R29's console
-pixel proofs establish correctness; its controlled game benchmark is pending.
-The previous integer-filter experiment reduced copy cost without improving FPS
-and was rolled back. Engine `r_scale 2` and `tasks 0` also failed to improve FPS.
+Entries live in `/app0/ps5vk-shader-cache/<first 16 hex digits of the driver
+build>/`, one directory per build, since keys include the build. Directories are
+0777 so the console's FTP service can read entries back and write shipped ones
+in; `PS5VK_SHADER_CACHE_DIR`, or on the console `/app0/ps5vk-shader-cache-dir.txt`,
+names another base for tests. Since R46 the driver's internal NIR stages are
+cached too, and the port ships each build's compiled set, so a launch compiles
+nothing ([R47](jobs/r47-shipped-cache/)).
 
-120 FPS allows **8.33 ms for an entire frame**. Work should start with measured
-CPU image/mip paths, possible GPU blits, excessive cache work and opportunities
-for correct CPU/GPU overlap. Engine-side water passes, uploads and scheduling
-also deserve profiling. Neither missing synchronization nor smaller render
-resolution is an established fix. Each optimization needs image comparisons,
-repeatable game timing and stability checks.
+### What is still open
 
-There is a separate output limit: [the current WSI](driver/ps5vk_wsi.c) exposes
-**one 3840×2160 mode at 60 Hz, FIFO only**. 120 distinct displayed frames per
-second require implementing and validating a real 120 Hz VideoOut mode and frame
-pacing, plus a suitable display/HDMI setup. PS5 supports 4K120 output in general
-([Sony's guide](https://www.playstation.com/en-ca/support/hardware/ps5-4k-resolution-guide/));
-that does not establish support in this driver. Stable 4K60 is the next practical
-performance milestone; 4K120 remains a target requiring both driver and
-application measurement, not a promised result.
+- **Refresh reporting.** The WSI still reports one 3840×2160 mode at 60 Hz, FIFO,
+  although the display runs up to 120 Hz under VRR. The driver should enumerate
+  VideoOut's modes, select 120 Hz at swapchain creation when the title's metadata
+  allows it (the port sets `attribute3 0x80040`), restore it at close, keep the
+  60 Hz fallback and report what it measured.
+- **Colour targets are 3840×2160 only.** Rendering into a smaller colour image is
+  refused by name, which is why vkQuake's raster warp path (`r_waterwarpcompute 0`)
+  cannot run; its default compute path does.
+- **Multiple colour attachments** are still refused (`v0-mrt`), and that case
+  stops the test runner.
 
 ## What this is — and what it is not
 

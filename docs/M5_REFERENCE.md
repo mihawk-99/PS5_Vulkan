@@ -115,7 +115,7 @@ Adopted on 2026-09-15. Phase B's lessons shape the workflow:
    guessing. Before queuing anything, a failing PC check is diagnosed as
    driver logic or missing hardware knowledge.
 5. **Risk.** A probe that may fault the GPU or freeze the console is named,
-   with its likely effect, before the user launches it. It is never queued by
+   with its likely effect, before I launch it. It is never queued by
    default: the runner's `kFaultingTests` keeps known offenders out of the
    default and `all` queues.
 6. **Commits.**
@@ -123,7 +123,7 @@ Adopted on 2026-09-15. Phase B's lessons shape the workflow:
      Phases A and B.
    - Each step's closing commit is titled
      `feat(vulkan): implement C<N> - <feature>`, with a detailed body.
-   - Commits stay local; the user pushes.
+   - Commits stay local; I push.
 7. **Toolchain.** Scripts in `tools/` gain no Android or other non-PS5
    toolchain flags.
 

@@ -50,8 +50,8 @@ Game (port evidence `m6-r37-mapped-flush`, profiled, trimmed fixture): flush
 (work 37.3 -> 31.8 ms); E1M1 34.19 FPS in one window and 39.28 in the other
 (work 21.6 / 20.8 ms). Both readbacks correct.
 
-Display note, added after the run: the owner reports that VRR "Apply to
-Unsupported Games" was only now enabled, so none of the runs above had VRR, and
+Display note, added after the run: VRR "Apply to Unsupported Games" was only
+enabled afterwards, so none of the runs above had VRR, and
 the variable-refresh model in `jobs/r33-begin-split` does not explain the
 29.25 ms E1M1 period. Later runs are under a different display setting.
 

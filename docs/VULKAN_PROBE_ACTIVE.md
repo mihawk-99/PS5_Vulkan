@@ -4,40 +4,38 @@ Volatile by design. Keep this file under about 120 lines. Specifications are in
 `docs/VULKAN_PROBE_PLAN.md`; measurements are in `docs/M5_PHASE_C.md` and
 `docs/HARDWARE_FINDINGS.md`.
 
-_Updated: 2026-09-23 (R47)_
+_Updated: 2026-09-23_
 
 ## Now
-**vkQuake performance is the priority; no CTS work.** Rounds R33-R40 this
-session (jobs/r33-begin-split, jobs/r37-mapped-flush; port evidence m6-r33-*
-through m6-r40-*):
+**vkQuake performance and stability are the priority; no CTS work.** vkQuake
+runs at up to 120 FPS at 4K: walking the start map, 119.88 FPS with every frame
+8.29-8.40 ms, 4.0-4.4 ms of work (port evidence m6-r49-kstuff-paused). That needs
+two console settings: etaHEN's "pause kstuff on game launch" (with kstuff active
+a system call costs ~20 us instead of 0.73 us, and the game manages ~52 FPS) and
+VRR for unsupported games (frames present as soon as ready, 48-120 Hz).
 
-- The profile is nearly free (44337ef): TSC timestamps (a system call costs
-  ~20 us on this console, a TSC read 12 ns) and one write(2) on fileno(stderr).
-  Earlier profiled window means are inflated by a 1.6-5.8 s summary write.
-- R37 (6f347ba): colour targets are flushed only in memory the application has
-  mapped; blits/resolves invalidate their source first, the runner's
-  image-storage pointer invalidates on handover. Flush 3.9 -> 0.002 ms at E1M1.
-  Runner battery: every test except b8-indirect, per-test statuses identical to
-  the pre-change driver (138 tests, 130 PASS each). v0-mrt stops the runner on
-  both drivers -- a pre-existing open item.
-- R38 (d915015): the completion marker is spun on for up to 1.5 ms before the
-  first 1 ms sleep; every step is found in the spin, poll 1.12 -> 0.15 ms.
-- R40 (b4c0b2e): vkCmdExecuteCommands 0.14 ms a frame; begin 0.33 ms, draw
-  encoding 0.08 ms. The driver is ~0.9 ms of an E1M1 frame; the application's
-  ~17-19 ms is the remaining cost.
-- The owner enabled VRR for unsupported games; with it the present does not
-  wait and FPS follows work. E1M1 55.76 FPS, start map 33.08 (was 29.58/19.72
-  at R29). The console's runner title currently holds the R37 baseline build.
+Driver rounds this session, each with its console proof in jobs/:
+R33-R36 (jobs/r33-begin-split) a nearly free profile with TSC timestamps and one
+write(2), and the finding that its old fputs was the multi-second "stall";
+R37 (jobs/r37-mapped-flush) flush colour targets only in mapped memory, runner
+battery identical to the pre-change driver (138 tests, 130 PASS each); R38 a
+bounded marker spin; R40 vkCmdExecuteCommands timed (0.14 ms, ruled out);
+R42 (jobs/r42-parallel-blit) blits on five threads; R43
+(jobs/r43-hitch-recorder) a per-frame hitch report; R46 (jobs/r46-nir-cache)
+the internal NIR cache; R47 (jobs/r47-shipped-cache) one cache directory per
+build, 0777, which the port harvests and ships.
 
-R41-R47 (jobs/r42-parallel-blit, r43-hitch-recorder, r46-nir-cache,
-r47-shipped-cache): blits resampled on five threads (walking the start map
-52-55 FPS, runner blit/mip/resolve tests identical); a per-frame hitch report;
-the internal NIR cache landed (warm launches compile nothing); one cache
-directory per build, 0777 so the port can harvest and ship it. The owner's New
-Game stutter was the port's unbuffered console stream, now fixed there.
+Next, in order:
+1. Report the refresh truthfully: enumerate VideoOut's modes, select 120 Hz at
+   swapchain creation when the metadata allows it, restore it at close, keep
+   the 60 Hz fallback, and report the measured rate instead of 60000.
+2. Colour targets other than 3840x2160 (vkQuake's raster warp path renders
+   512x512 and is refused), then multiple colour attachments (v0-mrt, which
+   also stops the runner).
+3. The port's gameplay/stability acceptance.
 
-Next: the application's ~17 ms; then the 120 Hz mode at swapchain creation
-(enumerate, restore, fall back, report truthfully).
+The test runner on the console (PPSA99988) holds the R46 build. An intermittent
+texture glitch seen in play is set aside until it can be captured.
 
 ## Standing work
 - Graphics R7 rounds 1-4, R8 dynamic depth bias, the first batch's R9 (push

@@ -1147,7 +1147,7 @@ crashed after presentation; warm hits prove its saved shaders survived.
 
 The same two map-recording refusals and ps5vk_cmd_draw_indirect stride assertion
 repeat (already PID 199). No M3–M6 acceptance or rendering repair is claimed.
-The pair was the user's cache experiment; with it complete, follow the user's
+The pair was my cache experiment; with it complete, follow my
 repeat-failure stop rule rather than start another rendering experiment.
 
 Implementation and gates are recorded in M5_PHASE_C.md and jobs/shader-cache/README.md.
@@ -1196,7 +1196,7 @@ Fifteen targeted host/link arms, cache package tests and all eleven gates PASS;
 port five gates and template relink PASS. Host regression cache enabled during
 check-driver. Metadata stress: 64 records, 18,432 bytes, below 32 KiB.
 
-The user's mission requires stopping when a run contradicts an earlier claim.
+My brief requires stopping when a run contradicts an earlier claim.
 Corrected code is parked in parked/r16-mip-tail.patch against b838832, with
 jobs/r16-mip-blit/README.md and validation artifacts; failed hardware evidence
 is golden/r16-mip-blit-before. Restore accepted R15 source/archive and relink
@@ -1214,7 +1214,7 @@ Exact restoration identities: jobs/r16-mip-blit/restored-base.txt.
 
 ## 2026-09-22 — R16 corrected mip readback accepted, PID 207
 
-The user explicitly resumed corrected readback, then vkQuake relink/launch.
+I then resumed corrected readback, then the vkQuake relink/launch.
 PS5 PID 207 returns 277 PASS, zero FAIL. m2-solid, c7-mip-upload and the new
 r16-mip-blit pass; every pinned lower mip matches 8,294,400/8,294,400 pixels,
 including the formerly failing 64x64 level. Independent shifted-coordinate
@@ -1260,7 +1260,7 @@ replay failures). On-screen question pending; no new visual acceptance claimed.
 
 ## 2026-09-23 — R17 descriptor arrays accepted, PID 209
 
-The user requested R17 then R18. Each descriptor array element now has its own
+R17 was requested first, then R18. Each descriptor array element now has its own
 record; writes, copies and partial updates use binding record indices. Shared
 graphics/compute validation and emission walk elements at their declared stride.
 Dynamic offsets retain binding/element order. Input-attachment arrays remain

@@ -41,7 +41,7 @@ At that checkpoint the corrected candidate had NOT run on PS5.
 
 The mission says to stop when a run contradicts an earlier claim. PID 206
 triggers that rule. The patch was parked and accepted R15 source/archive and port links restored.
-The user then explicitly resumed corrected readback and the vkQuake launch.
+I then resumed corrected readback and the vkQuake launch.
 
 ## Reproduction
 

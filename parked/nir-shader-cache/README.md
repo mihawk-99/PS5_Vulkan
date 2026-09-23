@@ -45,7 +45,7 @@ Remaining acceptance:
    actual readback, final traces twice, clean exit and no refusals/audio errors.
 3. Record only measured startup benefit, restore test configs/profile, then land
    the production patch and remove this parked status. No physical confirmation
-   is required while the user is unavailable.
+   is required for it.
 
 The existing common cache tests cover unavailable directories and corrupt or
 truncated output recovery. Cache-directory disable still compiles normally.
