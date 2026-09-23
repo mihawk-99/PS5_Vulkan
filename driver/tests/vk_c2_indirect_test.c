@@ -146,16 +146,23 @@ main(void)
                   .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
                   .commandBufferCount = 1,
                };
-               VkCommandBuffer command = VK_NULL_HANDLE;
-               VK_FUNCTION(triangle.instance, AllocateCommandBuffers)(triangle.device, &command_info,
-                                                                      &command);
-               const VkCommandBufferBeginInfo begin = {
-                  .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-               VK_FUNCTION(triangle.instance, BeginCommandBuffer)(command, &begin);
-               VK_FUNCTION(triangle.instance, CmdFillBuffer)(command, indirect, 0, 16, 0);
-               VK_FUNCTION(triangle.instance, CmdDrawIndirect)(command, indirect, 0, 1, 16);
-               check(VK_FUNCTION(triangle.instance, EndCommandBuffer)(command) == VK_ERROR_UNKNOWN,
-                     "an indirect draw whose parameters this command buffer writes is refused");
+               for (unsigned indexed = 0; indexed < 2; indexed++) {
+                  VkCommandBuffer command = VK_NULL_HANDLE;
+                  VK_FUNCTION(triangle.instance, AllocateCommandBuffers)(triangle.device, &command_info,
+                                                                         &command);
+                  const VkCommandBufferBeginInfo begin = {
+                     .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+                  VK_FUNCTION(triangle.instance, BeginCommandBuffer)(command, &begin);
+                  VK_FUNCTION(triangle.instance, CmdFillBuffer)(command, indirect, 0, 20, 0);
+                  if (indexed)
+                     VK_FUNCTION(triangle.instance, CmdDrawIndexedIndirect)(command, indirect, 0, 1, 0);
+                  else
+                     VK_FUNCTION(triangle.instance, CmdDrawIndirect)(command, indirect, 0, 1, 0);
+                  check(VK_FUNCTION(triangle.instance, EndCommandBuffer)(command) == VK_ERROR_UNKNOWN,
+                        "zero stride reaches the written-parameters refusal for both indirect forms");
+                  VK_FUNCTION(triangle.instance, FreeCommandBuffers)(triangle.device, triangle.pool,
+                                                                      1, &command);
+               }
             }
          }
       }

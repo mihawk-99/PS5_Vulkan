@@ -3287,12 +3287,12 @@ draw(struct ps5vk_triangle *triangle, VkCommandBuffer command)
          CALL(triangle, CmdDraw)(command, 3, instances, 0, 0);
          return;
       }
-      /* The same parameters through an indirect buffer: 3 vertices, the
+      /* Single-draw stride is ignored; use zero like vkQuake.
+       * The same parameters through an indirect buffer: 3 vertices, the
        * instances the caller asked for, nothing else (VkDrawIndirectCommand). */
       const uint32_t parameters[4] = {3, instances, 0, 0};
       memcpy(triangle->indirect_mapped, parameters, sizeof(parameters));
-      CALL(triangle, CmdDrawIndirect)(command, triangle->indirect_buffer, 0, 1,
-                                      (uint32_t)sizeof(parameters));
+      CALL(triangle, CmdDrawIndirect)(command, triangle->indirect_buffer, 0, 1, 0);
       return;
    }
    const VkDeviceSize zero = 0;
@@ -3306,8 +3306,7 @@ draw(struct ps5vk_triangle *triangle, VkCommandBuffer command)
       }
       const uint32_t parameters[4] = {triangle->vertex_count, instances, 0, 0};
       memcpy(triangle->indirect_mapped, parameters, sizeof(parameters));
-      CALL(triangle, CmdDrawIndirect)(command, triangle->indirect_buffer, 0, 1,
-                                      (uint32_t)sizeof(parameters));
+      CALL(triangle, CmdDrawIndirect)(command, triangle->indirect_buffer, 0, 1, 0);
       return;
    }
    CALL(triangle, CmdBindIndexBuffer)(command, triangle->index_buffer, 0, VK_INDEX_TYPE_UINT16);
@@ -3336,8 +3335,7 @@ draw(struct ps5vk_triangle *triangle, VkCommandBuffer command)
    const uint32_t parameters[5] = {indices, instances, first_index,
                                    (uint32_t)triangle->base_vertex, 0};
    memcpy(triangle->indirect_mapped, parameters, sizeof(parameters));
-   CALL(triangle, CmdDrawIndexedIndirect)(command, triangle->indirect_buffer, 0, 1,
-                                          (uint32_t)sizeof(parameters));
+   CALL(triangle, CmdDrawIndexedIndirect)(command, triangle->indirect_buffer, 0, 1, 0);
 }
 
 /* Records the fill pass a render-to-texture frame starts with (Phase C4), into

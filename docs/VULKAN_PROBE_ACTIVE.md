@@ -31,13 +31,12 @@ SHA-256 e089e060… . PS5 probe PIDs 200 and 201 each returned 241 PASS/zero FAI
 twelve submissions replay exactly, goldens in golden/shader-cache-cold and
 -warm. Driver probe stdout is not a hit-count witness; vkQuake's trace is.
 
-**M6 remains blocked after first presentation.** PIDs 199, 202 and 203 repeat
-named tiled-chain blit and multiple dynamic-offset refusals, then the indirect
-stride assertion. Upstream uses count=1/stride=0; this driver asserts stride
-at least command size even for one draw. The cache runs were the explicitly
-requested persistence/timing experiment, not retries to repair rendering.
-The user's repeat-failure stop rule now bars another rendering experiment
-without resumption. R13 removed the prior upload OOM; it was not all of M6.
+**M6 resumed by user; R14 stride fix accepted.** Single-draw count=1/stride=0
+now records; indexed/non-indexed host checks PASS. PS5 PID 204: 121 PASS,
+zero FAIL, indirect triangle pixels and exact submission replay PASS.
+Six check-driver arms, eleven gates, port five gates and template relink PASS.
+Evidence: jobs/r14-indirect-stride/README.md; golden/r14-indirect-stride.
+No port retry yet; next are the named dynamic-offset and tiled-chain refusals.
 
 **Port M2 met:** PID 197, QueuePresent success and human-confirmed Quake
 menu/console; port evidence/m2-first-frame. M3–M6 remain open. Input/audio

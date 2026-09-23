@@ -2510,9 +2510,10 @@ ps5vk_cmd_draw_indirect(struct ps5vk_cmd_buffer *cmd_buffer, VkBuffer _buffer, V
 {
    VK_FROM_HANDLE(ps5vk_buffer, buffer, _buffer);
    const uint32_t command_bytes = indexed ? 20u : 16u;
-   /* Valid usage: a bound buffer, a stride that is a multiple of four and at
-    * least the command's size, and a range inside the buffer. */
-   assert(buffer != NULL && (stride % 4) == 0 && stride >= command_bytes);
+   /* Vulkan ignores stride for a single draw (vkQuake passes zero).
+    * Only a multi-draw array needs aligned, non-overlapping records. */
+   assert(buffer != NULL);
+   assert(draw_count <= 1 || ((stride % 4) == 0 && stride >= command_bytes));
    if (buffer->vk.device_address == 0) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                               "an indirect draw names a buffer with no GPU address: it has to be "

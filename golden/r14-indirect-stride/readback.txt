@@ -1,0 +1,54 @@
+{
+  "pid": 204,
+  "ended": true,
+  "statuses": {
+    "PASS": 121,
+    "INFO": 12,
+    "NOT_REQUIRED": 8,
+    "ARMED": 1,
+    "WARN": 1
+  },
+  "tests": [
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "m2-solid"
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_test",
+      "status": "PASS",
+      "result": 0,
+      "detail": "c2-indirect"
+    }
+  ],
+  "records": [
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "c2_indirect",
+      "status": "PASS",
+      "result": 0,
+      "detail": "M2 triangle drawn through vkCmdDrawIndirect and read back"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "runner_summary",
+      "field": "ran",
+      "value": 2
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "runner_summary",
+      "status": "PASS",
+      "result": 0,
+      "detail": "2 of 2 queued tests passed"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+# Single-draw zero stride follows the same recorded draw path.
+hold 1
+capture
+m2-solid
+c2-indirect
+exit

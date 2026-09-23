@@ -8571,3 +8571,12 @@ The same two map-recording refusals and ps5vk_cmd_draw_indirect stride assertion
 repeat (already PID 199). No M3–M6 acceptance or rendering repair is claimed.
 The pair was the user's cache experiment; with it complete, follow the user's
 repeat-failure stop rule rather than start another rendering experiment.
+
+## 2026-09-22 — R14 single-draw stride accepted
+
+User resumed M6 rendering work. Count=1/stride=0 now records in the shared
+indirect helper; multi-draw retains its stride checks. Six host/link arms,
+eleven gates, port five gates and template relink PASS. PS5 PID 204: 121 PASS,
+zero FAIL, pixel readback PASS, one exact replay; closed. Evidence and commands:
+jobs/r14-indirect-stride/README.md, golden/r14-indirect-stride. No port retry;
+dynamic-offset and tiled-chain refusals are the next named gaps.

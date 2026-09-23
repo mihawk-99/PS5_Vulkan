@@ -1,0 +1,1 @@
+c2-indirect.dump c2-indirect draw: identical to c2-indirect-1.json: 8 packets, 3 register tables
