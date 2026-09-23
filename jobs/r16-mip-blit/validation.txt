@@ -1,0 +1,32 @@
+lint PASS
+test PASS
+audit-commands PASS
+audit-limits PASS
+audit-formats PASS
+migration PASS
+mip-layout PASS
+psbc-link PASS
+probe-packages PASS
+vulkan-runtime PASS
+runner-cases PASS
+
+c7_mip_upload loader         PASS
+c7_mip_upload direct         PASS
+c7_mip_upload PS5 link       PASS
+c7_tiled_mip loader          PASS
+c7_tiled_mip direct          PASS
+c7_tiled_mip PS5 link        PASS
+c7_copy loader               PASS
+c7_copy direct               PASS
+c7_copy PS5 link             PASS
+c7_blit_formats loader       PASS
+c7_blit_formats direct       PASS
+c7_blit_formats PS5 link     PASS
+c4_texture loader            PASS
+c4_texture direct            PASS
+c4_texture PS5 link          PASS
+256x256 5 levels: 87296 texels; additive mismatches=2048, XOR mismatches=0
+512x512 5 levels: 349184 texels; additive mismatches=2048, XOR mismatches=0
+upload metadata: 1 records for 1 regions, 288 bytes per record
+repeated uploads: 64 records for 64 regions; metadata capacity 18432 bytes
+Port five gates PASS; template relink PASS.

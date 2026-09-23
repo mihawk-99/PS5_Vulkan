@@ -1,0 +1,66 @@
+{
+  "candidate": "XOR mip tail; checker average checked using shifted tail coordinates",
+  "records": [
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r16_mip_texels",
+      "field": "mismatches",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "r16_mip_texels",
+      "status": "PASS",
+      "result": 0,
+      "detail": "all 87040 lower-level texels equal the filtered checker average"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r16_mip_texels",
+      "field": "mismatches",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "r16_mip_texels",
+      "status": "PASS",
+      "result": 0,
+      "detail": "all 87040 lower-level texels equal the filtered checker average"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r16_mip_texels",
+      "field": "mismatches",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "r16_mip_texels",
+      "status": "PASS",
+      "result": 0,
+      "detail": "all 87040 lower-level texels equal the filtered checker average"
+    },
+    {
+      "schema": 2,
+      "event": "value",
+      "probe": "r16_mip_texels",
+      "field": "mismatches",
+      "value": 0
+    },
+    {
+      "schema": 2,
+      "event": "probe",
+      "probe": "r16_mip_texels",
+      "status": "PASS",
+      "result": 0,
+      "detail": "all 87040 lower-level texels equal the filtered checker average"
+    }
+  ],
+  "host_pixel_checks": "not applicable: host does not render"
+}

@@ -1,0 +1,6 @@
+{
+  "bytes": 14428778,
+  "sha256": "8d5206d5d4fc1535c342916b71c81e57d62ae4086d14fcd993074bc4c2fc8c67",
+  "patch_sha256": "0bf7829459d3748cf582d89fdfb0d1f038e5e807dc0b7392da594237cf55373c",
+  "accepted_on_ps5": false
+}

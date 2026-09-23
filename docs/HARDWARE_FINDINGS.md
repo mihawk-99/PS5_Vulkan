@@ -3012,3 +3012,26 @@ sampling and within the established bilinear tolerance. The 64x36 baseline
 passed in the same run. Evidence: golden/r12-pitch, jobs/r12-pitch/queue.txt.
 This proves the narrow padded 2D case; it does not prove padded array or mip-chain
 placement, which remains guarded. Four submissions replay identically on host.
+
+## 2026-09-22 — R16 first hardware run and mip-tail coverage correction
+
+PID 206 tested Quake's 512x512 five-level tiled water texture: upload a 0/254
+checkerboard, generate four lower levels with linear blits, then sample each
+pinned LOD. CPU checks using the same additive addressing as the driver found
+87,040 expected texels after each frame. Hardware instead found only 7,776,000
+of 8,294,400 expected pixels for the 64x64 level; the other three levels were
+exact. This candidate failed; no vkQuake launch followed. The failed capture
+and measurements remain in golden/r16-mip-blit-before.
+
+The independent whole-chain AddrLib query (the measured 64KB_R_X colour mode)
+shows why the CPU check was insufficient: the packed tail origin participates
+in the XOR swizzle. Adding its swizzled value can carry into another bit.
+For both the 256x256/five-level and 512x512/five-level chains, addition differs
+at 2,048 texels; XOR differs at zero of 87,296 and 349,184 queried texels.
+The per-level origins and previously recorded centre addresses do not change.
+
+This explicitly narrows the older C7 claim: matching level origins and sampled
+centres did not establish every texel in a packed tail. The earlier narrative
+about the shifted tail coordinate was correct; its implementation as addition
+and the matching CPU probe were not. Earlier entries/goldens are retained.
+The corrected candidate is still awaiting its hardware rerun at this entry.

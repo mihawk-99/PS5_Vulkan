@@ -1,0 +1,10 @@
+{
+  "driver_commit": "b838832",
+  "archive_bytes": 14427682,
+  "archive_sha256": "055c7c6c1ff47829fcb3c294cc4d8bd758529a0c2dea8f238e3347ed11c17811",
+  "port_build_identity": "de7a813a51722193a7c2fb7754afda8285ec8f23c73b9e98230316cf68e6ce6c",
+  "port_gates": "all five PASS; 23 captures, zero failed",
+  "template_build_identity": "c9478e70a75d3715631f6992930ea1707246853dc7ed28919d9aaa6b195c1982",
+  "template_relink": "PASS; pre-existing unused audio function warnings",
+  "deployed_or_launched": false
+}

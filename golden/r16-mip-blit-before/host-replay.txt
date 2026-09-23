@@ -1,0 +1,12 @@
+golden/r16-mip-blit-before/run-1.json: register defaults from m2-solid-1.json, the same run
+c7-mip-upload.dump c7-mip-upload mip bands: identical to c7-mip-upload-1.json: 17 packets, 6 register tables
+c7-mip-upload.dump c7-mip-upload pinned level 0: identical to c7-mip-upload-2.json: 16 packets, 6 register tables
+c7-mip-upload.dump c7-mip-upload pinned level 1: identical to c7-mip-upload-3.json: 16 packets, 6 register tables
+c7-mip-upload.dump c7-mip-upload pinned level 2: identical to c7-mip-upload-4.json: 16 packets, 6 register tables
+c7-mip-upload.dump c7-mip-upload pinned level 3: identical to c7-mip-upload-5.json: 16 packets, 6 register tables
+c7-mip-upload.dump c7-mip-upload pinned level 4: identical to c7-mip-upload-6.json: 16 packets, 6 register tables
+golden/r16-mip-blit-before/run-1.json: register defaults from m2-solid-1.json, the same run
+r16-mip-blit.dump r16-mip-blit pinned level 1: identical to r16-mip-blit-1.json: 17 packets, 6 register tables
+r16-mip-blit.dump r16-mip-blit pinned level 2: identical to r16-mip-blit-2.json: 16 packets, 6 register tables
+r16-mip-blit.dump r16-mip-blit pinned level 3: identical to r16-mip-blit-3.json: 16 packets, 6 register tables
+r16-mip-blit.dump r16-mip-blit pinned level 4: identical to r16-mip-blit-4.json: 16 packets, 6 register tables

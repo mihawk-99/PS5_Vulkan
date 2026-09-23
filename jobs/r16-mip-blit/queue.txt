@@ -1,0 +1,7 @@
+# Quake water-texture shape and filtered mip generation.
+hold 1
+capture
+m2-solid
+c7-mip-upload
+r16-mip-blit
+exit

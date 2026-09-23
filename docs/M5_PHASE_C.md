@@ -8598,3 +8598,58 @@ Those runs established address-offset pixels/streams, not acceptance of a
 correctly typed dynamic write. R15 corrects the harness and the driver's type
 check and re-runs D1 on PS5; old streams still compare unchanged. This is a
 coverage correction; earlier evidence and log entries remain unmodified.
+
+## 2026-09-22 — R16 first hardware run and mip-tail coverage correction
+
+PID 206 tested Quake's 512x512 five-level tiled water texture: upload a 0/254
+checkerboard, generate four lower levels with linear blits, then sample each
+pinned LOD. CPU checks using the same additive addressing as the driver found
+87,040 expected texels after each frame. Hardware instead found only 7,776,000
+of 8,294,400 expected pixels for the 64x64 level; the other three levels were
+exact. This candidate failed; no vkQuake launch followed. The failed capture
+and measurements remain in golden/r16-mip-blit-before.
+
+The independent whole-chain AddrLib query (the measured 64KB_R_X colour mode)
+shows why the CPU check was insufficient: the packed tail origin participates
+in the XOR swizzle. Adding its swizzled value can carry into another bit.
+For both the 256x256/five-level and 512x512/five-level chains, addition differs
+at 2,048 texels; XOR differs at zero of 87,296 and 349,184 queried texels.
+The per-level origins and previously recorded centre addresses do not change.
+
+This explicitly narrows the older C7 claim: matching level origins and sampled
+centres did not establish every texel in a packed tail. The earlier narrative
+about the shifted tail coordinate was correct; its implementation as addition
+and the matching CPU probe were not. Earlier entries/goldens are retained.
+The corrected candidate is still awaiting its hardware rerun at this entry.
+
+
+## 2026-09-22 — R16 corrected candidate parked after contradictory readback
+
+PID 206 failed level-3 full-frame readback: 7,776,000/8,294,400 matching pixels,
+while the old additive CPU witness passed. Separate correction entries above
+narrow the earlier C7 claim. The corrected shared XOR tail addressing and
+actual-written-range flush pass whole-chain AddrLib queries (zero mismatches
+across 87,296 and 349,184 texels) and independent shifted-coordinate CPU checks
+for all 87,040 lower texels. Ten PM4 streams still replay exactly; that is not
+corrected hardware pixel acceptance.
+
+Final explicit candidate build: 14,428,778 bytes, SHA-256
+8d5206d5d4fc1535c342916b71c81e57d62ae4086d14fcd993074bc4c2fc8c67.
+Fifteen targeted host/link arms, cache package tests and all eleven gates PASS;
+port five gates and template relink PASS. Host regression cache enabled during
+check-driver. Metadata stress: 64 records, 18,432 bytes, below 32 KiB.
+
+The user's mission requires stopping when a run contradicts an earlier claim.
+Corrected code is parked in parked/r16-mip-tail.patch against b838832, with
+jobs/r16-mip-blit/README.md and validation artifacts; failed hardware evidence
+is golden/r16-mip-blit-before. Restore accepted R15 source/archive and relink
+dependents before checkpointing. No corrected-candidate or port launch; console
+idle. Next authorized cycle must prove all four mip levels on PS5 before port
+relink/deployment. M6 remains open.
+
+Checkpoint restoration completed: explicit accepted-base build is 14,427,682
+bytes, SHA-256 055c7c6c1ff47829fcb3c294cc4d8bd758529a0c2dea8f238e3347ed11c17811.
+Port all five gates PASS (23 captures, zero failures), identity
+de7a813a51722193a7c2fb7754afda8285ec8f23c73b9e98230316cf68e6ce6c; template relink PASS
+(pre-existing unused audio helper warnings). Neither was deployed or launched.
+Exact restoration identities: jobs/r16-mip-blit/restored-base.txt.
