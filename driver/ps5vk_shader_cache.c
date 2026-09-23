@@ -23,32 +23,73 @@ struct cache_header {
    PsbcShaderMetadata metadata;
 };
 
+#if DETECT_OS_LINUX
+#define PS5VK_CACHE_BUILD PS5VK_CACHE_HOST_BUILD
+#else
+#define PS5VK_CACHE_BUILD PS5VK_CACHE_PS5_BUILD
+#endif
+
+/* The cache for this driver build: <base>/<first 16 hex digits of the build>.
+ * Keys already include the build, so every build's entries were valid only for
+ * it, and they piled up side by side in one directory; one directory a build
+ * keeps them apart, and is exactly the set a title can ship pre-built
+ * (the port's tools/shader-cache.py). The base is PS5VK_SHADER_CACHE_DIR, or on
+ * the console the first line of /app0/ps5vk-shader-cache-dir.txt (a test hook,
+ * default-off), or /app0/ps5vk-shader-cache. The directories are opened to the
+ * FTP service (below). NULL when there is none. Called under
+ * the compiler mutex, so the one-time setup needs no lock of its own. */
+static const char *
+ps5vk_shader_cache_directory(void)
+{
+   static bool done;
+   static char directory[768];
+   if (done)
+      return directory[0] ? directory : NULL;
+   done = true;
+   char base[512] = {0};
+   const char *const environment = getenv("PS5VK_SHADER_CACHE_DIR");
+   if (environment != NULL) {
+      snprintf(base, sizeof(base), "%s", environment);
+   } else {
+#if !DETECT_OS_LINUX
+      FILE *const hook = fopen("/app0/ps5vk-shader-cache-dir.txt", "rb");
+      if (hook != NULL) {
+         if (fgets(base, sizeof(base), hook) != NULL)
+            base[strcspn(base, "\r\n")] = '\0';
+         fclose(hook);
+      }
+      if (!base[0])
+         snprintf(base, sizeof(base), "/app0/ps5vk-shader-cache");
+#endif
+   }
+   if (!base[0])
+      return NULL;
+   snprintf(directory, sizeof(directory), "%s/%.16s", base, PS5VK_CACHE_BUILD);
+   const bool made = (mkdir(base, 0777) == 0 || errno == EEXIST) &&
+                     (mkdir(directory, 0777) == 0 || errno == EEXIST);
+   /* Open to the console's FTP service, which is not the title's user: it reads
+    * entries back (harvest) and writes shipped ones in (deploy). An existing
+    * base from an older driver was made 0700. */
+   (void)chmod(base, 0777);
+   (void)chmod(directory, 0777);
+   if (!made) {
+      fprintf(stderr, "[ps5vk] shader cache directory unavailable; compiling normally\n");
+      directory[0] = '\0';
+      return NULL;
+   }
+   return directory;
+}
+
 bool
 ps5vk_shader_cache_key(const uint32_t *words, size_t size, const PsbcCompileOptions *options,
                        struct ps5vk_shader_cache_key *key)
 {
-   const char *directory = getenv("PS5VK_SHADER_CACHE_DIR");
-#if !DETECT_OS_LINUX
-   if (directory == NULL)
-      directory = "/app0/ps5vk-shader-cache";
-#endif
-   if (!directory || !*directory || !words || !size)
+   const char *const directory = ps5vk_shader_cache_directory();
+   if (!directory || !words || !size)
       return false;
-   if (mkdir(directory, 0700) != 0 && errno != EEXIST) {
-      static bool warned;
-      if (!warned) {
-         fprintf(stderr, "[ps5vk] shader cache directory unavailable; compiling normally\n");
-         warned = true;
-      }
-      return false;
-   }
    struct mesa_blake3 hash;
    _mesa_blake3_init(&hash);
-#if DETECT_OS_LINUX
-   const char *build = PS5VK_CACHE_HOST_BUILD;
-#else
-   const char *build = PS5VK_CACHE_PS5_BUILD;
-#endif
+   const char *build = PS5VK_CACHE_BUILD;
    _mesa_blake3_update(&hash, build, strlen(build));
    _mesa_blake3_update(&hash, &size, sizeof(size));
    _mesa_blake3_update(&hash, words, size);
