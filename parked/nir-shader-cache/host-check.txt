@@ -1,0 +1,2 @@
+PASS: fresh-process NIR cache skips compilation with byte-identical output and stable keys
+logs: build/nir-cache-9ib7983b

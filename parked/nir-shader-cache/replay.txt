@@ -1,0 +1,4 @@
+cold compiles 4 NIR compiles 2 hits 0
+warm compiles 0 NIR compiles 0 hits 4
+PASS: eight exact mip submissions; warm NIR and SPIR-V compiles zero
+logs: build/nir-meta-replay-o5zs9das

@@ -70,8 +70,9 @@ existing saves/configs. The last game PID 265 exited normally; fixtures absent.
 While hardware is offline, a NIR-cache candidate reuses Mesa serialization and
 the existing output cache. Host fresh-process cold/warm/disabled outputs match;
 warm compilation count zero. Eight captured mip submissions replay exactly.
-Full checks are in progress; console cache/readback and game startup remain
-unverified. Keep this candidate separate from the saved R29 game binary.
+Full host/cache checks and eleven gates pass. Production source is restored;
+parked/nir-shader-cache holds the patch, checks and remaining console acceptance.
+Keep it separate from the saved R29 game binary.
 ## Standing work
 - Graphics R7 rounds 1-4, R8 dynamic depth bias, the first batch's R9 (push
   pointers), and the R4 clear/refusal coverage are in `docs/M5_PHASE_C.md`; the

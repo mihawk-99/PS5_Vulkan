@@ -1,0 +1,78 @@
+diff --git a/driver/ps5vk_nir.c b/driver/ps5vk_nir.c
+index a0557d2..daf24b8 100644
+--- a/driver/ps5vk_nir.c
++++ b/driver/ps5vk_nir.c
+@@ -33,9 +33,11 @@
+  */
+ 
+ #include "ps5vk_private.h"
++#include "ps5vk_shader_cache.h"
+ 
+ #include "compiler/nir/nir.h"
+ #include "compiler/nir/nir_builder.h"
++#include "compiler/nir/nir_serialize.h"
+ 
+ /* Removes every store to the shader's layer output, then the variable. */
+ static bool
+@@ -142,3 +144,19 @@ ps5vk_nir_free(nir_shader *nir)
+ {
+    ralloc_free(nir);
+ }
++
++/* Reuse Mesa's pointer-free serialization and the same persistent-output key.
++ * A zero prefix distinguishes this input from a valid SPIR-V module. */
++bool
++ps5vk_shader_cache_nir_key(const nir_shader *nir, const PsbcCompileOptions *options,
++                           struct ps5vk_shader_cache_key *key)
++{
++   struct blob blob;
++   blob_init(&blob);
++   blob_write_uint32(&blob, 0);
++   nir_serialize(&blob, nir, true);
++   const bool valid = !blob.out_of_memory &&
++      ps5vk_shader_cache_key((const uint32_t *)blob.data, blob.size, options, key);
++   blob_finish(&blob);
++   return valid;
++}
+diff --git a/driver/ps5vk_pipeline.c b/driver/ps5vk_pipeline.c
+index 9380723..c052d8c 100644
+--- a/driver/ps5vk_pipeline.c
++++ b/driver/ps5vk_pipeline.c
+@@ -1038,7 +1038,8 @@ ps5vk_compile_shader_deep(struct nir_shader *nir, const uint32_t *words, size_t
+                           bool *aborted)
+ {
+    struct ps5vk_shader_cache_key key;
+-   const bool cacheable = !nir && ps5vk_shader_cache_key(words, size, options, &key);
++   const bool cacheable = nir ? ps5vk_shader_cache_nir_key(nir, options, &key)
++                              : ps5vk_shader_cache_key(words, size, options, &key);
+    if (aborted)
+       *aborted = false;
+    if (cacheable && ps5vk_shader_cache_load(&key, output))
+diff --git a/driver/ps5vk_shader_cache.c b/driver/ps5vk_shader_cache.c
+index f879b5d..a352077 100644
+--- a/driver/ps5vk_shader_cache.c
++++ b/driver/ps5vk_shader_cache.c
+@@ -4,7 +4,7 @@
+  *
+  * Called under the existing compiler mutex. Save after each successful compile,
+  * so a later application crash preserves completed work. Cache failures are
+- * misses, never Vulkan errors. NIR meta shaders remain on the compiler path.
++ * misses, never Vulkan errors. NIR meta shaders use Mesa serialization as input.
+  */
+ #include "ps5vk_shader_cache.h"
+ #include "ps5vk_cache_build.h"
+diff --git a/driver/ps5vk_shader_cache.h b/driver/ps5vk_shader_cache.h
+index 08fab0a..42ae7bd 100644
+--- a/driver/ps5vk_shader_cache.h
++++ b/driver/ps5vk_shader_cache.h
+@@ -11,6 +11,10 @@ struct ps5vk_shader_cache_key {
+ bool ps5vk_shader_cache_key(const uint32_t *words, size_t size,
+                             const PsbcCompileOptions *options,
+                             struct ps5vk_shader_cache_key *key);
++struct nir_shader;
++bool ps5vk_shader_cache_nir_key(const struct nir_shader *nir,
++                                const PsbcCompileOptions *options,
++                                struct ps5vk_shader_cache_key *key);
+ bool ps5vk_shader_cache_load(const struct ps5vk_shader_cache_key *key, PsbcShaderOutput *output);
+ void ps5vk_shader_cache_store(const struct ps5vk_shader_cache_key *key,
+                               const PsbcShaderOutput *output);

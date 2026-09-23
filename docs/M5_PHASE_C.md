@@ -9022,3 +9022,19 @@ Game measurement of the shared address change is pending: at 09:24 UTC the
 console stopped answering FTP/control/klog; no new game binary or fixture was
 uploaded. No FPS improvement is claimed. jobs/r29-tile-address has evidence
 and reproduction; port identity e3525e30… is built for the next benchmark.
+
+## 2026-09-23 — internal NIR cache candidate parked for console acceptance
+
+While PS5 network services are unavailable, extend the existing persistent
+compiler-output cache to NIR inputs using Mesa's stripped serialization, with
+an input-domain prefix. Host fresh-process cold/warm/disabled outputs match
+byte for byte; cloned/debug-renamed input has a stable key, semantic-info and
+option changes invalidate it. Cold mip replay compiles two NIR and two SPIR-V
+stages; warm replay compiles none. Eight submissions compare exactly; ten
+additional mip/upload submissions also match. Explicit rebuild, full host/cache
+suite and eleven gates pass. No console cache or game startup claim is made.
+
+Production source was restored to c3e51f6, then explicitly rebuilt. The PS5
+archive matches the console-tested R29 archive byte for byte. The complete
+candidate and remaining console acceptance are in parked/nir-shader-cache.
+Finish the prepared R29 game measurement before applying that patch.

@@ -1,0 +1,3 @@
+Explicit tools/build-driver.sh: PASS
+Full tools/check-driver.sh: PASS (all loader/direct/PS5-link arms, negatives and shader-cache checks)
+driver check: PASS
