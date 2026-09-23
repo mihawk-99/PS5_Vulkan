@@ -1103,3 +1103,11 @@ the resulting correction to C1's direct-only surface-refusal assertion.
 | Request | Result | Evidence |
 | --- | --- | --- |
 | R12, padded 32-wide sampled image | Driver hardware criterion PASS: both nearest and bilinear frames pass beside the tight 64-wide baseline. Explicit rebuild and all gates pass. Padded mip/array layouts remain guarded. Port acceptance awaits relink/boot. | PPSA99988 PID 196; golden/r12-pitch/README.md; jobs/r12-pitch/queue.txt; archive c37afdec… |
+
+
+### 2026-09-22 — R12 port acceptance and R13
+
+| Request | Result | Evidence |
+| --- | --- | --- |
+| R11/R12 actual port first frame | PASS: QueuePresent success and human sees Quake menu/console; M2 met. | Port 3c29641, PID 197, a779b2bd…, evidence/m2-first-frame |
+| R13 bounded upload metadata | Open: named host-memory refusal during map staging; one record per row is the source candidate. Failed EndCommandBuffer is then ignored by upstream staging and triggers submit assertion. | Same boot; host record-count/byte witness is next, no fix claimed. |

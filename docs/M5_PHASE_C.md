@@ -8454,3 +8454,26 @@ using this run's m2-solid register defaults. No old golden changed.
 Reproduce with the commands in golden/r12-pitch/README.md. The original parked
 patch remains a historical correction record, labelled superseded. Next: relink
 vkQuake and measure its own first frame. No port presentation claim yet.
+
+
+## 2026-09-22 — R12 port acceptance: first visible frame, then R13 staging memory
+
+Port commit 3c29641 records PPSA99010 PID 197, identity a779b2bd…, against R12
+c8658bf. Port's five gates and shader scan pass; 540 successful compiles,
+QueuePresent -> 0, and the human confirms a Quake menu/console frame before the
+crash. Port M2 is met; R11/R12's positive first-frame condition is closed.
+Source evidence: ../PS5_vkQuake/evidence/m2-first-frame/.
+
+The new failure is a named OUT_OF_HOST_MEMORY recording failure after the
+Necropolis/protocol-15 trace lines: CmdCopyMemoryToImageKHR cannot grow its copy
+records. EndCommandBuffer returns -1; upstream staging ignores that and submits,
+causing the runtime command-state assertion. The kernel identifies PID 197's
+abort and termination; console count=0. Two FTP reads match. The old exit SIGSYS
+is a separate finding. No M3–M6 success is claimed.
+
+R13 host question: row uploads allocate one metadata record per row (debug type
+size 272 bytes), while the port keeps native reallocations native after growth.
+The existing one-record region-copy executor may bound this metadata; byte
+correctness, offsets, pitches, reversal and record count need a host witness.
+The overall heap census is not yet measured, so this remains a candidate cause.
+No R13 implementation or additional console run is part of this record.

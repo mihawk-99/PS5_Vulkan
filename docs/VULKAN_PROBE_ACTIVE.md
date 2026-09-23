@@ -42,8 +42,16 @@ PASS. Template five-gate regression PASS. Archive: 14,385,036 bytes, SHA-256
 and 32-wide textures passed nearest and bilinear pixel readback: 224 PASS,
 zero FAIL, one known benign VideoOut-busy close warning. Title closed. Four
 streams replay identically with same-run defaults. `golden/r12-pitch/README.md`
-has commands, deployment segment proof and readback data. The port relink/boot
-is next; no M2–M6 acceptance is inferred from this driver probe.
+has commands, deployment segment proof and readback data. The port relink then ran as PID 197 with identity `a779b2bd…`: 540 compiles,
+QueuePresent success, and human-visible Quake menu/console. **Port M2 is met.**
+Evidence: `../PS5_vkQuake/evidence/m2-first-frame/`. M3–M6 remain open.
+
+**Next named failure (R13):** after the Necropolis starts, host memory runs out
+in CmdCopyMemoryToImageKHR. The engine ignores staging EndCommandBuffer=-1
+and submits the invalid recording, provoking Mesa's assertion and process abort.
+Row uploads append one 272-byte record per row; port native realloc keeps its
+route above the mapping threshold. Bounded region metadata is the next host
+question, not yet a proved fix. The title terminated; console count=0.
 
 **Still open from R10:** the subpass read is correct only through x=960 of 3840;
 the row-stored input descriptor needs its own readback fix. `v0-lines` still
