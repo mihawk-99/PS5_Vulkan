@@ -1111,3 +1111,10 @@ the resulting correction to C1's direct-only surface-refusal assertion.
 | --- | --- | --- |
 | R11/R12 actual port first frame | PASS: QueuePresent success and human sees Quake menu/console; M2 met. | Port 3c29641, PID 197, a779b2bd…, evidence/m2-first-frame |
 | R13 bounded upload metadata | Open: named host-memory refusal during map staging; one record per row is the source candidate. Failed EndCommandBuffer is then ignored by upstream staging and triggers submit assertion. | Same boot; host record-count/byte witness is next, no fix claimed. |
+
+
+### 2026-09-22 — R13 bounded upload metadata response
+
+| Request | Result | Evidence |
+| --- | --- | --- |
+| R13 bounded row-upload metadata | Driver criteria PASS: one record per region; 64 uploads use 17,408 bytes; copy/format host tests and PS5 texture/mip/copy pixels pass. Port heap outcome still pending. | PID 198; jobs/r13-upload/README.md; golden/r13-upload/README.md; archive b3bb7ac9… |

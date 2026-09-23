@@ -1,0 +1,8 @@
+# R13: bound upload metadata, keep pixels and tiled mip uploads intact.
+hold 1
+capture
+m2-solid
+c4-padded
+c7-mip-upload
+c7-copy
+exit

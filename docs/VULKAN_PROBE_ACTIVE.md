@@ -8,55 +8,37 @@ _Updated: 2026-09-22 (late evening)_
 
 ## Now
 
-**R11: framebuffer-free secondary recording is console-proven.** The port's
-`vkBeginCommandBuffer` leaves the optional inheritance framebuffer unset. The
-old driver refused that before any draw. Its reason was hidden behind Mesa's
-optional debug logging. Secondary commands now use Mesa's owned command queue,
-replayed into the primary's current subpass; no GPU INDIRECT_BUFFER is used.
-Recording refusals write their command and sentence to stderr as well as the
-existing Vulkan callback. A host negative test checks the no-messenger case.
+**R13: upload metadata is now one record per region.** R12 let vkQuake present
+its first human-visible menu/console frame, then PID 197 ran out of host memory
+recording map-staging image copies. The old row path appended one 272-byte
+record per row. It now reuses the existing region-copy executor; two linear
+sides copy whole rows. Tiled maps and command order remain unchanged.
 
-**Console PID 194, PPSA99988:** `b8-secondary`, `c1-triangle`, `c4-rtt` all PASS;
-235 PASS probe records, zero FAIL. The runner was closed. Evidence and exact
-reproduction: `golden/r11-secondary/README.md`, `jobs/r11-secondary/queue.txt`.
-All eleven captured submissions/flip streams reproduce exactly on the host,
-using explicitly identified existing B4 register defaults (the new queue lacks
-an AGC-level anchor). No existing golden changed.
+**Host witness:** a 36-row upload fell from 36 records to one. Sixty-four repeated
+regions use 64 records and 17,408 bytes of capacity, below 32 KiB. Reproduce:
+`jobs/r13-upload/README.md`. This bounds upload metadata; it does not establish
+that every contributor to the port's heap pressure is gone.
 
-**Gates:** `bash build/gates.sh` all eleven PASS; full `tools/check-driver.sh`
-PASS (55 loader, 55 direct, 55 PS5 links, two negative arms). The template's
-five gates pass and its final driver relink passes. Archive: 14,383,172 bytes,
-SHA-256 `65550cae…`. The port's identity `6b437103…`, PID 195, compiled 540
-shaders then reached a named `ps5vk_sampled_image` refusal: a 32-texel-wide
-image has 256-byte padded rows. No frame presented; the harness ended with
-count=0. R11 diagnostics work, but its positive presentation criterion is open.
-Port evidence: `../PS5_vkQuake/evidence/m2-texture-row-pitch/`.
+**Gates:** explicit driver build PASS, zero warnings; targeted check-driver
+c4_texture/c7_mip_upload/c7_copy/c7_blit_formats/v0_formats PASS (15 arms).
+All eleven driver gates PASS. Template relink PASS. The compile/pipeline path
+was unchanged; the full 167-arm suite passed in R12. Archive 14,383,804 bytes,
+SHA-256 `b3bb7ac9…`.
 
-**R12 resumed and hardware-proven.** Mesa `align()` replaces the unavailable
-macro; sampled single-level, single-layer 2D images encode padded row pitch in
-word 4. Explicit driver build PASS; full 167-arm check PASS; all eleven gates
-PASS. Template five-gate regression PASS. Archive: 14,385,036 bytes, SHA-256
-`c37afdec…`. No new advertised format or mip/array layout claim.
+**Console PID 198, PPSA99988:** m2-solid, c4-padded, c7-mip-upload, c7-copy PASS;
+486 PASS records, zero FAIL; known benign unregister-busy warning then closure.
+Twelve submissions replay exactly with same-run defaults. Evidence and exact
+commands: `golden/r13-upload/README.md`. Port relink is pending its own boot.
 
-**Console PID 196, PPSA99988:** m2-solid, c4-texture, c4-padded PASS. Both 64-wide
-and 32-wide textures passed nearest and bilinear pixel readback: 224 PASS,
-zero FAIL, one known benign VideoOut-busy close warning. Title closed. Four
-streams replay identically with same-run defaults. `golden/r12-pitch/README.md`
-has commands, deployment segment proof and readback data. The port relink then ran as PID 197 with identity `a779b2bd…`: 540 compiles,
-QueuePresent success, and human-visible Quake menu/console. **Port M2 is met.**
-Evidence: `../PS5_vkQuake/evidence/m2-first-frame/`. M3–M6 remain open.
+**Port M2 is met:** R12 c8658bf, PID 197, identity a779b2bd…, QueuePresent success
+and human-visible Quake menu/console; port evidence/m2-first-frame. M3–M6 remain
+open. That boot's staging path ignored EndCommandBuffer=-1 and submitted the
+invalid recording, causing a runtime assertion; that error handling is a
+separate port issue. R11 secondary replay/diagnostics are proven in PID 194.
 
-**Next named failure (R13):** after the Necropolis starts, host memory runs out
-in CmdCopyMemoryToImageKHR. The engine ignores staging EndCommandBuffer=-1
-and submits the invalid recording, provoking Mesa's assertion and process abort.
-Row uploads append one 272-byte record per row; port native realloc keeps its
-route above the mapping threshold. Bounded region metadata is the next host
-question, not yet a proved fix. The title terminated; console count=0.
-
-**Still open from R10:** the subpass read is correct only through x=960 of 3840;
-the row-stored input descriptor needs its own readback fix. `v0-lines` still
-FAILs on hardware. R9 specialization constants remain console-proven. No
-shader/compiler, descriptor, line, gamma, resolution or OIT change in R11.
+**Other open rendering findings:** R10 input-attachment fetch matched only the
+first quarter-width; `v0-lines` still fails. R13 does not alter either path,
+gamma, contrast, OIT or resolution.
 
 ## Standing work
 

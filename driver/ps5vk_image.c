@@ -1564,26 +1564,28 @@ ps5vk_CmdCopyMemoryToImageKHR(VkCommandBuffer commandBuffer,
          };
          continue;
       }
-      for (uint32_t row = 0; row < region->imageExtent.height; row++) {
-         struct ps5vk_memory_copy *const copy =
-            util_dynarray_grow(&cmd_buffer->copies, struct ps5vk_memory_copy, 1);
-         if (!copy) {
-            ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
-                                    "no memory to record an image copy");
-            return;
-         }
-         /* One row: the source's row pitch and the image's padded one differ in
-          * general, which a single flat range cannot carry. */
-         *copy = (struct ps5vk_memory_copy){
-            .source = region->addressRange.address + (uint64_t)row * source_pitch,
-            .destination = image->address + level_offset +
-                           ((uint64_t)region->imageOffset.y + row) * row_pitch +
-                           (uint64_t)region->imageOffset.x * texel_bytes,
-            .bytes = row_bytes,
-            .reverse_texel_bytes = ps5vk_image_storage_reversed(image) ? texel_bytes : 0,
-            .after_words = after_words,
-         };
+      /* Keep one record per region, as image-to-image copies do. Expanding
+       * every row into a 272-byte record can exhaust a title's host heap while
+       * staging a map; the queue already knows how to walk two pitched sides. */
+      struct ps5vk_memory_copy *const copy =
+         util_dynarray_grow(&cmd_buffer->copies, struct ps5vk_memory_copy, 1);
+      if (!copy) {
+         ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
+                                 "no memory to record an image copy");
+         return;
       }
+      *copy = (struct ps5vk_memory_copy){
+         .image_copy = true,
+         .source_side = {.address = region->addressRange.address, .row_pitch = source_pitch},
+         .destination_side = {.address = image->address + level_offset, .row_pitch = row_pitch},
+         .destination_x = (uint32_t)region->imageOffset.x,
+         .destination_y = (uint32_t)region->imageOffset.y,
+         .width = region->imageExtent.width,
+         .height = region->imageExtent.height,
+         .source_texel_bytes = texel_bytes,
+         .reverse_texel_bytes = ps5vk_image_storage_reversed(image) ? texel_bytes : 0,
+         .after_words = after_words,
+      };
    }
 }
 

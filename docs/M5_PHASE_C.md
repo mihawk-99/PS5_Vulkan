@@ -8477,3 +8477,34 @@ The existing one-record region-copy executor may bound this metadata; byte
 correctness, offsets, pitches, reversal and record count need a host witness.
 The overall heap census is not yet measured, so this remains a candidate cause.
 No R13 implementation or additional console run is part of this record.
+
+
+## 2026-09-22 — R13 bounded row-upload metadata, host and PS5 proof
+
+Question: can the row-upload path retain pitches and offsets in one region
+record instead of allocating one record per row? PID 197's named host-memory
+refusal and the source's per-row growth selected this step. The port's native
+realloc route does not migrate grown buffers out of the small native heap.
+The total heap census is not measured; no claim that this fixes all pressure.
+
+The existing image-copy representation and executor already describe both row
+pitches and storage reversal. Row uploads now use that representation, and two
+linear sides execute a whole row per memcpy; tiled sides keep the measured run
+size. No new API, allocator or pixel-layout rule. Host GDB witness against the
+actual C4 upload: 36 records at 272 bytes each before, one after. Sixty-four
+repeated regions require 64 records, capacity 17,408 bytes. Reproduction and
+baseline/candidate measurements: jobs/r13-upload/README.md and host-records.txt.
+
+Explicit build-driver PASS, zero warnings; check-driver c4_texture,
+c7_mip_upload, c7_copy, c7_blit_formats, v0_formats PASS in loader/direct/PS5-link
+modes (15 arms). All eleven gates PASS. Template build/relink PASS. Compile and
+pipeline logic did not move, so R12's full 167-arm run remains the prior full
+suite; this round targets upload/copy/format semantics. Archive: 14,383,804 bytes,
+SHA-256 b3bb7ac99730e894895fb817f956eb48616eaa856dc1fe1ffd3d31b8221e52f0.
+
+Console PID 198, PPSA99988: m2-solid/c4-padded/c7-mip-upload/c7-copy all PASS,
+486 PASS records, zero FAIL, one known benign unregister-busy warning before
+closure. Two ELF reads and every loadable byte matched the build. Fourteen new
+golden artifacts include twelve driver submissions, all identical on host
+replay using same-run defaults; no old golden changed. Evidence/reproduction:
+golden/r13-upload/README.md. Next: measure vkQuake's map staging in a fresh boot.

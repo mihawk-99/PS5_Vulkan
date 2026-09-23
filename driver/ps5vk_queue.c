@@ -1355,9 +1355,11 @@ ps5vk_image_copy_execute(const struct ps5vk_memory_copy *copy)
 {
    const uint32_t texel_bytes = copy->source_texel_bytes;
    const uint64_t row_bytes = (uint64_t)copy->width * texel_bytes;
-   const uint64_t run_texels = PS5VK_TILED_RUN_BYTES / texel_bytes > 0
-                                  ? PS5VK_TILED_RUN_BYTES / texel_bytes
-                                  : 1u;
+   /* Two row-layout sides can copy a whole row at once. Tiled sides keep
+    * the measured contiguous run size so no memcpy crosses a tile boundary. */
+   const uint64_t run_texels = !copy->source_side.tiled && !copy->destination_side.tiled
+                                  ? MAX2(copy->width, 1u)
+                                  : MAX2(PS5VK_TILED_RUN_BYTES / texel_bytes, 1u);
    for (uint32_t row = 0; row < copy->height; row++) {
       for (uint64_t at = 0; at < row_bytes; at += run_texels * texel_bytes) {
          const uint64_t run_bytes = MIN2(row_bytes - at, run_texels * texel_bytes);
