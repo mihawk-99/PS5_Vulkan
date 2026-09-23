@@ -247,6 +247,10 @@ struct ps5vk_queue_profile {
     * this driver's own state. */
    uint64_t begin_secondary_calls, begin_secondary_ns;
    uint64_t resets, reset_common_ns, reset_driver_ns;
+   /* vkCmdExecuteCommands, timed on its own rather than as a chain slot: it
+    * replays every secondary's recorded commands through this driver, draws
+    * included, and those draws take their own probe pairs inside it. */
+   uint64_t execute_calls, execute_buffers, execute_ns;
    /* Carried across windows: how long the previous summary's single write took,
     * and what one os_time_get_nano costs (measured once when profiling is
     * enabled), which bounds how much the probes themselves add to a frame. */

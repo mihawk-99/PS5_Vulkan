@@ -1320,6 +1320,7 @@ ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now, char *l
             "draws/frame=%.1f begins/frame=%.1f call_draw_ms=%.3f between_draws_ms=%.3f "
             "secondary_begins/frame=%.1f call_begin_secondary_ms=%.3f resets/frame=%.1f "
             "reset_common_ms=%.3f reset_driver_ms=%.3f last_write_ms=%.3f clock_ns=%.1f "
+            "executes/frame=%.1f executed/frame=%.1f call_execute_ms=%.3f "
             "presents=%" PRIu64 "/%" PRIu64
             " periods=%s elapsed_ms=%.0f\n",
             p->app_pre_submit_ns * per_present, p->app_pre_present_ns * per_present,
@@ -1352,6 +1353,9 @@ ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now, char *l
             p->frames != 0 ? (double)p->resets / (double)p->frames : 0.0,
             p->reset_common_ns * per_present, p->reset_driver_ns * per_present,
             (double)p->report_write_ns / 1000000.0, (double)p->clock_ns_x1000 / 1000.0,
+            p->frames != 0 ? (double)p->execute_calls / (double)p->frames : 0.0,
+            p->frames != 0 ? (double)p->execute_buffers / (double)p->frames : 0.0,
+            p->execute_ns * per_present,
             p->present_index[0], p->present_index[1], periods,
             (double)(now - p->since) / 1000000.0);
    /* One write(2), not fputs: the port reopens stderr unbuffered, and the

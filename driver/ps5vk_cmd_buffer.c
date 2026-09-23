@@ -329,6 +329,9 @@ ps5vk_CmdExecuteCommands(VkCommandBuffer commandBuffer, uint32_t commandBufferCo
                               "executes another would have to be copied twice");
       return;
    }
+   struct ps5vk_queue *const queue =
+      ps5vk_device_profile_queue(container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk));
+   const uint64_t started = queue && queue->profile.enabled ? ps5vk_profile_now() : 0;
    for (uint32_t i = 0; i < commandBufferCount; i++) {
       VK_FROM_HANDLE(ps5vk_cmd_buffer, secondary, pCommandBuffers[i]);
       if (secondary == NULL || secondary->vk.level != VK_COMMAND_BUFFER_LEVEL_SECONDARY) {
@@ -338,6 +341,11 @@ ps5vk_CmdExecuteCommands(VkCommandBuffer commandBuffer, uint32_t commandBufferCo
       }
       vk_cmd_queue_execute(&secondary->vk.cmd_queue, commandBuffer,
                             cmd_buffer->vk.base.device->command_dispatch_table);
+   }
+   if (started != 0) {
+      queue->profile.execute_calls++;
+      queue->profile.execute_buffers += commandBufferCount;
+      queue->profile.execute_ns += ps5vk_profile_now() - started;
    }
 }
 
