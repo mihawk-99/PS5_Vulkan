@@ -1,0 +1,16 @@
+PS5 Vulkan r60-big shader packages, built by tools/build-probe-shaders.sh r60-big.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
+vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32_float:0:0:16:4 --vertex-attribute 1:r32g32_float:0:8:16:4; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2; writer --allow-unresolved
+vertex attributes: location 0 r32g32_float offset 0, location 1 r32g32_float offset 8, stride 16, binding 0
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+9dcd4eda5542f23ba9111fa2fa0713176a78f5190c7a39a0a4025079bf0faf3e  shaders/r59/fragcoord.vert
+4b084763f5f4e00d4575231c5701161524c22e41723c2565e0ee7d6c1139e4fd  shaders/r60/big.frag
+7afa376e9f525b41df217ff17722f0a05dfdc653942efedd6a8e96b1c28b4f39  build/shaders/r60-big/vertex.spv
+471ffe4da2ee82baeb7e8808278864bf38e087da8b29251d0de48d8b9850670c  build/shaders/r60-big/pixel.spv
+c073fc6dc9533b53b707353508bd7499c63d76d653c47d6e9a563ca9a1000aab  build/shaders/r60-big/vertex.ngg.bin
+8904479e60688bcb7dd02c6a302c80bd011dc7f216a82455907e2d067692cb0c  build/shaders/r60-big/vertex.hw.json
+9c278df0b606fc86bea61e3ebed5415a5d326ba6fee16f9704452efa20f9c92f  build/shaders/r60-big/pixel.raw.bin
+de5f1a6d565e5593968f259c25da475c07f2af7ff340ed92d03f22c04a9d11c5  build/shaders/r60-big/pixel.hw.json

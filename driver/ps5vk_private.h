@@ -1333,6 +1333,13 @@ struct ps5vk_pipeline_shaders {
    bool attempted;
    VkResult result;
    struct ps5vk_direct_mapping stage;
+   /* R60: where sceAgcLinkShaders wrote the linked context and uniform
+    * records in this stage, and the stage's size. Shaders that end before
+    * PS5VK_STAGE_CONTEXT_OFFSET keep the runner's fixed layout; larger ones
+    * (Dolphin's ubershaders) move both after their code (ps5vk_pipeline.c). */
+   size_t context_offset;
+   size_t uniform_offset;
+   size_t stage_bytes;
    struct ps5vk_shader_tables tables[PS5VK_PIPELINE_STAGE_COUNT];
 };
 

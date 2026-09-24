@@ -654,6 +654,28 @@ c7-diag)
         --vertex-attribute 1:r32g32_float:0:8:16:4)
     pixel_flags=(--address32-hi 2)
     ;;
+r60-big)
+    vertex_source=shaders/r59/fragcoord.vert
+    pixel_source=shaders/r60/big.frag
+    output=probes/r60-big
+    # R59's quad; a pixel stage whose code is larger than the runner's fixed
+    # stage layout held, with no descriptors.
+    vertex_flags=(--address32-hi 2
+        --vertex-attribute 0:r32g32_float:0:0:16:4
+        --vertex-attribute 1:r32g32_float:0:8:16:4)
+    pixel_flags=(--address32-hi 2)
+    ;;
+r59-fragcoord)
+    vertex_source=shaders/r59/fragcoord.vert
+    pixel_source=shaders/r59/fragcoord.frag
+    output=probes/r59-fragcoord
+    # The c7 band quad's 16-byte records: position and coordinate (x is the
+    # depth), no descriptors.
+    vertex_flags=(--address32-hi 2
+        --vertex-attribute 0:r32g32_float:0:0:16:4
+        --vertex-attribute 1:r32g32_float:0:8:16:4)
+    pixel_flags=(--address32-hi 2)
+    ;;
 c7-mip-linear)
     vertex_source=shaders/c7/band.vert
     pixel_source=shaders/c7/linear.frag
@@ -1168,7 +1190,7 @@ elif set_name == "c2-instance":
     bindings = [("address32_hi", expected_hi),
                 *vertex_input("vertex attributes: location 0 r32g32_float offset 0, "
                               "location 1 r32g32b32a32_float offset 8, stride 24, binding 0")]
-elif set_name == "c7-diag":
+elif set_name in ("c7-diag", "r59-fragcoord", "r60-big"):
     if pixel.get("descriptor_bindings"):
         fail("pixel stage unexpectedly declares descriptor bindings")
     bindings = [("address32_hi", expected_hi),

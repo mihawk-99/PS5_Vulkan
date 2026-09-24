@@ -2213,6 +2213,33 @@ ps5vk_image_copy_execute(const struct ps5vk_memory_copy *copy)
    ps5vk_cpu_fence();
 }
 
+/* R60: a command buffer whose recording the driver refused ends INVALID
+ * (vk_command_buffer_end), and submitting one is an application error the
+ * runtime asserts on (vk_queue_submit_add_command_buffer) -- Dolphin submitted
+ * one after an ubershader pipeline was refused, and the assert took the title
+ * down. The submission is refused with a result instead, naming why, and
+ * nothing in it runs. */
+VKAPI_ATTR VkResult VKAPI_CALL
+ps5vk_QueueSubmit2(VkQueue _queue, uint32_t submitCount, const VkSubmitInfo2 *pSubmits,
+                   VkFence fence)
+{
+   VK_FROM_HANDLE(vk_queue, queue, _queue);
+   for (uint32_t submit = 0; submit < submitCount; submit++) {
+      for (uint32_t at = 0; at < pSubmits[submit].commandBufferInfoCount; at++) {
+         VK_FROM_HANDLE(vk_command_buffer, cmd_buffer,
+                        pSubmits[submit].pCommandBufferInfos[at].commandBuffer);
+         if (cmd_buffer->state != MESA_VK_COMMAND_BUFFER_STATE_EXECUTABLE &&
+             cmd_buffer->state != MESA_VK_COMMAND_BUFFER_STATE_PENDING &&
+             cmd_buffer->state != MESA_VK_COMMAND_BUFFER_STATE_INITIAL)
+            return vk_errorf(queue, VK_ERROR_UNKNOWN,
+                             "command buffer %u of submission %u is not executable (state %d): "
+                             "its recording failed, so nothing in this submission runs",
+                             at, submit, (int)cmd_buffer->state);
+      }
+   }
+   return vk_common_QueueSubmit2(_queue, submitCount, pSubmits, fence);
+}
+
 VkResult
 ps5vk_queue_init(struct ps5vk_device *device, struct ps5vk_queue *queue,
                  const VkDeviceQueueCreateInfo *info)

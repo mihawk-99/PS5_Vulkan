@@ -21545,6 +21545,138 @@ void run_vulkan_lod_bias_frames(const TestContext &test, TestOutcome &outcome) n
     log.number("r26_lod_bias", "passed_frames", passed);
 }
 
+// R59: gl_FragCoord's z and w in a fragment shader (Dolphin's fog and depth
+// read them). A full-screen quad whose depth ramps from 0.25 on the left edge to
+// 0.75 on the right and whose clip w is 2 writes gl_FragCoord.z to red and
+// gl_FragCoord.w to green: red must follow the ramp to within one step in every
+// column and green must be 0.5 (127 or 128) everywhere.
+void run_vulkan_frag_coord_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const float vertices[] = {-1, -1, 0.25f, 0, 1, -1, 0.75f, 0, 1, 1, 0.75f, 0, -1, 1, 0.25f, 0};
+    const std::uint16_t indices[] = {0, 1, 2, 2, 3, 0};
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    input.vertex_data = vertices;
+    input.vertex_count = 4;
+    input.vertex_stride = 16;
+    input.index_data = indices;
+    input.index_count = 6;
+    input.attribute_count = 2;
+    input.attributes[0] = {0, 0, VK_FORMAT_R32G32_SFLOAT, 0};
+    input.attributes[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, 8};
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    ps5vk_triangle triangle{};
+    auto status = ps5vk_triangle_create(&triangle, &input);
+    if (status == PS5VK_TRIANGLE_OK)
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+    outcome.command_built = status != PS5VK_TRIANGLE_FAILED;
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        outcome.stage_in_use = true;
+        return;
+    }
+    unsigned mismatches = 0;
+    bool drew = status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes;
+    if (drew)
+    {
+        if (test.capture)
+        {
+            log_driver_submission(triangle.device, "gl_FragCoord z and w", log);
+            log_driver_stages(triangle.device, log);
+        }
+        const FramebufferView view{static_cast<const std::uint32_t *>(triangle.target),
+                                   kTiledRgba8Layout};
+        for (unsigned y = 0; y < kOutputHeight; ++y)
+            for (unsigned x = 0; x < kOutputWidth; ++x)
+            {
+                const std::uint32_t word = view.word(x, y);
+                const double z = 0.25 + 0.5 * (x + 0.5) / kOutputWidth;
+                const int red = static_cast<int>(word & 0xffu);
+                const int green = static_cast<int>((word >> 8) & 0xffu);
+                const bool good = std::abs(red - static_cast<int>(z * 255.0 + 0.5)) <= 1 &&
+                                  (green == 127 || green == 128) && (word >> 16) == 0xff00u;
+                mismatches += good ? 0u : 1u;
+            }
+        log.hex("r59_frag_coord", "left", view.word(0, kOutputHeight / 2));
+        log.hex("r59_frag_coord", "center", view.word(kOutputWidth / 2, kOutputHeight / 2));
+        log.hex("r59_frag_coord", "right", view.word(kOutputWidth - 1, kOutputHeight / 2));
+        log.number("r59_frag_coord", "mismatches", mismatches);
+        log.number("r59_frag_coord", "pixels", kOutputWidth * kOutputHeight);
+        log.event("r59_frag_coord", mismatches == 0 ? "PASS" : "FAIL", mismatches == 0 ? 0 : -1,
+                  "gl_FragCoord z ramp and w");
+    }
+    ps5vk_triangle_finish(&triangle);
+    outcome.passed = drew && mismatches == 0;
+}
+
+// R60: a pixel stage whose code (32 KiB) is larger than the runner's fixed stage
+// layout held (the linked context at 0x5000 capped the shaders at 20 KiB, and
+// Dolphin's 24 KiB ubershaders were refused). The shader's thousand terms feed a
+// test whose outcome is fixed, so every pixel is (0.25, 0.5, 0.75, 1).
+void run_vulkan_big_shader_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const float vertices[] = {-1, -1, 0.25f, 0, 1, -1, 0.75f, 0, 1, 1, 0.75f, 0, -1, 1, 0.25f, 0};
+    const std::uint16_t indices[] = {0, 1, 2, 2, 3, 0};
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    input.vertex_data = vertices;
+    input.vertex_count = 4;
+    input.vertex_stride = 16;
+    input.index_data = indices;
+    input.index_count = 6;
+    input.attribute_count = 2;
+    input.attributes[0] = {0, 0, VK_FORMAT_R32G32_SFLOAT, 0};
+    input.attributes[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, 8};
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    ps5vk_triangle triangle{};
+    auto status = ps5vk_triangle_create(&triangle, &input);
+    if (status == PS5VK_TRIANGLE_OK)
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+    outcome.command_built = status != PS5VK_TRIANGLE_FAILED;
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        outcome.stage_in_use = true;
+        return;
+    }
+    const bool drew = status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes;
+    unsigned mismatches = 0;
+    if (drew)
+    {
+        if (test.capture)
+        {
+            log_driver_submission(triangle.device, "32 KiB pixel stage", log);
+            log_driver_stages(triangle.device, log);
+        }
+        const FramebufferView view{static_cast<const std::uint32_t *>(triangle.target),
+                                   kTiledRgba8Layout};
+        constexpr std::uint32_t kExpected = 0xffbf8040u;
+        for (unsigned y = 0; y < kOutputHeight; ++y)
+            for (unsigned x = 0; x < kOutputWidth; ++x)
+                mismatches += view.word(x, y) != kExpected;
+        log.hex("r60_big_shader", "center", view.word(kOutputWidth / 2, kOutputHeight / 2));
+        log.number("r60_big_shader", "mismatches", mismatches);
+        log.number("r60_big_shader", "pixels", kOutputWidth * kOutputHeight);
+        log.event("r60_big_shader", mismatches == 0 ? "PASS" : "FAIL", mismatches == 0 ? 0 : -1,
+                  "32 KiB pixel stage");
+    }
+    ps5vk_triangle_finish(&triangle);
+    outcome.passed = drew && mismatches == 0;
+}
+
 // R58: primitive restart on an indexed triangle strip (Dolphin draws its strips
 // with it). Two quads, left and right with a gap between them, drawn as one strip
 // {0,1,2,3, 0xffff, 4,5,6,7}: with restart the gap is the clear colour. The
@@ -25093,6 +25225,8 @@ constexpr RunnerTest kRunnerTests[] = {
     {"r26-lod-bias", "r26-lod-bias", run_vulkan_lod_bias_frames},
     {"r57-border", "c7-mip", run_vulkan_border_frames},
     {"r58-restart", "m3-vertex", run_vulkan_restart_frames},
+    {"r59-fragcoord", "r59-fragcoord", run_vulkan_frag_coord_frames},
+    {"r60-big", "r60-big", run_vulkan_big_shader_frames},
     {"r18-padded-mips", "c7-mip", run_vulkan_padded_mip_frames},
     {"r18-mip-addresses", "c7-mip", run_vulkan_padded_mip_addresses},
     {"r18-small-mips", "c7-mip", run_vulkan_small_padded_mips},

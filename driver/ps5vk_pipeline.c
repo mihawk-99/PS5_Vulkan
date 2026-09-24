@@ -1379,19 +1379,32 @@ ps5vk_pipeline_create_shaders(struct ps5vk_device *device, struct ps5vk_pipeline
       vertex_code_offset + ALIGN_POT(vertex_code_bytes, PS5VK_STAGE_REGION_ALIGNMENT);
    const size_t pixel_code_offset =
       pixel_offset + ALIGN_POT(pixel_header_bytes, PS5VK_STAGE_REGION_ALIGNMENT);
-   if (pixel_code_offset + pixel_code_bytes > PS5VK_STAGE_CONTEXT_OFFSET)
-      return vk_errorf(device, VK_ERROR_UNKNOWN,
-                       "shaders of %zu bytes do not fit before the linked context",
-                       pixel_code_offset + pixel_code_bytes);
+   /* R60: the runner's layout puts the linked context at 0x5000 and the
+    * uniforms at 0x6000, which caps the shaders at 20 KiB; Dolphin's
+    * ubershaders are larger. Shaders that fit keep that layout word for word
+    * (every golden holds it); larger ones place the context on the next
+    * region after their code and the uniforms on the one after, in a stage
+    * grown to fit. */
+   const size_t code_end = pixel_code_offset + pixel_code_bytes;
+   if (code_end <= PS5VK_STAGE_CONTEXT_OFFSET) {
+      shaders->context_offset = PS5VK_STAGE_CONTEXT_OFFSET;
+      shaders->uniform_offset = PS5VK_STAGE_UNIFORM_OFFSET;
+      shaders->stage_bytes = PS5VK_STAGE_BYTES;
+   } else {
+      shaders->context_offset = ALIGN_POT(code_end, PS5VK_STAGE_REGION_ALIGNMENT);
+      shaders->uniform_offset = shaders->context_offset + PS5VK_STAGE_REGION_ALIGNMENT;
+      shaders->stage_bytes =
+         ALIGN_POT(shaders->uniform_offset + PS5VK_STAGE_REGION_ALIGNMENT, PS5VK_STAGE_BYTES);
+   }
 
-   const int32_t mapped = ps5vk_direct_mapping_create(&shaders->stage, PS5VK_STAGE_BYTES,
+   const int32_t mapped = ps5vk_direct_mapping_create(&shaders->stage, shaders->stage_bytes,
                                                       PS5VK_DIRECT_PAGE_BYTES);
    if (mapped != 0)
       return vk_errorf(device, VK_ERROR_OUT_OF_DEVICE_MEMORY,
                        "the stage workspace could not be mapped in the address window: 0x%08x",
                        (unsigned)mapped);
    uint8_t *const stage = shaders->stage.address;
-   memset(stage, 0, PS5VK_STAGE_BYTES);
+   memset(stage, 0, shaders->stage_bytes);
    memcpy(stage, vertex_header, vertex_header_bytes);
    memcpy(stage + vertex_code_offset, vertex_code, vertex_code_bytes);
    memcpy(stage + pixel_offset, pixel_header, pixel_header_bytes);
@@ -1405,8 +1418,8 @@ ps5vk_pipeline_create_shaders(struct ps5vk_device *device, struct ps5vk_pipeline
    if (result == 0 && vertex_shader)
       result = sceAgcCreateShader(&pixel_shader, stage + pixel_offset, stage + pixel_code_offset);
    if (result == 0 && pixel_shader)
-      result = sceAgcLinkShaders(stage + PS5VK_STAGE_CONTEXT_OFFSET,
-                                 stage + PS5VK_STAGE_UNIFORM_OFFSET, NULL, vertex_shader,
+      result = sceAgcLinkShaders(stage + shaders->context_offset,
+                                 stage + shaders->uniform_offset, NULL, vertex_shader,
                                  pixel_shader, pipeline->link_primitive_type);
    mtx_unlock(&ps5vk_compile_mutex);
    if (result != 0 || !vertex_shader || !pixel_shader) {
@@ -1428,7 +1441,7 @@ ps5vk_pipeline_create_shaders(struct ps5vk_device *device, struct ps5vk_pipeline
        * Reading a table from there is a crash rather than a wrong frame, so
        * the addresses are checked, not just their counts. */
       const uintptr_t begin = (uintptr_t)stage;
-      const uintptr_t end = begin + PS5VK_STAGE_BYTES;
+      const uintptr_t end = begin + shaders->stage_bytes;
       const uintptr_t cx_at = (uintptr_t)tables->cx;
       const uintptr_t sh_at = (uintptr_t)tables->sh;
       if (!tables->cx || !tables->sh || cx_at < begin || cx_at >= end || sh_at < begin ||
@@ -1439,7 +1452,7 @@ ps5vk_pipeline_create_shaders(struct ps5vk_device *device, struct ps5vk_pipeline
                           "a created shader's register tables are out of bounds");
       }
    }
-   ps5vk_flush_cpu_cache(stage, PS5VK_STAGE_BYTES);
+   ps5vk_flush_cpu_cache(stage, shaders->stage_bytes);
    /* The runner's capture logs these mappings: a PC rebuild replays what AGC
     * wrote here, and a pipeline the capture does not carry cannot be modelled
     * (ps5vk_debug.h, ps5vk_debug_pipeline_stages). */

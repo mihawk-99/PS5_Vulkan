@@ -2298,7 +2298,7 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
    }
    ps5vk_viewport_registers(&dynamic->vp.viewports[0], &dynamic->vp.scissors[0],
                             cx + target_words + msaa_count + depth_count + stencil_count);
-   memcpy(cx + fixed, stage + PS5VK_STAGE_CONTEXT_OFFSET,
+   memcpy(cx + fixed, stage + shaders->context_offset,
           PS5VK_STAGE_CONTEXT_RECORDS * sizeof(*cx));
    memcpy(cx + fixed + PS5VK_STAGE_CONTEXT_RECORDS, vertex->cx, vertex->cx_count * sizeof(*cx));
    memcpy(cx + fixed + PS5VK_STAGE_CONTEXT_RECORDS + vertex->cx_count, pixel->cx,
@@ -2441,7 +2441,7 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
        sceAgcCbReleaseMem(&command, PS5VK_COLOUR_BARRIER_EVENT, PS5VK_COLOUR_BARRIER_CONTROL, 1,
                           0, NULL, 0, 0, 0, 1, 0, 0) != NULL) &&
       sceAgcDcbSetCxRegistersIndirect(&command, cx, cx_count) &&
-      sceAgcDcbSetUcRegistersIndirect(&command, stage + PS5VK_STAGE_UNIFORM_OFFSET,
+      sceAgcDcbSetUcRegistersIndirect(&command, stage + shaders->uniform_offset,
                                       PS5VK_STAGE_UNIFORM_RECORDS) &&
       sceAgcDcbSetShRegistersIndirect(&command, sh, sh_count);
    for (uint32_t s = 0; encoded && s < PS5VK_PIPELINE_STAGE_COUNT; s++) {

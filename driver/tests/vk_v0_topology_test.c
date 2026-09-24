@@ -272,6 +272,80 @@ draw_frame(const struct frame *frame, const uint32_t *vertex, size_t vertex_byte
       ps5vk_triangle_finish(&triangle);
 }
 
+#if defined(__linux__)
+/* R60: a pixel stage whose code is larger than the runner's fixed stage layout
+ * held (32 KiB; the layout's limit was 20 KiB, and Dolphin's ubershaders were
+ * refused at 24 KiB) creates, draws and signals its fence. Then a command buffer
+ * whose recording the driver refused: its end fails, and submitting it returns
+ * a result instead of reaching the runtime's assert. */
+static void
+big_shader_and_refused_submit(const uint32_t *vertex, size_t vertex_bytes, const uint32_t *pixel,
+                              size_t pixel_bytes)
+{
+   static const float quad[] = {-1, -1, 0.25f, 0, 1, -1, 0.75f, 0, 1, 1, 0.75f, 0, -1, 1, 0.25f, 0};
+   static const uint16_t quad_indices[] = {0, 1, 2, 2, 3, 0};
+   struct steps steps = {0};
+   const struct ps5vk_triangle_report report = {&steps, record_step};
+   struct ps5vk_triangle_input input = {0};
+   input.get_instance_proc_addr = GET_PROC;
+   input.pipeline_count = 1;
+   input.shaders[0] = (struct ps5vk_triangle_shaders){vertex, vertex_bytes, pixel, pixel_bytes};
+   input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+   input.report = &report;
+   input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+   input.vertex_data = quad;
+   input.vertex_count = 4;
+   input.vertex_stride = 16;
+   input.index_data = quad_indices;
+   input.index_count = 6;
+   input.attribute_count = 2;
+   input.attributes[0] = (VkVertexInputAttributeDescription){0, 0, VK_FORMAT_R32G32_SFLOAT, 0};
+   input.attributes[1] = (VkVertexInputAttributeDescription){1, 0, VK_FORMAT_R32G32_SFLOAT, 8};
+   struct ps5vk_triangle triangle = {0};
+   enum ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+   if (status == PS5VK_TRIANGLE_OK)
+      status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+   check(status == PS5VK_TRIANGLE_OK && steps.failed == NULL,
+         "a 32 KiB pixel stage creates, draws and signals its fence");
+   if (steps.failed != NULL)
+      printf("  (first failed step: %s, result %d: %s)\n", steps.failed, steps.result,
+             steps.detail != NULL ? steps.detail : "");
+   if (status == PS5VK_TRIANGLE_OK) {
+#define PROC(name) ((PFN_##name)triangle.get_instance_proc_addr(triangle.instance, #name))
+      const VkCommandBufferAllocateInfo allocate = {
+         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+         .commandPool = triangle.pool,
+         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+         .commandBufferCount = 1,
+      };
+      VkCommandBuffer refused = VK_NULL_HANDLE;
+      const VkCommandBufferBeginInfo begin = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+      VkResult ended = VK_SUCCESS, submitted = VK_SUCCESS;
+      if (PROC(vkAllocateCommandBuffers)(triangle.device, &allocate, &refused) == VK_SUCCESS &&
+          PROC(vkBeginCommandBuffer)(refused, &begin) == VK_SUCCESS) {
+         /* A primary executing a primary: refused by name
+          * (ps5vk_CmdExecuteCommands, "executes secondary command buffers"). */
+         PROC(vkCmdExecuteCommands)(refused, 1, &refused);
+         ended = PROC(vkEndCommandBuffer)(refused);
+         const VkSubmitInfo submit = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &refused,
+         };
+         submitted = PROC(vkQueueSubmit)(triangle.queue, 1, &submit, VK_NULL_HANDLE);
+         PROC(vkFreeCommandBuffers)(triangle.device, triangle.pool, 1, &refused);
+      }
+      check(ended != VK_SUCCESS,
+            "a command buffer whose recording was refused fails vkEndCommandBuffer");
+      check(submitted == VK_ERROR_UNKNOWN,
+            "submitting it returns VK_ERROR_UNKNOWN instead of aborting");
+#undef PROC
+   }
+   if (status != PS5VK_TRIANGLE_IN_FLIGHT)
+      ps5vk_triangle_finish(&triangle);
+}
+#endif
+
 int
 main(void)
 {
@@ -307,6 +381,22 @@ main(void)
    };
    for (size_t at = 0; vertex && pixel && at < sizeof(kFrames) / sizeof(kFrames[0]); at++)
       draw_frame(&kFrames[at], vertex, vertex_bytes, pixel, pixel_bytes);
+
+#if defined(__linux__)
+   {
+      size_t big_vertex_bytes = 0;
+      size_t big_pixel_bytes = 0;
+      uint32_t *const big_vertex =
+         probes ? read_spirv(probes, "r60-big", "vertex", &big_vertex_bytes) : NULL;
+      uint32_t *const big_pixel =
+         probes ? read_spirv(probes, "r60-big", "pixel", &big_pixel_bytes) : NULL;
+      check(big_vertex && big_pixel, "PS5VK_PROBES holds the r60-big SPIR-V");
+      if (big_vertex && big_pixel)
+         big_shader_and_refused_submit(big_vertex, big_vertex_bytes, big_pixel, big_pixel_bytes);
+      free(big_vertex);
+      free(big_pixel);
+   }
+#endif
 
    free(vertex);
    free(pixel);

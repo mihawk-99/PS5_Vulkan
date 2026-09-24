@@ -858,7 +858,11 @@ std::int32_t sceAgcLinkShaders(void *context, void *uniforms, void *, void *, vo
     if (region == nullptr || region->image == nullptr)
         return 0;
     const std::size_t offset = reinterpret_cast<std::uintptr_t>(context) - region->address;
-    if (offset % kStageHalfBytes != kLinkBegin || offset + kLinkEnd - kLinkBegin > region->bytes ||
+    // R60: a stage whose shaders outgrew the fixed layout links its areas after
+    // its code, on any 4 KiB boundary (driver/ps5vk_pipeline.c); the capture
+    // holds them there, so they are replayed from wherever the driver linked.
+    if ((offset % kStageHalfBytes != kLinkBegin && offset % 0x1000 != 0) ||
+        offset + kLinkEnd - kLinkBegin > region->bytes ||
         reinterpret_cast<std::uintptr_t>(uniforms) !=
             reinterpret_cast<std::uintptr_t>(context) + kLinkUniforms - kLinkBegin)
         return -1;

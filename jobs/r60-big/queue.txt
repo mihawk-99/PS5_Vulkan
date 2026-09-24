@@ -1,0 +1,6 @@
+hold 1
+capture
+m2-solid
+r60-big
+r59-fragcoord
+exit

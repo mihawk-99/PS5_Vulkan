@@ -1,0 +1,5 @@
+{"schema":2,"event":"run_start","pid":337}
+{"schema":2,"event":"hex","probe":"r60_big_shader","field":"center","value":"0xffbf8040"}
+{"schema":2,"event":"value","probe":"r60_big_shader","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r60_big_shader","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r60_big_shader","status":"PASS","result":0,"detail":"32 KiB pixel stage"}
