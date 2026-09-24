@@ -136,7 +136,7 @@ main(void)
             const VkMemoryAllocateInfo allocate = {
                .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
                .allocationSize = requirements.size,
-               .memoryTypeIndex = 0,
+               .memoryTypeIndex = PS5VK_TEST_HOST_MEMORY_TYPE,
             };
             if (allocate_memory(triangle.device, &allocate, NULL, &memory) == VK_SUCCESS &&
                 bind_memory(triangle.device, indirect, memory, 0) == VK_SUCCESS) {

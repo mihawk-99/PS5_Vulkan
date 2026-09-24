@@ -1,12 +1,12 @@
 {
  "schema": 1,
  "source": {
-  "klog": "v0-multiset-quake.log",
-  "pid": 129
+  "klog": "capture-state.log",
+  "pid": 214
  },
  "test": "m2-solid",
  "sequence": 1,
- "frame": 2,
+ "frame": 1,
  "flips_before": 0,
  "buffer": 0,
  "regions": {

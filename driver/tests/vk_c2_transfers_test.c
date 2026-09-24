@@ -91,7 +91,7 @@ main(void)
    const VkMemoryAllocateInfo memory_info = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
       .allocationSize = requirements.size,
-      .memoryTypeIndex = 0,
+      .memoryTypeIndex = PS5VK_TEST_HOST_MEMORY_TYPE,
    };
    VkDeviceMemory memory = VK_NULL_HANDLE;
    check(VK_FUNCTION(g_instance, AllocateMemory)(g_device, &memory_info, NULL, &memory) == VK_SUCCESS,

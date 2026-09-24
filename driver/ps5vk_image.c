@@ -779,7 +779,10 @@ ps5vk_GetPhysicalDeviceFormatProperties2(VkPhysicalDevice physicalDevice, VkForm
                                          VkFormatProperties2 *pFormatProperties)
 {
    (void)physicalDevice;
-   const struct ps5vk_format *const entry = ps5vk_find_format(format);
+   const struct ps5vk_format *const entry =
+      (ps5vk_ab_flags & PS5VK_AB_NO_D24) && format == VK_FORMAT_D24_UNORM_S8_UINT
+         ? NULL
+         : ps5vk_find_format(format);
    /* No linear tiling for any format yet. */
    pFormatProperties->formatProperties = (VkFormatProperties){
       .linearTilingFeatures = 0,
@@ -1188,7 +1191,7 @@ ps5vk_GetImageMemoryRequirements2(VkDevice _device, const VkImageMemoryRequireme
    pMemoryRequirements->memoryRequirements = (VkMemoryRequirements){
       .size = image->size,
       .alignment = image->alignment,
-      .memoryTypeBits = 1,
+      .memoryTypeBits = PS5VK_MEMORY_TYPE_BITS,
    };
 }
 

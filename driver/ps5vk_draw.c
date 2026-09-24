@@ -110,6 +110,11 @@
  * ones a depth-biased pipeline's draw records (PS5_VULKAN_REQUESTS.md, R1). */
 #define PS5VK_CLIP_CONTROL_REGISTER 0x204
 #define PS5VK_RASTERIZER_REGISTER 0x205
+/* PA_SU_VTX_CNTL (0x2f9): PIX_CENTER 1 puts pixel centres at .5 as Vulkan
+ * requires, ROUND_MODE 2 rounds to even and QUANT_MODE 5 snaps vertices to
+ * 1/256 of a pixel -- RADV's word (radv_cmd_buffer.c). */
+#define PS5VK_VERTEX_CONTROL_REGISTER 0x2f9
+#define PS5VK_VERTEX_CONTROL_WORD 0x2du
 #define PS5VK_CLIP_CONTROL_DISCARD (UINT32_C(1) << 22)
 #define PS5VK_POLY_OFFSET_DB_FMT_REGISTER 0x2de
 #define PS5VK_POLY_OFFSET_COUNT 6
@@ -669,6 +674,44 @@ ps5vk_push_set_bound(const struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set)
           cmd_buffer->descriptor_sets[set]->push;
 }
 
+/* Vulkan applies a view's component mapping to what a shader samples. The
+ * descriptor's DST_SEL field (word 3, three bits a channel from bit 0: 0 for
+ * zero, 1 for one, 4 to 7 for the fetched X, Y, Z and W) already holds the
+ * format's own mapping from memory channels to R, G, B and A, so the view's
+ * mapping composes onto it: an output channel asking for R takes the format's
+ * R selector, and so on. The runtime has already resolved
+ * VK_COMPONENT_SWIZZLE_IDENTITY to the channel itself. Framebuffer, storage and
+ * input-attachment views must be the identity, which composes to the format's
+ * own selectors unchanged. */
+static uint32_t
+ps5vk_compose_dst_sel(uint32_t format_sel, const VkComponentMapping *mapping)
+{
+   const VkComponentSwizzle wanted[4] = {mapping->r, mapping->g, mapping->b, mapping->a};
+   uint32_t composed = 0;
+   for (unsigned channel = 0; channel < 4; channel++) {
+      uint32_t selector;
+      switch (wanted[channel]) {
+      case VK_COMPONENT_SWIZZLE_ZERO:
+         selector = 0;
+         break;
+      case VK_COMPONENT_SWIZZLE_ONE:
+         selector = 1;
+         break;
+      case VK_COMPONENT_SWIZZLE_R:
+      case VK_COMPONENT_SWIZZLE_G:
+      case VK_COMPONENT_SWIZZLE_B:
+      case VK_COMPONENT_SWIZZLE_A:
+         selector = (format_sel >> (3u * (unsigned)(wanted[channel] - VK_COMPONENT_SWIZZLE_R))) & 7u;
+         break;
+      default: /* IDENTITY, resolved by the runtime before it gets here */
+         selector = (format_sel >> (3u * channel)) & 7u;
+         break;
+      }
+      composed |= selector << (3u * channel);
+   }
+   return composed;
+}
+
 /* A colour target this driver programs: a 2D view, or a one-layer 2D array
  * view, which is what vk_meta renders its blits into. */
 static bool
@@ -1205,24 +1248,6 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
                               "(docs/M5_REFERENCE.md)", (unsigned)set, binding, (unsigned)image->vk.samples);
       return false;
    }
-   /* Vulkan applies a view's component mapping to what a shader reads through
-    * a combined image sampler, and the descriptor carries only the format's own
-    * DST_SEL selectors (ps5vk_image.c): a mapping that is not the identity
-    * would return the format's own channels where the application asked for
-    * others, so it is refused rather than sampled wrongly. The runtime resolves
-    * VK_COMPONENT_SWIZZLE_IDENTITY to R, G, B and A whatever the format is, and
-    * Vulkan requires the identity mapping for every other use this driver has of
-    * a view -- framebuffer attachments, storage images and input attachments --
-    * so this is the only place that has to check it. Composing the mapping into
-    * the selectors is a runner probe's step (docs/M5_REFERENCE.md, V0-formats). */
-   if (view->swizzle.r != VK_COMPONENT_SWIZZLE_R || view->swizzle.g != VK_COMPONENT_SWIZZLE_G ||
-       view->swizzle.b != VK_COMPONENT_SWIZZLE_B || view->swizzle.a != VK_COMPONENT_SWIZZLE_A) {
-      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                              "set %u binding %u samples a view whose component mapping is not the "
-                              "identity; composing it into the descriptor's selectors needs a "
-                              "runner probe (docs/M5_REFERENCE.md, V0-formats)", (unsigned)set, binding);
-      return false;
-   }
    const bool tiled = image->storage == PS5VK_IMAGE_STORAGE_TILES;
    /* Row storage aligns bytes, not texels. Word 4 can encode a custom
     * pitch for a non-array 2D image; arrays use that field for layers. R18
@@ -1280,7 +1305,7 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
    sampled->format_word = entry->image_format << 20;
    sampled->pitch_texels = !tiled && single_2d && (padded || image->vk.mip_levels > 1)
                               ? pitch_texels : 0;
-   sampled->dst_sel = entry->dst_sel;
+   sampled->dst_sel = ps5vk_compose_dst_sel(entry->dst_sel, &view->swizzle);
    /* Only a combined image sampler carries a sampler's words; a storage image's
     * 32 bytes leave them out (ps5vk_write_image_descriptor). */
    sampled->sampler_word = needs_sampler ? sampler->word : 0;
@@ -1292,7 +1317,9 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
    sampled->cube = view->layer_count == 6 &&
                    (image->vk.create_flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) != 0;
    sampled->base_mip_level = view->base_mip_level;
-   sampled->last_mip_level = view->base_mip_level + view->level_count - 1;
+   sampled->last_mip_level = (ps5vk_ab_flags & PS5VK_AB_BASE_MIP)
+                                ? view->base_mip_level
+                                : view->base_mip_level + view->level_count - 1;
    sampled->image_last_mip_level = image->vk.mip_levels - 1;
    sampled->tiled = tiled;
    ps5vk_census("sampled fmt %d view fmt %d %ux%u mips %u/%u layers %u viewtype %d tiled %d depth %d "
@@ -2176,24 +2203,25 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
     * alpha-only draws (PPSSPP's alpha-preserving and stencil-upload passes) came
     * out wrong where forcing RGBA drew them almost right. A pipeline that writes
     * no colour keeps both words zero, the measured vk_meta depth-clear stream. */
-   const uint32_t mask_count =
-      pipeline->colour_write_mask == 0xfu ||
-            ((ps5vk_ab_flags & PS5VK_AB_FULL_MASK) && pipeline->colour_write_mask != 0)
-         ? 0u
-      : pipeline->colour_write_mask == 0 ? 2u
-                                          : 1u;
+   /* Context registers keep their last value from one draw to the next, so
+    * every draw records the whole of the state it owns -- the write mask, the
+    * blend words, the rasterizer word and the clip word -- and not only what
+    * differs from AGC's defaults. A table that left a default word out kept
+    * the previous draw's: an opaque draw after a blending one blended, a
+    * full-mask draw after an RGB-only one lost alpha, and God of War: Ghost of
+    * Sparta drew its characters as flat silhouettes under a brown tint until
+    * the words were recorded every draw (2026-09-24, klog st-explicit2). */
+   const uint32_t mask_count = pipeline->colour_write_mask == 0 ? 2u : 1u;
    /* A four-sample rendering's rasterizer registers come right after the colour
     * target's, so a one-sample draw records exactly the words it recorded before
     * Phase C8. */
    const uint32_t msaa_count = cmd_buffer->multisample_count;
-   /* A blending pipeline's CB_BLEND0_CONTROL and CB_COLOR_CONTROL go at the end
-    * of the table, after the write masks, and CB_BLEND_RED/GREEN/BLUE/ALPHA
-    * follow when its state reads the blend constants: every draw that does not
-    * blend, and every blending draw whose factors are not constants, records
-    * exactly the words it recorded before. */
+   /* CB_BLEND0_CONTROL and CB_COLOR_CONTROL go at the end of the table, after
+    * the write masks, for every draw (a blend word of 0 is blending off), and
+    * CB_BLEND_RED/GREEN/BLUE/ALPHA follow when its state reads the constants. */
    const uint32_t blend_constant_count =
       pipeline->blend_uses_constants ? PS5VK_BLEND_CONSTANT_COUNT : 0u;
-   const uint32_t blend_count = (pipeline->blend_control != 0 ? PS5VK_BLEND_REGISTER_COUNT : 0u) +
+   const uint32_t blend_count = PS5VK_BLEND_REGISTER_COUNT +
                                 blend_constant_count;
    /* R1's rasterization words go behind everything else, and only the state a
     * pipeline asks for: a draw that culls nothing, discards nothing and biases
@@ -2206,12 +2234,18 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
    const uint32_t depth_bias_count =
       depth_bias && cmd_buffer->depth_bound ? PS5VK_POLY_OFFSET_COUNT : 0u;
    const uint32_t line_count = pipeline->line_rasterizer ? PS5VK_LINE_REGISTER_COUNT : 0u;
-   /* A line's rasterizer word is recorded even when it is 0: the pipeline
-    * cleared its cull bits (ps5vk_pipeline.c), and a table without the word
+   /* The rasterizer word is recorded even when it is 0, a line's included (the
+    * pipeline cleared its cull bits, ps5vk_pipeline.c): a table without it
     * would leave an earlier culling draw's in the register. */
-   const bool rasterizer_recorded = rasterizer_word != 0 || pipeline->line_rasterizer;
-   const uint32_t raster_count = (rasterizer_recorded ? 1u : 0u) +
-                                 (pipeline->discard_rasterizer ? 1u : 0u) + depth_bias_count +
+   /* A pipeline that does not discard records AGC's own clip word, 0 (the
+    * console's default, golden/c4-texture of 2026-09-24), so an earlier
+    * discarding draw's DX_RASTERIZATION_KILL does not outlive it. */
+   const bool clip_recorded = true;
+   const uint32_t clip_default = 0;
+   const bool vertex_control_recorded = (ps5vk_ab_flags & PS5VK_AB_PIX_CENTER) != 0;
+   const uint32_t raster_count = 1u +
+                                 (vertex_control_recorded ? 1u : 0u) +
+                                 (clip_recorded ? 1u : 0u) + depth_bias_count +
                                  line_count;
    /* One row of target registers per colour attachment the rendering declared:
     * together with the copy below, this is the arithmetic R6's heap corruption
@@ -2260,13 +2294,16 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
    if (mask_count != 0) {
       struct ps5vk_agc_register *const masks =
          cx + fixed + PS5VK_STAGE_CONTEXT_RECORDS + vertex->cx_count + pixel->cx_count;
-      masks[0] = (struct ps5vk_agc_register){.offset = 0x08e,
-                                             .value = pipeline->colour_write_mask};
+      masks[0] = (struct ps5vk_agc_register){
+         .offset = 0x08e,
+         .value = (ps5vk_ab_flags & PS5VK_AB_FULL_MASK) && pipeline->colour_write_mask != 0
+                     ? 0xfu
+                     : pipeline->colour_write_mask};
       if (mask_count == 2)
          masks[1] = (struct ps5vk_agc_register){.offset = 0x08f,
                                                 .value = pipeline->colour_write_mask};
    }
-   if (blend_count != 0) {
+   {
       struct ps5vk_agc_register *const blend =
          cx + fixed + PS5VK_STAGE_CONTEXT_RECORDS + vertex->cx_count + pixel->cx_count + mask_count;
       blend[0] = (struct ps5vk_agc_register){.offset = PS5VK_BLEND_CONTROL_REGISTER,
@@ -2293,12 +2330,16 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
       struct ps5vk_agc_register *raster =
          cx + fixed + PS5VK_STAGE_CONTEXT_RECORDS + vertex->cx_count + pixel->cx_count +
          mask_count + blend_count;
-      if (rasterizer_recorded)
-         *raster++ = (struct ps5vk_agc_register){.offset = PS5VK_RASTERIZER_REGISTER,
-                                                 .value = rasterizer_word};
-      if (pipeline->discard_rasterizer)
+      *raster++ = (struct ps5vk_agc_register){.offset = PS5VK_RASTERIZER_REGISTER,
+                                              .value = rasterizer_word};
+      if (vertex_control_recorded)
+         *raster++ = (struct ps5vk_agc_register){.offset = PS5VK_VERTEX_CONTROL_REGISTER,
+                                                 .value = PS5VK_VERTEX_CONTROL_WORD};
+      if (clip_recorded)
          *raster++ = (struct ps5vk_agc_register){.offset = PS5VK_CLIP_CONTROL_REGISTER,
-                                                 .value = PS5VK_CLIP_CONTROL_DISCARD};
+                                                 .value = pipeline->discard_rasterizer
+                                                             ? PS5VK_CLIP_CONTROL_DISCARD
+                                                             : clip_default};
       if (depth_bias_count != 0) {
          /* Vulkan's one bias is the front face's and the back face's alike, as
           * ps5-opengl's block writes it: the back pair mirrors the front's. */

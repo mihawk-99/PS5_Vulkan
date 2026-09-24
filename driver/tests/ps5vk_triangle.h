@@ -56,7 +56,7 @@ extern "C" {
  * before Phase C7, and three for the mip probe's LOD-carrying vertices. */
 #define PS5VK_TRIANGLE_MAX_ATTRIBUTES 4
 /* Colour targets: the program's image, or the swapchain's images. */
-#define PS5VK_TRIANGLE_MAX_IMAGES 2
+#define PS5VK_TRIANGLE_MAX_IMAGES 3
 
 /* The colour attachments one rendering may declare: the number this device
  * advertises as VkPhysicalDeviceLimits.maxColorAttachments, which a case reads

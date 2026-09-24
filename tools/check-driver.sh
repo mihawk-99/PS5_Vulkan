@@ -486,7 +486,9 @@ run_test() {
         c3_quad) replay=c3-quad
             compare=(compare-run "$quad_run" "$dump" --test c3-quad) ;;
         c4_texture) replay=c4-texture
-            compare=(compare-run "$texture_run" "$dump" --test c4-texture) ;;
+            # The swizzled view's frame is the PC test's own (vk_c4_texture_test.c):
+            # the runner's c4-texture case draws the first two.
+            compare=(compare-run "$texture_run" "$dump" --test c4-texture --uncaptured-tail 1) ;;
         c4_rtt) replay=c4-rtt
             compare=(compare-run "$rtt_run" "$dump" --test c4-rtt) ;;
         c5_depth) replay=c5-depth
@@ -557,6 +559,17 @@ run_test() {
         # as is the viewport the driver's orientation turns over.
         compare+=(--extra-sh-register 0x8c --extra-sh-register 0x0c
                   --expect-record 0x111=0x44870000)
+    fi
+    # Context registers keep their last value from one draw to the next, so the
+    # driver writes each draw's write mask (CB_TARGET_MASK 0x08e), blend words
+    # (CB_BLEND0_CONTROL 0x1e0, CB_COLOR_CONTROL 0x202), clip word
+    # (PA_CL_CLIP_CNTL 0x204) and rasterizer word (PA_SU_SC_MODE_CNTL 0x205)
+    # even where a console frame left the default in place (driver/ps5vk_draw.c).
+    if [[ ${#compare[@]} -gt 0 ]]; then
+        local restated
+        for restated in 0x08e 0x1e0 0x202 0x204 0x205; do
+            compare+=(--restated-cx-register "$restated")
+        done
     fi
     # R19 removes the index-size cache. Historical UINT16 captures omitted
     # repeated writes; keep them, but require each new draw to bind UINT16 and

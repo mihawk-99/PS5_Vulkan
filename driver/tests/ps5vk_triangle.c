@@ -2073,7 +2073,7 @@ create_subpass_target(struct ps5vk_triangle *triangle, VkPhysicalDevice physical
         index++) {
       if ((requirements.memoryTypeBits & (UINT32_C(1) << index)) &&
           (memory_properties.memoryTypes[index].propertyFlags &
-           VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT))
+           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) /* read back through vkMapMemory below */
          memory_type = index;
    }
    const VkMemoryAllocateInfo allocation = {

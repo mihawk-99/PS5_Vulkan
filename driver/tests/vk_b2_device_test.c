@@ -132,12 +132,14 @@ check_properties(VkInstance instance, VkPhysicalDevice physical)
    VkPhysicalDeviceMemoryProperties memory;
    memset(&memory, 0, sizeof(memory));
    VK_FUNCTION(instance, GetPhysicalDeviceMemoryProperties)(physical, &memory);
-   check(memory.memoryTypeCount == 1 &&
-            memory.memoryTypes[0].propertyFlags ==
+   check(memory.memoryTypeCount == 2 &&
+            memory.memoryTypes[0].propertyFlags == VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT &&
+            memory.memoryTypes[0].heapIndex == 0 &&
+            memory.memoryTypes[PS5VK_TEST_HOST_MEMORY_TYPE].propertyFlags ==
                (VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) &&
-            memory.memoryTypes[0].heapIndex == 0,
-         "one device-local, host-visible, host-coherent memory type");
+            memory.memoryTypes[PS5VK_TEST_HOST_MEMORY_TYPE].heapIndex == 0,
+         "a device-local memory type, then a device-local, host-visible, host-coherent one");
    check(memory.memoryHeapCount == 1 && memory.memoryHeaps[0].size > 0 &&
             memory.memoryHeaps[0].flags == VK_MEMORY_HEAP_DEVICE_LOCAL_BIT,
          "one device-local heap of the direct memory size");

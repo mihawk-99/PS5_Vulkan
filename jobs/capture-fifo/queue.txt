@@ -1,0 +1,18 @@
+# PS5 Vulkan test runner job queue (PPSA99988): golden capture of c1-triangle
+# after the swapchain became a three-image FIFO queue.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/capture-fifo/queue.txt
+#
+# "capture" makes every frame log its AGC helper calls, its whole command
+# stream and its stage workspace image. Turn the klog into golden files with:
+#   python3 tools/golden.py extract <klog> golden/c1-triangle --test m2-solid --test c1-triangle
+#
+# A present now returns once its flip is queued, each image's flip is written
+# into a slot of its own at the end of the submission buffer, and the four
+# frames take the three images in turn, so c1-triangle's streams and its flip
+# of buffer 2 are new (driver/ps5vk_wsi.c, driver/ps5vk_queue.c). m2-solid runs
+# first for the register defaults, as in jobs/capture/queue.txt.
+capture
+hold 60
+m2-solid
+c1-triangle
+exit

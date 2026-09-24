@@ -33,7 +33,7 @@ try_allocate(VkInstance instance, VkDevice device, VkDeviceSize size)
    const VkMemoryAllocateInfo info = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
       .allocationSize = size,
-      .memoryTypeIndex = 0,
+      .memoryTypeIndex = PS5VK_TEST_HOST_MEMORY_TYPE,
    };
    VkDeviceMemory memory = VK_NULL_HANDLE;
    const VkResult result = VK_FUNCTION(instance, AllocateMemory)(device, &info, NULL, &memory);
@@ -95,7 +95,7 @@ main(void)
    const VkMemoryAllocateInfo info = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
       .allocationSize = QUARTER_GIB,
-      .memoryTypeIndex = 0,
+      .memoryTypeIndex = PS5VK_TEST_HOST_MEMORY_TYPE,
    };
    VkDeviceMemory kept[REUSED_COUNT];
    unsigned allocated = 0;

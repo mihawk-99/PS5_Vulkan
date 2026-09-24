@@ -219,7 +219,7 @@ expect_storage(VkFormat format, uint32_t width, uint32_t height, uint32_t levels
       return false;
    const VkMemoryRequirements r = requirements(image);
    destroy_image(image);
-   if (r.size != size || r.alignment != alignment || r.memoryTypeBits != 1) {
+   if (r.size != size || r.alignment != alignment || r.memoryTypeBits != 3) {
       printf("  (size %llu, alignment %llu, types 0x%x)\n", (unsigned long long)r.size,
              (unsigned long long)r.alignment, r.memoryTypeBits);
       return false;

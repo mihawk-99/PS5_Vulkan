@@ -160,7 +160,7 @@ def extract(args):
                 print(f"{stream['test']}: incomplete capture: {'; '.join(problems)}")
                 failures += 1
                 continue
-            driver_streams.append(stream)
+            driver_streams.append(dict(stream, flips_before=flips_before))
             continue
         test = stream["test"] or "stream"
         sequences[test] = sequences.get(test, 0) + 1
@@ -463,6 +463,8 @@ def driver_run_document(run, streams, log_name):
     return {"schema": GOLDEN_SCHEMA, "kind": "driver-run",
             "source": {"klog": log_name, "pid": run["pid"]},
             "video": video, "videos": videos, "stages": stages, "regions": regions,
+            "flips_before": {stream["test"]: stream.get("flips_before", 0)
+                             for stream in streams},
             "submissions": submissions}
 
 
@@ -543,7 +545,7 @@ def replay_text(document, defaults):
     return "\n".join(lines) + "\n"
 
 
-def driver_replay_text(document, defaults, test=None):
+def driver_replay_text(document, defaults, test=None, flips_before=0):
     """A driver run's replay: the process's shared inputs, then the defaults.
 
     A run document holds the pipelines the driver compiled, the regions it
@@ -554,7 +556,7 @@ def driver_replay_text(document, defaults, test=None):
     """
     lines = [f"# PS5 Vulkan host replay from {document['source']['klog']} "
              f"pid {document['source']['pid']}, written by tools/golden.py replay",
-             "frame 1", "flips 0"]
+             "frame 1", f"flips {flips_before}"]
     # The VideoOut handle the replayed test presented through, which a test
     # that presents through none records as -1: a run holds every test's, so
     # the map decides when the document has one and `video` (the last stream's)
@@ -736,6 +738,18 @@ def rebuild(args):
     return 1 if failures else 0
 
 
+def driver_run_flips_before(document, test):
+    """The flips the console process made before a driver run's first frame of
+    test: the flip helper numbers each flip from the process's own count, so a
+    PC run of the test starts from the same one. A run whose earlier tests
+    flipped (a capture queue runs m2-solid first) otherwise came out one flip
+    ahead of the PC in every flip word (2026-09-24)."""
+    counts = document.get("flips_before", {})
+    if test is not None:
+        return counts.get(test, 0)
+    return min(counts.values(), default=0)
+
+
 def write_replay(args):
     document = json.loads(Path(args.golden).read_text(encoding="utf-8"))
     defaults = register_defaults(document)
@@ -748,7 +762,8 @@ def write_replay(args):
     if defaults is None:
         print(f"{args.golden}: no context register table to take register defaults from")
         return 1
-    text = (driver_replay_text(document, defaults, args.test)
+    text = (driver_replay_text(document, defaults, args.test,
+                               driver_run_flips_before(document, args.test))
             if document.get("kind") == "driver-run"
             else replay_text(document, defaults))
     Path(args.output).write_text(text, encoding="utf-8", newline="\n")
@@ -836,7 +851,13 @@ def declared_user_data(packets, registers, documented):
     return kept
 
 
-def compare_packets(golden, submission, draws, expected, extra_sh_registers=()):
+def restated_offsets(args):
+    """The --restated-cx-register offsets of a comparison, as a set."""
+    return {int(offset, 16) for offset in getattr(args, "restated_cx_register", None) or []}
+
+
+def compare_packets(golden, submission, draws, expected, extra_sh_registers=(),
+                    restated_registers=()):
     """How one recorded submission differs from a golden frame whose draw
     section, the packets before its first RELEASE_MEM, repeats draws times:
     (problems, expected differences found, their register offsets, packets,
@@ -848,7 +869,8 @@ def compare_packets(golden, submission, draws, expected, extra_sh_registers=()):
     end = next((index for index, (_, packet) in enumerate(console)
                 if (packet[0] >> 8) & 0xFF == RELEASE_MEM), len(console))
     console = [(golden, packet) for _, packet in console[:end] * draws + console[end:]]
-    return compare_stream(console, submission, expected, extra_sh_registers)
+    return compare_stream(console, submission, expected, extra_sh_registers,
+                          restated_registers=restated_registers)
 
 
 def checked_uint16_rebinds(packets, require_each_draw):
@@ -873,13 +895,19 @@ def checked_uint16_rebinds(packets, require_each_draw):
     return kept
 
 
-def compare_stream(console, submission, expected, extra_sh_registers=(), index_size_rebind=False):
+def compare_stream(console, submission, expected, extra_sh_registers=(), index_size_rebind=False,
+                   restated_registers=()):
     """How one recorded submission differs from console packets, each given
     with the golden document holding its register tables: (problems, expected
     differences found, their register offsets, packets, register tables).
     expected maps register offsets to the values the driver programs instead
-    of the console's, and extra_sh_registers the user-data registers whose
-    writes the driver adds and a console frame may not have."""
+    of the console's, extra_sh_registers the user-data registers whose
+    writes the driver adds and a console frame may not have, and
+    restated_registers the context registers the driver writes in every draw's
+    table because registers keep their last value between draws (the write
+    mask, blend, rasterizer and clip words): a record of one the console's
+    table does not write is set aside as documented, and every other record
+    must still match the console's in order."""
     problems = []
     documented = []
     seen = set()
@@ -900,14 +928,49 @@ def compare_stream(console, submission, expected, extra_sh_registers=(), index_s
                 problems.append(f"{where}: header {built[0]:#010x} (console {recorded[0]:#010x})")
             elif opcode in TABLE_LOADS:
                 # Address low, address high, 0x80000000 and the record count:
-                # the table may lie elsewhere, in the same address window.
-                if built[2:] != recorded[2:]:
+                # the table may lie elsewhere, in the same address window, and
+                # hold restated records the console's does not.
+                if built[2:4] != recorded[2:4] or \
+                        (built[4] != recorded[4] and not restated_registers):
                     problems.append(f"{where}: {TABLE_LOADS[opcode]} table load {hex_words(built)} "
                                     f"(console {hex_words(recorded)})")
                     continue
                 count = recorded[4]
-                pairs = zip(golden_table(golden, recorded[1] | recorded[2] << 32, count),
-                            dumped_table(submission, built[1] | built[2] << 32, count))
+                console_records = golden_table(golden, recorded[1] | recorded[2] << 32, count)
+                driver_records = dumped_table(submission, built[1] | built[2] << 32, built[4])
+                if restated_registers:
+                    # The driver's restated records come after the console's
+                    # own writes of the same register, so the ones beyond the
+                    # console's count are taken from the end. Where the console
+                    # writes the register too, a restated value must be the
+                    # console's last one, so the state the draw leaves is the
+                    # same.
+                    console_count = {}
+                    console_last = {}
+                    for offset, value in console_records:
+                        console_count[offset] = console_count.get(offset, 0) + 1
+                        console_last[offset] = value
+                    remaining = dict(console_count)
+                    for offset, _ in driver_records:
+                        remaining[offset] = remaining.get(offset, 0) - 1
+                    kept = []
+                    for offset, value in reversed(driver_records):
+                        if offset in restated_registers and remaining.get(offset, 0) < 0:
+                            remaining[offset] += 1
+                            if offset in console_last and console_last[offset] != value:
+                                problems.append(f"{where}: register {offset:#05x} restated as "
+                                                f"{value:#010x} (console {console_last[offset]:#010x})")
+                            else:
+                                documented.append(f"register {offset:#05x} = {value:#010x} restated")
+                            continue
+                        kept.append((offset, value))
+                    driver_records = list(reversed(kept))
+                    if len(driver_records) != len(console_records):
+                        problems.append(f"{where}: {TABLE_LOADS[opcode]} table holds "
+                                        f"{len(driver_records)} records beside the restated ones "
+                                        f"(console {len(console_records)})")
+                        continue
+                pairs = zip(console_records, driver_records)
                 for index, (console_record, driver_record) in enumerate(pairs):
                     if driver_record == console_record:
                         continue
@@ -955,9 +1018,15 @@ def compare_run(args):
     if not wanted:
         print(f"{args.run}: no submission of {args.test or 'any test'} in this run")
         return 2
-    if len(lines) != len(wanted):
-        print(f"{args.dump}: {len(lines)} submissions recorded, expected {len(wanted)}")
+    # A PC test may draw frames past the ones its console case captured: those
+    # are named, and the ones the console did capture are still compared.
+    uncaptured = args.uncaptured_tail
+    if len(lines) != len(wanted) + uncaptured:
+        print(f"{args.dump}: {len(lines)} submissions recorded, expected {len(wanted)}" +
+              (f" and {uncaptured} not captured on the console" if uncaptured else ""))
         return 1
+    for index in range(len(wanted), len(lines)):
+        print(f"{Path(args.dump).name} submission {index + 1}: not captured on the console yet")
     failures = 0
     for entry, line in zip(wanted, lines):
         document = json.loads((directory / entry["file"]).read_text(encoding="utf-8"))
@@ -975,8 +1044,9 @@ def compare_run(args):
         document = dict(document, stages=stages)
         words = [int(word, 16) for word in document["words"]]
         console = [(document, packet) for _, packet in stream_packets(words)]
-        problems, _, _, packets, tables = compare_stream(console, json.loads(line), {},
-                                                         index_size_rebind=args.index_size_rebind)
+        problems, _, _, packets, tables = compare_stream(
+            console, json.loads(line), {}, index_size_rebind=args.index_size_rebind,
+            restated_registers=restated_offsets(args))
         label = f"{Path(args.dump).name} {entry['test']} {entry['label']}"
         if problems:
             failures += 1
@@ -1003,13 +1073,14 @@ def compare_submission(args):
         offset, _, value = text.partition("=")
         expected[int(offset, 16)] = int(value, 16)
     extra_sh_registers = {int(offset, 16) for offset in args.extra_sh_register or []}
+    restated = restated_offsets(args)
 
     name = Path(args.golden).name
     failures = 0
     seen = set()
     for index, (line, count) in enumerate(zip(lines, draws)):
         problems, documented, found, packets, tables = compare_packets(
-            golden, json.loads(line), count, expected, extra_sh_registers)
+            golden, json.loads(line), count, expected, extra_sh_registers, restated)
         seen |= found
         label = f"{Path(args.dump).name} submission {index + 1} ({count} draw{'s' if count != 1 else ''})"
         if problems:
@@ -1059,9 +1130,15 @@ def main():
     command.add_argument("dump")
     command.add_argument("--test", help="the runner test whose submissions to compare, e.g. "
                                         "c1-triangle")
+    command.add_argument("--uncaptured-tail", type=int, default=0, metavar="COUNT",
+                         help="trailing submissions the PC test draws past the console case's "
+                              "own (default 0)")
     command.add_argument("--index-size-rebind", action="store_true",
                          help="R19 migration: require fresh UINT16 size before every indexed draw; "
                               "compare all other packets against the unchanged historical capture")
+    command.add_argument("--restated-cx-register", action="append", metavar="OFFSET",
+                         help="a context register the driver writes in every draw's table, "
+                              "which a console table may leave out (repeatable)")
     command.set_defaults(handler=compare_run)
     command = commands.add_parser("compare-submission",
                                   help="compare a driver test's submission with a golden frame")
@@ -1076,6 +1153,9 @@ def main():
     command.add_argument("--extra-sh-register", action="append", metavar="OFFSET",
                          help="an SH register's user-data write the driver makes before every "
                               "draw and the golden frame has none of (repeatable)")
+    command.add_argument("--restated-cx-register", action="append", metavar="OFFSET",
+                         help="a context register the driver writes in every draw's table, "
+                              "which a console table may leave out (repeatable)")
     command.set_defaults(handler=compare_submission)
     command = commands.add_parser("rebuild",
                                   help="rebuild the golden frames with the PC runner and compare")

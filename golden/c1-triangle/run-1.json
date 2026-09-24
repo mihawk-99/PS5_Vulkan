@@ -2,12 +2,12 @@
  "schema": 1,
  "kind": "driver-run",
  "source": {
-  "klog": "capture-c1-triangle3.log",
-  "pid": 298
+  "klog": "capture-fifo.log",
+  "pid": 221
  },
- "video": 1309671680,
+ "video": 1309671936,
  "videos": {
-  "c1-triangle": 1309671680
+  "c1-triangle": 1309671936
  },
  "stages": [
   {
@@ -51,7 +51,7 @@
  "regions": {
   "framebuffer-c1-triangle": {
    "address": "0x200400000",
-   "bytes": 67108864,
+   "bytes": 100663296,
    "test": "c1-triangle"
   },
   "tables-c1-triangle-0x200030000": {
@@ -59,6 +59,9 @@
    "bytes": 262144,
    "test": "c1-triangle"
   }
+ },
+ "flips_before": {
+  "c1-triangle": 1
  },
  "submissions": [
   {

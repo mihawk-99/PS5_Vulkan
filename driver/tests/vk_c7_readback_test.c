@@ -110,7 +110,7 @@ create_buffer(VkDeviceSize bytes, VkBufferUsageFlags usage, VkDeviceMemory *memo
    const VkMemoryAllocateInfo allocate = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
       .allocationSize = requirements.size,
-      .memoryTypeIndex = 0,
+      .memoryTypeIndex = PS5VK_TEST_HOST_MEMORY_TYPE,
    };
    if (VK_FUNCTION(g_instance, AllocateMemory)(g_device, &allocate, NULL, memory) != VK_SUCCESS)
       return VK_NULL_HANDLE;
@@ -186,7 +186,7 @@ create_image(VkImageUsageFlags usage, unsigned samples, VkDeviceMemory *memory_o
    const VkMemoryAllocateInfo allocate = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
       .allocationSize = requirements.size,
-      .memoryTypeIndex = 0,
+      .memoryTypeIndex = PS5VK_TEST_HOST_MEMORY_TYPE,
    };
    VkDeviceMemory memory = VK_NULL_HANDLE;
    if (VK_FUNCTION(g_instance, AllocateMemory)(g_device, &allocate, NULL, &memory) != VK_SUCCESS ||

@@ -65,7 +65,7 @@ allocate(VkInstance instance, VkDevice device, VkDeviceSize size, struct mapping
    const VkMemoryAllocateInfo info = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
       .allocationSize = size,
-      .memoryTypeIndex = 0,
+      .memoryTypeIndex = PS5VK_TEST_HOST_MEMORY_TYPE,
    };
    m->memory = VK_NULL_HANDLE;
    m->size = size;
@@ -173,7 +173,7 @@ main(void)
    const VkMemoryAllocateInfo too_large = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
       .allocationSize = heap + PAGE_BYTES,
-      .memoryTypeIndex = 0,
+      .memoryTypeIndex = PS5VK_TEST_HOST_MEMORY_TYPE,
    };
    VkDeviceMemory failed = VK_NULL_HANDLE;
    const VkResult result =

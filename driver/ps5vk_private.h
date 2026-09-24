@@ -1429,7 +1429,19 @@ struct ps5vk_pipeline {
 };
 
 /* A swapchain's images: VideoOut's two registered framebuffers. */
-#define PS5VK_SWAPCHAIN_IMAGES 2
+#define PS5VK_SWAPCHAIN_IMAGES 3
+/* The runner's flip wait: up to 200 vblanks. */
+#define PS5VK_FLIP_WAITS 200
+/* sceVideoOutGetFlipStatus fills 16 64-bit words; the fourth is the marker of
+ * the latest flip shown. */
+#define PS5VK_FLIP_STATUS_WORDS 16
+#define PS5VK_FLIP_STATUS_MARKER 3
+/* Each swapchain image's flip is written into a slot of its own at the end of
+ * the queue's submission buffer (ps5vk_queue.c): a present returns before
+ * VideoOut shows the flip, so the next submission must not overwrite a flip
+ * stream the GPU may not have read yet. A slot is written again only when its
+ * image is presented again, which needs its previous flip to have been shown. */
+#define PS5VK_FLIP_SLOT_WORDS 256u
 
 /* VideoOut and its framebuffers (ps5vk_wsi.c): one per process, presented
  * through by the newest swapchain of a chain of replacements, and kept on screen
@@ -1453,6 +1465,10 @@ struct ps5vk_video_out {
    uint32_t shown;
    /* The marker of the last flip. */
    int64_t flip_marker;
+   /* Each buffer's last flip marker, 0 for none: a buffer whose marker is past
+    * the one VideoOut last showed is queued, the one equal to it is on screen,
+    * and any other is free to render into (ps5vk_wsi.c). */
+   int64_t image_marker[PS5VK_SWAPCHAIN_IMAGES];
 };
 
 struct ps5vk_swapchain {
@@ -1508,10 +1524,12 @@ ps5vk_queue_init(struct ps5vk_device *device, struct ps5vk_queue *queue,
 void
 ps5vk_queue_finish(struct ps5vk_queue *queue);
 
-/* Submits the flip of a VideoOut buffer in a stream of its own and waits
- * until VideoOut's flip status reaches marker (ps5vk_queue.c). */
+/* Submits the flip of a VideoOut buffer in a stream of its own and, when
+ * wait_shown, waits until VideoOut's flip status reaches marker
+ * (ps5vk_queue.c). */
 VkResult
-ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, int64_t marker);
+ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, int64_t marker,
+                 bool wait_shown);
 
 /* ps5vk_query.c: occlusion queries, which are the GPU's z-pass counter
  * sampled around a region and scaled to samples. */
@@ -1742,8 +1760,17 @@ ps5vk_meta_copy(struct ps5vk_cmd_buffer *cmd_buffer, const VkCopyImageInfo2 *inf
 #define PS5VK_AB_CONST_HALF (1u << 2) /* blend constants read as 0.5 */
 #define PS5VK_AB_NO_STENCIL (1u << 3) /* no stencil test */
 #define PS5VK_AB_NO_DEPTH (1u << 4)   /* no depth test */
+/* Memory types (ps5vk_physical_device.c): device-local only, then mappable. */
+#define PS5VK_MEMORY_TYPE_DEVICE 0u
+#define PS5VK_MEMORY_TYPE_HOST 1u
+#define PS5VK_MEMORY_TYPE_COUNT 2u
+#define PS5VK_MEMORY_TYPE_BITS ((1u << PS5VK_MEMORY_TYPE_COUNT) - 1u)
 #define PS5VK_AB_TILE_PADDED (1u << 5) /* single-level padded textures are tiled */
 #define PS5VK_AB_CPU_TRANSFERS (1u << 6) /* blits and copies stay on the CPU */
+#define PS5VK_AB_PIX_CENTER (1u << 7) /* every draw records PA_SU_VTX_CNTL */
+#define PS5VK_AB_BASE_MIP (1u << 8) /* sampled views read their base level only */
+#define PS5VK_AB_NO_D24 (1u << 9) /* D24_UNORM_S8_UINT reports no features */
+#define PS5VK_AB_SYNC_PRESENT (1u << 10) /* a present waits until its flip is shown */
 extern unsigned ps5vk_ab_flags;
 void
 ps5vk_ab_load(void);

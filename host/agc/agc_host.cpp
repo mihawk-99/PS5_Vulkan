@@ -207,13 +207,15 @@ std::uint32_t *sceAgcCbReleaseMem(void *buffer, std::uint8_t event, std::int16_t
 // driver's flips hold the frame's own tail because a frame and its flip are
 // written at the same address (run pid 113). Zeroing them here would be a
 // buffer the console does not have. The VideoOut handle is not encoded. Only
-// mode 1, buffers 0-1 and the first 255 flips of a process are captured.
+// mode 1, buffers 0-2 and the first 255 flips of a process are captured.
 std::uint32_t *sceAgcDcbSetFlip(void *buffer, std::uint32_t video, int buffer_index,
                                 std::uint32_t mode, std::int64_t marker)
 {
     (void)video;
-    if (mode != 1 || buffer_index < 0 || buffer_index > 1 || g_flips >= 0xff)
-        return refuse("sceAgcDcbSetFlip: only mode 1, buffers 0-1 and flips 1-255 are captured");
+    // Buffer 2 since the driver's swapchain has three images (2026-09-24,
+    // golden/c1-triangle): its words follow buffers 0 and 1's, the index at bit 3.
+    if (mode != 1 || buffer_index < 0 || buffer_index > 2 || g_flips >= 0xff)
+        return refuse("sceAgcDcbSetFlip: only mode 1, buffers 0-2 and flips 1-255 are captured");
     std::uint32_t *const start = reserve(buffer, kFlipPacketWords);
     if (start == nullptr)
         return refuse("command buffer full or invalid");
@@ -240,17 +242,17 @@ std::uint32_t sceAgcDriverGetWaitRenderingPacketSizeInDwords(void)
 // written, with the caller's pointer advanced the 32 words the console's
 // helper reserves. The 16 words after the helper's own are the caller's, as
 // the flip's are (runner pid 109, run pid 113): a frame's wait carries the
-// previous submission's words there. The VideoOut handle is not encoded. Only
-// buffers 0-1 are captured. Returns 0 on success.
+// previous submission's words there. The VideoOut handle is not encoded.
+// Buffers 0-2 are captured. Returns 0 on success.
 std::uint32_t sceAgcDriverWaitUntilSafeForRendering(std::uint32_t **up, std::uint32_t words,
                                                     std::uint32_t reserved, std::uint32_t video,
                                                     int buffer_index)
 {
     (void)video;
     if (up == nullptr || *up == nullptr || words != kWaitPacketWords || reserved != 0 ||
-        buffer_index < 0 || buffer_index > 1)
+        buffer_index < 0 || buffer_index > 2)
     {
-        refuse("sceAgcDriverWaitUntilSafeForRendering: needs a 32-word packet, reserved 0 and buffer 0-1");
+        refuse("sceAgcDriverWaitUntilSafeForRendering: needs a 32-word packet, reserved 0 and buffer 0-2");
         return 1;
     }
     const auto slot = static_cast<std::uint32_t>(buffer_index);

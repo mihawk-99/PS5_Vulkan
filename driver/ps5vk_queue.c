@@ -1464,7 +1464,8 @@ static VkResult
 ps5vk_queue_run(struct ps5vk_queue *queue, const struct vk_queue_submit *submit)
 {
    uint32_t *const stream = queue->submission.address;
-   const size_t capacity = queue->submission.bytes / sizeof(uint32_t) - 1;
+   const size_t capacity = queue->submission.bytes / sizeof(uint32_t) - 1 -
+                           PS5VK_SWAPCHAIN_IMAGES * PS5VK_FLIP_SLOT_WORDS;
    uint32_t *const marker = stream + capacity;
    size_t words = 0;
 
@@ -1589,12 +1590,6 @@ ps5vk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
 
 /* The flip mode the runner flips with. */
 #define PS5VK_FLIP_MODE 1
-/* The runner's flip wait: up to 200 vblanks. */
-#define PS5VK_FLIP_WAITS 200
-/* sceVideoOutGetFlipStatus fills 16 64-bit words; the fourth is the marker of
- * the latest flip shown. */
-#define PS5VK_FLIP_STATUS_WORDS 16
-#define PS5VK_FLIP_STATUS_MARKER 3
 
 /* The second summary line: what the first one cannot show. A mean frame time
  * hides whether the period is the work or the refresh, whether a "gpu" interval
@@ -1725,11 +1720,76 @@ ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now, char *l
    p->report_write_ns = ps5vk_profile_now() - written;
 }
 
+/* A flip counted as presented: the frame count, its period since the previous
+ * one and, every ten seconds, the profile's summary lines. started is when the
+ * present began; first_hit whether VideoOut had shown it at the first look. */
+static void
+ps5vk_queue_flip_presented(struct ps5vk_queue *queue, uint64_t started, bool first_hit)
+{
+   struct ps5vk_queue_profile *const p = &queue->profile;
+   if (p->enabled) {
+      const uint64_t now = ps5vk_profile_now();
+      p->frames++;
+      p->flip_ns += now - started;
+      p->flip_first_hits += first_hit;
+      /* The period of a presented frame, measured between two confirmed
+       * presents rather than derived from a throttled count. */
+      if (p->last_present_ns != 0 && now > p->last_present_ns) {
+         const uint64_t gap = now - p->last_present_ns;
+         const unsigned bucket = gap / UINT64_C(4000000);
+         p->present_gap_ns += gap;
+         p->present_gap_count++;
+         if (p->present_gap_min_ns == 0 || gap < p->present_gap_min_ns)
+            p->present_gap_min_ns = gap;
+         if (gap > p->present_gap_max_ns)
+            p->present_gap_max_ns = gap;
+         ps5vk_hitch_frame(p, gap);
+         p->present_period[bucket < PS5VK_PERIOD_BUCKETS ? bucket
+                                                         : PS5VK_PERIOD_BUCKETS - 1]++;
+      }
+      p->last_present_ns = now;
+      if (p->since == 0 || now - p->since >= UINT64_C(10000000000)) {
+         if (p->since != 0) {
+            const double ms = 1.0 / ((double)p->frames * 1000000.0);
+            /* Both summary lines go out as one write: see the note on
+             * ps5vk_queue_profile_report2 for what a second one costs. */
+            char line[2048];
+            snprintf(line, sizeof(line),
+                    "[ps5vk] profile frames=%" PRIu64 " steps/frame=%.2f "
+                    "queue_ms=%.3f flush_ms=%.3f gpu_ms=%.3f flip_ms=%.3f "
+                    "flush_MiB/frame=%.2f copy_ms=%.3f sync_wait_ms=%.3f sync_signal_ms=%.3f\n", p->frames,
+                    (double)p->steps / p->frames, p->queue_ns * ms, p->flush_ns * ms,
+                    p->gpu_ns * ms, p->flip_ns * ms,
+                    (double)p->flush_bytes / (p->frames * 1048576.0),
+                    p->copy_ns * ms, p->sync_wait_ns * ms, p->sync_signal_ns * ms);
+            ps5vk_queue_profile_report2(p, now, line, sizeof(line));
+         }
+         /* last_return_ns and last_present_ns carry across a window: the
+          * first interval after one is still a real one. */
+         /* The hitch counters are process-wide and cumulative, so their
+          * snapshot outlives the window. */
+         uint64_t hitch_calls[PS5VK_HITCH_KINDS], hitch_ns[PS5VK_HITCH_KINDS];
+         memcpy(hitch_calls, p->frame_hitch_calls, sizeof(hitch_calls));
+         memcpy(hitch_ns, p->frame_hitch_ns, sizeof(hitch_ns));
+         *p = (struct ps5vk_queue_profile){.enabled = true,
+                                           .since = now,
+                                           .last_return_ns = now,
+                                           .last_present_ns = now,
+                                           .report_write_ns = p->report_write_ns,
+                                           .clock_ns_x1000 = p->clock_ns_x1000};
+         memcpy(p->frame_hitch_calls, hitch_calls, sizeof(hitch_calls));
+         memcpy(p->frame_hitch_ns, hitch_ns, sizeof(hitch_ns));
+      }
+   }
+}
+
 /* A flip in a stream of its own, as run pid 134 presented (c1-present):
- * submitted, through the suspend point, then confirmed when VideoOut's flip
- * status reaches marker, waiting a vblank at a time as the runner waits. */
+ * submitted, through the suspend point, then -- when wait_shown -- confirmed
+ * when VideoOut's flip status reaches marker, waiting a vblank at a time as
+ * the runner waits. */
 VkResult
-ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, int64_t marker)
+ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, int64_t marker,
+                 bool wait_shown)
 {
    struct ps5vk_queue_profile *const p = &queue->profile;
    const uint64_t started = p->enabled ? ps5vk_profile_now() : 0;
@@ -1741,8 +1801,11 @@ ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, in
       if (buffer_index < 2)
          p->present_index[buffer_index]++;
    }
-   uint32_t *const stream = queue->submission.address;
-   const size_t capacity = queue->submission.bytes / sizeof(uint32_t) - 1;
+   /* The image's own slot (PS5VK_FLIP_SLOT_WORDS). */
+   uint32_t *const stream = (uint32_t *)queue->submission.address +
+                            queue->submission.bytes / sizeof(uint32_t) -
+                            (size_t)(PS5VK_SWAPCHAIN_IMAGES - buffer_index) * PS5VK_FLIP_SLOT_WORDS;
+   const size_t capacity = PS5VK_FLIP_SLOT_WORDS - 1;
    struct ps5vk_agc_command_buffer command = {
       .bottom = stream,
       .top = stream + capacity,
@@ -1780,6 +1843,14 @@ ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, in
    if (result != 0)
       return vk_queue_set_lost(&queue->vk, "sceAgcSuspendPoint failed after a flip: 0x%08x",
                                (unsigned)result);
+   /* A FIFO present returns once the flip is queued: VideoOut shows it at a
+    * later vblank while the application goes on to its next frame, and the
+    * acquire of an image still on screen or queued is what waits
+    * (ps5vk_wsi.c). */
+   if (!wait_shown) {
+      ps5vk_queue_flip_presented(queue, started, true);
+      return VK_SUCCESS;
+   }
 
    uint64_t status[PS5VK_FLIP_STATUS_WORDS];
    for (unsigned wait = 0; wait < PS5VK_FLIP_WAITS; wait++) {
@@ -1790,60 +1861,7 @@ ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, in
          p->flip_status_ns += ps5vk_profile_now() - queried;
       }
       if (flipped == 0 && (int64_t)status[PS5VK_FLIP_STATUS_MARKER] >= marker) {
-         if (p->enabled) {
-            const uint64_t now = ps5vk_profile_now();
-            p->frames++;
-            p->flip_ns += now - started;
-            p->flip_first_hits += wait == 0;
-            /* The period of a presented frame, measured between two confirmed
-             * presents rather than derived from a throttled count. */
-            if (p->last_present_ns != 0 && now > p->last_present_ns) {
-               const uint64_t gap = now - p->last_present_ns;
-               const unsigned bucket = gap / UINT64_C(4000000);
-               p->present_gap_ns += gap;
-               p->present_gap_count++;
-               if (p->present_gap_min_ns == 0 || gap < p->present_gap_min_ns)
-                  p->present_gap_min_ns = gap;
-               if (gap > p->present_gap_max_ns)
-                  p->present_gap_max_ns = gap;
-               ps5vk_hitch_frame(p, gap);
-               p->present_period[bucket < PS5VK_PERIOD_BUCKETS ? bucket
-                                                               : PS5VK_PERIOD_BUCKETS - 1]++;
-            }
-            p->last_present_ns = now;
-            if (p->since == 0 || now - p->since >= UINT64_C(10000000000)) {
-               if (p->since != 0) {
-                  const double ms = 1.0 / ((double)p->frames * 1000000.0);
-                  /* Both summary lines go out as one write: see the note on
-                   * ps5vk_queue_profile_report2 for what a second one costs. */
-                  char line[2048];
-                  snprintf(line, sizeof(line),
-                          "[ps5vk] profile frames=%" PRIu64 " steps/frame=%.2f "
-                          "queue_ms=%.3f flush_ms=%.3f gpu_ms=%.3f flip_ms=%.3f "
-                          "flush_MiB/frame=%.2f copy_ms=%.3f sync_wait_ms=%.3f sync_signal_ms=%.3f\n", p->frames,
-                          (double)p->steps / p->frames, p->queue_ns * ms, p->flush_ns * ms,
-                          p->gpu_ns * ms, p->flip_ns * ms,
-                          (double)p->flush_bytes / (p->frames * 1048576.0),
-                          p->copy_ns * ms, p->sync_wait_ns * ms, p->sync_signal_ns * ms);
-                  ps5vk_queue_profile_report2(p, now, line, sizeof(line));
-               }
-               /* last_return_ns and last_present_ns carry across a window: the
-                * first interval after one is still a real one. */
-               /* The hitch counters are process-wide and cumulative, so their
-                * snapshot outlives the window. */
-               uint64_t hitch_calls[PS5VK_HITCH_KINDS], hitch_ns[PS5VK_HITCH_KINDS];
-               memcpy(hitch_calls, p->frame_hitch_calls, sizeof(hitch_calls));
-               memcpy(hitch_ns, p->frame_hitch_ns, sizeof(hitch_ns));
-               *p = (struct ps5vk_queue_profile){.enabled = true,
-                                                 .since = now,
-                                                 .last_return_ns = now,
-                                                 .last_present_ns = now,
-                                                 .report_write_ns = p->report_write_ns,
-                                                 .clock_ns_x1000 = p->clock_ns_x1000};
-               memcpy(p->frame_hitch_calls, hitch_calls, sizeof(hitch_calls));
-               memcpy(p->frame_hitch_ns, hitch_ns, sizeof(hitch_ns));
-            }
-         }
+         ps5vk_queue_flip_presented(queue, started, wait == 0);
          return VK_SUCCESS;
       }
       const uint64_t waited = p->enabled ? ps5vk_profile_now() : 0;

@@ -9058,3 +9058,55 @@ and limits_audit.py --check each exit 0. README local links checked against the
 checkout; git diff --check passes. Port format/evidence checks pass with 48
 capture replays. Documentation-only change; no rebuild or new hardware/FPS
 claim. The user's README request takes priority over deferred console fixtures.
+
+## 2026-09-24 — per-draw state, GPU transfers, device-local memory and a FIFO swapchain
+
+God of War: Ghost of Sparta under PPSSPP at 10x (4800x2720) was the test, and
+every fix below is general Vulkan behaviour, not a PPSSPP path.
+
+**Stale context registers.** Context registers keep their last value between
+draws, and a draw's table recorded the write mask, the blend words, the
+rasterizer word and the clip word only when they differed from AGC's
+defaults. An opaque draw after a blending one blended, a full-mask draw after
+an RGB-only one kept the partial mask, and God of War drew its characters as
+flat silhouettes under a brown tint. Every draw now records CB_TARGET_MASK,
+CB_BLEND0_CONTROL, CB_COLOR_CONTROL, PA_CL_CLIP_CNTL (0, AGC's default as the
+console recorded it, when the pipeline does not discard) and
+PA_SU_SC_MODE_CNTL. The menu and gameplay now match PPSSPP's software
+renderer. `tools/golden.py` takes `--restated-cx-register` for runner-built
+frames, which leave those words at their defaults; the driver-run goldens of
+c1-triangle, c4-rtt, c4-texture, c7-mip-tiled, c7-mip-upload and
+v0-multiset-quake were re-captured (`jobs/capture-state`,
+`Klog_Logs/capture-state.log`, runner pid 214, all eight tests PASS).
+
+**Component mappings.** A sampled view's component mapping now composes onto
+the format's DST_SEL selectors instead of being refused; vk_c4_texture_test
+checks the composed word (B, G, R, A over RGBA8 is 0xf2e). The runner case
+draws two frames, so its compare takes `--uncaptured-tail 1` for the PC test's
+third.
+
+**Device-local memory type.** Type 0 is now device-local only and type 1
+the mappable one. Images in memory the application never maps are not evicted
+from the CPU's caches around every submission: God of War's flush fell from
+2075 MiB a frame (35 ms) to none.
+
+**GPU blits and copies.** One-sample colour blits and same-format copies
+draw through vk_meta (push descriptors, a split gl_FragCoord, one-layer 2D
+array targets), which took PPSSPP's 370 ms a frame of CPU copies at 10x to
+none.
+
+**A FIFO swapchain.** Three images, and a present returns once its flip is
+queued: each image's flip goes into a slot of its own at the end of the
+submission buffer, and an acquire takes an image neither on screen nor
+queued, waiting a vblank at a time only when none is. A present used to wait
+until its flip was shown, which left RetroArch -- it presents every 60 Hz frame
+twice at 120 Hz -- one vblank for its whole frame: God of War ran at ~87 %
+speed with audio gaps (`audio ps5: window` ~420,000 of 480,000 frames). It
+now runs at full speed, 480,000 of 480,000 with no silence, flipping 1198
+times per 10 s; Genesis Plus GX (Sonic) runs at full speed too. c1-triangle's
+golden was re-captured with the three images (`jobs/capture-fifo`, runner pid
+221), the host model takes buffer 2, and a driver run's replay now seeds the
+flip helper's count from the flips its capture made before the test.
+
+`sync-present`, `base-mip`, `no-d24` and `pix-center` are A/B switches in
+`/app0/ps5vk-ab.txt` for comparisons; none changes the default path.

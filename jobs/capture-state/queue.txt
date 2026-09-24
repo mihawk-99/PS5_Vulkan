@@ -1,0 +1,27 @@
+# PS5 Vulkan test runner job queue (PPSA99988): golden capture after every draw
+# restates its write mask, blend, clip and rasterizer words.
+# Upload: python3 tools/ps5_console.py push-jobs --replace PPSA99988 jobs/capture-state/queue.txt
+#
+# "capture" makes every frame log its AGC helper calls, its whole command
+# stream and its stage workspace image. Turn the klog into golden files with:
+#   python3 tools/golden.py extract <klog> <directory> --test m2-solid --test <case>
+#
+# Context registers keep their last value between draws, so the driver now
+# records CB_TARGET_MASK, CB_BLEND0_CONTROL, CB_COLOR_CONTROL, PA_CL_CLIP_CNTL
+# and PA_SU_SC_MODE_CNTL in every draw's table (driver/ps5vk_draw.c). The
+# runner-built goldens take that as declared restated registers
+# (tools/check-driver.sh); these driver-run goldens hold the driver's own
+# streams, whose table sizes and the addresses allocated after them moved, and
+# c4-texture's swizzled view now draws a third frame where it was refused.
+# m2-solid runs first and last, as in jobs/capture/queue.txt.
+capture
+hold 60
+m2-solid
+c1-triangle
+c4-rtt
+c4-texture
+c7-mip-tiled
+c7-mip-upload
+v0-multiset-quake
+m2-solid
+exit

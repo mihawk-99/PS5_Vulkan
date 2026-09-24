@@ -183,7 +183,7 @@ clear_level_case(VkCommandPool pool, VkFence fence, VkFormat format, VkImageUsag
    const VkMemoryAllocateInfo image_memory = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
       .allocationSize = requirements.size,
-      .memoryTypeIndex = 0,
+      .memoryTypeIndex = PS5VK_TEST_HOST_MEMORY_TYPE,
    };
    VkDeviceMemory memory = VK_NULL_HANDLE;
    if (VK_FUNCTION(g_instance, AllocateMemory)(g_device, &image_memory, NULL, &memory) != VK_SUCCESS ||
@@ -205,7 +205,7 @@ clear_level_case(VkCommandPool pool, VkFence fence, VkFormat format, VkImageUsag
    const VkMemoryAllocateInfo buffer_allocate = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
       .allocationSize = buffer_requirements.size,
-      .memoryTypeIndex = 0,
+      .memoryTypeIndex = PS5VK_TEST_HOST_MEMORY_TYPE,
    };
    void *mapped = NULL;
    if (VK_FUNCTION(g_instance, AllocateMemory)(g_device, &buffer_allocate, NULL, &buffer_memory) !=
@@ -408,7 +408,7 @@ main(void)
          const VkMemoryAllocateInfo allocate = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
             .allocationSize = requirements.size,
-            .memoryTypeIndex = 0,
+            .memoryTypeIndex = PS5VK_TEST_HOST_MEMORY_TYPE,
          };
          VkDeviceMemory memory = VK_NULL_HANDLE;
          if (VK_FUNCTION(g_instance, AllocateMemory)(g_device, &allocate, NULL, &memory) ==

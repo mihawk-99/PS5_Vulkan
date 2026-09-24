@@ -92,7 +92,7 @@ check_refusals(struct ps5vk_triangle *triangle)
        {0, 0}, VK_PRESENT_MODE_FIFO_KHR, 0},
       {"imageExtent", 0, {1280, 720}, VK_PRESENT_MODE_FIFO_KHR, 0},
       {"presentMode", 0, {0, 0}, VK_PRESENT_MODE_MAILBOX_KHR, 0},
-      {"minImageCount", 0, {0, 0}, VK_PRESENT_MODE_FIFO_KHR, 3},
+      {"minImageCount", 0, {0, 0}, VK_PRESENT_MODE_FIFO_KHR, 4},
    };
    for (size_t at = 0; at < sizeof(kCases) / sizeof(kCases[0]); at++) {
       VkSwapchainCreateInfoKHR info = triangle->swapchain_info;
@@ -210,7 +210,7 @@ check_replacement(struct ps5vk_triangle *triangle)
    uint32_t count = 0;
    result = VK_FUNCTION(triangle->instance, GetSwapchainImagesKHR)(triangle->device, replacement,
                                                                    &count, NULL);
-   check(result == VK_SUCCESS && count == 2, "the replacement has two images");
+   check(result == VK_SUCCESS && count == 3, "the replacement has three images");
    VK_FUNCTION(triangle->instance, DestroySwapchainKHR)(triangle->device, replacement, NULL);
 }
 
@@ -284,21 +284,21 @@ main(void)
       };
       struct ps5vk_triangle triangle;
       enum ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
-      check(status == PS5VK_TRIANGLE_OK && triangle.image_count == 2 &&
+      check(status == PS5VK_TRIANGLE_OK && triangle.image_count == 3 &&
                triangle.format == VK_FORMAT_B8G8R8A8_UNORM,
-            "a display surface and a FIFO swapchain of two B8G8R8A8_UNORM images");
+            "a display surface and a FIFO swapchain of three B8G8R8A8_UNORM images");
 
       unsigned presented = 0;
       bool alternating = true;
       for (unsigned frame = 0; frame < FRAMES && status == PS5VK_TRIANGLE_OK; frame++) {
          status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
-         alternating = alternating && triangle.image_index == frame % 2;
+         alternating = alternating && triangle.image_index == frame % 3;
          if (status == PS5VK_TRIANGLE_OK)
             status = ps5vk_triangle_present(&triangle);
          presented += status == PS5VK_TRIANGLE_OK ? 1u : 0u;
       }
       check(presented == FRAMES, "four frames acquired, drawn and presented");
-      check(presented == FRAMES && alternating, "the frames alternate between the two images");
+      check(presented == FRAMES && alternating, "the frames take the three images in turn");
       check(status != PS5VK_TRIANGLE_OK || triangle.target == NULL,
             "swapchain images are not mapped for the application");
       if (status == PS5VK_TRIANGLE_OK) {

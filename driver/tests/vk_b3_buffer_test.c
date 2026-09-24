@@ -57,7 +57,7 @@ allocate(VkDeviceSize size, VkDeviceMemory *memory, uint8_t **data)
    const VkMemoryAllocateInfo info = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
       .allocationSize = size,
-      .memoryTypeIndex = 0,
+      .memoryTypeIndex = PS5VK_TEST_HOST_MEMORY_TYPE,
    };
    *memory = VK_NULL_HANDLE;
    void *mapped = NULL;
@@ -97,7 +97,7 @@ check_requirements(void)
       }
       const VkMemoryRequirements r = requirements(buffer);
       const VkMemoryRequirements t = requirements(twin);
-      valid = valid && r.memoryTypeBits == 1 && r.alignment == ALIGNMENT &&
+      valid = valid && r.memoryTypeBits == 3 && r.alignment == ALIGNMENT &&
               r.size >= sizes[i] && r.size < sizes[i] + ALIGNMENT && r.size % ALIGNMENT == 0;
       /* A subset of the usage must not need more (resources.adoc). */
       stable = stable && t.memoryTypeBits == r.memoryTypeBits && t.size <= r.size &&
@@ -105,7 +105,7 @@ check_requirements(void)
       destroy_buffer(twin);
       destroy_buffer(buffer);
    }
-   check(valid, "buffers of 1 B to 3 MiB need memory type 0, 256-byte alignment, the size rounded up");
+   check(valid, "buffers of 1 B to 3 MiB take either memory type, 256-byte alignment, the size rounded up");
    check(stable, "a subset of the usage needs no more memory");
 
    VkBuffer largest;

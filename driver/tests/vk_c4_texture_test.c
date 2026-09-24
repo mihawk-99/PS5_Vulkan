@@ -270,13 +270,12 @@ main(void)
          ps5vk_triangle_finish(&triangle);
 
       /* A view whose component mapping is not the identity: Vulkan applies the
-       * mapping to what a combined image sampler returns, and the descriptor
-       * the driver writes carries only the format's own selectors, so the draw
-       * has to be refused rather than return the format's channels where the
-       * mapping asked for others (driver/ps5vk_draw.c). The view itself is
-       * legal, so the create succeeds and the draw is what refuses, naming the
-       * rule -- and the frame is its own program, created after the two above
-       * so the addresses they landed on are the ones the golden holds. */
+       * mapping to what a combined image sampler returns, and the driver
+       * composes it onto the format's own DST_SEL selectors in the descriptor
+       * (driver/ps5vk_draw.c, ps5vk_compose_dst_sel). B, G, R, A over RGBA8's
+       * X, Y, Z, W selectors is Z, Y, X, W: 0xf2e, where the identity is 0xfac.
+       * The frame is its own program, created after the two above so the
+       * addresses they landed on are the ones the golden holds. */
       {
          struct steps mapped_steps = {0};
          const struct ps5vk_triangle_report mapped_report = {&mapped_steps, record_step};
@@ -293,9 +292,22 @@ main(void)
                "a view with a component mapping other than the identity is created");
          if (mapped_status == PS5VK_TRIANGLE_OK)
             mapped_status = ps5vk_triangle_draw(&mapped_triangle, PS5VK_TRIANGLE_ONE_DRAW);
-         check(mapped_status == PS5VK_TRIANGLE_FAILED && mapped_steps.failed != NULL &&
-                  strstr(mapped_steps.message, "component mapping") != NULL,
-               "sampling a view whose component mapping is not the identity is refused by name");
+         check(mapped_status != PS5VK_TRIANGLE_FAILED && mapped_steps.failed == NULL,
+               "sampling a view whose component mapping is not the identity draws");
+#if defined(PS5VK_TEST_DIRECT)
+         if (mapped_status != PS5VK_TRIANGLE_FAILED) {
+            /* Word 3 of the combined image sampler: the 2D kind in bits 28-31 and
+             * the composed selectors in bits 0-11. */
+            ps5vk_debug_table tables[4] = {{0}};
+            const uint32_t count = ps5vk_debug_descriptor_tables(mapped_triangle.device, tables, 4);
+            bool composed = false;
+            for (uint32_t table = 0; table < count; table++)
+               for (size_t word = 0; word < tables[table].bytes / sizeof(uint32_t); word++)
+                  composed = composed || (tables[table].words[word] >> 28 == 0x9u &&
+                                          (tables[table].words[word] & 0xfffu) == 0xf2eu);
+            check(composed, "the descriptor carries the mapping composed onto the format: 0xf2e");
+         }
+#endif
          if (mapped_status != PS5VK_TRIANGLE_IN_FLIGHT)
             ps5vk_triangle_finish(&mapped_triangle);
       }

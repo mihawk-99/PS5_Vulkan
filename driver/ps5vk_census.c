@@ -43,6 +43,14 @@ ps5vk_ab_load(void)
          ps5vk_ab_flags |= PS5VK_AB_NO_STENCIL;
       else if (!strcmp(word, "no-depth"))
          ps5vk_ab_flags |= PS5VK_AB_NO_DEPTH;
+      else if (!strcmp(word, "sync-present"))
+         ps5vk_ab_flags |= PS5VK_AB_SYNC_PRESENT;
+      else if (!strcmp(word, "no-d24"))
+         ps5vk_ab_flags |= PS5VK_AB_NO_D24;
+      else if (!strcmp(word, "base-mip"))
+         ps5vk_ab_flags |= PS5VK_AB_BASE_MIP;
+      else if (!strcmp(word, "pix-center"))
+         ps5vk_ab_flags |= PS5VK_AB_PIX_CENTER;
       else if (!strcmp(word, "cpu-transfers"))
          ps5vk_ab_flags |= PS5VK_AB_CPU_TRANSFERS;
       else if (!strcmp(word, "tile-padded"))

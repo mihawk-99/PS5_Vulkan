@@ -19741,7 +19741,7 @@ void run_vulkan_present_frames_impl(const TestContext &test, TestOutcome &outcom
                 reinterpret_cast<std::uintptr_t>(storage));
         log.number("agc_gpu_pointer_swapchain_image", "bytes", static_cast<long long>(bytes));
         bool drawn = storage != nullptr && bytes >= kFramebufferBytes &&
-                     triangle.image_index == index % 2 &&
+                     triangle.image_index == index % triangle.image_count &&
                      check_split_frame(storage, index, kTriangleClearWord, kCornerColourWord, log);
         if (readback && status == PS5VK_TRIANGLE_OK)
         {
@@ -19783,9 +19783,11 @@ void run_vulkan_present_frames_impl(const TestContext &test, TestOutcome &outcom
                 sceKernelUsleep(kRefreshMicroseconds);
             log.number("agc_live_frame_hold", "vblanks", test.hold_vblanks);
         }
-        log.event("agc_c1_triangle_frame", passed ? "PASS" : "FAIL", passed ? 0 : -1,
-                  index % 2 == 0 ? "swapchain image 0 drawn, read back and presented"
-                                 : "swapchain image 1 drawn, read back and presented");
+        char frame_detail[64]{};
+        std::snprintf(frame_detail, sizeof(frame_detail),
+                      "swapchain image %u drawn, read back and presented",
+                      static_cast<unsigned>(triangle.image_index));
+        log.event("agc_c1_triangle_frame", passed ? "PASS" : "FAIL", passed ? 0 : -1, frame_detail);
         passed_frames += passed ? 1u : 0u;
     }
     outcome.command_built = status != PS5VK_TRIANGLE_FAILED;

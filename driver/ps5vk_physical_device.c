@@ -262,9 +262,20 @@ ps5vk_GetPhysicalDeviceMemoryProperties2(VkPhysicalDevice physicalDevice,
    const VkDeviceSize heap_size =
       direct_memory > 0 ? MIN2((VkDeviceSize)direct_memory, PS5VK_ADDRESS_WINDOW_BYTES) : 0;
    pMemoryProperties->memoryProperties = (VkPhysicalDeviceMemoryProperties){
-      .memoryTypeCount = 1,
+      /* Two types on one heap. Type 0 is device-local only: the application
+       * cannot map it, so the queue never has to evict it from the CPU's
+       * caches around a submission (ps5vk_queue_flush_targets), which is
+       * where images and other GPU-only resources belong -- allocators such
+       * as VMA put them there. Type 1 is the mappable one. The spec orders a
+       * type whose flags are a strict subset of another's first. The driver
+       * maps both for its own CPU paths alike. */
+      .memoryTypeCount = PS5VK_MEMORY_TYPE_COUNT,
       .memoryTypes = {
-         {
+         [PS5VK_MEMORY_TYPE_DEVICE] = {
+            .propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            .heapIndex = 0,
+         },
+         [PS5VK_MEMORY_TYPE_HOST] = {
             .propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,

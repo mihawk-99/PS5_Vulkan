@@ -8,7 +8,7 @@
  * runner and ps5-opengl map every GPU-visible allocation. The mapping lasts as
  * long as the memory: the GPU uses the same virtual addresses, and memory is
  * host-coherent, so vkMapMemory is only a view of it and flushing does
- * nothing.
+ * nothing. Of the two memory types only the host-visible one maps.
  *
  * Shaders combine 32-bit pointers with a fixed address high word, so every
  * mapping must lie inside that word's 4 GiB window; allocations the kernel
@@ -43,8 +43,8 @@ ps5vk_AllocateMemory_untimed(VkDevice _device, const VkMemoryAllocateInfo *pAllo
                      const VkAllocationCallbacks *pAllocator, VkDeviceMemory *pMemory)
 {
    VK_FROM_HANDLE(ps5vk_device, device, _device);
-   /* Valid usage: an existing type, and this device has one. */
-   assert(pAllocateInfo->memoryTypeIndex == 0);
+   /* Valid usage: an existing type. */
+   assert(pAllocateInfo->memoryTypeIndex < PS5VK_MEMORY_TYPE_COUNT);
 
    if (pAllocateInfo->allocationSize > PS5VK_ADDRESS_WINDOW_BYTES)
       return vk_error(device, VK_ERROR_OUT_OF_DEVICE_MEMORY);
@@ -120,8 +120,14 @@ ps5vk_GetDeviceMemoryCommitment(VkDevice _device, VkDeviceMemory _memory,
 VKAPI_ATTR VkResult VKAPI_CALL
 ps5vk_MapMemory2(VkDevice _device, const VkMemoryMapInfo *pMemoryMapInfo, void **ppData)
 {
-   (void)_device;
+   VK_FROM_HANDLE(ps5vk_device, device, _device);
    VK_FROM_HANDLE(ps5vk_device_memory, memory, pMemoryMapInfo->memory);
+   /* Valid usage forbids mapping a type without HOST_VISIBLE; refusing it
+    * keeps the device-local type's promise that the CPU never caches it
+    * outside the driver's own paths. */
+   if (memory->vk.memory_type_index != PS5VK_MEMORY_TYPE_HOST)
+      return vk_errorf(device, VK_ERROR_MEMORY_MAP_FAILED,
+                       "memory type %u is not host-visible", memory->vk.memory_type_index);
    /* VK_MEMORY_MAP_PLACED_BIT_EXT needs VK_EXT_map_memory_placed, which is not
     * exposed; valid usage leaves offset and size inside the allocation. */
    assert(pMemoryMapInfo->flags == 0);

@@ -82,7 +82,7 @@ ps5vk_GetDeviceBufferMemoryRequirements(VkDevice _device,
    pMemoryRequirements->memoryRequirements = (VkMemoryRequirements){
       .size = align64(pInfo->pCreateInfo->size, PS5VK_BUFFER_ALIGNMENT),
       .alignment = PS5VK_BUFFER_ALIGNMENT,
-      .memoryTypeBits = 1,
+      .memoryTypeBits = PS5VK_MEMORY_TYPE_BITS,
    };
 }
 

@@ -15,6 +15,11 @@
 #ifndef PS5VK_TEST_H
 #define PS5VK_TEST_H
 
+/* The driver's mappable memory type (type 0 is device-local only and never
+ * maps): what a test that writes or reads its allocation through vkMapMemory
+ * allocates from. */
+#define PS5VK_TEST_HOST_MEMORY_TYPE 1u
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>

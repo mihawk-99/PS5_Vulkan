@@ -27,6 +27,7 @@
 
 #include "ps5/ps5_host.hpp"
 #include "agc_abi.hpp"
+#include "agc/agc_host.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -594,6 +595,10 @@ void load_environment_replay() noexcept
         std::fprintf(stderr, "PS5_HOST_REPLAY: cannot use %s\n", path);
         std::abort();
     }
+    // The flip helper numbers flips from the process's own count, which a
+    // driver run's replay carries when earlier tests of its capture flipped.
+    if (path != nullptr)
+        agc_host_reset(flips_before);
 }
 
 bool host_mapped(std::uintptr_t address, std::size_t bytes) noexcept
