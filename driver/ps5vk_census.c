@@ -43,6 +43,8 @@ ps5vk_ab_load(void)
          ps5vk_ab_flags |= PS5VK_AB_NO_STENCIL;
       else if (!strcmp(word, "no-depth"))
          ps5vk_ab_flags |= PS5VK_AB_NO_DEPTH;
+      else if (!strcmp(word, "cpu-transfers"))
+         ps5vk_ab_flags |= PS5VK_AB_CPU_TRANSFERS;
       else if (!strcmp(word, "tile-padded"))
          ps5vk_ab_flags |= PS5VK_AB_TILE_PADDED;
    }

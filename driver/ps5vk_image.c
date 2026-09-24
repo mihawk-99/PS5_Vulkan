@@ -51,7 +51,7 @@
 
 /* Allowed Extent Values and the limits of ps5vk_physical_device.c: the
  * complete mip chain of a 4096x4096 image, and maxImageArrayLayers. */
-#define PS5VK_MAX_EXTENT_2D 4096
+#define PS5VK_MAX_EXTENT_2D 16384
 #define PS5VK_MAX_MIP_LEVELS 13
 #define PS5VK_MAX_ARRAY_LAYERS 256
 
@@ -1367,18 +1367,30 @@ ps5vk_CreateSampler_untimed(VkDevice _device, const VkSamplerCreateInfo *pCreate
    else
       return vk_errorf(device, VK_ERROR_UNKNOWN, "sampler mipmap mode %d is not a Vulkan mode",
                        (int)info->mipmapMode);
-   /* The canary's two words are a nearest/nearest pair and a linear/linear one,
-    * so a mixed filter pair has no recorded word to reach the descriptor. */
-   uint32_t word;
-   if (info->minFilter == VK_FILTER_NEAREST && info->magFilter == VK_FILTER_NEAREST)
-      word = PS5VK_SAMPLER_WORD_NEAREST;
-   else if (info->minFilter == VK_FILTER_LINEAR && info->magFilter == VK_FILTER_LINEAR)
-      word = PS5VK_SAMPLER_WORD_LINEAR;
-   else
-      return vk_errorf(device, VK_ERROR_UNKNOWN,
-                       "sampler filters %d and %d are neither the nearest/nearest nor the "
-                       "linear/linear the texture canary ran; a mixed pair needs a runner probe "
-                       "(docs/M5_REFERENCE.md, C4)", (int)info->minFilter, (int)info->magFilter);
+   /* Word 2's filters, as RADV builds them (radv_tex_filter,
+    * ac_build_sampler_descriptor): XY_MAG_FILTER bits 20-21 and XY_MIN_FILTER
+    * 22-23 -- point 0, bilinear 1, their anisotropic forms 2 and 3 when the
+    * sampler filters anisotropically -- Z_FILTER 24-25, which follows the
+    * minification filter as the canary's two words did (0x08000000 nearest,
+    * 0x09500000 linear), and MIP_FILTER 26-27 below. The canary's pairs are the
+    * words this builds for nearest/nearest and linear/linear; a mixed pair,
+    * which PPSSPP creates from the PSP's own filter state, is the same fields
+    * set independently. */
+   const bool anisotropic = info->anisotropyEnable && info->maxAnisotropy > 1.0f;
+   uint32_t aniso_ratio = 0;
+   if (anisotropic) {
+      const float ratio = MIN2(info->maxAnisotropy, 16.0f);
+      aniso_ratio = ratio >= 16.0f ? 4u : ratio >= 8.0f ? 3u : ratio >= 4.0f ? 2u : ratio >= 2.0f ? 1u : 0u;
+   }
+   const uint32_t aniso_filter = aniso_ratio > 0 ? 2u : 0u;
+   const uint32_t mag = (info->magFilter == VK_FILTER_LINEAR ? 1u : 0u) | aniso_filter;
+   const uint32_t min = (info->minFilter == VK_FILTER_LINEAR ? 1u : 0u) | aniso_filter;
+   if ((info->minFilter != VK_FILTER_NEAREST && info->minFilter != VK_FILTER_LINEAR) ||
+       (info->magFilter != VK_FILTER_NEAREST && info->magFilter != VK_FILTER_LINEAR))
+      return vk_errorf(device, VK_ERROR_UNKNOWN, "sampler filters %d and %d are not Vulkan 1.0 filters",
+                       (int)info->minFilter, (int)info->magFilter);
+   const uint32_t word = (mag << 20) | (min << 22) |
+                         ((info->minFilter == VK_FILTER_LINEAR ? 1u : 0u) << 24) | (2u << 26);
    const float bias_limit = device->vk.physical->properties.maxSamplerLodBias;
    if (!(info->mipLodBias >= -bias_limit && info->mipLodBias <= bias_limit))
       return vk_errorf(device, VK_ERROR_UNKNOWN,
@@ -1447,7 +1459,15 @@ ps5vk_CreateSampler_untimed(VkDevice _device, const VkSamplerCreateInfo *pCreate
    sampler->word |= (uint32_t)(int32_t)(info->mipLodBias * 256.0f) & 0x3fffu;
    sampler->lod_word = ps5vk_sampler_unsigned_lod(info->minLod) |
                        (ps5vk_sampler_unsigned_lod(info->maxLod) << 12);
-   sampler->address_word = address_word;
+   /* Word 0's anisotropy fields, RADV's values for the ratio's log2 (at most 4,
+    * 16x): MAX_ANISO_RATIO bits 9-11, ANISO_THRESHOLD 16-18 (the ratio halved)
+    * and ANISO_BIAS 21-26 (the ratio); word 1's PERF_MIP (24-27) is ratio + 6
+    * when the sampler reaches levels. Zero for an isotropic sampler, which is
+    * every word before this. */
+   sampler->address_word = address_word | (aniso_ratio << 9) | ((aniso_ratio >> 1) << 16) |
+                           (aniso_ratio << 21);
+   if (aniso_ratio != 0)
+      sampler->lod_word |= (aniso_ratio + 6u) << 24;
 
    *pSampler = ps5vk_sampler_to_handle(sampler);
    return VK_SUCCESS;
@@ -2422,6 +2442,8 @@ ps5vk_CmdCopyImage2KHR(VkCommandBuffer commandBuffer, const VkCopyImageInfo2 *pC
    if (vk_command_buffer_has_error(&cmd_buffer->vk) || pCopyImageInfo->regionCount == 0 ||
        source == NULL || destination == NULL)
       return;
+   if (ps5vk_meta_copy(cmd_buffer, pCopyImageInfo))
+      return;
    struct ps5vk_image_copy *const regions = malloc(pCopyImageInfo->regionCount * sizeof(*regions));
    if (!regions) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
@@ -2543,6 +2565,8 @@ ps5vk_CmdBlitImage2KHR(VkCommandBuffer commandBuffer, const VkBlitImageInfo2 *pB
    VK_FROM_HANDLE(ps5vk_image, destination, pBlitImageInfo->dstImage);
    if (vk_command_buffer_has_error(&cmd_buffer->vk) || pBlitImageInfo->regionCount == 0 ||
        source == NULL || destination == NULL)
+      return;
+   if (ps5vk_meta_blit(cmd_buffer, pBlitImageInfo))
       return;
    struct ps5vk_image_copy *const regions = malloc(pBlitImageInfo->regionCount * sizeof(*regions));
    if (!regions) {

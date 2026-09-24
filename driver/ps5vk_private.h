@@ -661,6 +661,8 @@ struct ps5vk_cmd_buffer {
     * with no bytes is a split with no copy: a draw that samples a target an
     * earlier draw in the same command buffer rendered into (ps5vk_draw.c). */
    struct util_dynarray copies;
+   /* The push descriptor sets this command buffer owns (ps5vk_descriptor_set.c). */
+   struct util_dynarray push_sets;
    /* Whether a rendering is active, its target's extent and CB_COLOR0
     * registers. */
    bool rendering;
@@ -1253,6 +1255,10 @@ struct ps5vk_descriptor_set {
    struct ps5vk_descriptor_set_layout *layout;
    /* The pool's live sets, newest first; NULL for the last one. */
    struct ps5vk_descriptor_set *next_in_pool;
+   /* A vkCmdPushDescriptorSet set: it holds only the bindings written with
+    * it, and vk_meta's blit layout declares depth and stencil textures a
+    * colour blit never writes, whose table entries are left null. */
+   bool push;
    struct ps5vk_descriptor_buffer buffers[];
 };
 
@@ -1721,6 +1727,15 @@ sceKernelGetProcessTimeCounter(void);
  * Declared as the test runner declares them (src/diagnostics.cpp). */
 /* The opt-in census of exercised paths (ps5vk_census.c). */
 extern bool ps5vk_census_enabled;
+struct ps5vk_cmd_buffer;
+void
+ps5vk_cmd_buffer_release_push_sets(struct ps5vk_cmd_buffer *cmd_buffer);
+/* vk_meta blits and copies on the GPU (ps5vk_draw.c); false when a region is
+ * not one they cover, which leaves the CPU path. */
+bool
+ps5vk_meta_blit(struct ps5vk_cmd_buffer *cmd_buffer, const VkBlitImageInfo2 *info);
+bool
+ps5vk_meta_copy(struct ps5vk_cmd_buffer *cmd_buffer, const VkCopyImageInfo2 *info);
 /* Diagnostic A/B switches, from /app0/ps5vk-ab.txt beside the log flag. */
 #define PS5VK_AB_FULL_MASK (1u << 0)  /* every colour write mask is RGBA */
 #define PS5VK_AB_CONST_ZERO (1u << 1) /* blend constants read as 0 */
@@ -1728,6 +1743,7 @@ extern bool ps5vk_census_enabled;
 #define PS5VK_AB_NO_STENCIL (1u << 3) /* no stencil test */
 #define PS5VK_AB_NO_DEPTH (1u << 4)   /* no depth test */
 #define PS5VK_AB_TILE_PADDED (1u << 5) /* single-level padded textures are tiled */
+#define PS5VK_AB_CPU_TRANSFERS (1u << 6) /* blits and copies stay on the CPU */
 extern unsigned ps5vk_ab_flags;
 void
 ps5vk_ab_load(void);

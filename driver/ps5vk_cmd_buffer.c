@@ -113,6 +113,7 @@ ps5vk_cmd_buffer_create(struct vk_command_pool *pool, VkCommandBufferLevel level
    util_dynarray_init(&cmd_buffer->words, NULL);
    util_dynarray_init(&cmd_buffer->targets, NULL);
    util_dynarray_init(&cmd_buffer->copies, NULL);
+   util_dynarray_init(&cmd_buffer->push_sets, NULL);
    ps5vk_cmd_buffer_clear_state(cmd_buffer);
 
    *out_command_buffer = &cmd_buffer->vk;
@@ -130,6 +131,7 @@ ps5vk_cmd_buffer_reset(struct vk_command_buffer *vk_cmd_buffer, VkCommandBufferR
                                                                                  : NULL;
    const uint64_t started = p != NULL ? ps5vk_profile_now() : 0;
    vk_command_buffer_reset(&cmd_buffer->vk);
+   ps5vk_cmd_buffer_release_push_sets(cmd_buffer);
    const uint64_t common = p != NULL ? ps5vk_profile_now() : 0;
    if (flags & VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT) {
       ps5vk_cmd_buffer_release_tables(cmd_buffer);
@@ -151,6 +153,8 @@ ps5vk_cmd_buffer_destroy(struct vk_command_buffer *vk_cmd_buffer)
       container_of(vk_cmd_buffer, struct ps5vk_cmd_buffer, vk);
    struct vk_command_pool *const pool = cmd_buffer->vk.pool;
    ps5vk_cmd_buffer_release_tables(cmd_buffer);
+   ps5vk_cmd_buffer_release_push_sets(cmd_buffer);
+   util_dynarray_fini(&cmd_buffer->push_sets);
    util_dynarray_foreach (&cmd_buffer->copies, struct ps5vk_memory_copy, copy)
       free(copy->owned_source);
    util_dynarray_fini(&cmd_buffer->targets);

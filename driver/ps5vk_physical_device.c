@@ -50,6 +50,10 @@ static const struct vk_sync_type *const ps5vk_sync_types[] = {&ps5vk_sync_type, 
  * assertions in driver/tests/vk_b2_device_test.c hold both halves of that. */
 static const struct vk_features ps5vk_features = {
    .robustBufferAccess = true,
+   /* Anisotropic filtering up to 16x: the sampler's MAX_ANISO_RATIO,
+    * ANISO_THRESHOLD and ANISO_BIAS and the anisotropic XY filters, as RADV
+    * encodes them (ps5vk_image.c, ps5vk_CreateSampler). */
+   .samplerAnisotropy = true,
 };
 
 /* Presentation to VideoOut (ps5vk_wsi.c, Phase C1). */
@@ -69,10 +73,12 @@ ps5vk_get_properties(struct vk_properties *p)
        * the direct memory the GPU drew into. */
       .deviceType = VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU,
 
-      .maxImageDimension1D = 4096,
-      .maxImageDimension2D = 4096,
+      /* 16384, the GFX10 texture and colour/depth surface limit RADV reports:
+       * PPSSPP's 10x internal resolution renders 4800x2720 targets. */
+      .maxImageDimension1D = 16384,
+      .maxImageDimension2D = 16384,
       .maxImageDimension3D = 256,
-      .maxImageDimensionCube = 4096,
+      .maxImageDimensionCube = 16384,
       .maxImageArrayLayers = 256,
       .maxTexelBufferElements = 65536,
       .maxUniformBufferRange = 16384,
@@ -121,10 +127,10 @@ ps5vk_get_properties(struct vk_properties *p)
       .maxDrawIndexedIndexValue = (UINT32_C(1) << 24) - 1, /* no fullDrawIndexUint32 */
       .maxDrawIndirectCount = 1,                           /* no multiDrawIndirect */
       .maxSamplerLodBias = 2.0f,
-      .maxSamplerAnisotropy = 1.0f, /* no samplerAnisotropy */
+      .maxSamplerAnisotropy = 16.0f, /* samplerAnisotropy, 2^MAX_ANISO_RATIO 4 */
       .maxViewports = 1,            /* no multiViewport */
-      .maxViewportDimensions = {4096, 4096},
-      .viewportBoundsRange = {-8192.0f, 8191.0f},
+      .maxViewportDimensions = {16384, 16384},
+      .viewportBoundsRange = {-32768.0f, 32767.0f},
       .viewportSubPixelBits = 0,
       /* Mapped direct memory is page aligned, above the required 64. */
       .minMemoryMapAlignment = 4096,
@@ -138,8 +144,8 @@ ps5vk_get_properties(struct vk_properties *p)
       .minInterpolationOffset = 0.0f, /* no sampleRateShading */
       .maxInterpolationOffset = 0.0f,
       .subPixelInterpolationOffsetBits = 0,
-      .maxFramebufferWidth = 4096,
-      .maxFramebufferHeight = 4096,
+      .maxFramebufferWidth = 16384,
+      .maxFramebufferHeight = 16384,
       .maxFramebufferLayers = 256,
       /* Required for every implementation; multisampling is not yet probed
        * on the hardware (Phase C8). */

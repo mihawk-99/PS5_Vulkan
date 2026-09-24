@@ -39,8 +39,9 @@ UTIL_SRCS := \
 # vk_meta.c, vk_meta_clear.c and vk_meta_draw_rects.c belong to the full
 # runtime rather than the lite one, because they build shaders with NIR. The
 # driver links the same NIR compiler beside this archive (libpsbc), so they
-# build here too; Phase C1b draws colour clears with them. The rest of
-# vk_meta, which copies and blits, waits for C4 and C7.
+# build here too; Phase C1b draws colour clears with them, and
+# vk_meta_blit_resolve.c draws the colour blits and copies that PPSSPP's
+# framebuffers need on the GPU (the CPU path cost 370 ms a frame at 10x).
 RUNTIME_SRCS := \
 	rmv/vk_rmv_common.c \
 	rmv/vk_rmv_exporter.c \
@@ -66,6 +67,7 @@ RUNTIME_SRCS := \
 	vk_image.c \
 	vk_log.c \
 	vk_meta.c \
+	vk_meta_blit_resolve.c \
 	vk_meta_clear.c \
 	vk_meta_draw_rects.c \
 	vk_meta_object_list.c \

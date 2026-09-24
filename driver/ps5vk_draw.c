@@ -660,6 +660,24 @@ ps5vk_meta_restore(struct ps5vk_cmd_buffer *cmd_buffer, const struct ps5vk_meta_
    memcpy(cmd_buffer->push_constants, saved->push_constants, sizeof(cmd_buffer->push_constants));
 }
 
+/* Whether set `set` is a push set, whose unwritten bindings are null entries
+ * instead of a refusal. */
+static bool
+ps5vk_push_set_bound(const struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set)
+{
+   return set < PS5VK_DESCRIPTOR_SET_COUNT && cmd_buffer->descriptor_sets[set] != NULL &&
+          cmd_buffer->descriptor_sets[set]->push;
+}
+
+/* A colour target this driver programs: a 2D view, or a one-layer 2D array
+ * view, which is what vk_meta renders its blits into. */
+static bool
+ps5vk_single_layer_2d_view(const struct vk_image_view *view)
+{
+   return view->view_type == VK_IMAGE_VIEW_TYPE_2D ||
+          (view->view_type == VK_IMAGE_VIEW_TYPE_2D_ARRAY && view->layer_count == 1);
+}
+
 VKAPI_ATTR void VKAPI_CALL
 ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pRenderingInfo)
 {
@@ -838,7 +856,7 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
       const struct ps5vk_colour_format *const format =
          view != NULL ? ps5vk_find_colour_format(view->format) : NULL;
       if (view == NULL || image == NULL || format == NULL ||
-          view->view_type != VK_IMAGE_VIEW_TYPE_2D || image->vk.mip_levels != 1 ||
+          !ps5vk_single_layer_2d_view(view) || image->vk.mip_levels != 1 ||
           image->vk.array_layers != 1 ||
           (image->vk.samples != VK_SAMPLE_COUNT_1_BIT &&
            image->vk.samples != VK_SAMPLE_COUNT_4_BIT) ||
@@ -1617,12 +1635,20 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
                   return false;
                if (written == NULL)
                   written = ps5vk_cmd_buffer_descriptor(cmd_buffer, binding->set, binding->binding, element);
+               if (written == NULL && ps5vk_push_set_bound(cmd_buffer, set))
+                  continue;
                if (written == NULL) {
                   ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                                           "set %u binding %u element %u is not bound or holds no write; the "
                                           "application has to bind and update it "
-                                          "(docs/M5_REFERENCE.md, C3)",
-                                          (unsigned)set, (unsigned)binding->binding, element);
+                                          "(docs/M5_REFERENCE.md, C3; stage %u of %u reads %u "
+                                          "bindings, set %u %s)",
+                                          (unsigned)set, (unsigned)binding->binding, element,
+                                          (unsigned)s, (unsigned)stage_count,
+                                          (unsigned)stage_metadata->descriptor_binding_count,
+                                          (unsigned)set,
+                                          cmd_buffer->descriptor_sets[set] == NULL ? "unbound"
+                                                                                   : "bound");
                   return false;
                }
                if (binding->stride == PS5VK_COMBINED_IMAGE_SAMPLER_DESCRIPTOR_BYTES ||
@@ -1757,7 +1783,8 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
                   return false;
                if (written == NULL)
                   written = ps5vk_cmd_buffer_descriptor(cmd_buffer, binding->set, binding->binding, element);
-               assert(written != NULL); /* Validated above. */
+               if (written == NULL)
+                  continue; /* A push set's unwritten binding: a null entry. */
                struct ps5vk_sampled_image sampled;
                if ((binding->stride == PS5VK_STORAGE_IMAGE_DESCRIPTOR_BYTES ||
                     binding->stride == PS5VK_COMBINED_IMAGE_SAMPLER_DESCRIPTOR_BYTES) &&
@@ -2658,6 +2685,103 @@ ps5vk_CmdClearAttachments(VkCommandBuffer commandBuffer, uint32_t attachmentCoun
    vk_meta_clear_attachments(&cmd_buffer->vk, &device->meta, &cmd_buffer->render, attachmentCount,
                              pAttachments, rectCount, pRects);
    ps5vk_meta_restore(cmd_buffer, &saved);
+}
+
+/* ---------------- blits and copies on the GPU ---------------- */
+
+/* Whether an image transfer can run as vk_meta's blit draw: a one-sample,
+ * one-level, one-layer tiled colour image on both sides, the source sampled and
+ * the destination rendered into -- exactly the uses this driver draws and
+ * samples every frame. Anything else keeps the CPU path (ps5vk_image.c),
+ * which is measured for every shape it accepts. */
+static bool
+ps5vk_meta_transfer_eligible(const struct ps5vk_image *source, const struct ps5vk_image *destination,
+                             const VkImageSubresourceLayers *src_sub,
+                             const VkImageSubresourceLayers *dst_sub)
+{
+   return source->storage == PS5VK_IMAGE_STORAGE_TILES &&
+          destination->storage == PS5VK_IMAGE_STORAGE_TILES &&
+          source->vk.samples == VK_SAMPLE_COUNT_1_BIT &&
+          destination->vk.samples == VK_SAMPLE_COUNT_1_BIT &&
+          source->vk.mip_levels == 1 && destination->vk.mip_levels == 1 &&
+          source->vk.array_layers == 1 && destination->vk.array_layers == 1 &&
+          src_sub->aspectMask == VK_IMAGE_ASPECT_COLOR_BIT &&
+          dst_sub->aspectMask == VK_IMAGE_ASPECT_COLOR_BIT && src_sub->mipLevel == 0 &&
+          dst_sub->mipLevel == 0 && src_sub->baseArrayLayer == 0 && dst_sub->baseArrayLayer == 0 &&
+          (source->vk.usage & VK_IMAGE_USAGE_SAMPLED_BIT) != 0 &&
+          (destination->vk.usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) != 0 &&
+          ps5vk_find_colour_format(destination->vk.format) != NULL &&
+          ps5vk_find_format(source->vk.format) != NULL;
+}
+
+/* vkCmdBlitImage on the GPU when every region is eligible: vk_meta renders the
+ * destination rectangle sampling the source, which costs the GPU well under a
+ * millisecond where the CPU path spent hundreds on PPSSPP's 4800x2720
+ * framebuffers. The application's bound state is kept around it, as for the
+ * clears. False leaves the blit to the caller's CPU path. */
+bool
+ps5vk_meta_blit(struct ps5vk_cmd_buffer *cmd_buffer, const VkBlitImageInfo2 *info)
+{
+   VK_FROM_HANDLE(ps5vk_image, source, info->srcImage);
+   VK_FROM_HANDLE(ps5vk_image, destination, info->dstImage);
+   if (ps5vk_ab_flags & PS5VK_AB_CPU_TRANSFERS)
+      return false;
+   for (uint32_t r = 0; r < info->regionCount; r++)
+      if (!ps5vk_meta_transfer_eligible(source, destination, &info->pRegions[r].srcSubresource,
+                                        &info->pRegions[r].dstSubresource) ||
+          info->pRegions[r].srcSubresource.layerCount != 1 ||
+          info->pRegions[r].dstSubresource.layerCount != 1)
+         return false;
+   struct ps5vk_device *const device =
+      container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk);
+   struct ps5vk_meta_saved_state saved;
+   ps5vk_meta_save(cmd_buffer, &saved);
+   vk_meta_blit_image2(&cmd_buffer->vk, &device->meta, info);
+   ps5vk_meta_restore(cmd_buffer, &saved);
+   return true;
+}
+
+/* vkCmdCopyImage between two eligible images of one format, as a nearest blit
+ * of the same rectangle: texel for texel the same bytes. */
+bool
+ps5vk_meta_copy(struct ps5vk_cmd_buffer *cmd_buffer, const VkCopyImageInfo2 *info)
+{
+   VK_FROM_HANDLE(ps5vk_image, source, info->srcImage);
+   VK_FROM_HANDLE(ps5vk_image, destination, info->dstImage);
+   if (source->vk.format != destination->vk.format || info->regionCount > 16 ||
+       (ps5vk_ab_flags & PS5VK_AB_CPU_TRANSFERS))
+      return false;
+   VkImageBlit2 blits[16];
+   for (uint32_t r = 0; r < info->regionCount; r++) {
+      const VkImageCopy2 *const copy = &info->pRegions[r];
+      if (!ps5vk_meta_transfer_eligible(source, destination, &copy->srcSubresource,
+                                        &copy->dstSubresource) ||
+          copy->srcSubresource.layerCount != 1 || copy->dstSubresource.layerCount != 1 ||
+          copy->extent.depth != 1)
+         return false;
+      blits[r] = (VkImageBlit2){
+         .sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2,
+         .srcSubresource = copy->srcSubresource,
+         .srcOffsets = {copy->srcOffset,
+                        {copy->srcOffset.x + (int32_t)copy->extent.width,
+                         copy->srcOffset.y + (int32_t)copy->extent.height, 1}},
+         .dstSubresource = copy->dstSubresource,
+         .dstOffsets = {copy->dstOffset,
+                        {copy->dstOffset.x + (int32_t)copy->extent.width,
+                         copy->dstOffset.y + (int32_t)copy->extent.height, 1}},
+      };
+   }
+   const VkBlitImageInfo2 blit = {
+      .sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2,
+      .srcImage = info->srcImage,
+      .srcImageLayout = info->srcImageLayout,
+      .dstImage = info->dstImage,
+      .dstImageLayout = info->dstImageLayout,
+      .regionCount = info->regionCount,
+      .pRegions = blits,
+      .filter = VK_FILTER_NEAREST,
+   };
+   return ps5vk_meta_blit(cmd_buffer, &blit);
 }
 
 /* ---------------- indirect draws (1.0's vkCmdDrawIndirect) ---------------- */

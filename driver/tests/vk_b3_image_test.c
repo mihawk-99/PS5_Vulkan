@@ -103,11 +103,11 @@ check_formats(void)
                                              VK_IMAGE_USAGE_SAMPLED_BIT |
                                                 VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                                              0, &ip);
-   check(result == VK_SUCCESS && ip.maxExtent.width == 4096 && ip.maxExtent.height == 4096 &&
+   check(result == VK_SUCCESS && ip.maxExtent.width == 16384 && ip.maxExtent.height == 16384 &&
             ip.maxExtent.depth == 1 && ip.maxMipLevels == 13 && ip.maxArrayLayers == 256 &&
             ip.sampleCounts == (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT) &&
             ip.maxResourceSize >= UINT64_C(1) << 31,
-         "a sampled 2D RGBA8 image: 4096 extent, 13 levels, 256 layers, 1 and 4 samples");
+         "a sampled 2D RGBA8 image: 16384 extent, 13 levels, 256 layers, 1 and 4 samples");
    result = image_format_properties(VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D,
                                     VK_IMAGE_TILING_OPTIMAL,
                                     VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 0, &ip);

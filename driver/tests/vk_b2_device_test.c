@@ -69,9 +69,9 @@ check_properties(VkInstance instance, VkPhysicalDevice physical)
    check(strcmp(p.deviceName, kDeviceName) == 0, "device name");
 
    const VkPhysicalDeviceLimits *const l = &p.limits;
-   check(l->maxImageDimension2D == 4096 && l->maxFramebufferWidth == 4096 &&
-            l->maxViewportDimensions[0] == 4096,
-         "image, framebuffer and viewport limits 4096");
+   check(l->maxImageDimension2D == 16384 && l->maxFramebufferWidth == 16384 &&
+            l->maxViewportDimensions[0] == 16384,
+         "image, framebuffer and viewport limits 16384 (PPSSPP's 10x targets)");
    check(l->maxBoundDescriptorSets == 4 && l->maxPerStageResources == 44,
          "4 descriptor sets, 44 per-stage resources (footnote 2)");
    check(l->maxDescriptorSetSamplers == 48 && l->maxDescriptorSetUniformBuffers == 36 &&
@@ -80,9 +80,9 @@ check_properties(VkInstance instance, VkPhysicalDevice physical)
    check(l->maxTessellationGenerationLevel == 0 && l->maxGeometryOutputVertices == 0 &&
             l->maxFragmentDualSrcAttachments == 0 && l->maxClipDistances == 0,
          "limits of unsupported features are 0");
-   check(l->maxViewports == 1 && l->maxSamplerAnisotropy == 1.0f &&
+   check(l->maxViewports == 1 && l->maxSamplerAnisotropy == 16.0f &&
             l->maxDrawIndexedIndexValue == 0xffffff && l->maxDrawIndirectCount == 1,
-         "single viewport, no anisotropy, 24-bit indices, single indirect draw");
+         "single viewport, 16x anisotropy, 24-bit indices, single indirect draw");
    check(l->pointSizeRange[0] == 1.0f && l->pointSizeRange[1] == 1.0f &&
             l->lineWidthRange[1] == 1.0f && l->pointSizeGranularity == 0.0f,
          "points and lines of size 1 only");
@@ -108,7 +108,9 @@ check_properties(VkInstance instance, VkPhysicalDevice physical)
    const VkBool32 *const flags = (const VkBool32 *)&features;
    bool only_robust = true;
    for (size_t i = 0; i < sizeof(features) / sizeof(VkBool32); i++)
-      only_robust = only_robust && (flags[i] == VK_FALSE || &flags[i] == &features.robustBufferAccess);
+      only_robust = only_robust && (flags[i] == VK_FALSE || &flags[i] == &features.robustBufferAccess ||
+                                    &flags[i] == &features.samplerAnisotropy);
+   check(features.samplerAnisotropy == VK_TRUE, "samplerAnisotropy is on (PPSSPP's 16x filtering)");
    check(only_robust, "every other Vulkan 1.0 feature is off");
 
    uint32_t families = 0;

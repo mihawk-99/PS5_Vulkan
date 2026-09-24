@@ -492,3 +492,74 @@ ps5vk_CmdBindDescriptorSets2KHR(VkCommandBuffer commandBuffer,
                               "bind consumed %u dynamic offsets but received %u",
                               next_offset, info->dynamicOffsetCount);
 }
+
+/* vkCmdPushDescriptorSetKHR reaches this through the runtime's common entry
+ * point (vk_common_CmdPushDescriptorSetKHR). A pushed set is an ordinary set
+ * object that the command buffer owns: it is written with the same code a
+ * vkUpdateDescriptorSets write uses and bound at the set index, and a draw
+ * reads it while it is recorded (ps5vk_cmd_buffer_descriptor), so it only has
+ * to outlive the recording; the command buffer frees it on reset and destroy
+ * (ps5vk_cmd_buffer_release_push_sets). Mesa's vk_meta blits, resolves and
+ * copies bind their source images this way, which is what moves those
+ * operations from the CPU onto the GPU. */
+VKAPI_ATTR void VKAPI_CALL
+ps5vk_CmdPushDescriptorSet2KHR(VkCommandBuffer commandBuffer,
+                               const VkPushDescriptorSetInfoKHR *pPushDescriptorSetInfo)
+{
+   VK_FROM_HANDLE(ps5vk_cmd_buffer, cmd_buffer, commandBuffer);
+   const VkPushDescriptorSetInfoKHR *const info = pPushDescriptorSetInfo;
+   struct ps5vk_device *const device =
+      container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk);
+   if (vk_command_buffer_has_error(&cmd_buffer->vk))
+      return;
+   VK_FROM_HANDLE(vk_pipeline_layout, pipeline_layout, info->layout);
+   if (info->set >= PS5VK_DESCRIPTOR_SET_COUNT || pipeline_layout == NULL ||
+       info->set >= pipeline_layout->set_count || pipeline_layout->set_layouts[info->set] == NULL) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                              "a push descriptor set %u the pipeline layout does not declare",
+                              info->set);
+      return;
+   }
+   struct ps5vk_descriptor_set_layout *const layout =
+      container_of(pipeline_layout->set_layouts[info->set], struct ps5vk_descriptor_set_layout, vk);
+   struct ps5vk_descriptor_set *const set =
+      vk_object_zalloc(&device->vk, NULL,
+                       sizeof(*set) + layout->descriptor_count * sizeof(set->buffers[0]),
+                       VK_OBJECT_TYPE_DESCRIPTOR_SET);
+   struct ps5vk_descriptor_set **const slot =
+      set != NULL ? util_dynarray_grow(&cmd_buffer->push_sets, struct ps5vk_descriptor_set *, 1)
+                  : NULL;
+   if (slot == NULL) {
+      if (set != NULL)
+         vk_object_free(&device->vk, NULL, set);
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
+                              "no memory for a push descriptor set");
+      return;
+   }
+   *slot = set;
+   set->layout = layout;
+   set->push = true;
+   vk_descriptor_set_layout_ref(&layout->vk);
+   for (uint32_t b = 0; b < layout->descriptor_count; b++)
+      set->buffers[b].type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+   for (uint32_t i = 0; i < info->descriptorWriteCount; i++) {
+      VkWriteDescriptorSet write = info->pDescriptorWrites[i];
+      write.dstSet = ps5vk_descriptor_set_to_handle(set);
+      ps5vk_descriptor_set_write(device, &write);
+   }
+   cmd_buffer->descriptor_sets[info->set] = set;
+   memset(cmd_buffer->descriptor_set_offsets[info->set], 0,
+          sizeof(cmd_buffer->descriptor_set_offsets[info->set]));
+}
+
+void
+ps5vk_cmd_buffer_release_push_sets(struct ps5vk_cmd_buffer *cmd_buffer)
+{
+   struct ps5vk_device *const device =
+      container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk);
+   util_dynarray_foreach (&cmd_buffer->push_sets, struct ps5vk_descriptor_set *, set) {
+      vk_descriptor_set_layout_unref(&device->vk, &(*set)->layout->vk);
+      vk_object_free(&device->vk, NULL, *set);
+   }
+   util_dynarray_clear(&cmd_buffer->push_sets);
+}

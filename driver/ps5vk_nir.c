@@ -97,6 +97,25 @@ ps5vk_nir_push_constant_to_ubo(nir_builder *b, nir_intrinsic_instr *intrinsic, v
    return true;
 }
 
+/* vk_meta's fragment shaders load gl_FragCoord as one vec4, because they are
+ * built without compiler options; SPIR-V shaders reach the compiler with it
+ * split into xy, z and w, which is the only form its fragment-position pass
+ * accepts (radv_nir_lower_opt_fs_frag_pos.c: "only frag_coord_xy is
+ * expected"). This splits vk_meta's the same way. */
+static bool
+ps5vk_nir_split_frag_coord(nir_builder *b, nir_intrinsic_instr *intrinsic, void *data)
+{
+   (void)data;
+   if (intrinsic->intrinsic != nir_intrinsic_load_frag_coord)
+      return false;
+   b->cursor = nir_before_instr(&intrinsic->instr);
+   nir_def *const xy = nir_load_frag_coord_xy(b);
+   nir_def *const value = nir_vec4(b, nir_channel(b, xy, 0), nir_channel(b, xy, 1),
+                                   nir_load_frag_coord_z(b), nir_load_frag_coord_w(b));
+   nir_def_replace(&intrinsic->def, value);
+   return true;
+}
+
 nir_shader *
 ps5vk_nir_prepare(const nir_shader *source, uint32_t push_constant_bytes)
 {
@@ -115,6 +134,9 @@ ps5vk_nir_prepare(const nir_shader *source, uint32_t push_constant_bytes)
 
    if (nir->info.stage == MESA_SHADER_VERTEX)
       ps5vk_nir_drop_layer_output(nir);
+   else
+      (void)nir_shader_intrinsics_pass(nir, ps5vk_nir_split_frag_coord,
+                                       nir_metadata_control_flow, NULL);
    if (push_constant_bytes != 0) {
       /* The same lowering RADV runs before it reaches the compiler, so the
        * offsets libpsbc sees are the ones it would have produced itself.
