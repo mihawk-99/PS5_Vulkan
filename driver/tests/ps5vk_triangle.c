@@ -625,10 +625,12 @@ create_uniform(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
     * range would name bytes the shader was never told about. */
    /* One 16-byte colour, or the 32 bytes a dynamic binding moves its 16-byte
     * range through (Phase D1): the shader's declaration stays one colour. */
-   if (input->uniform_bytes != PS5VK_TRIANGLE_UNIFORM_BYTES &&
-       input->uniform_bytes != 2 * PS5VK_TRIANGLE_UNIFORM_BYTES)
+   /* R62: a larger block of whole 16-byte rows, up to 64 KiB, for a shader that
+    * declares one (a uniform array); its compile options declare the binding
+    * the same way, 16-byte rows. */
+   if (input->uniform_bytes % PS5VK_TRIANGLE_UNIFORM_BYTES != 0 || input->uniform_bytes > 65536)
       return step(triangle, "uniform geometry", VK_ERROR_INITIALIZATION_FAILED,
-                  "the uniform buffer holds one 16-byte colour, or two for a dynamic binding");
+                  "the uniform buffer holds whole 16-byte rows, at most 64 KiB");
    const VkDescriptorSetLayoutBinding binding = {
       .binding = 0,
       /* A dynamic offset is the application's choice of where in the bound
@@ -1340,9 +1342,9 @@ create_texture(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
    const VkImageViewCreateInfo view_info = {
       .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
       .image = triangle->texture_image,
-      .viewType = input->texture_cube      ? VK_IMAGE_VIEW_TYPE_CUBE
-                  : layers > 1             ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
-                                           : VK_IMAGE_VIEW_TYPE_2D,
+      .viewType = input->texture_cube                             ? VK_IMAGE_VIEW_TYPE_CUBE
+                  : layers > 1 || input->texture_array_view       ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                                                                  : VK_IMAGE_VIEW_TYPE_2D,
       .format = format,
       /* The caller's component mapping, which is the identity for every frame
        * that leaves the field out (VK_COMPONENT_SWIZZLE_IDENTITY is zero). */
@@ -2726,7 +2728,12 @@ create_pipeline(struct ps5vk_triangle *triangle, uint32_t index,
                                                  : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
       .primitiveRestartEnable = input->primitive_restart,
    };
-   const VkViewport viewport = {0.0f, 0.0f, PS5VK_TRIANGLE_WIDTH, PS5VK_TRIANGLE_HEIGHT, 0.0f, 1.0f};
+   const VkViewport viewport = {0.0f,
+                                0.0f,
+                                PS5VK_TRIANGLE_WIDTH,
+                                PS5VK_TRIANGLE_HEIGHT,
+                                input->viewport_depth_inverted ? 1.0f : 0.0f,
+                                input->viewport_depth_inverted ? 0.0f : 1.0f};
    /* The pipeline's scissor: the caller's rect when it declares one (V0-query's
     * known regions), and the whole target -- which is what every frame before
     * that phase drew with -- when it does not. The caller's rect is used

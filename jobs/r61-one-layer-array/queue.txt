@@ -1,6 +1,5 @@
 hold 1
 capture
 m2-solid
-r59-fragcoord
 r61-one-layer-array
 exit

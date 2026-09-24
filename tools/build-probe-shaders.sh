@@ -665,6 +665,18 @@ r60-big)
         --vertex-attribute 1:r32g32_float:0:8:16:4)
     pixel_flags=(--address32-hi 2)
     ;;
+r62-uniform-index)
+    vertex_source=shaders/r62/index.vert
+    pixel_source=shaders/m3/vertex_colour.frag
+    output=probes/r62-uniform-index
+    # Position, then the index as a uvec4 (the Vulkan run fetches it as
+    # R8G8B8A8_UINT, as the byte-attribute probes do); a 64-row uniform array.
+    vertex_flags=(--address32-hi 2
+        --vertex-attribute 0:r32g32_float:0:0:24:4
+        --vertex-attribute 1:r32g32b32a32_uint:0:8:24:4
+        --descriptor-binding 0:0:uniform_buffer:1:0:16)
+    pixel_flags=(--address32-hi 2)
+    ;;
 r59-fragcoord)
     vertex_source=shaders/r59/fragcoord.vert
     pixel_source=shaders/r59/fragcoord.frag
@@ -1217,6 +1229,13 @@ elif set_name == "c1-clear":
                 *vertex_input("vertex attributes: location 0 r32g32b32a32_uint offset 0, "
                               "stride 16, binding 0"),
                 *pixel_descriptor(16)]
+elif set_name == "r62-uniform-index":
+    if pixel.get("descriptor_bindings"):
+        fail("pixel stage unexpectedly declares descriptor bindings")
+    bindings = [("address32_hi", expected_hi),
+                *vertex_input_descriptor("vertex attributes: location 0 r32g32_float offset 0, "
+                                         "location 1 r32g32b32a32_uint offset 8, stride 24, "
+                                         "binding 0", 16)]
 elif set_name == "c3-quad":
     # The first probe set whose vertex stage reads a vertex buffer and a
     # descriptor: the stage transforms the buffer's position with the uniform

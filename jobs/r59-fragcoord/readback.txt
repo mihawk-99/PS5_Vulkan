@@ -1,7 +1,16 @@
-{"schema":2,"event":"run_start","pid":337}
+{"schema":2,"event":"run_start","pid":362}
+{"schema":2,"event":"value","probe":"r59_frag_coord","field":"frame","value":0}
 {"schema":2,"event":"hex","probe":"r59_frag_coord","field":"left","value":"0xff008040"}
 {"schema":2,"event":"hex","probe":"r59_frag_coord","field":"center","value":"0xff008080"}
 {"schema":2,"event":"hex","probe":"r59_frag_coord","field":"right","value":"0xff0080bf"}
 {"schema":2,"event":"value","probe":"r59_frag_coord","field":"mismatches","value":0}
 {"schema":2,"event":"value","probe":"r59_frag_coord","field":"pixels","value":8294400}
-{"schema":2,"event":"probe","probe":"r59_frag_coord","status":"PASS","result":0,"detail":"gl_FragCoord z ramp and w"}
+{"schema":2,"event":"probe","probe":"r59_frag_coord","status":"PASS","result":0,"detail":"depth range 0 to 1"}
+{"schema":2,"event":"value","probe":"r59_frag_coord","field":"frame","value":1}
+{"schema":2,"event":"hex","probe":"r59_frag_coord","field":"left","value":"0xff0080bf"}
+{"schema":2,"event":"hex","probe":"r59_frag_coord","field":"center","value":"0xff00807f"}
+{"schema":2,"event":"hex","probe":"r59_frag_coord","field":"right","value":"0xff008040"}
+{"schema":2,"event":"value","probe":"r59_frag_coord","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r59_frag_coord","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r59_frag_coord","status":"PASS","result":0,"detail":"depth range 1 to 0"}
+{"schema":2,"event":"value","probe":"r59_frag_coord","field":"passed_frames","value":2}

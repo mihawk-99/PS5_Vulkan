@@ -253,6 +253,12 @@ struct ps5vk_triangle_input {
     * descriptor's TYPE field 11 rather than a 2D array's 13. Requires
     * texture_layers 6. */
    bool texture_cube;
+   /* R61: the texture's view as a 2D array even with one layer, which is how
+    * Dolphin samples every texture (sampler2DArray). */
+   bool texture_array_view;
+   /* R59: the viewport's depth range inverted (minDepth 1, maxDepth 0), which is
+    * how Dolphin draws its 3D scenes. */
+   bool viewport_depth_inverted;
    /* Whether a tiled chain's texels reach it through the caller's own
     * vkCmdCopyBufferToImage instead of the caller writing the storage itself
     * (Phase C7): the image then carries TRANSFER_DST and the frame's upload

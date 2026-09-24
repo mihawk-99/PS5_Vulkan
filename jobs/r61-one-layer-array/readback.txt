@@ -1,0 +1,10 @@
+{"schema":2,"event":"run_start","pid":363}
+{"schema":2,"event":"hex","probe":"r61_one_layer_array","field":"center","value":"0xffc08040"}
+{"schema":2,"event":"value","probe":"r61_one_layer_array","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r61_one_layer_array","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r61_one_layer_array","status":"PASS","result":0,"detail":"one-layer linear array"}
+{"schema":2,"event":"hex","probe":"r61_one_layer_array","field":"center","value":"0xffc08040"}
+{"schema":2,"event":"value","probe":"r61_one_layer_array","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r61_one_layer_array","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r61_one_layer_array","status":"PASS","result":0,"detail":"one-layer tiled array"}
+{"schema":2,"event":"value","probe":"r61_one_layer_array","field":"passed_frames","value":2}

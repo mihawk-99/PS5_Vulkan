@@ -1,0 +1,17 @@
+PS5 Vulkan r62-uniform-index shader packages, built by tools/build-probe-shaders.sh r62-uniform-index.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
+vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32_float:0:0:24:4 --vertex-attribute 1:r32g32b32a32_uint:0:8:24:4 --descriptor-binding 0:0:uniform_buffer:1:0:16; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2; writer --allow-unresolved
+vertex attributes: location 0 r32g32_float offset 0, location 1 r32g32b32a32_uint offset 8, stride 24, binding 0
+vertex binding metadata: {"array_size": 1, "binding": 0, "offset": 0, "set": 0, "stride": 16, "type": 1}
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+338ff22d604c3cd61d975da3741034af62390c5f01fae3148359014da85522e4  shaders/r62/index.vert
+89726db6c5e32027c4fe1fc386fabb48f3be0616b9296eab7c28a83e807488ba  shaders/m3/vertex_colour.frag
+73b9fa2a45b2bf3fd240e66137c60e23a03fe08642ff2cdb033847f430320d7f  build/shaders/r62-uniform-index/vertex.spv
+b57f4b8de678250582aa36b47cfb8e22e99eb47511ce911e6bca90f3d46fcfcd  build/shaders/r62-uniform-index/pixel.spv
+f42352b890505c0c90fe00e0f020990c82d49146af672cf30eefadc75360fc71  build/shaders/r62-uniform-index/vertex.ngg.bin
+ed26210f1bac25e4a8a3304fdb6e466e926a82de050c418c5793a58e76dbe067  build/shaders/r62-uniform-index/vertex.hw.json
+585664b0b5c47f9d10aad61f184a59b9b7f4cf4484b79c538077c8d8d39eb99c  build/shaders/r62-uniform-index/pixel.raw.bin
+0561f6b0c6477a8f8a2bfca904b185c2b5a0853921fe0b0764229b6811492b80  build/shaders/r62-uniform-index/pixel.hw.json

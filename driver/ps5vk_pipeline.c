@@ -1912,6 +1912,43 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
             : 0u,
    };
    struct ps5vk_vertex_binding vertex_bindings[PS5VK_MAX_VERTEX_BINDINGS] = {0};
+   /* The census (opt-in logging): each distinct vertex input and descriptor
+    * layout a pipeline declares, once, so an application's real usage can be
+    * compared with what the console probes have measured. */
+   if (ps5vk_census_enabled && info->pVertexInputState != NULL) {
+      const VkPipelineVertexInputStateCreateInfo *const input = info->pVertexInputState;
+      char attributes[256];
+      int used = 0;
+      for (uint32_t at = 0; at < input->vertexAttributeDescriptionCount && used < 220; at++) {
+         const VkVertexInputAttributeDescription *const attribute =
+            &input->pVertexAttributeDescriptions[at];
+         uint32_t stride = 0;
+         for (uint32_t b = 0; b < input->vertexBindingDescriptionCount; b++)
+            if (input->pVertexBindingDescriptions[b].binding == attribute->binding)
+               stride = input->pVertexBindingDescriptions[b].stride;
+         used += snprintf(attributes + used, sizeof(attributes) - (size_t)used, " %u:%d@%u/%u",
+                          attribute->location, (int)attribute->format, attribute->offset, stride);
+      }
+      ps5vk_census("pipeline vertex input%s", used > 0 ? attributes : " none");
+   }
+   if (ps5vk_census_enabled && layout != NULL) {
+      for (uint32_t set = 0; set < layout->set_count; set++) {
+         const struct ps5vk_descriptor_set_layout *const set_layout =
+            (const struct ps5vk_descriptor_set_layout *)layout->set_layouts[set];
+         if (set_layout == NULL)
+            continue;
+         char bindings[256];
+         int used = 0;
+         for (uint32_t b = 0; b < set_layout->binding_count && used < 220; b++) {
+            const struct ps5vk_descriptor_binding *const binding = &set_layout->bindings[b];
+            if (binding->count == 0)
+               continue;
+            used += snprintf(bindings + used, sizeof(bindings) - (size_t)used, " %u:t%d x%u",
+                             b, (int)binding->type, binding->count);
+         }
+         ps5vk_census("pipeline set %u bindings%s", set, used > 0 ? bindings : " none");
+      }
+   }
    VkResult result =
       ps5vk_vertex_input_options(device, info->pVertexInputState, vertex_bindings, &vertex_options);
    if (result == VK_SUCCESS)

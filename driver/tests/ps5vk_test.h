@@ -136,17 +136,18 @@ test_destroy_device(VkInstance instance, VkDevice device)
  * descriptor's four words and the combined image sampler's twelve, as far as a
  * caller can know them without being the driver (driver/ps5vk_draw.c,
  * ps5vk_write_image_descriptor). */
-#define PS5VK_TEST_UNIFORM_STRIDE 16
 #define PS5VK_TEST_IMAGE_ENTRY_WORDS 12
 
-/* The uniform descriptor's four words: the address, the stride in the high half
- * of word 1, the elements the range covers and the flags -- the same shape
+/* The uniform descriptor's four words: the address, no stride in the high half
+ * of word 1, the range in bytes and the flags -- the same shape
  * driver/ps5vk_draw.c writes for a bound uniform buffer. */
 static inline bool
 test_table_uniform_entry(const uint32_t *entry, uint32_t bytes)
 {
-   return entry[0] != 0 && (entry[1] >> 16) == PS5VK_TEST_UNIFORM_STRIDE &&
-          entry[2] == bytes / PS5VK_TEST_UNIFORM_STRIDE && entry[3] != 0;
+   /* R62: a byte-addressed buffer -- no element stride, NUM_RECORDS the bound
+    * range in bytes, OOB_SELECT raw (2) in word 3's bits 28-29. */
+   return entry[0] != 0 && (entry[1] >> 16) == 0 && entry[2] == bytes &&
+          ((entry[3] >> 28) & 3u) == 2u;
 }
 
 /* The combined image sampler's twelve words, as far as a caller can know them

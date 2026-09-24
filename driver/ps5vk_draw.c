@@ -171,6 +171,9 @@
  * address high with the element stride, element count, flags
  * (src/diagnostics.cpp, kUniformBufferFlags). */
 #define PS5VK_UNIFORM_BUFFER_FLAGS (0xfacu | (77u << 12))
+/* Word 3's OOB_SELECT, bits 28-29: 2 is raw, a byte offset checked against
+ * NUM_RECORDS (RADV's V_008F0C_OOB_SELECT_RAW). */
+#define PS5VK_BUFFER_OOB_SELECT_RAW (2u << 28)
 /* A texel buffer's word 3 is the view's own: the format entry's DST_SEL
  * selectors (the same field, and the same three-bit channel numbers, the image
  * descriptor's word 1 takes), the view's GFX10 format word in the FORMAT field
@@ -1761,10 +1764,10 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
                      return false;
                   }
                   /* A uniform range that is not a whole number of 16-byte
-                   * records is rounded up to one when the descriptor is written:
-                   * a shader reads only the members its block declares, and
-                   * uniform buffers have no bounds checking to preserve (PPSSPP
-                   * binds a 4-byte block). */
+                   * rows is rounded up to one when the descriptor is written: a
+                   * shader reads only the members its block declares (PPSSPP
+                   * binds a 4-byte block), and the descriptor's raw bounds check
+                   * covers the rounded range (R62). */
                   if (written->size == 0) {
                      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                                              "set %u binding %u covers %" PRIu64 " bytes, not a whole "
@@ -1803,11 +1806,13 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
                 (pipeline->push_constant_stages & stage_bits[s])) {
                /* The reserved binding's descriptor, exactly as the C1b path
                 * wrote it: the draw's push-constant bytes, one 16-byte entry. */
+               /* R62: the uniform buffer's raw byte-range form (below), so a
+                * push-constant array indexed at run time -- a vector load -- reads
+                * past its first 16 bytes as the scalar loads always could. */
                descriptor[0] = (uint32_t)(uintptr_t)push_constant_block;
-               descriptor[1] = (uint32_t)((uintptr_t)push_constant_block >> 32) |
-                               (PS5VK_UNIFORM_BUFFER_DESCRIPTOR_BYTES << 16);
-               descriptor[2] = push_constant_bytes / PS5VK_UNIFORM_BUFFER_DESCRIPTOR_BYTES;
-               descriptor[3] = PS5VK_UNIFORM_BUFFER_FLAGS;
+               descriptor[1] = (uint32_t)((uintptr_t)push_constant_block >> 32);
+               descriptor[2] = push_constant_bytes;
+               descriptor[3] = PS5VK_UNIFORM_BUFFER_FLAGS | PS5VK_BUFFER_OOB_SELECT_RAW;
                device->push_constant_descriptor = descriptor;
                continue;
             }
@@ -1908,10 +1913,21 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
                   assert(dynamic_index < PS5VK_DYNAMIC_UNIFORM_COUNT);
                   address += cmd_buffer->descriptor_set_offsets[binding->set][dynamic_index];
                }
+               /* R62: a byte-addressed buffer over the whole bound range, as
+                * RADV writes one for GFX10 and later: STRIDE 0, NUM_RECORDS the
+                * range in bytes (rounded up to whole 16-byte rows, as a block
+                * smaller than one -- PPSSPP binds 4 bytes -- always has been),
+                * and OOB_SELECT raw, which bounds-checks the byte offset against
+                * NUM_RECORDS. The canary's structured form (STRIDE 16, a count
+                * of rows, OOB_SELECT 0) checked each offset against the stride,
+                * so every load past the first 16 bytes read zero: Dolphin's
+                * matrices, fog constants and texture matrices were all zero
+                * (jobs/r62-uniform-index). */
                descriptor[0] = (uint32_t)address;
-               descriptor[1] = (uint32_t)(address >> 32) | (binding->stride << 16);
-               descriptor[2] = (uint32_t)DIV_ROUND_UP(written->size, binding->stride);
-               descriptor[3] = PS5VK_UNIFORM_BUFFER_FLAGS;
+               descriptor[1] = (uint32_t)(address >> 32);
+               descriptor[2] = (uint32_t)(DIV_ROUND_UP(written->size, binding->stride) *
+                                          binding->stride);
+               descriptor[3] = PS5VK_UNIFORM_BUFFER_FLAGS | PS5VK_BUFFER_OOB_SELECT_RAW;
             }
          }
          ps5vk_flush_cpu_cache(table, allocated);
@@ -1985,6 +2001,11 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
     * One of each fills the viewport registers; vk_meta's clears use a
     * 4096x4096 one over a 3840x2160 target, which clips nothing. */
    const struct vk_dynamic_graphics_state *const dynamic = &cmd_buffer->vk.dynamic_graphics_state;
+   /* The viewport's depth range, rounded so that a few distinct ranges are a few
+    * census lines (Dolphin programs GameCube depth ranges). */
+   if (ps5vk_census_enabled)
+      ps5vk_census("draw viewport depth %.3f to %.3f",
+                   (double)dynamic->vp.viewports[0].minDepth, (double)dynamic->vp.viewports[0].maxDepth);
    if (ps5vk_census_enabled)
       ps5vk_census("draw blend 0x%08x const %d/%d mask 0x%x raster 0x%x line %d discard %d | depth test %d "
                    "write %d op %d | stencil %d bound %d ops %d/%d/%d/%d wmask 0x%x cmask 0x%x | "
