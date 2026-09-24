@@ -21632,6 +21632,473 @@ void run_vulkan_frag_coord_frames(const TestContext &test, TestOutcome &outcome)
     log.number("r59_frag_coord", "passed_frames", passed);
 }
 
+// R63: Dolphin's skinned-vertex record, 36 bytes: an R8G8B8A8_UINT matrix index
+// at offset 0, the position (R32G32B32_SFLOAT) at 4, the normal at 16 and a
+// texture coordinate (R32G32_SFLOAT) at 28 -- the layout of every animated
+// character in Wind Waker, whose polygons were stretched while the scenery (the
+// position at offset 0) drew correctly. Four bands; a band's place comes from
+// its position, its colour from its normal's x, its coordinate's y and the
+// uniform row its index selects, so any field read from the wrong bytes moves
+// or recolours it.
+void run_vulkan_skinned_record_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    std::array<float, 64 * 4> rows{};
+    for (unsigned row = 0; row < 64; ++row)
+    {
+        rows[row * 4 + 0] = row / 63.0f;
+        rows[row * 4 + 1] = (63 - row) / 63.0f;
+        rows[row * 4 + 2] = ((row * 7) % 64) / 63.0f;
+        rows[row * 4 + 3] = 1.0f;
+    }
+    constexpr std::uint8_t kIndices[4] = {3, 17, 40, 63};
+#pragma pack(push, 1)
+    struct Record
+    {
+        std::uint8_t index[4];
+        float position[3];
+        float normal[3];
+        float coordinate[2];
+    };
+#pragma pack(pop)
+    static_assert(sizeof(Record) == 36, "Dolphin's skinned record is 36 bytes");
+    std::array<Record, 16> vertices{};
+    std::array<std::uint16_t, 24> indices{};
+    for (unsigned band = 0; band < 4; ++band)
+    {
+        const float left = -1.0f + 0.5f * band, right = left + 0.5f;
+        const float corners[4][2] = {{left, -1.0f}, {right, -1.0f}, {right, 1.0f}, {left, 1.0f}};
+        const float normal_x = (band + 1) * 0.2f;
+        const float coordinate_y = 1.0f - (band + 1) * 0.2f;
+        for (unsigned corner = 0; corner < 4; ++corner)
+            vertices[band * 4 + corner] = {{kIndices[band], 0, 0, 0},
+                                           {corners[corner][0], corners[corner][1], 0.0f},
+                                           {normal_x, 0.0f, 0.0f},
+                                           {0.0f, coordinate_y}};
+        const std::uint16_t base = static_cast<std::uint16_t>(band * 4);
+        const std::uint16_t quad[6] = {base,
+                                       static_cast<std::uint16_t>(base + 1),
+                                       static_cast<std::uint16_t>(base + 2),
+                                       static_cast<std::uint16_t>(base + 2),
+                                       static_cast<std::uint16_t>(base + 3),
+                                       base};
+        std::copy(std::begin(quad), std::end(quad), indices.begin() + band * 6);
+    }
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    input.vertex_data = vertices.data();
+    input.vertex_count = 16;
+    input.vertex_stride = sizeof(Record);
+    input.index_data = indices.data();
+    input.index_count = 24;
+    input.attribute_count = 4;
+    input.attributes[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 4};
+    input.attributes[1] = {1, 0, VK_FORMAT_R8G8B8A8_UINT, 0};
+    input.attributes[2] = {2, 0, VK_FORMAT_R32G32B32_SFLOAT, 16};
+    input.attributes[3] = {3, 0, VK_FORMAT_R32G32_SFLOAT, 28};
+    input.uniform_data = rows.data();
+    input.uniform_bytes = sizeof(rows);
+    input.uniform_stages = VK_SHADER_STAGE_VERTEX_BIT;
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    ps5vk_triangle triangle{};
+    auto status = ps5vk_triangle_create(&triangle, &input);
+    if (status == PS5VK_TRIANGLE_OK)
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+    outcome.command_built = status != PS5VK_TRIANGLE_FAILED;
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        outcome.stage_in_use = true;
+        return;
+    }
+    const bool drew = status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes;
+    unsigned mismatches = 0;
+    if (drew)
+    {
+        if (test.capture)
+        {
+            log_driver_submission(triangle.device, "Dolphin's skinned record", log);
+            log_driver_stages(triangle.device, log);
+        }
+        const FramebufferView view{static_cast<const std::uint32_t *>(triangle.target),
+                                   kTiledRgba8Layout};
+        for (unsigned band = 0; band < 4; ++band)
+        {
+            const int expected[3] = {
+                static_cast<int>((band + 1) * 0.2f * 255.0f + 0.5f),
+                static_cast<int>((1.0f - (band + 1) * 0.2f) * 255.0f + 0.5f),
+                static_cast<int>(rows[kIndices[band] * 4 + 2] * 255.0f + 0.5f)};
+            unsigned band_mismatches = 0;
+            for (unsigned y = 0; y < kOutputHeight; ++y)
+                for (unsigned x = band * kOutputWidth / 4; x < (band + 1) * kOutputWidth / 4; ++x)
+                {
+                    const std::uint32_t word = view.word(x, y);
+                    bool good = (word >> 24) == 0xffu;
+                    for (unsigned channel = 0; channel < 3; ++channel)
+                        good = good && std::abs(static_cast<int>((word >> (8 * channel)) & 0xffu) -
+                                                expected[channel]) <= 1;
+                    band_mismatches += good ? 0u : 1u;
+                }
+            log.hex("r63_skinned_record", "center",
+                    view.word(band * kOutputWidth / 4 + kOutputWidth / 8, kOutputHeight / 2));
+            log.number("r63_skinned_record", "band_mismatches", band_mismatches);
+            mismatches += band_mismatches;
+        }
+        log.number("r63_skinned_record", "mismatches", mismatches);
+        log.number("r63_skinned_record", "pixels", kOutputWidth * kOutputHeight);
+        log.event("r63_skinned_record", mismatches == 0 ? "PASS" : "FAIL", mismatches == 0 ? 0 : -1,
+                  "Dolphin's 36-byte skinned vertex record");
+    }
+    ps5vk_triangle_finish(&triangle);
+    outcome.passed = drew && mismatches == 0;
+}
+
+// R64: long indexed strip draws with primitive restart, the shape Wind Waker's
+// scenery is drawn in: hundreds of short triangle strips (3 to 16 vertices, every
+// vertex used once and in order), each ended by a restart index, 16-bit indices
+// into 24-byte records at a large vertexOffset and firstIndex. On the console the
+// first such draw past 2048 indices (2138 indices, 1740 vertices) drew garbage
+// over the scene, and the same draw with restart off (triangle lists) was
+// correct. Each strip here is one cell of a 40x30 grid in a colour of its own,
+// and every pixel is compared with the layout: a strip's quads in its colour, the
+// half-quad an odd strip ends with in its colour or the clear colour, everything
+// else the clear colour. The frames vary the index count, the offsets, the strip
+// shape, restart itself (a control that joins the same strips with degenerate
+// triangles), a long draw (64 instances) and a change of restart between two
+// draws of one command buffer, whose second draw fetches vertex 0xffff.
+//
+// Before the fix every restart frame failed from about the 300th index on: the
+// driver turned restart off right after each restart draw, and that write took
+// effect while the draw was still fetching indices, so the rest of it fetched
+// its restart indices as vertices. A failing frame logs a map of its cells ('.'
+// right, 'm' a strip's own pixels wrong, 's' pixels drawn where the cell should
+// be clear, 'X' both).
+namespace
+{
+constexpr unsigned kR64Columns = 40;
+constexpr unsigned kR64Rows = 30;
+constexpr std::uint32_t kR64Clear = 0xffff8040u;
+// Dolphin's offsets for the draw that failed: vertexOffset and firstIndex.
+constexpr std::int32_t kR64VertexOffset = 271091;
+constexpr std::uint32_t kR64FirstIndex = 250975;
+// Every frame's buffers are the same size, whatever its draw, so the console
+// places every frame's allocations alike and a PC replay can pin them: records
+// for Dolphin's offset plus all 65536 16-bit indices (and a poison tail), and
+// indices for Dolphin's first index plus the largest frame's.
+constexpr std::size_t kR64Records = static_cast<std::size_t>(kR64VertexOffset) + 65536 + 64;
+constexpr std::size_t kR64Indices = kR64FirstIndex + 8192;
+
+struct R64Strip
+{
+    unsigned length;
+    std::uint32_t x0, full_end, end, top, bottom;
+    std::uint32_t word;
+};
+
+// Strip lengths in about the proportions Wind Waker's scenery draws have: mostly
+// quads, some single triangles, a few longer strips.
+unsigned r64_next_length(std::uint32_t &state) noexcept
+{
+    static const unsigned char kLengths[64] = {3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4,
+                                               4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+                                               4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+                                               4, 4, 4, 5, 5, 5, 5, 5, 6, 6, 6, 7, 8, 8, 9, 16};
+    state = state * 1103515245u + 12345u;
+    return kLengths[(state >> 16) & 63u];
+}
+
+// Strips for a draw of `indices` indices (a restart after every strip, as
+// Dolphin writes them), one per cell from first_cell on, with their records
+// appended to `records`: fixed_length 0 takes the mix above.
+void r64_strips(unsigned indices, unsigned fixed_length, std::vector<R64Strip> &strips,
+                std::vector<float> &records) noexcept
+{
+    const std::uint32_t cell_w = kOutputWidth / kR64Columns;
+    const std::uint32_t cell_h = kOutputHeight / kR64Rows;
+    const std::uint32_t margin = cell_w / 24;
+    std::uint32_t state = 12345u;
+    unsigned used = 0;
+    while (used < indices && strips.size() < kR64Columns * kR64Rows)
+    {
+        const unsigned remaining = indices - used;
+        unsigned length = fixed_length != 0 ? fixed_length : r64_next_length(state);
+        // The last strip takes what is left, so the draw has exactly `indices`.
+        if (length + 1 > remaining || remaining - (length + 1) < 4)
+            length = remaining - 1;
+        const unsigned cell = static_cast<unsigned>(strips.size());
+        R64Strip strip{};
+        strip.length = length;
+        strip.x0 = (cell % kR64Columns) * cell_w + margin;
+        const std::uint32_t right = (cell % kR64Columns + 1) * cell_w - margin;
+        strip.top = (cell / kR64Columns) * cell_h + margin;
+        strip.bottom = (cell / kR64Columns + 1) * cell_h - margin;
+        const unsigned columns = (length + 1) / 2;
+        const std::uint32_t spacing = (right - strip.x0) / (columns - 1);
+        strip.end = strip.x0 + spacing * (columns - 1);
+        strip.full_end = length % 2 == 0 ? strip.end : strip.end - spacing;
+        const std::uint32_t red = 32 + (cell * 37) % 192, green = 32 + (cell * 91) % 192,
+                            blue = 32 + (cell * 53 + 17) % 192;
+        strip.word = 0xff000000u | blue << 16 | green << 8 | red;
+        for (unsigned vertex = 0; vertex < length; ++vertex)
+        {
+            const std::uint32_t x = strip.x0 + spacing * (vertex / 2);
+            const std::uint32_t y = vertex % 2 == 0 ? strip.top : strip.bottom;
+            const float record[6] = {2.0f * static_cast<float>(x) / kOutputWidth - 1.0f,
+                                     2.0f * static_cast<float>(y) / kOutputHeight - 1.0f,
+                                     red / 255.0f,
+                                     green / 255.0f,
+                                     blue / 255.0f,
+                                     1.0f};
+            records.insert(records.end(), std::begin(record), std::end(record));
+        }
+        strips.push_back(strip);
+        used += length + 1;
+    }
+}
+
+// The index stream for strips [first, last) whose records start at local index
+// `base`: each strip then a restart index, or with no restart the strips joined
+// by degenerate triangles.
+void r64_indices(const std::vector<R64Strip> &strips, std::size_t first, std::size_t last,
+                 unsigned base, bool restart, std::vector<std::uint16_t> &indices) noexcept
+{
+    unsigned next = base;
+    for (std::size_t s = first; s < last; ++s)
+    {
+        if (!restart && s != first)
+        {
+            indices.push_back(static_cast<std::uint16_t>(next - 1));
+            indices.push_back(static_cast<std::uint16_t>(next));
+        }
+        for (unsigned vertex = 0; vertex < strips[s].length; ++vertex)
+            indices.push_back(static_cast<std::uint16_t>(next++));
+        if (restart)
+            indices.push_back(0xffffu);
+    }
+}
+
+bool r64_close(std::uint32_t word, std::uint32_t expected) noexcept
+{
+    if ((word >> 24) != 0xffu)
+        return false;
+    for (unsigned channel = 0; channel < 3; ++channel)
+        if (std::abs(static_cast<int>((word >> (8 * channel)) & 0xffu) -
+                     static_cast<int>((expected >> (8 * channel)) & 0xffu)) > 1)
+            return false;
+    return true;
+}
+} // namespace
+
+void run_vulkan_restart_strip_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8},
+    };
+    struct Frame
+    {
+        const char *name;
+        unsigned indices;
+        bool restart;
+        bool offsets;
+        unsigned fixed_length;
+        unsigned instances;
+        // A second draw in the same command buffer through the same pipeline
+        // without restart: `second` indices of quads, joined, whose records end
+        // at local index 0xffff.
+        unsigned second;
+    };
+    static const Frame kFrames[] = {
+        {"2138 indices with restart at Dolphin's offsets", 2138, true, true, 0, 0, 0},
+        {"2138 indices with restart at offset 0", 2138, true, false, 0, 0, 0},
+        {"1894 indices with restart at Dolphin's offsets", 1894, true, true, 0, 0, 0},
+        {"2047 indices with restart", 2047, true, true, 0, 0, 0},
+        {"2049 indices with restart", 2049, true, true, 0, 0, 0},
+        {"4096 indices with restart", 4096, true, true, 0, 0, 0},
+        {"the 2138-index strips joined by degenerate triangles, no restart", 2138, false, true, 0,
+         0, 0},
+        {"256 quads with restart", 256 * 5, true, false, 4, 0, 0},
+        {"256 single triangles with restart", 256 * 4, true, false, 3, 0, 0},
+        {"128 six-vertex strips with restart", 128 * 7, true, false, 6, 0, 0},
+        {"4096 indices with restart, 64 instances", 4096, true, true, 0, 64, 0},
+        {"2138 indices with restart, then a draw without it that fetches vertex 0xffff", 2138, true,
+         false, 0, 0, 200},
+    };
+    unsigned passed = 0;
+    for (const Frame &frame : kFrames)
+    {
+        std::vector<R64Strip> strips;
+        std::vector<float> strip_records;
+        r64_strips(frame.indices, frame.fixed_length, strips, strip_records);
+        const std::size_t first_strips = strips.size();
+        const std::uint32_t vertex_count = static_cast<std::uint32_t>(strip_records.size() / 6);
+        // The draw's indices, local to its first vertex as Dolphin's are.
+        std::vector<std::uint16_t> draw_indices;
+        r64_indices(strips, 0, first_strips, 0, frame.restart, draw_indices);
+        const std::uint32_t first_draw_indices =
+            frame.second != 0 ? static_cast<std::uint32_t>(draw_indices.size()) : 0;
+        std::vector<float> second_records;
+        if (frame.second != 0)
+        {
+            // The quads take the cells after the first draw's strips.
+            r64_strips(frame.second, 4, strips, second_records);
+            r64_indices(strips, first_strips, strips.size(),
+                        65536u - static_cast<unsigned>(second_records.size() / 6), false,
+                        draw_indices);
+        }
+        // Everything outside the draws' own records and indices is poison: a
+        // record there is magenta and far across the target, and an index there
+        // names a poison record.
+        const std::int32_t vertex_offset = frame.offsets ? kR64VertexOffset : 0;
+        const std::uint32_t first_index = frame.offsets ? kR64FirstIndex : 0;
+        std::vector<float> records(kR64Records * 6);
+        for (std::size_t record = 0; record < kR64Records; ++record)
+        {
+            const float poison[6] = {record % 3 == 0 ? -1.5f : (record % 3 == 1 ? 1.5f : 0.0f),
+                                     record % 2 == 0 ? -1.5f : 1.5f,
+                                     1.0f,
+                                     0.0f,
+                                     1.0f,
+                                     1.0f};
+            std::copy(std::begin(poison), std::end(poison), records.begin() + record * 6);
+        }
+        std::copy(strip_records.begin(), strip_records.end(),
+                  records.begin() + static_cast<std::size_t>(vertex_offset) * 6);
+        std::copy(second_records.begin(), second_records.end(),
+                  records.begin() + (static_cast<std::size_t>(vertex_offset) + 65536u) * 6 -
+                      second_records.size());
+        std::vector<std::uint16_t> indices(kR64Indices, static_cast<std::uint16_t>(vertex_count));
+        std::copy(draw_indices.begin(), draw_indices.end(), indices.begin() + first_index);
+
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], g_strip_shaders, log))
+            return;
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = frame.second != 0 ? 2 : 1;
+        input.shaders[0] = g_strip_shaders;
+        input.shaders[1] = g_strip_shaders;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = records.data();
+        input.vertex_count = static_cast<std::uint32_t>(kR64Records);
+        input.vertex_stride = kVertexStride;
+        input.index_data = indices.data();
+        input.index_count = static_cast<std::uint32_t>(indices.size());
+        input.draw_index_count = static_cast<std::uint32_t>(draw_indices.size());
+        input.first_index = first_index;
+        input.first_draw_indices = first_draw_indices;
+        input.base_vertex = vertex_offset;
+        input.attribute_count = 2;
+        input.attributes[0] = attributes[0];
+        input.attributes[1] = attributes[1];
+        input.primitive_topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+        input.primitive_restart = frame.restart;
+        input.primitive_restart_first_only = frame.second != 0;
+        input.instance_count = frame.instances;
+        ps5vk_triangle triangle{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status =
+                ps5vk_triangle_draw(&triangle, frame.second != 0 ? PS5VK_TRIANGLE_ONE_COMMAND_BUFFER
+                                                                 : PS5VK_TRIANGLE_ONE_DRAW);
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            return;
+        }
+        const bool drew = status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes;
+        if (test.capture && drew)
+        {
+            log_driver_submission(triangle.device, frame.name, log);
+            log_driver_stages(triangle.device, log);
+        }
+        if (drew)
+        {
+            const FramebufferView view{static_cast<const std::uint32_t *>(triangle.target),
+                                       kTiledRgba8Layout};
+            // Which way up the viewport puts row 0 is not this probe's business:
+            // the first strip's first triangle says.
+            const R64Strip &first = strips.front();
+            const std::uint32_t probe_x = first.x0 + (first.end - first.x0) / 8;
+            const std::uint32_t probe_y = first.top + (first.bottom - first.top) / 4;
+            const bool flipped =
+                !r64_close(view.word(probe_x, probe_y), first.word) &&
+                r64_close(view.word(probe_x, kOutputHeight - 1 - probe_y), first.word);
+            const std::uint32_t cell_w = kOutputWidth / kR64Columns;
+            const std::uint32_t cell_h = kOutputHeight / kR64Rows;
+            std::array<char, kR64Columns * kR64Rows> cells;
+            cells.fill('.');
+            unsigned missing = 0, stray = 0, logged = 0;
+            for (std::uint32_t y = 0; y < kOutputHeight; ++y)
+                for (std::uint32_t x = 0; x < kOutputWidth; ++x)
+                {
+                    const std::uint32_t layout_y = flipped ? kOutputHeight - 1 - y : y;
+                    const unsigned cell = (layout_y / cell_h) * kR64Columns + x / cell_w;
+                    const std::uint32_t word = view.word(x, y);
+                    bool good = word == kR64Clear;
+                    bool inside = false;
+                    if (cell < strips.size())
+                    {
+                        const R64Strip &strip = strips[cell];
+                        const bool rows = layout_y >= strip.top && layout_y < strip.bottom;
+                        inside = rows && x >= strip.x0 && x < strip.full_end;
+                        if (inside)
+                            good = r64_close(word, strip.word);
+                        else if (rows && x >= strip.full_end && x < strip.end)
+                            good = good || r64_close(word, strip.word);
+                    }
+                    if (good)
+                        continue;
+                    (inside ? missing : stray)++;
+                    if (logged < 6 && (x % 16 == 0))
+                    {
+                        ++logged;
+                        log.number("r64_restart_strips", "wrong_x", x);
+                        log.number("r64_restart_strips", "wrong_y", y);
+                        log.hex("r64_restart_strips", "wrong_word", word);
+                    }
+                    const char mark = inside ? 'm' : 's';
+                    if (cell < cells.size())
+                        cells[cell] = cells[cell] == '.' || cells[cell] == mark ? mark : 'X';
+                }
+            const unsigned mismatches = missing + stray;
+            if (mismatches != 0)
+                for (unsigned row = 0; row < kR64Rows; ++row)
+                {
+                    char line[kR64Columns + 1];
+                    std::copy(cells.begin() + row * kR64Columns,
+                              cells.begin() + (row + 1) * kR64Columns, line);
+                    line[kR64Columns] = '\0';
+                    log.text("r64_restart_strips", "cells", line);
+                }
+            log.number("r64_restart_strips", "strips", static_cast<unsigned>(strips.size()));
+            log.number("r64_restart_strips", "indices", static_cast<unsigned>(draw_indices.size()));
+            log.number("r64_restart_strips", "flipped", flipped ? 1u : 0u);
+            log.number("r64_restart_strips", "missing", missing);
+            log.number("r64_restart_strips", "stray", stray);
+            log.number("r64_restart_strips", "mismatches", mismatches);
+            log.number("r64_restart_strips", "pixels", kOutputWidth * kOutputHeight);
+            log.event("r64_restart_strips", mismatches == 0 ? "PASS" : "FAIL",
+                      mismatches == 0 ? 0 : -1, frame.name);
+            passed += mismatches == 0;
+        }
+        ps5vk_triangle_finish(&triangle);
+        if (status != PS5VK_TRIANGLE_OK)
+            break;
+    }
+    outcome.command_built = passed != 0;
+    outcome.passed = passed == std::size(kFrames);
+    log.number("r64_restart_strips", "passed_frames", passed);
+}
+
 // R62: a uniform array indexed by a vertex attribute, the way Dolphin picks each
 // vertex's transform matrix. A 64-row uniform array holds a distinct colour per
 // row; four vertical bands carry indices 3, 17, 40 and 63 in an R8G8B8A8_UINT
@@ -25456,6 +25923,8 @@ constexpr RunnerTest kRunnerTests[] = {
     {"r60-big", "r60-big", run_vulkan_big_shader_frames},
     {"r61-one-layer-array", "v0-array", run_vulkan_one_layer_array_frames},
     {"r62-uniform-index", "r62-uniform-index", run_vulkan_uniform_index_frames},
+    {"r63-skinned", "r63-skinned", run_vulkan_skinned_record_frames},
+    {"r64-restart-strips", "m3-vertex", run_vulkan_restart_strip_frames},
     {"r18-padded-mips", "c7-mip", run_vulkan_padded_mip_frames},
     {"r18-mip-addresses", "c7-mip", run_vulkan_padded_mip_addresses},
     {"r18-small-mips", "c7-mip", run_vulkan_small_padded_mips},

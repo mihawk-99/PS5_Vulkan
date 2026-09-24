@@ -1,0 +1,12 @@
+{"schema":2,"event":"run_start","pid":449}
+{"schema":2,"event":"hex","probe":"r63_skinned_record","field":"center","value":"0xff55cc33"}
+{"schema":2,"event":"value","probe":"r63_skinned_record","field":"band_mismatches","value":0}
+{"schema":2,"event":"hex","probe":"r63_skinned_record","field":"center","value":"0xffdf9966"}
+{"schema":2,"event":"value","probe":"r63_skinned_record","field":"band_mismatches","value":0}
+{"schema":2,"event":"hex","probe":"r63_skinned_record","field":"center","value":"0xff616699"}
+{"schema":2,"event":"value","probe":"r63_skinned_record","field":"band_mismatches","value":0}
+{"schema":2,"event":"hex","probe":"r63_skinned_record","field":"center","value":"0xffe733cc"}
+{"schema":2,"event":"value","probe":"r63_skinned_record","field":"band_mismatches","value":0}
+{"schema":2,"event":"value","probe":"r63_skinned_record","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r63_skinned_record","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r63_skinned_record","status":"PASS","result":0,"detail":"Dolphin's 36-byte skinned vertex record"}

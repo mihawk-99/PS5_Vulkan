@@ -1,0 +1,17 @@
+PS5 Vulkan r63-skinned shader packages, built by tools/build-probe-shaders.sh r63-skinned.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
+vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32b32_float:0:0:48:4 --vertex-attribute 1:r32g32b32a32_uint:0:12:48:4 --vertex-attribute 2:r32g32b32_float:0:28:48:4 --vertex-attribute 3:r32g32_float:0:40:48:4 --descriptor-binding 0:0:uniform_buffer:1:0:16; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2; writer --allow-unresolved
+vertex attributes: location 0 r32g32b32_float offset 0, location 1 r32g32b32a32_uint offset 12, location 2 r32g32b32_float offset 28, location 3 r32g32_float offset 40, stride 48, binding 0
+vertex binding metadata: {"array_size": 1, "binding": 0, "offset": 0, "set": 0, "stride": 16, "type": 1}
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+9aa8ff21fc08c18a015c74120ea244b95f24a6771d3d68fb8f100230c86c8138  shaders/r63/skinned.vert
+89726db6c5e32027c4fe1fc386fabb48f3be0616b9296eab7c28a83e807488ba  shaders/m3/vertex_colour.frag
+90ccfd58220e03ae84b1a1061ffe6eaf46143109f80f9a4d3085ee40008c0b0d  build/shaders/r63-skinned/vertex.spv
+b57f4b8de678250582aa36b47cfb8e22e99eb47511ce911e6bca90f3d46fcfcd  build/shaders/r63-skinned/pixel.spv
+6c6213d239a3f6a6c8f2404204a3ee42b63b2324c26d99426cbe9907b385929b  build/shaders/r63-skinned/vertex.ngg.bin
+c9be8577f8b0147fd9ef27d76a2083f2f668d34995dc534303c79ae762c7c297  build/shaders/r63-skinned/vertex.hw.json
+585664b0b5c47f9d10aad61f184a59b9b7f4cf4484b79c538077c8d8d39eb99c  build/shaders/r63-skinned/pixel.raw.bin
+0561f6b0c6477a8f8a2bfca904b185c2b5a0853921fe0b0764229b6811492b80  build/shaders/r63-skinned/pixel.hw.json

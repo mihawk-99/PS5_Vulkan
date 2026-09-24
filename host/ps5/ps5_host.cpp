@@ -520,10 +520,14 @@ bool parse_replay(const char *path, std::uint32_t &frame, std::uint32_t &flips_b
             region.bytes = static_cast<std::size_t>(third);
             region.stage_index = static_cast<long>(first);
         }
+        /* A stage's image follows its own "stage" line. The index restarts with
+         * every device a test creates (R64 captures twelve frames, a device each),
+         * so the image belongs to the latest stage of that index: the first one
+         * would take every later frame's chunks over its own relocated headers. */
         else if (std::sscanf(line, "stageimage %llu %llx %513s", &first, &second, hex) == 3)
         {
             const Region *found = nullptr;
-            for (std::size_t index = 0; index < g_region_count && !found; ++index) {
+            for (std::size_t index = g_region_count; index-- > 0 && !found;) {
                 if (g_regions[index].stage_index == static_cast<long>(first))
                     found = &g_regions[index];
             }

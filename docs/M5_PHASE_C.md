@@ -9110,3 +9110,64 @@ flip helper's count from the flips its capture made before the test.
 
 `sync-present`, `base-mip`, `no-d24` and `pix-center` are A/B switches in
 `/app0/ps5vk-ab.txt` for comparisons; none changes the default path.
+
+## 2026-09-24 — Dolphin bring-up: R57-R64
+
+Wind Waker under Dolphin (../PS5_RetroArch) was the test. Every round is a
+general Vulkan mechanism with its own probe under jobs/, not a Dolphin path.
+
+- **R57** (jobs/r57-border): clamp-to-border samplers and the three border
+  colour types.
+- **R58** (jobs/r58-restart): primitive restart on indexed triangle strips; 101
+  of Wind Waker's pipelines asked for it and were refused.
+- **R59** (jobs/r59-fragcoord): gl_FragCoord, including gl_FragCoord.z under an
+  inverted viewport depth range (Dolphin's 3D draws).
+- **R60** (jobs/r60-big): shader stages over the runner layout's 20 KiB
+  (Dolphin's ubershaders), and a refused command buffer's submission returns a
+  result instead of reaching the runtime's assert.
+- **R61** (jobs/r61-one-layer-array): one-layer 2D_ARRAY views, linear and
+  tiled. Correct before any change; kept as a gate.
+- **R62** (jobs/r62-uniform-index): uniform buffers as byte ranges (STRIDE 0,
+  NUM_RECORDS in bytes, OOB_SELECT raw). A uniform array indexed at run time
+  read zero past its first 16 bytes; Wind Waker's matrices come from such
+  arrays, and its 3D scenes were one flat fog colour.
+- **R63** (jobs/r63-skinned): Dolphin's 36-byte skinned record (a
+  R8G8B8A8_UINT matrix index ahead of the position). Correct before any change;
+  kept as a gate.
+- **R64** (jobs/r64-restart-strips): primitive restart as command-buffer state.
+
+**R64.** A ten-frame FIFO log of Link on the ship deck bisected Wind Waker's
+corrupt 3D scene to one draw, the first with more than 2048 indices: 2138 16-bit
+indices, 398 short triangle strips each ended by a restart index. With Dolphin
+drawing lists instead, the same prefix of the frame matched desktop Dolphin.
+The probe draws that shape as a grid of cells, one strip each, and checks every
+pixel. Every restart frame failed from about the 300th index on, whatever its
+count: R58 turned VGT_MULTI_PRIM_IB_RESET_EN off with a bare uconfig write right
+after each restart draw, and the write took effect while the draw was still
+fetching indices. A four-variant A/B in one build measured it: with the write
+after the draw every restart frame fails; with no write, with an SQ_NON_EVENT
+before it, or with a VS_PARTIAL_FLUSH before it, all pass, a 64-instance draw of
+4096 indices included. RADV writes the enable only when it changes, behind an
+SQ_NON_EVENT on GFX10 and GFX10.3 (radv_emit_primitive_restart,
+has_prim_restart_sync_bug), and the driver now does the same: the enable is
+command-buffer state, each change behind the event, and vkEndCommandBuffer puts
+it back to off, so every command buffer starts and ends with restart off and one
+that never restarts records the words it did before R58. PS5 PID 449: the twelve
+frames PASS with zero mismatches over 8294400 pixels each, including a change of
+restart between two draws of one command buffer whose second draw fetches
+vertex 0xffff; R58 and R57-R63 pass in the same run.
+
+Two faults outside the driver turned up on the way. The test harness set a
+frame's draw_index_count only when the frame had a uniform buffer, so R64's
+frames without one drew the whole index buffer (the driver's robustness clamp
+cut the draw at the buffer's end): the first capture passed only because its
+buffers ended at their draws, and the second, whose buffers hold poison past
+them, drew one extra triangle from the poison. The host model attached a
+captured stage's image lines to the first stage of that index, but the index
+restarts with every device a test creates, so a multi-device capture with
+differing stage addresses overwrote frame 1's relocated headers. Both are
+fixed; R58, R62 and R63 still replay word for word.
+
+Gates: tools/check-driver.sh PASS (vk_v0_topology_test asserts both restart
+changes sit behind an SQ_NON_EVENT); jobs/r58-restart, r63-skinned and
+r64-restart-strips check.py and replay.py PASS.

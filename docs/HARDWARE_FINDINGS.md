@@ -3270,3 +3270,16 @@ through driver paths that flush what they write and invalidate what they read,
 the per-step whole-target flush is needed only for memory the application maps;
 the full runner battery is identical with and without it. The completion marker
 of a vkQuake step is written within ~0.15 ms of the submission (R38).
+
+## 2026-09-24 — a bare primitive-restart write lands in the draw before it (R64)
+
+VGT_MULTI_PRIM_IB_RESET_EN (uconfig 0x3092c) written right after an indexed
+draw, with no event between them, takes effect while that draw is still
+fetching indices: past about 300 indices the rest of a restart strip draw
+fetched its 0xffff indices as vertices, with the same result for 1894 to 4096
+indices and for quads, single triangles and six-vertex strips. An SQ_NON_EVENT
+(EVENT_WRITE, event type 0) before the write orders it behind the draw: a draw of
+4096 indices run 64 times is untouched. A VS_PARTIAL_FLUSH before it works too,
+at the cost of a stall. This matches Mesa's public note on GFX10 and GFX10.3
+(ac_gpu_info.c, has_prim_restart_sync_bug) and RADV's handling of it. Evidence:
+jobs/r64-restart-strips (A/B build, then PID 449 with the fix).

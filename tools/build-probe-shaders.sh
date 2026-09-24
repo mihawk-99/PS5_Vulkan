@@ -665,6 +665,20 @@ r60-big)
         --vertex-attribute 1:r32g32_float:0:8:16:4)
     pixel_flags=(--address32-hi 2)
     ;;
+r63-skinned)
+    vertex_source=shaders/r63/skinned.vert
+    pixel_source=shaders/m3/vertex_colour.frag
+    output=probes/r63-skinned
+    # The package declares 32-bit forms; the Vulkan run fetches Dolphin's own
+    # record (R8G8B8A8_UINT index at 0, position 4, normal 16, coordinate 28).
+    vertex_flags=(--address32-hi 2
+        --vertex-attribute 0:r32g32b32_float:0:0:48:4
+        --vertex-attribute 1:r32g32b32a32_uint:0:12:48:4
+        --vertex-attribute 2:r32g32b32_float:0:28:48:4
+        --vertex-attribute 3:r32g32_float:0:40:48:4
+        --descriptor-binding 0:0:uniform_buffer:1:0:16)
+    pixel_flags=(--address32-hi 2)
+    ;;
 r62-uniform-index)
     vertex_source=shaders/r62/index.vert
     pixel_source=shaders/m3/vertex_colour.frag
@@ -1229,6 +1243,14 @@ elif set_name == "c1-clear":
                 *vertex_input("vertex attributes: location 0 r32g32b32a32_uint offset 0, "
                               "stride 16, binding 0"),
                 *pixel_descriptor(16)]
+elif set_name == "r63-skinned":
+    if pixel.get("descriptor_bindings"):
+        fail("pixel stage unexpectedly declares descriptor bindings")
+    bindings = [("address32_hi", expected_hi),
+                *vertex_input_descriptor("vertex attributes: location 0 r32g32b32_float offset 0, "
+                                         "location 1 r32g32b32a32_uint offset 12, location 2 "
+                                         "r32g32b32_float offset 28, location 3 r32g32_float "
+                                         "offset 40, stride 48, binding 0", 16)]
 elif set_name == "r62-uniform-index":
     if pixel.get("descriptor_bindings"):
         fail("pixel stage unexpectedly declares descriptor bindings")

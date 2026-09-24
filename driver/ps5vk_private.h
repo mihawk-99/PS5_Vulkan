@@ -649,6 +649,10 @@ struct ps5vk_cmd_buffer {
    size_t table_bytes_used;
    /* The bound graphics pipeline, or NULL. */
    struct ps5vk_pipeline *pipeline;
+   /* R64: the primitive-restart enable (VGT_MULTI_PRIM_IB_RESET_EN) the words
+    * recorded so far leave the hardware with. Draws write it only when it
+    * changes; every command buffer starts and ends with it off (ps5vk_draw.c). */
+   bool primitive_restart;
    /* The descriptor sets bound for the next draws, by set index
     * (vkCmdBindDescriptorSets; ps5vk_descriptor_set.c), and the dynamic offset
     * each was bound with (VkBindDescriptorSetsInfo.pDynamicOffsets, D1). */
@@ -1775,6 +1779,10 @@ extern bool ps5vk_spirv_dump_enabled;
 struct ps5vk_cmd_buffer;
 void
 ps5vk_cmd_buffer_release_push_sets(struct ps5vk_cmd_buffer *cmd_buffer);
+/* Records the end of primitive restart for a command buffer whose draws left
+ * it on (ps5vk_draw.c, R64). */
+void
+ps5vk_cmd_buffer_end_primitive_restart(struct ps5vk_cmd_buffer *cmd_buffer);
 /* vk_meta blits and copies on the GPU (ps5vk_draw.c); false when a region is
  * not one they cover, which leaves the CPU path. */
 bool

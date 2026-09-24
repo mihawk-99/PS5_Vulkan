@@ -692,11 +692,6 @@ create_uniform(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
    triangle->uniform_range_bytes = input->uniform_range_bytes;
    triangle->uniform_dynamic = input->uniform_dynamic_offset != 0;
    triangle->uniform_dynamic_pair = input->uniform_dynamic_pair;
-   /* The index count a frame's draws ask for, which V0-robust raises past what
-    * the buffer holds (ps5vk_triangle_set_draw_index_count). Zero keeps the
-    * buffer's own count: this runs before the geometry exists, so the count is
-    * read where the draw is recorded. */
-   triangle->draw_index_count = input->draw_index_count;
    const VkDescriptorSetAllocateInfo set_allocate = {
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
       .descriptorPool = triangle->descriptor_pool,
@@ -2726,7 +2721,8 @@ create_pipeline(struct ps5vk_triangle *triangle, uint32_t index,
       .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
       .topology = input->primitive_topology != 0 ? input->primitive_topology
                                                  : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-      .primitiveRestartEnable = input->primitive_restart,
+      .primitiveRestartEnable =
+         input->primitive_restart && !(input->primitive_restart_first_only && index != 0),
    };
    const VkViewport viewport = {0.0f,
                                 0.0f,
@@ -3047,6 +3043,13 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
    memcpy(triangle->push_constant_second, input->push_constant_second,
           sizeof(triangle->push_constant_second));
    triangle->first_draw_indices = input->first_draw_indices;
+   triangle->first_index = input->first_index;
+   /* The index count a frame's draws ask for, which V0-robust raises past what
+    * the buffer holds (ps5vk_triangle_set_draw_index_count) and R64 keeps below
+    * it. Zero keeps the buffer's own count. It was set only with a uniform
+    * buffer, so a frame without one drew the whole index buffer: R64's frames,
+    * whose buffers hold poison past their draws, drew it. */
+   triangle->draw_index_count = input->draw_index_count;
    triangle->two_descriptor_sets = input->two_descriptor_sets;
    triangle->two_passes = input->two_passes;
    triangle->texture_address_mode_set = input->texture_address_mode_set;

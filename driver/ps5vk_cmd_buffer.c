@@ -81,6 +81,7 @@ ps5vk_cmd_buffer_clear_state(struct ps5vk_cmd_buffer *cmd_buffer)
    cmd_buffer->table_chunk = cmd_buffer->table_chunks;
    cmd_buffer->table_bytes_used = 0;
    cmd_buffer->pipeline = NULL;
+   cmd_buffer->primitive_restart = false;
    /* A set bound before the reset does not stay bound: the recording that
     * follows is a new command buffer's, and a stale set there would be one the
     * application never bound in it (ps5vk_descriptor_set.c). */
@@ -256,6 +257,9 @@ ps5vk_EndCommandBuffer(VkCommandBuffer commandBuffer)
       ps5vk_device_profile_queue(container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk));
    if (queue)
       ps5vk_profile_enter(queue, PS5VK_PROFILE_AFTER_END);
+   /* The next command buffer starts from restart off (R64). */
+   if (!vk_command_buffer_has_error(&cmd_buffer->vk))
+      ps5vk_cmd_buffer_end_primitive_restart(cmd_buffer);
    const VkResult result = vk_command_buffer_end(&cmd_buffer->vk);
    if (queue)
       ps5vk_profile_leave(queue, PS5VK_PROFILE_AFTER_END);

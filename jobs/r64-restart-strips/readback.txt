@@ -1,0 +1,98 @@
+{"schema":2,"event":"run_start","pid":449}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"strips","value":385}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"indices","value":2138}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"flipped","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"missing","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"stray","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r64_restart_strips","status":"PASS","result":0,"detail":"2138 indices with restart at Dolphin's offsets"}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"strips","value":385}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"indices","value":2138}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"flipped","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"missing","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"stray","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r64_restart_strips","status":"PASS","result":0,"detail":"2138 indices with restart at offset 0"}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"strips","value":338}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"indices","value":1894}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"flipped","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"missing","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"stray","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r64_restart_strips","status":"PASS","result":0,"detail":"1894 indices with restart at Dolphin's offsets"}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"strips","value":369}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"indices","value":2047}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"flipped","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"missing","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"stray","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r64_restart_strips","status":"PASS","result":0,"detail":"2047 indices with restart"}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"strips","value":369}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"indices","value":2049}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"flipped","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"missing","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"stray","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r64_restart_strips","status":"PASS","result":0,"detail":"2049 indices with restart"}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"strips","value":746}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"indices","value":4096}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"flipped","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"missing","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"stray","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r64_restart_strips","status":"PASS","result":0,"detail":"4096 indices with restart"}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"strips","value":385}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"indices","value":2521}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"flipped","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"missing","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"stray","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r64_restart_strips","status":"PASS","result":0,"detail":"the 2138-index strips joined by degenerate triangles, no restart"}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"strips","value":256}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"indices","value":1280}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"flipped","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"missing","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"stray","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r64_restart_strips","status":"PASS","result":0,"detail":"256 quads with restart"}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"strips","value":256}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"indices","value":1024}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"flipped","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"missing","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"stray","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r64_restart_strips","status":"PASS","result":0,"detail":"256 single triangles with restart"}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"strips","value":128}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"indices","value":896}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"flipped","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"missing","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"stray","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r64_restart_strips","status":"PASS","result":0,"detail":"128 six-vertex strips with restart"}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"strips","value":746}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"indices","value":4096}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"flipped","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"missing","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"stray","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r64_restart_strips","status":"PASS","result":0,"detail":"4096 indices with restart, 64 instances"}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"strips","value":425}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"indices","value":2376}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"flipped","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"missing","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"stray","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r64_restart_strips","status":"PASS","result":0,"detail":"2138 indices with restart, then a draw without it that fetches vertex 0xffff"}
+{"schema":2,"event":"value","probe":"r64_restart_strips","field":"passed_frames","value":12}

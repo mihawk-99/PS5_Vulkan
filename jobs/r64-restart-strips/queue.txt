@@ -1,0 +1,15 @@
+hold 1
+capture
+m2-solid
+r58-restart
+r64-restart-strips
+r57-border
+r59-fragcoord
+r60-big
+r61-one-layer-array
+r62-uniform-index
+r63-skinned
+r15-dynamic-pair
+d1-dynamic-ubo
+v0-push-constant
+exit

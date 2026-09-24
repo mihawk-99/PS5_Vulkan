@@ -4,40 +4,33 @@ Volatile by design. Keep this file under about 120 lines. Specifications are in
 `docs/VULKAN_PROBE_PLAN.md`; measurements are in `docs/M5_PHASE_C.md` and
 `docs/HARDWARE_FINDINGS.md`.
 
-_Updated: 2026-09-23_
+_Updated: 2026-09-24_
 
 ## Now
-**vkQuake performance and stability are the priority; no CTS work.** vkQuake
-runs at up to 120 FPS at 4K: walking the start map, 119.88 FPS with every frame
-8.29-8.40 ms, 4.0-4.4 ms of work (port evidence m6-r49-kstuff-paused). That needs
-two console settings: etaHEN's "pause kstuff on game launch" (with kstuff active
-a system call costs ~20 us instead of 0.73 us, and the game manages ~52 FPS) and
-VRR for unsupported games (frames present as soon as ready, 48-120 Hz).
-
-Driver rounds this session, each with its console proof in jobs/:
-R33-R36 (jobs/r33-begin-split) a nearly free profile with TSC timestamps and one
-write(2), and the finding that its old fputs was the multi-second "stall";
-R37 (jobs/r37-mapped-flush) flush colour targets only in mapped memory, runner
-battery identical to the pre-change driver (138 tests, 130 PASS each); R38 a
-bounded marker spin; R40 vkCmdExecuteCommands timed (0.14 ms, ruled out);
-R42 (jobs/r42-parallel-blit) blits on five threads; R43
-(jobs/r43-hitch-recorder) a per-frame hitch report; R46 (jobs/r46-nir-cache)
-the internal NIR cache; R47 (jobs/r47-shipped-cache) one cache directory per
-build, 0777, which the port harvests and ships; R51 (jobs/r51-output-mode)
-119.88 Hz selected where the title declares it, 59.94 Hz otherwise; R53
-(jobs/r53-output-retention) one VideoOut per process, configured when the modes
-are listed (a refused 119.88 Hz is never offered) and, retained by the
-application (`ps5vk_display_retain`), kept with its image across swapchains so
-RetroArch's context rebuilds no longer blank the panel.
+**Dolphin (Wind Waker) through ../PS5_RetroArch is the priority.** Every
+driver fault it shows is reduced to a runner probe, fixed as a general Vulkan
+mechanism, proved on the console and replayed on the host. The rounds so far,
+each with its job under jobs/ (docs/M5_PHASE_C.md, 2026-09-24): R57 border
+colours, R58 primitive restart, R59 gl_FragCoord with inverted depth, R60
+stages over 20 KiB, R61 one-layer array views (a gate), R62 uniform buffers as
+byte ranges, R63 Dolphin's skinned record (a gate), and R64: primitive restart
+is command-buffer state and every change of it follows an SQ_NON_EVENT. R58's
+bare write after each restart draw landed in the middle of the draw, and long
+restart strips (all of Wind Waker's scenery) fetched their restart indices as
+vertices. After R64 a FIFO log of Link on the ship deck matches desktop
+Dolphin except for thin stray lines on the left of the frame, which change
+from frame to frame.
 
 Next, in order:
-1. Colour targets other than 3840x2160 (vkQuake's raster warp path renders
-   512x512 and is refused), then multiple colour attachments (v0-mrt, which
-   also stops the runner).
-2. The port's gameplay/stability acceptance.
+1. Bisect the stray lines with the FIFO log's object range (Dolphin's debug
+   mode "objects A B" in the port) and reduce them to a probe.
+2. Wind Waker from its save state: correct picture, then speed at 1x.
+3. The torture profiles (6x IR, ubershaders, 16x AF, EFB to RAM, MSAA) only
+   after that.
 
-The test runner on the console (PPSA99988) holds the R46 build. An intermittent
-texture glitch seen in play is set aside until it can be captured.
+vkQuake at 120 FPS and PPSSPP (God of War, Yu-Gi-Oh!) stay the regression
+titles. The test runner on the console (PPSA99988) holds the R64 build with
+jobs/regression/queue.txt queued.
 
 ## Standing work
 - Graphics R7 rounds 1-4, R8 dynamic depth bias, the first batch's R9 (push
@@ -56,7 +49,7 @@ texture glitch seen in play is set aside until it can be captured.
   by `tools/check-runner-cases.sh`: 97 limits, 55 features, 184 core formats,
   307 image-format combinations. The 3D dimension claim versus no 3D images and
   cube-query inconsistencies remain inventory findings.
-- CTS remains outside this user-requested game work; prior status is in docs/CTS.md.
+- CTS remains outside the game work I asked for; prior status is in docs/CTS.md.
 - Upstream AGC tile equations agree with the measured maps; the resource-slot
   table remains an untaken diagnostic opportunity (`docs/AGC_UPSTREAM_NOTES.md`).
 - Imported driver/host/vendor/tooling trees retain their own style with

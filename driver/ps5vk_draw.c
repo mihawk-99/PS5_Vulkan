@@ -232,8 +232,13 @@
 /* The most words one draw records: three 5-word register-table loads, both
  * stages' user data at the 16-dword maximum and a 14-word indexed draw (the
  * index size, base, count and DRAW_INDEX_2 packets), which is more than
- * DRAW_INDEX_AUTO's 3. */
-#define PS5VK_DRAW_MAX_WORDS (8 + 5 + 5 + 5 + 2 * (2 + PS5VK_MAX_USER_DATA) + 14)
+ * DRAW_INDEX_AUTO's 3; then a primitive-restart change (a 2-word SQ_NON_EVENT
+ * and two 5-word table loads) and the two instance-count packets. */
+#define PS5VK_DRAW_MAX_WORDS (8 + 5 + 5 + 5 + 2 * (2 + PS5VK_MAX_USER_DATA) + 14 + 12 + 4)
+/* EVENT_WRITE (PM4 0x46, one payload word) of SQ_NON_EVENT: event type 0,
+ * index 0 (Mesa's V_028A90_SQ_NON_EVENT). */
+#define PS5VK_EVENT_WRITE_HEADER UINT32_C(0xc0004600)
+#define PS5VK_EVENT_SQ_NON_EVENT UINT32_C(0)
 /* AGC's context defaults: a pointer to block pointers at offset 0, the first
  * block's record count at 0x20 (the layout the test runner reads). */
 #define PS5VK_DEFAULTS_COUNT_OFFSET 0x20
@@ -1953,6 +1958,60 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
    return true;
 }
 
+/* Appends an SQ_NON_EVENT, the event RADV writes before every change of
+ * VGT_MULTI_PRIM_IB_RESET_EN on GFX10 and GFX10.3: without it the write can take
+ * effect in the middle of the draw before it (R64). NULL when the words do not
+ * fit, as an AGC helper returns. */
+static uint32_t *
+ps5vk_sq_non_event(struct ps5vk_agc_command_buffer *command)
+{
+   if (command->down - command->up < 2)
+      return NULL;
+   uint32_t *const packet = command->up;
+   packet[0] = PS5VK_EVENT_WRITE_HEADER;
+   packet[1] = PS5VK_EVENT_SQ_NON_EVENT;
+   command->up += 2;
+   return packet;
+}
+
+/* Puts primitive restart back to off at the end of a command buffer that left
+ * it on (ps5vk_EndCommandBuffer): the draws write the enable only when it
+ * changes, and every command buffer has to end as it started, with it off, for
+ * the next one to start from the value its words assume (R64). */
+void
+ps5vk_cmd_buffer_end_primitive_restart(struct ps5vk_cmd_buffer *cmd_buffer)
+{
+   if (!cmd_buffer->primitive_restart)
+      return;
+   struct ps5vk_agc_register *const table =
+      ps5vk_cmd_buffer_table(cmd_buffer, sizeof(*table), 8);
+   if (!table)
+      return;
+   *table = (struct ps5vk_agc_register){.offset = 0x24b, .value = 0};
+   uint32_t words[8];
+   struct ps5vk_agc_command_buffer command = {
+      .bottom = words,
+      .top = words + 8,
+      .up = words,
+      .down = words + 8,
+      .callback = (uintptr_t)ps5vk_agc_out_of_space,
+   };
+   if (!ps5vk_sq_non_event(&command) || !sceAgcDcbSetUcRegistersIndirect(&command, table, 1)) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                              "the AGC helpers did not encode the end of primitive restart");
+      return;
+   }
+   const uint32_t count = (uint32_t)(command.up - command.bottom);
+   uint32_t *const recorded = util_dynarray_grow(&cmd_buffer->words, uint32_t, count);
+   if (!recorded) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
+                              "no memory to end primitive restart");
+      return;
+   }
+   memcpy(recorded, words, count * sizeof(*words));
+   cmd_buffer->primitive_restart = false;
+}
+
 /* Records one draw, indexed or not: the three register tables, both stages'
  * user data and the draw packet. An indexed draw's index state is the index
  * buffer the application bound (ps5vk_CmdBindIndexBuffer3KHR); a non-indexed
@@ -2004,8 +2063,12 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
    /* The viewport's depth range, rounded so that a few distinct ranges are a few
     * census lines (Dolphin programs GameCube depth ranges). */
    if (ps5vk_census_enabled)
-      ps5vk_census("draw viewport depth %.3f to %.3f",
-                   (double)dynamic->vp.viewports[0].minDepth, (double)dynamic->vp.viewports[0].maxDepth);
+      ps5vk_census("draw viewport %.1f,%.1f %.1fx%.1f depth %.3f to %.3f scissor %d,%d %ux%u",
+                   (double)dynamic->vp.viewports[0].x, (double)dynamic->vp.viewports[0].y,
+                   (double)dynamic->vp.viewports[0].width, (double)dynamic->vp.viewports[0].height,
+                   (double)dynamic->vp.viewports[0].minDepth, (double)dynamic->vp.viewports[0].maxDepth,
+                   dynamic->vp.scissors[0].offset.x, dynamic->vp.scissors[0].offset.y,
+                   dynamic->vp.scissors[0].extent.width, dynamic->vp.scissors[0].extent.height);
    if (ps5vk_census_enabled)
       ps5vk_census("draw blend 0x%08x const %d/%d mask 0x%x raster 0x%x line %d discard %d | depth test %d "
                    "write %d op %d | stencil %d bound %d ops %d/%d/%d/%d wmask 0x%x cmask 0x%x | "
@@ -2484,24 +2547,35 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
    if (instance_count != 1 && encoded &&
        sceAgcDcbSetNumInstances(&command, instance_count) == NULL)
       encoded = false;
-   /* R58: an indexed draw through a restart pipeline is bracketed by
-    * VGT_MULTI_PRIM_IB_RESET_EN (uconfig 0x3092c, record 0x24b), on before it and
-    * back to the hardware's 0 after, with VGT_MULTI_PRIM_IB_RESET_INDX (context
-    * 0x2840c, record 0x103) all ones: from GFX9 only the index type's own bits
-    * are compared, so the one value serves 16- and 32-bit indices (RADV's
-    * radv_emit_primitive_restart). Every other draw records exactly the words it
-    * did before R58, which is what every golden holds. */
+   /* R58, R64: primitive restart is VGT_MULTI_PRIM_IB_RESET_EN (uconfig 0x3092c,
+    * record 0x24b), with VGT_MULTI_PRIM_IB_RESET_INDX (context 0x2840c, record
+    * 0x103) all ones: from GFX9 only the index type's own bits are compared, so
+    * the one value serves 16- and 32-bit indices. The enable is state, written
+    * only when a draw needs the other value -- on for an indexed draw through a
+    * restart pipeline, off for every other draw -- and put back to off at
+    * vkEndCommandBuffer, so every command buffer starts and ends with it off and
+    * one that never restarts records exactly the words it did before R58.
+    *
+    * Each write follows an SQ_NON_EVENT, as RADV writes it on GFX10 and GFX10.3
+    * (radv_emit_primitive_restart; ac_gpu_info's has_prim_restart_sync_bug).
+    * R58 turned restart off with a bare write right after each restart draw,
+    * and R64 measured that write taking effect in the middle of the draw: past
+    * about 300 indices the rest of the draw fetched its restart indices as
+    * vertices (Wind Waker's scenery). With the event first, a 64-instance draw
+    * of 4096 indices is untouched by the write that follows it
+    * (jobs/r64-restart-strips). */
    const bool restart = indexed != NULL && pipeline->primitive_restart;
-   struct ps5vk_agc_register *restart_tables = NULL;
-   if (restart && encoded) {
-      restart_tables = ps5vk_cmd_buffer_table(cmd_buffer, 3 * sizeof(*restart_tables), 8);
+   const bool restart_changes = restart != cmd_buffer->primitive_restart;
+   if (restart_changes && encoded) {
+      struct ps5vk_agc_register *const restart_tables =
+         ps5vk_cmd_buffer_table(cmd_buffer, 2 * sizeof(*restart_tables), 8);
       if (!restart_tables)
          return;
-      restart_tables[0] = (struct ps5vk_agc_register){.offset = 0x24b, .value = 1};
-      restart_tables[1] = (struct ps5vk_agc_register){.offset = 0x24b, .value = 0};
-      restart_tables[2] = (struct ps5vk_agc_register){.offset = 0x103, .value = 0xffffffffu};
-      encoded = sceAgcDcbSetUcRegistersIndirect(&command, &restart_tables[0], 1) &&
-                sceAgcDcbSetCxRegistersIndirect(&command, &restart_tables[2], 1);
+      restart_tables[0] = (struct ps5vk_agc_register){.offset = 0x24b, .value = restart ? 1u : 0u};
+      restart_tables[1] = (struct ps5vk_agc_register){.offset = 0x103, .value = 0xffffffffu};
+      encoded = ps5vk_sq_non_event(&command) &&
+                sceAgcDcbSetUcRegistersIndirect(&command, &restart_tables[0], 1) &&
+                (!restart || sceAgcDcbSetCxRegistersIndirect(&command, &restart_tables[1], 1));
    }
    if (indexed == NULL) {
       encoded = encoded && sceAgcDcbDrawIndexAuto(&command, draw_count, PS5VK_DRAW_AUTO_INDEX);
@@ -2519,8 +2593,6 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
                 sceAgcDcbDrawIndex(&command, draw_count,
                                    (void *)(uintptr_t)index_address, 0) != NULL;
    }
-   if (restart && encoded)
-      encoded = sceAgcDcbSetUcRegistersIndirect(&command, &restart_tables[1], 1) != NULL;
    /* The draw has read the count; the next draw runs one instance unless it
     * asks for its own. */
    if (instance_count != 1 && encoded && sceAgcDcbSetNumInstances(&command, 1) == NULL)
@@ -2545,6 +2617,8 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
       return;
    }
    memcpy(recorded, words, draw_words * sizeof(*words));
+   if (restart_changes)
+      cmd_buffer->primitive_restart = restart;
    if (draw_queue)
       ps5vk_profile_leave(draw_queue, PS5VK_PROFILE_AFTER_DRAW);
 }

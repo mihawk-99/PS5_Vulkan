@@ -613,6 +613,13 @@ struct ps5vk_triangle_input {
    bool display_readback;
    /* Draw the same geometry again without a depth attachment in one submission. */
    bool detach_depth;
+   /* R64: the firstIndex of a frame's indexed draws, which then take
+    * draw_index_count indices from there. Zero is every frame before R64. */
+   uint32_t first_index;
+   /* R64: only the first pipeline restarts; the second is the same pipeline
+    * with primitiveRestartEnable false, so a two-draw frame changes restart
+    * between its draws. */
+   bool primitive_restart_first_only;
 };
 
 

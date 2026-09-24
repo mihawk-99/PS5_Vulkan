@@ -141,6 +141,44 @@ recorded(VkDevice device, uint16_t offset, uint32_t *value)
 }
 #endif
 
+#if defined(PS5VK_TEST_DIRECT)
+/* R64: the changes of VGT_MULTI_PRIM_IB_RESET_EN in the last submission -- the
+ * one-record uconfig table loads (PM4 0x64), which nothing else records -- how
+ * many of them follow an EVENT_WRITE of SQ_NON_EVENT, and how many come before
+ * the submission's DRAW_INDEX_2. */
+struct restart_writes {
+   unsigned count;
+   unsigned after_event;
+   unsigned before_draw;
+};
+
+static struct restart_writes
+restart_writes(VkDevice device)
+{
+   struct restart_writes found = {0};
+   uint32_t dwords = 0;
+   const uint32_t *const words = ps5vk_debug_last_submission(device, &dwords);
+   bool drawn = false;
+   for (uint32_t at = 0; words != NULL && at < dwords;) {
+      const uint32_t header = words[at];
+      if ((header >> 30) != 3u) {
+         at++;
+         continue;
+      }
+      const uint32_t count = ((header >> 16) & 0x3fffu) + 1u;
+      const uint32_t opcode = (header >> 8) & 0xffu;
+      drawn = drawn || opcode == 0x27u;
+      if (opcode == 0x64u && count == 4u && at + 4u < dwords && words[at + 4u] == 1u) {
+         found.count++;
+         found.after_event += at >= 2u && words[at - 2u] == 0xc0004600u && words[at - 1u] == 0u;
+         found.before_draw += !drawn;
+      }
+      at += 1u + count;
+   }
+   return found;
+}
+#endif
+
 struct frame {
    const char *name;
    VkPrimitiveTopology topology;
@@ -241,9 +279,9 @@ draw_frame(const struct frame *frame, const uint32_t *vertex, size_t vertex_byte
          }
       }
       /* R58: a restart draw loads VGT_MULTI_PRIM_IB_RESET_INDX (context record
-       * 0x103) as all ones and brackets itself with the uconfig
-       * VGT_MULTI_PRIM_IB_RESET_EN record (0x24b), off last; no other draw
-       * records either. */
+       * 0x103) as all ones and turns on the uconfig VGT_MULTI_PRIM_IB_RESET_EN
+       * record (0x24b), which the command buffer puts back to 0 at its end; no
+       * other frame records either. */
       {
          uint32_t index = 0;
          const bool index_found = recorded(triangle.device, 0x103, &index);
@@ -258,6 +296,24 @@ draw_frame(const struct frame *frame, const uint32_t *vertex, size_t vertex_byte
             snprintf(what, sizeof(what), "%s: records no primitive restart state", frame->name);
             check(!index_found && !enable_found, what);
          }
+         /* R64: the enable changes twice, on before the draw and off after it
+          * (at vkEndCommandBuffer), and each change follows an SQ_NON_EVENT:
+          * a bare write after a restart draw took effect in the middle of it
+          * on the console (jobs/r64-restart-strips). */
+         const struct restart_writes writes = restart_writes(triangle.device);
+         snprintf(what, sizeof(what),
+                  frame->restart ? "%s: restart is turned on before the draw and off after it, "
+                                   "each change behind an SQ_NON_EVENT"
+                                 : "%s: the submission changes no restart state",
+                  frame->name);
+         check(frame->restart ? writes.count == 2u && writes.after_event == 2u &&
+                                   writes.before_draw == 1u
+                              : writes.count == 0u,
+               what);
+         if (frame->restart && (writes.count != 2u || writes.after_event != 2u ||
+                                writes.before_draw != 1u))
+            printf("  (%u changes, %u behind the event, %u before the draw)\n", writes.count,
+                   writes.after_event, writes.before_draw);
       }
       if (line) {
          uint32_t value = UINT32_MAX;
