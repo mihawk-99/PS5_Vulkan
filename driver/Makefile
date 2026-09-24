@@ -24,6 +24,7 @@ PSBC_INCLUDE ?= $(error PSBC_INCLUDE is not set)
 
 DRIVER_SRCS := \
 	ps5vk_buffer.c \
+	ps5vk_census.c \
 	ps5vk_cmd_buffer.c \
 	ps5vk_compute.c \
 	ps5vk_descriptor_set.c \

@@ -202,6 +202,13 @@
  * SW_MODE 20-24 carries the same 64 KiB swizzle the tiled 2D kind does
  * (docs/HARDWARE_FINDINGS.md). */
 #define PS5VK_TEXTURE_SWIZZLE UINT32_C(0x01b00000)
+/* The same SW_MODE field for a depth attachment: SW_64KB_Z_X (24), the mode the
+ * depth block writes (DB_Z_INFO's SW_MODE, 0x80000180 >> 4), and the mode
+ * RADV samples a depth surface in -- the texture unit has to read the surface
+ * in the swizzle it was written in. The colour kind's 27 (SW_64KB_R_X) read a
+ * depth attachment's texels from the wrong places inside each tile. */
+#define PS5VK_TEXTURE_SWIZZLE_Z UINT32_C(0x01800000)
+#define PS5VK_TEXTURE_SWIZZLE_MASK UINT32_C(0x01f00000)
 #define PS5VK_TEXTURE_2D_ARRAY_KIND (UINT32_C(0xd) << 28)
 #define PS5VK_TEXTURE_CUBE_KIND (UINT32_C(0xb) << 28)
 #define PS5VK_TEXTURE_SINGLE_LEVEL UINT32_C(0x00400000)
@@ -385,7 +392,8 @@ ps5vk_depth_registers(uint64_t address, uint64_t stencil_address, VkExtent2D ext
 static uint32_t
 ps5vk_depth_control(const struct vk_dynamic_graphics_state *dynamic, bool stencil_bound)
 {
-   const bool stencil = stencil_bound && dynamic->ds.stencil.test_enable;
+   const bool stencil = stencil_bound && dynamic->ds.stencil.test_enable &&
+                        !(ps5vk_ab_flags & PS5VK_AB_NO_STENCIL);
    /* Not one stencil bit when the attachment has no stencil plane: Vulkan
     * ignores the stencil test there, and a word that kept the reference's
     * compare function would program a test nothing carries the plane for. */
@@ -394,6 +402,8 @@ ps5vk_depth_control(const struct vk_dynamic_graphics_state *dynamic, bool stenci
                    ((uint32_t)dynamic->ds.stencil.front.op.compare << 8) |
                    ((uint32_t)dynamic->ds.stencil.back.op.compare << 20)
               : 0;
+   if (ps5vk_ab_flags & PS5VK_AB_NO_DEPTH)
+      return stencil_bits;
    return stencil_bits | (dynamic->ds.depth.test_enable ? UINT32_C(1) << 1 : 0) |
           (dynamic->ds.depth.write_enable ? UINT32_C(1) << 2 : 0) |
           ((uint32_t)dynamic->ds.depth.compare_op << 4);
@@ -896,6 +906,23 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
                             cmd_buffer->depth_registers);
    cmd_buffer->target_extent = extent;
    cmd_buffer->rendering = true;
+   if (ps5vk_census_enabled) {
+      const VkRenderingAttachmentInfo *const c =
+         info->colorAttachmentCount > 0 ? &info->pColorAttachments[0] : NULL;
+      const VkRenderingAttachmentInfo *const d = info->pDepthAttachment;
+      const VkRenderingAttachmentInfo *const st = info->pStencilAttachment;
+      VK_FROM_HANDLE(vk_image_view, cv, c != NULL ? c->imageView : VK_NULL_HANDLE);
+      ps5vk_census("rendering colour fmt %d %ux%u samples %u load %d store %d resolve %d | depth fmt %d "
+                   "%ux%u load %d store %d | stencil load %d store %d | area %d,%d %ux%u",
+                   cv ? (int)cv->format : -1, cv ? cv->image->extent.width : 0,
+                   cv ? cv->image->extent.height : 0, cv ? (unsigned)cv->image->samples : 0,
+                   c ? (int)c->loadOp : -1, c ? (int)c->storeOp : -1, c ? (int)c->resolveMode : -1,
+                   (int)depth_format, depth_target_extent.width, depth_target_extent.height,
+                   d && d->imageView ? (int)d->loadOp : -1, d && d->imageView ? (int)d->storeOp : -1,
+                   st && st->imageView ? (int)st->loadOp : -1, st && st->imageView ? (int)st->storeOp : -1,
+                   info->renderArea.offset.x, info->renderArea.offset.y, info->renderArea.extent.width,
+                   info->renderArea.extent.height);
+   }
 
    /* The attachment descriptions a later vkCmdClearAttachments clears, and the
     * depth format vk_meta's clear draws into. */
@@ -1069,6 +1096,9 @@ struct ps5vk_sampled_image {
     * the single-level path keeps the canary's own word. */
    uint32_t lod_word;
    bool tiled;
+   /* A tiled depth attachment: the depth block wrote it in its own 64 KiB Z_X
+    * swizzle, so the descriptor names that mode rather than the colour R_X. */
+   bool depth_tiles;
    /* Whether the image is one this command buffer rendered into, and so needs
     * the colour barrier in the words before the draw that samples it (the
     * recorded packet is ps5vk_queue.c's, M4's render-to-texture barrier). */
@@ -1247,6 +1277,16 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
    sampled->last_mip_level = view->base_mip_level + view->level_count - 1;
    sampled->image_last_mip_level = image->vk.mip_levels - 1;
    sampled->tiled = tiled;
+   ps5vk_census("sampled fmt %d view fmt %d %ux%u mips %u/%u layers %u viewtype %d tiled %d depth %d "
+                "pitch %u swz %d%d%d%d rendered_here %d sampler 0x%08x lod 0x%08x addr 0x%x",
+                (int)image->vk.format, (int)view->format, image->vk.extent.width,
+                image->vk.extent.height, view->base_mip_level, image->vk.mip_levels,
+                image->vk.array_layers, (int)view->view_type, tiled,
+                vk_format_has_depth(image->vk.format), sampled->pitch_texels, view->swizzle.r,
+                view->swizzle.g, view->swizzle.b, view->swizzle.a, rendered_here,
+                needs_sampler ? sampler->word : 0, needs_sampler ? sampler->lod_word : 0,
+                needs_sampler ? sampler->address_word : 0);
+   sampled->depth_tiles = tiled && vk_format_has_depth(image->vk.format);
    sampled->barrier = rendered_here;
    return true;
 }
@@ -1364,7 +1404,9 @@ ps5vk_write_image_descriptor(uint32_t *descriptor, const struct ps5vk_sampled_im
                                              (sampled->tiled ? PS5VK_TEXTURE_SWIZZLE : 0))
                                           : (sampled->tiled ? PS5VK_TEXTURE_2D_TILED_KIND
                                                             : PS5VK_TEXTURE_2D_KIND);
-   descriptor[3] = kind | sampled->dst_sel | (sampled->base_mip_level << 12) |
+   const uint32_t swizzled_kind =
+      sampled->depth_tiles ? (kind & ~PS5VK_TEXTURE_SWIZZLE_MASK) | PS5VK_TEXTURE_SWIZZLE_Z : kind;
+   descriptor[3] = swizzled_kind | sampled->dst_sel | (sampled->base_mip_level << 12) |
                    (sampled->last_mip_level << 16);
    /* Word 4 carries the layers (D1): DEPTH, the count minus one, at bits 0-12
     * and BASE_ARRAY, the first layer, at bits 16-28 -- the register database's
@@ -1877,6 +1919,21 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
     * One of each fills the viewport registers; vk_meta's clears use a
     * 4096x4096 one over a 3840x2160 target, which clips nothing. */
    const struct vk_dynamic_graphics_state *const dynamic = &cmd_buffer->vk.dynamic_graphics_state;
+   if (ps5vk_census_enabled)
+      ps5vk_census("draw blend 0x%08x const %d/%d mask 0x%x raster 0x%x line %d discard %d | depth test %d "
+                   "write %d op %d | stencil %d bound %d ops %d/%d/%d/%d wmask 0x%x cmask 0x%x | "
+                   "indexed %d samples %u depthfmt %d",
+                   pipeline->blend_control, pipeline->blend_uses_constants,
+                   pipeline->blend_constants_dynamic, pipeline->colour_write_mask,
+                   pipeline->rasterizer_word, pipeline->line_rasterizer, pipeline->discard_rasterizer,
+                   dynamic->ds.depth.test_enable, dynamic->ds.depth.write_enable,
+                   (int)dynamic->ds.depth.compare_op, dynamic->ds.stencil.test_enable,
+                   cmd_buffer->stencil_bound, (int)dynamic->ds.stencil.front.op.compare,
+                   (int)dynamic->ds.stencil.front.op.fail, (int)dynamic->ds.stencil.front.op.pass,
+                   (int)dynamic->ds.stencil.front.op.depth_fail,
+                   dynamic->ds.stencil.front.write_mask, dynamic->ds.stencil.front.compare_mask,
+                   indexed != NULL, (unsigned)cmd_buffer->multisample_count,
+                   (int)cmd_buffer->depth_format);
    if (dynamic->vp.viewport_count != 1 || dynamic->vp.scissor_count != 1) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                               "draws need exactly one viewport and scissor; %u viewports and %u "
@@ -2084,7 +2141,20 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
     * holding zero through both the draw and vk_meta's clear (that clear is a draw
     * through these registers too). The vkQuake port project named the register.
     * zero mask_count means the default word already says it. */
-   const uint32_t mask_count = pipeline->colour_write_mask == 0xfu ? 0u : 2u;
+   /* CB_SHADER_MASK is the compiler's (psbc_compile.c: the channels the pixel
+    * shader exports, from SPI_SHADER_COL_FORMAT), as RADV's is: it describes the
+    * export's layout, not what reaches memory. A partial write mask is therefore
+    * CB_TARGET_MASK alone. Writing the mask into CB_SHADER_MASK too told the
+    * hardware an RGBA export carried RGB only, and God of War's RGB-only and
+    * alpha-only draws (PPSSPP's alpha-preserving and stencil-upload passes) came
+    * out wrong where forcing RGBA drew them almost right. A pipeline that writes
+    * no colour keeps both words zero, the measured vk_meta depth-clear stream. */
+   const uint32_t mask_count =
+      pipeline->colour_write_mask == 0xfu ||
+            ((ps5vk_ab_flags & PS5VK_AB_FULL_MASK) && pipeline->colour_write_mask != 0)
+         ? 0u
+      : pipeline->colour_write_mask == 0 ? 2u
+                                          : 1u;
    /* A four-sample rendering's rasterizer registers come right after the colour
     * target's, so a one-sample draw records exactly the words it recorded before
     * Phase C8. */
@@ -2165,8 +2235,9 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
          cx + fixed + PS5VK_STAGE_CONTEXT_RECORDS + vertex->cx_count + pixel->cx_count;
       masks[0] = (struct ps5vk_agc_register){.offset = 0x08e,
                                              .value = pipeline->colour_write_mask};
-      masks[1] = (struct ps5vk_agc_register){.offset = 0x08f,
-                                             .value = pipeline->colour_write_mask};
+      if (mask_count == 2)
+         masks[1] = (struct ps5vk_agc_register){.offset = 0x08f,
+                                                .value = pipeline->colour_write_mask};
    }
    if (blend_count != 0) {
       struct ps5vk_agc_register *const blend =
@@ -2182,6 +2253,10 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
          uint32_t value = pipeline->blend_constants[index];
          if (pipeline->blend_constants_dynamic)
             memcpy(&value, &dynamic_constants[index], sizeof(value));
+         if (ps5vk_ab_flags & (PS5VK_AB_CONST_ZERO | PS5VK_AB_CONST_HALF)) {
+            const float forced = (ps5vk_ab_flags & PS5VK_AB_CONST_ZERO) ? 0.0f : 0.5f;
+            memcpy(&value, &forced, sizeof(value));
+         }
          blend[PS5VK_BLEND_REGISTER_COUNT + index] =
             (struct ps5vk_agc_register){.offset = (uint16_t)(PS5VK_BLEND_CONSTANT_REGISTER + index),
                                         .value = value};
@@ -2571,6 +2646,12 @@ ps5vk_CmdClearAttachments(VkCommandBuffer commandBuffer, uint32_t attachmentCoun
       return;
    /* Valid usage: inside a rendering. */
    assert(cmd_buffer->rendering);
+   for (uint32_t a = 0; ps5vk_census_enabled && a < attachmentCount; a++)
+      ps5vk_census("clear attachments aspect 0x%x rects %u first %d,%d %ux%u target %ux%u depthfmt %d",
+                   pAttachments[a].aspectMask, rectCount, pRects[0].rect.offset.x,
+                   pRects[0].rect.offset.y, pRects[0].rect.extent.width,
+                   pRects[0].rect.extent.height, cmd_buffer->target_extent.width,
+                   cmd_buffer->target_extent.height, (int)cmd_buffer->depth_format);
 
    struct ps5vk_meta_saved_state saved;
    ps5vk_meta_save(cmd_buffer, &saved);

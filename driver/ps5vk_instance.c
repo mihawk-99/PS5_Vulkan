@@ -97,6 +97,8 @@ ps5vk_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
    if (log_flag != NULL) {
       fclose(log_flag);
       instance->vk.enable_debug_logging = true;
+      ps5vk_census_enabled = true;
+      ps5vk_ab_load();
    }
 
    /* The one AGC initialisation, while the application's own code calls

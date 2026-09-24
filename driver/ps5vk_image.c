@@ -959,7 +959,14 @@ ps5vk_image_layer_bytes(const struct ps5vk_image *image)
 {
    if (image->storage == PS5VK_IMAGE_STORAGE_TILES) {
       const struct ps5vk_tiled_chain *const chain = ps5vk_tiled_chain_of(image);
-      return chain != NULL ? chain->bytes : 0;
+      if (chain != NULL)
+         return chain->bytes;
+      /* One level needs no chain: a layer is its tile grid, which is what
+       * ps5vk_image_storage summed, and a colour attachment's texels have always
+       * been placed at base 0 of it. */
+      if (image->vk.mip_levels == 1 && !vk_format_has_stencil(image->vk.format))
+         return image->size / MAX2(image->vk.array_layers, 1u);
+      return 0;
    }
    uint64_t slice = 0;
    for (uint32_t level = 0; level < image->vk.mip_levels; level++) {
@@ -1028,8 +1035,15 @@ ps5vk_image_storage(const VkImageCreateInfo *info, enum ps5vk_image_storage *sto
 {
    const unsigned texel_bytes = vk_format_get_blocksize(info->format);
    const bool depth = vk_format_has_depth(info->format);
+   const bool padded_single = !depth && !vk_format_is_compressed(info->format) &&
+                              info->mipLevels == 1 && info->arrayLayers == 1 &&
+                              info->samples == VK_SAMPLE_COUNT_1_BIT &&
+                              (texel_bytes == 1 || texel_bytes == 2 || texel_bytes == 4 ||
+                               texel_bytes == 8 || texel_bytes == 16) &&
+                              (info->extent.width * texel_bytes) % 256 != 0;
    const bool tiled = (info->usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)) != 0;
+                                      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)) != 0 ||
+                      ((ps5vk_ab_flags & PS5VK_AB_TILE_PADDED) && padded_single);
    uint64_t layer_bytes = 0;
    *stencil_offset = 0;
 
@@ -2272,6 +2286,16 @@ ps5vk_cmd_buffer_copy_image(struct ps5vk_cmd_buffer *cmd_buffer, struct ps5vk_im
                             uint32_t region_count, bool blit)
 {
    const char *const what = blit ? "a blit" : "a copy";
+   for (uint32_t r = 0; ps5vk_census_enabled && r < region_count; r++)
+      ps5vk_census("%s src fmt %d %ux%u storage %d samples %u aspect 0x%x -> dst fmt %d %ux%u storage %d "
+                   "samples %u aspect 0x%x extent %ux%u same_image %d",
+                   blit ? "blit" : "copy", (int)source->vk.format, source->vk.extent.width,
+                   source->vk.extent.height, (int)source->storage, (unsigned)source->vk.samples,
+                   regions[r].source.aspectMask, (int)destination->vk.format,
+                   destination->vk.extent.width, destination->vk.extent.height,
+                   (int)destination->storage, (unsigned)destination->vk.samples,
+                   regions[r].destination.aspectMask, regions[r].extent.width,
+                   regions[r].extent.height, source == destination);
    if (!ps5vk_image_transfer_check(cmd_buffer, source, destination, what, true))
       return;
    const uint32_t after_words =
@@ -2436,6 +2460,13 @@ ps5vk_CmdCopyImageToBuffer2KHR(VkCommandBuffer commandBuffer,
    VK_FROM_HANDLE(ps5vk_cmd_buffer, cmd_buffer, commandBuffer);
    VK_FROM_HANDLE(ps5vk_image, source, pCopyImageToBufferInfo->srcImage);
    VK_FROM_HANDLE(ps5vk_buffer, buffer, pCopyImageToBufferInfo->dstBuffer);
+   if (source && pCopyImageToBufferInfo->regionCount)
+      ps5vk_census("readback fmt %d %ux%u storage %d aspect 0x%x region %ux%u",
+                   (int)source->vk.format, source->vk.extent.width, source->vk.extent.height,
+                   (int)source->storage,
+                   pCopyImageToBufferInfo->pRegions[0].imageSubresource.aspectMask,
+                   pCopyImageToBufferInfo->pRegions[0].imageExtent.width,
+                   pCopyImageToBufferInfo->pRegions[0].imageExtent.height);
    if (vk_command_buffer_has_error(&cmd_buffer->vk) || pCopyImageToBufferInfo->regionCount == 0 ||
        source == NULL || buffer == NULL)
       return;
@@ -2800,6 +2831,9 @@ ps5vk_CmdClearColorImage(VkCommandBuffer commandBuffer, VkImage _image, VkImageL
    (void)imageLayout;
    if (vk_command_buffer_has_error(&cmd_buffer->vk) || image == NULL || rangeCount == 0)
       return;
+   ps5vk_census("clear colour image fmt %d %ux%u storage %d mips %u", (int)image->vk.format,
+                image->vk.extent.width, image->vk.extent.height, (int)image->storage,
+                image->vk.mip_levels);
    if (image->vk.image_type != VK_IMAGE_TYPE_2D || vk_format_has_depth(image->vk.format) ||
        vk_format_has_stencil(image->vk.format)) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
@@ -2877,6 +2911,9 @@ ps5vk_CmdClearDepthStencilImage(VkCommandBuffer commandBuffer, VkImage _image,
    (void)imageLayout;
    if (vk_command_buffer_has_error(&cmd_buffer->vk) || rangeCount == 0)
       return;
+   if (image)
+      ps5vk_census("clear depth image fmt %d %ux%u aspect 0x%x", (int)image->vk.format,
+                   image->vk.extent.width, image->vk.extent.height, pRanges[0].aspectMask);
    /* An image the driver does not have is a refusal, not silence: the B2 device
     * test records every 1.0 command with the handles it has (none), which is
     * how a missing entry point or a crash in one shows up there. */

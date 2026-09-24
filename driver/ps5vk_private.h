@@ -1719,6 +1719,21 @@ sceKernelGetProcessTimeCounter(void);
 
 /* The PS5 kernel: libkernel on the console, host/ps5/ps5_host.cpp on the PC.
  * Declared as the test runner declares them (src/diagnostics.cpp). */
+/* The opt-in census of exercised paths (ps5vk_census.c). */
+extern bool ps5vk_census_enabled;
+/* Diagnostic A/B switches, from /app0/ps5vk-ab.txt beside the log flag. */
+#define PS5VK_AB_FULL_MASK (1u << 0)  /* every colour write mask is RGBA */
+#define PS5VK_AB_CONST_ZERO (1u << 1) /* blend constants read as 0 */
+#define PS5VK_AB_CONST_HALF (1u << 2) /* blend constants read as 0.5 */
+#define PS5VK_AB_NO_STENCIL (1u << 3) /* no stencil test */
+#define PS5VK_AB_NO_DEPTH (1u << 4)   /* no depth test */
+#define PS5VK_AB_TILE_PADDED (1u << 5) /* single-level padded textures are tiled */
+extern unsigned ps5vk_ab_flags;
+void
+ps5vk_ab_load(void);
+void
+ps5vk_census(const char *format, ...) __attribute__((format(printf, 1, 2)));
+
 /* sceAgcInit, once per process (ps5vk_device.c). */
 void
 ps5vk_agc_ensure(void);
