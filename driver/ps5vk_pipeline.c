@@ -44,6 +44,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "ps5_agc_package.h"
 #include "util/detect_os.h"
@@ -920,6 +921,58 @@ struct ps5vk_compile_call
  * two signals are caught: a real segmentation fault in the compiler is still a
  * crash this driver has to be fixed for, not something to report as the
  * shader's fault. */
+bool ps5vk_spirv_dump_enabled;
+
+/* The opt-in module dump (ps5vk_private.h): the module under its FNV-1a hash,
+ * written once, and its name on stdout before the compile starts, so the last
+ * name the console printed before a compiler fault is the module to replay. */
+static void
+ps5vk_dump_spirv(const uint32_t *words, size_t size, const PsbcCompileOptions *options)
+{
+   uint64_t hash = UINT64_C(0xcbf29ce484222325);
+   const unsigned char *const bytes = (const unsigned char *)words;
+   for (size_t at = 0; at < size; at++)
+      hash = (hash ^ bytes[at]) * UINT64_C(0x100000001b3);
+   char path[96];
+   mkdir("/app0/ps5vk-spirv", 0777);
+   snprintf(path, sizeof(path), "/app0/ps5vk-spirv/%016llx.spv", (unsigned long long)hash);
+   FILE *existing = fopen(path, "rb");
+   if (existing != NULL) {
+      fclose(existing);
+   } else {
+      FILE *file = fopen(path, "wb");
+      if (file != NULL) {
+         fwrite(words, 1, size, file);
+         fclose(file);
+      }
+   }
+   /* The options this compile ran with, beside the module, one file per
+    * distinct set: the entry point's name is written out and its pointer
+    * cleared, so the file is the plain data a host harness loads back. */
+   PsbcCompileOptions plain = *options;
+   char entrypoint[64] = {0};
+   if (plain.entrypoint != NULL)
+      snprintf(entrypoint, sizeof(entrypoint), "%s", plain.entrypoint);
+   plain.entrypoint = NULL;
+   uint64_t options_hash = hash;
+   const unsigned char *const option_bytes = (const unsigned char *)&plain;
+   for (size_t at = 0; at < sizeof(plain); at++)
+      options_hash = (options_hash ^ option_bytes[at]) * UINT64_C(0x100000001b3);
+   snprintf(path, sizeof(path), "/app0/ps5vk-spirv/%016llx-%016llx.opts",
+            (unsigned long long)hash, (unsigned long long)options_hash);
+   FILE *options_file = fopen(path, "wb");
+   if (options_file != NULL) {
+      fwrite(entrypoint, 1, sizeof(entrypoint), options_file);
+      fwrite(&plain, 1, sizeof(plain), options_file);
+      fclose(options_file);
+   }
+   /* On stderr as well: a title's stdout may reach no log (RetroArch's does
+    * not), and the trace file is where the last name before a fault is read. */
+   fprintf(stderr, "[ps5vk] compile module %016llx options %016llx (%zu bytes)\n",
+           (unsigned long long)hash, (unsigned long long)options_hash, size);
+   fflush(stderr);
+}
+
 static sigjmp_buf ps5vk_compile_jump;
 static volatile sig_atomic_t ps5vk_compile_raised;
 
@@ -942,6 +995,12 @@ ps5vk_compile_worker(void *argument)
    printf("[ps5vk] compile start: nir=%p words=%p\n", (void *)call->nir,
           (const void *)call->words);
    fflush(stdout);
+   if (ps5vk_spirv_dump_enabled && call->words != NULL)
+      ps5vk_dump_spirv(call->words, call->size, call->options);
+   else if (ps5vk_spirv_dump_enabled) {
+      fprintf(stderr, "[ps5vk] compile internal NIR shader (stage %d)\n", (int)call->options->stage);
+      fflush(stderr);
+   }
    struct sigaction action, saved_abort, saved_trap;
    memset(&action, 0, sizeof(action));
    action.sa_handler = ps5vk_compile_signal;
@@ -1750,10 +1809,19 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
       info->pInputAssemblyState != NULL ? info->pInputAssemblyState->topology
                                         : VK_PRIMITIVE_TOPOLOGY_MAX_ENUM;
    const uint32_t link_primitive_type = ps5vk_link_primitive_type(topology);
-   if (link_primitive_type == 0 || info->pInputAssemblyState->primitiveRestartEnable)
+   /* R58: primitive restart is core Vulkan 1.0 for strips, and what Dolphin
+    * draws its strips with. Restart on a list is
+    * VK_EXT_primitive_topology_list_restart, which is not exposed. */
+   const bool primitive_restart = link_primitive_type != 0 &&
+                                  info->pInputAssemblyState->primitiveRestartEnable;
+   if (link_primitive_type == 0 ||
+       (primitive_restart && link_primitive_type != PS5VK_LINK_TRIANGLE_STRIP))
       return vk_errorf(device, VK_ERROR_UNKNOWN,
-                       "only triangle lists, triangle strips and line lists without primitive "
-                       "restart are supported");
+                       "only triangle lists, triangle strips and line lists are supported, and "
+                       "primitive restart only on triangle strips (topology %d, restart %d)",
+                       (int)topology,
+                       info->pInputAssemblyState ? (int)info->pInputAssemblyState->primitiveRestartEnable
+                                                 : 0);
    /* R8: a line list is core Vulkan 1.0 with no feature bit gating it -- the class
     * of the strip -- and it brings the state a triangle does not have: its width
     * and its rasterization rules. The width is the one this device advertises,
@@ -1856,6 +1924,7 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
    /* What the link is told: the topology's own DI_PT value, so the hardware
     * alternates a strip's winding the way the specification defines it. */
    pipeline->link_primitive_type = link_primitive_type;
+   pipeline->primitive_restart = primitive_restart;
    /* The colour write masks a draw programs, as one word: Vulkan gives **each**
     * attachment its own VkPipelineColorBlendAttachmentState::colorWriteMask, and
     * the two registers that carry them are per-target nibble fields --

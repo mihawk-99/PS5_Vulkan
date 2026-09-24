@@ -1,0 +1,12 @@
+{"schema":2,"event":"run_start","pid":300}
+{"schema":2,"event":"hex","probe":"r58_restart","field":"drawn","value":"0xff40ff80"}
+{"schema":2,"event":"hex","probe":"r58_restart","field":"gap","value":"0xffff8040"}
+{"schema":2,"event":"value","probe":"r58_restart","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r58_restart","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r58_restart","status":"PASS","result":0,"detail":"strip with primitive restart"}
+{"schema":2,"event":"hex","probe":"r58_restart","field":"drawn","value":"0xff40ff80"}
+{"schema":2,"event":"hex","probe":"r58_restart","field":"gap","value":"0xffff8040"}
+{"schema":2,"event":"value","probe":"r58_restart","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r58_restart","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r58_restart","status":"PASS","result":0,"detail":"strip joined by degenerate triangles"}
+{"schema":2,"event":"value","probe":"r58_restart","field":"passed_frames","value":2}

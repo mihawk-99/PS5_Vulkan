@@ -493,7 +493,9 @@ run_test() {
         c4_rtt) replay=c4-rtt
             compare=(compare-run "$rtt_run" "$dump" --test c4-rtt) ;;
         c5_depth) replay=c5-depth
-            compare=(compare-run "$depth_run" "$dump" --test c5-depth) ;;
+            # The one-layer 2D array view's frame is the PC test's own
+            # (vk_c5_depth_test.c), the last submission.
+            compare=(compare-run "$depth_run" "$dump" --test c5-depth --uncaptured-tail 1) ;;
         # The stencil test's own words are the gate, not a stream comparison:
         # the replay places the console run's pipelines in creation order and
         # this program draws the first of its four frames.

@@ -331,6 +331,30 @@ main(void)
       }
       if (status != PS5VK_TRIANGLE_IN_FLIGHT)
          ps5vk_triangle_finish(&triangle);
+
+      /* The same frame through a one-layer 2D array view of the depth image,
+       * which is how Dolphin's EFB renders. It is the same memory and the same
+       * registers as the 2D view, so the draw records the depth words the 2D
+       * frame's checks above hold. Its own program, after the golden frame. */
+      struct ps5vk_triangle_input array_input = input;
+      array_input.depth_array_view = true;
+      struct ps5vk_triangle array_triangle = {0};
+      enum ps5vk_triangle_status array_status = ps5vk_triangle_create(&array_triangle, &array_input);
+      if (array_status == PS5VK_TRIANGLE_OK)
+         array_status = ps5vk_triangle_draw(&array_triangle, PS5VK_TRIANGLE_ONE_DRAW);
+      check(array_status == PS5VK_TRIANGLE_OK,
+            "a one-layer 2D array depth view renders and signals its fence");
+#if defined(PS5VK_TEST_DIRECT)
+      if (array_status == PS5VK_TRIANGLE_OK) {
+         ps5vk_debug_stage chunks[8] = {{0}};
+         const uint32_t chunk_count = ps5vk_debug_table_chunks(array_triangle.device, chunks, 8);
+         check(table_holds(chunks, chunk_count, 0x010, 0x80000183u) &&
+                  table_holds(chunks, chunk_count, 0x200, 0x16u),
+               "the array view's draw records the 2D view's DB_Z_INFO and DB_DEPTH_CONTROL");
+      }
+#endif
+      if (array_status != PS5VK_TRIANGLE_IN_FLIGHT)
+         ps5vk_triangle_finish(&array_triangle);
    }
 
    free(vertex);

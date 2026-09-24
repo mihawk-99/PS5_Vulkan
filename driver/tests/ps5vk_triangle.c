@@ -2656,7 +2656,7 @@ create_depth_attachment(struct ps5vk_triangle *triangle, VkPhysicalDevice physic
    const VkImageViewCreateInfo view_info = {
       .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
       .image = triangle->depth_image,
-      .viewType = VK_IMAGE_VIEW_TYPE_2D,
+      .viewType = triangle->depth_array_view ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D,
       .format = triangle->depth_format,
       .subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1},
    };
@@ -2724,6 +2724,7 @@ create_pipeline(struct ps5vk_triangle *triangle, uint32_t index,
       .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
       .topology = input->primitive_topology != 0 ? input->primitive_topology
                                                  : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+      .primitiveRestartEnable = input->primitive_restart,
    };
    const VkViewport viewport = {0.0f, 0.0f, PS5VK_TRIANGLE_WIDTH, PS5VK_TRIANGLE_HEIGHT, 0.0f, 1.0f};
    /* The pipeline's scissor: the caller's rect when it declares one (V0-query's
@@ -2865,6 +2866,7 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
    /* Phase C5's depth attachment, and what a frame's passes do with it. */
    triangle->depth = input->depth;
    triangle->depth_clear_image = triangle->depth && input->depth_clear_image;
+   triangle->depth_array_view = triangle->depth && input->depth_array_view;
    triangle->depth_load_op = triangle->depth && input->depth_load_op == VK_ATTACHMENT_LOAD_OP_CLEAR
                                 ? VK_ATTACHMENT_LOAD_OP_CLEAR
                                 : VK_ATTACHMENT_LOAD_OP_DONT_CARE;

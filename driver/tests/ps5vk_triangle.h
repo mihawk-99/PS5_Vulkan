@@ -215,6 +215,9 @@ struct ps5vk_triangle_input {
     * rather than clear for the command's own write to be what the frame's depth
     * test reads. */
    bool depth_clear_image;
+   /* The depth attachment's view as a one-layer 2D array rather than a 2D view,
+    * which is how Dolphin's EFB renders (its targets are layered for stereo). */
+   bool depth_array_view;
    /* How many instances the frame's draws run (Phase C2); 0 means one. */
    uint32_t instance_count;
    /* Whether each draw sets the viewport and scissor itself, with the same
@@ -583,6 +586,9 @@ struct ps5vk_triangle_input {
     * hardware alternating the winding, so a strip of a quad's four vertices is the
     * two triangles a list of its six indices draws (R6 of the port's requests). */
    VkPrimitiveTopology primitive_topology;
+   /* R58: the pipelines' primitiveRestartEnable, for an indexed strip whose
+    * all-ones index starts a new strip. */
+   bool primitive_restart;
    /* The fragment stage's specialization constants, or NULL for a stage that takes
     * the shader's own defaults. The values are the pipeline's, so two frames of the
     * same module with different entries here have to draw what those values say
@@ -918,6 +924,8 @@ struct ps5vk_triangle {
    /* Whether the frame records vkCmdClearDepthStencilImage over the depth
     * image before its pass (input.depth_clear_image). */
    bool depth_clear_image;
+   /* The input field of the same name. */
+   bool depth_array_view;
    /* Phase V0-query: the scissor the pipelines declare, and the occlusion query
     * each frame's draws are recorded inside (VK_NULL_HANDLE for none). */
    bool use_scissor;

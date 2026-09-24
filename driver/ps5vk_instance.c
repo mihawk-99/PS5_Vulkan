@@ -100,6 +100,11 @@ ps5vk_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
       ps5vk_census_enabled = true;
       ps5vk_ab_load();
    }
+   FILE *dump_flag = fopen("/app0/ps5vk-spirv-dump.txt", "rb");
+   if (dump_flag != NULL) {
+      fclose(dump_flag);
+      ps5vk_spirv_dump_enabled = true;
+   }
 
    /* The one AGC initialisation, while the application's own code calls
     * (ps5vk_agc_ensure). */

@@ -783,7 +783,7 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
            depth_view->format != VK_FORMAT_D16_UNORM &&
            depth_view->format != VK_FORMAT_D24_UNORM_S8_UINT &&
            depth_view->format != VK_FORMAT_D32_SFLOAT_S8_UINT) ||
-          depth_view->view_type != VK_IMAGE_VIEW_TYPE_2D ||
+          !ps5vk_single_layer_2d_view(depth_view) ||
           depth_image->vk.mip_levels != 1 || depth_image->vk.array_layers != 1 ||
           (depth_image->vk.samples != VK_SAMPLE_COUNT_1_BIT &&
            depth_image->vk.samples != VK_SAMPLE_COUNT_4_BIT) ||
@@ -797,7 +797,14 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
                                  "depth attachments other than a single-level tiled 2D "
                                  "D32_SFLOAT, D16_UNORM, D24_UNORM_S8_UINT or "
                                  "D32_SFLOAT_S8_UINT image, one or four samples, are not "
-                                 "supported yet");
+                                 "supported yet (this one: format %d, view type %d with %u "
+                                 "layers, %u levels, %u image layers, %u samples, storage %d, "
+                                 "stencil offset %llu)",
+                                 (int)depth_view->format, (int)depth_view->view_type,
+                                 depth_view->layer_count, depth_image->vk.mip_levels,
+                                 depth_image->vk.array_layers, (unsigned)depth_image->vk.samples,
+                                 (int)depth_image->storage,
+                                 (unsigned long long)depth_image->stencil_offset);
          return;
       }
       depth_samples = depth_image->vk.samples;
@@ -2456,6 +2463,25 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
    if (instance_count != 1 && encoded &&
        sceAgcDcbSetNumInstances(&command, instance_count) == NULL)
       encoded = false;
+   /* R58: an indexed draw through a restart pipeline is bracketed by
+    * VGT_MULTI_PRIM_IB_RESET_EN (uconfig 0x3092c, record 0x24b), on before it and
+    * back to the hardware's 0 after, with VGT_MULTI_PRIM_IB_RESET_INDX (context
+    * 0x2840c, record 0x103) all ones: from GFX9 only the index type's own bits
+    * are compared, so the one value serves 16- and 32-bit indices (RADV's
+    * radv_emit_primitive_restart). Every other draw records exactly the words it
+    * did before R58, which is what every golden holds. */
+   const bool restart = indexed != NULL && pipeline->primitive_restart;
+   struct ps5vk_agc_register *restart_tables = NULL;
+   if (restart && encoded) {
+      restart_tables = ps5vk_cmd_buffer_table(cmd_buffer, 3 * sizeof(*restart_tables), 8);
+      if (!restart_tables)
+         return;
+      restart_tables[0] = (struct ps5vk_agc_register){.offset = 0x24b, .value = 1};
+      restart_tables[1] = (struct ps5vk_agc_register){.offset = 0x24b, .value = 0};
+      restart_tables[2] = (struct ps5vk_agc_register){.offset = 0x103, .value = 0xffffffffu};
+      encoded = sceAgcDcbSetUcRegistersIndirect(&command, &restart_tables[0], 1) &&
+                sceAgcDcbSetCxRegistersIndirect(&command, &restart_tables[2], 1);
+   }
    if (indexed == NULL) {
       encoded = encoded && sceAgcDcbDrawIndexAuto(&command, draw_count, PS5VK_DRAW_AUTO_INDEX);
    } else {
@@ -2472,6 +2498,8 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
                 sceAgcDcbDrawIndex(&command, draw_count,
                                    (void *)(uintptr_t)index_address, 0) != NULL;
    }
+   if (restart && encoded)
+      encoded = sceAgcDcbSetUcRegistersIndirect(&command, &restart_tables[1], 1) != NULL;
    /* The draw has read the count; the next draw runs one instance unless it
     * asks for its own. */
    if (instance_count != 1 && encoded && sceAgcDcbSetNumInstances(&command, 1) == NULL)

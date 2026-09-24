@@ -21545,6 +21545,109 @@ void run_vulkan_lod_bias_frames(const TestContext &test, TestOutcome &outcome) n
     log.number("r26_lod_bias", "passed_frames", passed);
 }
 
+// R58: primitive restart on an indexed triangle strip (Dolphin draws its strips
+// with it). Two quads, left and right with a gap between them, drawn as one strip
+// {0,1,2,3, 0xffff, 4,5,6,7}: with restart the gap is the clear colour. The
+// control draws the same quads as one strip joined by degenerate triangles
+// {0,1,2,3,3,4,4,5,6,7} through a pipeline without restart, which must be the
+// same image. Every pixel is compared.
+void run_vulkan_restart_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8},
+    };
+    constexpr float kRed = kSquareRed / 255.0f;
+    // Each quad in a strip's order; the left one spans x -1 to -0.2 and the
+    // right one 0.2 to 1, so pixel columns 0-1535 and 2304-3839 are drawn.
+    static const float vertices[8][6] = {
+        {-1.0f, -1.0f, kRed, 1.0f, 0.25f, 1.0f}, {-1.0f, 1.0f, kRed, 1.0f, 0.25f, 1.0f},
+        {-0.2f, -1.0f, kRed, 1.0f, 0.25f, 1.0f}, {-0.2f, 1.0f, kRed, 1.0f, 0.25f, 1.0f},
+        {0.2f, -1.0f, kRed, 1.0f, 0.25f, 1.0f},  {0.2f, 1.0f, kRed, 1.0f, 0.25f, 1.0f},
+        {1.0f, -1.0f, kRed, 1.0f, 0.25f, 1.0f},  {1.0f, 1.0f, kRed, 1.0f, 0.25f, 1.0f},
+    };
+    static const std::uint16_t restarted[9] = {0, 1, 2, 3, 0xffff, 4, 5, 6, 7};
+    static const std::uint16_t joined[10] = {0, 1, 2, 3, 3, 4, 4, 5, 6, 7};
+    struct Frame
+    {
+        const char *name;
+        const std::uint16_t *indices;
+        std::uint32_t count;
+        bool restart;
+    };
+    static const Frame kFrames[] = {
+        {"strip with primitive restart", restarted, 9, true},
+        {"strip joined by degenerate triangles", joined, 10, false},
+    };
+    const std::uint32_t clear_word = 0xffff8040u;
+    unsigned passed = 0;
+    for (const Frame &frame : kFrames)
+    {
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], g_strip_shaders, log))
+            return;
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        input.shaders[0] = g_strip_shaders;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = vertices;
+        input.vertex_count = 8;
+        input.vertex_stride = kVertexStride;
+        input.index_data = frame.indices;
+        input.index_count = frame.count;
+        input.attribute_count = 2;
+        input.attributes[0] = attributes[0];
+        input.attributes[1] = attributes[1];
+        input.primitive_topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+        input.primitive_restart = frame.restart;
+        ps5vk_triangle triangle{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            return;
+        }
+        const bool drew = status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes;
+        if (test.capture && drew)
+        {
+            log_driver_submission(triangle.device, frame.name, log);
+            log_driver_stages(triangle.device, log);
+        }
+        if (drew)
+        {
+            const FramebufferView view{static_cast<const std::uint32_t *>(triangle.target),
+                                       kTiledRgba8Layout};
+            const std::uint32_t drawn = view.word(kOutputWidth / 8, kOutputHeight / 2);
+            unsigned mismatches = drawn == clear_word ? 1u : 0u;
+            for (unsigned y = 0; y < kOutputHeight; ++y)
+                for (unsigned x = 0; x < kOutputWidth; ++x)
+                {
+                    const bool quad = x < 1536 || x >= 2304;
+                    mismatches += view.word(x, y) != (quad ? drawn : clear_word);
+                }
+            log.hex("r58_restart", "drawn", drawn);
+            log.hex("r58_restart", "gap", view.word(kOutputWidth / 2, kOutputHeight / 2));
+            log.number("r58_restart", "mismatches", mismatches);
+            log.number("r58_restart", "pixels", kOutputWidth * kOutputHeight);
+            log.event("r58_restart", mismatches == 0 ? "PASS" : "FAIL", mismatches == 0 ? 0 : -1,
+                      frame.name);
+            passed += mismatches == 0;
+        }
+        ps5vk_triangle_finish(&triangle);
+        if (status != PS5VK_TRIANGLE_OK)
+            break;
+    }
+    outcome.command_built = passed != 0;
+    outcome.passed = passed == std::size(kFrames);
+    log.number("r58_restart", "passed_frames", passed);
+}
+
 // R57: clamp-to-border and the three border colour types (Dolphin's static
 // samplers clamp to a border). A full-screen quad samples a 4x4 texture of one
 // colour with coordinates from -0.5 to 1.5, so the middle quarter of the frame is
@@ -24989,6 +25092,7 @@ constexpr RunnerTest kRunnerTests[] = {
     {"r27-menu-alpha", "r27-menu-alpha", run_vulkan_menu_alpha_frames},
     {"r26-lod-bias", "r26-lod-bias", run_vulkan_lod_bias_frames},
     {"r57-border", "c7-mip", run_vulkan_border_frames},
+    {"r58-restart", "m3-vertex", run_vulkan_restart_frames},
     {"r18-padded-mips", "c7-mip", run_vulkan_padded_mip_frames},
     {"r18-mip-addresses", "c7-mip", run_vulkan_padded_mip_addresses},
     {"r18-small-mips", "c7-mip", run_vulkan_small_padded_mips},

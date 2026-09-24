@@ -1,0 +1,7 @@
+hold 1
+capture
+m2-solid
+r58-restart
+v0-strip
+r57-border
+exit

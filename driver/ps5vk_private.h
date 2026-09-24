@@ -1353,6 +1353,9 @@ struct ps5vk_pipeline {
     * is why the topology reaches the link rather than a draw-time register
     * (ps5vk_pipeline.c, R6 and R8 of the port's requests). */
    uint32_t link_primitive_type;
+   /* R58: an indexed strip's primitive restart (primitiveRestartEnable), which
+    * the draw brackets with VGT_MULTI_PRIM_IB_RESET_EN (ps5vk_draw.c). */
+   bool primitive_restart;
    /* The pipeline's colour write mask: 0xf for RGBA, 0 for a pipeline that
     * writes no colour (vk_meta's depth clear is one). A draw whose pipeline
     * writes none carries CB_TARGET_MASK and CB_SHADER_MASK zeroed in its table,
@@ -1758,6 +1761,10 @@ sceKernelGetProcessTimeCounter(void);
  * Declared as the test runner declares them (src/diagnostics.cpp). */
 /* The opt-in census of exercised paths (ps5vk_census.c). */
 extern bool ps5vk_census_enabled;
+/* Opt-in (/app0/ps5vk-spirv-dump.txt, read at instance creation): every SPIR-V
+ * module is written to /app0/ps5vk-spirv/ before it is compiled, and named on
+ * stdout, so a compiler fault can be reproduced on the host (ps5vk_pipeline.c). */
+extern bool ps5vk_spirv_dump_enabled;
 struct ps5vk_cmd_buffer;
 void
 ps5vk_cmd_buffer_release_push_sets(struct ps5vk_cmd_buffer *cmd_buffer);

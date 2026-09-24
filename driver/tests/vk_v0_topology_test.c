@@ -151,7 +151,13 @@ struct frame {
     * DRAW_INDEX_AUTO, indices for a DRAW_INDEX_2. */
    uint32_t draw_count;
    VkCullModeFlags cull;
+   /* R58: the pipeline's primitiveRestartEnable, for an indexed strip. */
+   bool restart;
 };
+
+/* R58: one quad, restarted: the strip's four vertices, the all-ones index, and
+ * the same four again. */
+static const uint16_t kRestarted[9] = {0, 1, 2, 3, 0xffff, 0, 1, 2, 3};
 
 static void
 draw_frame(const struct frame *frame, const uint32_t *vertex, size_t vertex_bytes,
@@ -170,7 +176,8 @@ draw_frame(const struct frame *frame, const uint32_t *vertex, size_t vertex_byte
    input.vertex_count = frame->vertex_count;
    input.vertex_stride = TOPOLOGY_STRIDE;
    input.index_data = frame->indices;
-   input.index_count = frame->indices != NULL ? 6u : 0u;
+   input.index_count = frame->indices == NULL ? 0u : frame->restart ? 9u : 6u;
+   input.primitive_restart = frame->restart;
    input.attribute_count = 2;
    input.attributes[0] = (VkVertexInputAttributeDescription){0, 0, VK_FORMAT_R32G32_SFLOAT, 0};
    input.attributes[1] =
@@ -233,6 +240,25 @@ draw_frame(const struct frame *frame, const uint32_t *vertex, size_t vertex_byte
             check(!found, what);
          }
       }
+      /* R58: a restart draw loads VGT_MULTI_PRIM_IB_RESET_INDX (context record
+       * 0x103) as all ones and brackets itself with the uconfig
+       * VGT_MULTI_PRIM_IB_RESET_EN record (0x24b), off last; no other draw
+       * records either. */
+      {
+         uint32_t index = 0;
+         const bool index_found = recorded(triangle.device, 0x103, &index);
+         uint32_t enable = UINT32_MAX;
+         const bool enable_found = recorded(triangle.device, 0x24b, &enable);
+         if (frame->restart) {
+            snprintf(what, sizeof(what),
+                     "%s: the reset index is all ones and the enable is put back to 0",
+                     frame->name);
+            check(index_found && index == 0xffffffffu && enable_found && enable == 0u, what);
+         } else {
+            snprintf(what, sizeof(what), "%s: records no primitive restart state", frame->name);
+            check(!index_found && !enable_found, what);
+         }
+      }
       if (line) {
          uint32_t value = UINT32_MAX;
          const bool found = recorded(triangle.device, 0x205, &value);
@@ -276,6 +302,8 @@ main(void)
       {"two lines", VK_PRIMITIVE_TOPOLOGY_LINE_LIST, 4, NULL, 2, 4, VK_CULL_MODE_NONE},
       {"two lines, both faces culled", VK_PRIMITIVE_TOPOLOGY_LINE_LIST, 4, NULL, 2, 4,
        VK_CULL_MODE_FRONT_AND_BACK},
+      {"quad, indexed strip with primitive restart", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, 4,
+       kRestarted, 6, 9, VK_CULL_MODE_NONE, true},
    };
    for (size_t at = 0; vertex && pixel && at < sizeof(kFrames) / sizeof(kFrames[0]); at++)
       draw_frame(&kFrames[at], vertex, vertex_bytes, pixel, pixel_bytes);
