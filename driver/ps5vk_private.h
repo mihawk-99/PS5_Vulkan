@@ -899,6 +899,11 @@ struct ps5vk_sampler {
     * ps5vk_image.c). The value the M3 texture canary's descriptor carried is
     * clamp-to-edge on all three axes. */
    uint32_t address_word;
+   /* Word 11: the border colour a clamp-to-border axis returns, as the sampler
+    * word's BORDER_COLOR_TYPE (bits 30-31: transparent black 0, opaque black 1,
+    * opaque white 2 -- Mesa's public ac_build_sampler_descriptor). Zero, the
+    * canary's transparent black, is every sampler before R57. */
+   uint32_t border_word;
 };
 
 /* SPIR-V's header, OpMemoryModel, OpCapability, OpEntryPoint, OpExecutionMode

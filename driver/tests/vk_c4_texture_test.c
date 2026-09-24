@@ -265,6 +265,43 @@ main(void)
                   !ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, NAN) &&
                   !ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, INFINITY),
                "out-of-range and non-finite sampler biases are refused");
+         /* R57: clamp-to-border with each of Vulkan 1.0's border colours. The
+          * float and integer forms of a colour share its BORDER_COLOR_TYPE. */
+         static const VkBorderColor borders[] = {
+            VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK, VK_BORDER_COLOR_INT_TRANSPARENT_BLACK,
+            VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK,      VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+            VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE,      VK_BORDER_COLOR_INT_OPAQUE_WHITE,
+         };
+         bool bordered = true;
+         for (unsigned index = 0; index < sizeof(borders) / sizeof(borders[0]); index++)
+            bordered = bordered && ps5vk_triangle_set_texture_border(
+                                      &triangle, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+                                      borders[index]);
+         check(bordered, "clamp-to-border samplers with each core border colour create");
+         /* The last one, opaque white, drawn: word 8 carries clamp-border (6)
+          * on U and V and clamp-to-edge (2) on W, and word 11 three words on
+          * carries BORDER_COLOR_TYPE 2 in bits 30-31. */
+         const bool border_drawn =
+            bordered && ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW) ==
+                           PS5VK_TRIANGLE_OK;
+         check(border_drawn, "a frame samples through the clamp-to-border sampler");
+#if defined(PS5VK_TEST_DIRECT)
+         if (border_drawn) {
+            ps5vk_debug_table tables[4] = {{0}};
+            const uint32_t count = ps5vk_debug_descriptor_tables(triangle.device, tables, 4);
+            bool encoded = false;
+            for (uint32_t table = 0; table < count; table++)
+               for (size_t word = 0; word + 3 < tables[table].bytes / sizeof(uint32_t); word++)
+                  encoded = encoded || ((tables[table].words[word] & 0x1ffu) == 0xb6u &&
+                                        tables[table].words[word + 3] >> 30 == 2u);
+            check(encoded, "the descriptor carries clamp-border on U and V and an opaque white "
+                           "border type");
+         }
+#endif
+         check(!ps5vk_triangle_set_texture_border(
+                  &triangle, VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE,
+                  VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK),
+               "mirror-clamp-to-edge, an extension that is not exposed, is still refused");
       }
       if (status != PS5VK_TRIANGLE_IN_FLIGHT)
          ps5vk_triangle_finish(&triangle);

@@ -1338,11 +1338,10 @@ ps5vk_CreateSampler_untimed(VkDevice _device, const VkSamplerCreateInfo *pCreate
          clamp = 2;
          break;
       case VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER:
-         return vk_errorf(device, VK_ERROR_UNKNOWN,
-                          "sampler axis %u clamps to a border colour, and word 11 of the "
-                          "descriptor is the transparent black no probe has varied; a border "
-                          "mode needs a runner probe (docs/M5_REFERENCE.md, C4)",
-                          axis);
+         /* SQ_TEX_CLAMP_BORDER, the same field's 6 (RADV's radv_tex_wrap), with
+          * the colour in word 11 below; R57's runner probe samples all three. */
+         clamp = 6;
+         break;
       case VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE:
          return vk_errorf(device, VK_ERROR_UNKNOWN,
                           "sampler axis %u asks mirror-clamp-to-edge, which is "
@@ -1422,13 +1421,31 @@ ps5vk_CreateSampler_untimed(VkDevice _device, const VkSamplerCreateInfo *pCreate
       return vk_errorf(device, VK_ERROR_UNKNOWN,
                        "comparison sampling is not the none the texture canary ran; shadow "
                        "samplers need a runner probe (docs/M5_REFERENCE.md, C4)");
-   /* The canary's descriptor keeps word 11 zero, the border colour
-    * VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK encodes. */
-   if (info->borderColor != VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK)
+   /* Word 11's BORDER_COLOR_TYPE, bits 30-31, for the six core border colours:
+    * transparent black 0 (the canary's zero word), opaque black 1, opaque white
+    * 2, the float and integer forms sharing a type as in RADV's
+    * radv_tex_bordercolor. R57's runner probe samples all three types. Custom
+    * border colours are VK_EXT_custom_border_color, which is not exposed. */
+   uint32_t border_type;
+   switch (info->borderColor) {
+   case VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK:
+   case VK_BORDER_COLOR_INT_TRANSPARENT_BLACK:
+      border_type = 0;
+      break;
+   case VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK:
+   case VK_BORDER_COLOR_INT_OPAQUE_BLACK:
+      border_type = 1;
+      break;
+   case VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE:
+   case VK_BORDER_COLOR_INT_OPAQUE_WHITE:
+      border_type = 2;
+      break;
+   default:
       return vk_errorf(device, VK_ERROR_UNKNOWN,
-                       "sampler border colour %d is not the transparent black the texture canary "
-                       "ran; another border colour needs a runner probe "
-                       "(docs/M5_REFERENCE.md, C4)", (int)info->borderColor);
+                       "sampler border colour %d is not one of Vulkan 1.0's six; custom border "
+                       "colours are VK_EXT_custom_border_color, which is not exposed",
+                       (int)info->borderColor);
+   }
    if (info->unnormalizedCoordinates)
       return vk_errorf(device, VK_ERROR_UNKNOWN,
                        "unnormalized coordinates are not the normalized ones the texture canary "
@@ -1471,6 +1488,7 @@ ps5vk_CreateSampler_untimed(VkDevice _device, const VkSamplerCreateInfo *pCreate
                            (aniso_ratio << 21);
    if (aniso_ratio != 0)
       sampler->lod_word |= (aniso_ratio + 6u) << 24;
+   sampler->border_word = border_type << 30;
 
    *pSampler = ps5vk_sampler_to_handle(sampler);
    return VK_SUCCESS;

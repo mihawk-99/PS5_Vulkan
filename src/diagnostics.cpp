@@ -21545,6 +21545,134 @@ void run_vulkan_lod_bias_frames(const TestContext &test, TestOutcome &outcome) n
     log.number("r26_lod_bias", "passed_frames", passed);
 }
 
+// R57: clamp-to-border and the three border colour types (Dolphin's static
+// samplers clamp to a border). A full-screen quad samples a 4x4 texture of one
+// colour with coordinates from -0.5 to 1.5, so the middle quarter of the frame is
+// the texture and everything around it is the border. Frame 0 is the
+// clamp-to-edge control (the texture everywhere); then transparent black, opaque
+// black, and opaque white in its float and integer forms. Every pixel is checked.
+void run_vulkan_border_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const float vertices[] = {-1, -1, -0.5f, -0.5f, 1,  -1, 1.5f,  -0.5f,
+                              1,  1,  1.5f,  1.5f,  -1, 1,  -0.5f, 1.5f};
+    const std::uint16_t indices[] = {0, 1, 2, 2, 3, 0};
+    std::array<std::uint8_t, 4 * 4 * 4> texels{};
+    for (unsigned texel = 0; texel < 16; ++texel)
+    {
+        texels[texel * 4 + 0] = 0x40;
+        texels[texel * 4 + 1] = 0x80;
+        texels[texel * 4 + 2] = 0xc0;
+        texels[texel * 4 + 3] = 0xff;
+    }
+    constexpr std::uint32_t kTexture = 0xffc08040u;
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    input.vertex_data = vertices;
+    input.vertex_count = 4;
+    input.vertex_stride = 16;
+    input.index_data = indices;
+    input.index_count = 6;
+    input.attribute_count = 2;
+    input.attributes[0] = {0, 0, VK_FORMAT_R32G32_SFLOAT, 0};
+    input.attributes[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, 8};
+    input.texture_data = texels.data();
+    input.texture_width = input.texture_height = 4;
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    ps5vk_triangle triangle{};
+    auto status = ps5vk_triangle_create(&triangle, &input);
+    struct Frame
+    {
+        VkSamplerAddressMode mode;
+        VkBorderColor border;
+        std::uint32_t outside;
+        const char *name;
+    };
+    constexpr Frame frames[] = {
+        {VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK, kTexture,
+         "clamp to edge"},
+        {VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER, VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+         0x00000000u, "border transparent black"},
+        {VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER, VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK, 0xff000000u,
+         "border opaque black"},
+        {VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER, VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE, 0xffffffffu,
+         "border opaque white"},
+        {VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER, VK_BORDER_COLOR_INT_OPAQUE_WHITE, 0xffffffffu,
+         "border integer opaque white"},
+    };
+    unsigned passed = 0;
+    for (unsigned frame = 0; frame < std::size(frames) && status == PS5VK_TRIANGLE_OK; ++frame)
+    {
+        if (!ps5vk_triangle_set_texture_border(&triangle, frames[frame].mode, frames[frame].border))
+        {
+            status = PS5VK_TRIANGLE_FAILED;
+            break;
+        }
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (status != PS5VK_TRIANGLE_OK || triangle.target_bytes < kFramebufferBytes)
+            break;
+        char label[64]{};
+        std::snprintf(label, sizeof(label), "%s frame %u", frames[frame].name, frame);
+        if (test.capture)
+            log_driver_submission(triangle.device, label, log);
+        const FramebufferView view{static_cast<const std::uint32_t *>(triangle.target),
+                                   kTiledRgba8Layout};
+        // A pixel whose texel coordinate lies within the reported subtexel
+        // precision (subTexelPrecisionBits 4: 1/16 texel) of the texture's edge
+        // may read either side, as Vulkan allows; the first console run found
+        // exactly that ring (5998 pixels, 0.001 texel from the edge) and every
+        // other pixel exact. Those pixels are counted, not compared.
+        const auto near_edge = [](double coordinate)
+        {
+            const double texel = coordinate * 4.0;
+            return std::fabs(texel) < 1.0 / 16 || std::fabs(texel - 4.0) < 1.0 / 16;
+        };
+        unsigned mismatches = 0;
+        unsigned skipped = 0;
+        for (unsigned y = 0; y < kOutputHeight; ++y)
+        {
+            const double v = -0.5 + 2.0 * (y + 0.5) / kOutputHeight;
+            for (unsigned x = 0; x < kOutputWidth; ++x)
+            {
+                const double u = -0.5 + 2.0 * (x + 0.5) / kOutputWidth;
+                const bool inside = u >= 0.0 && u < 1.0 && v >= 0.0 && v < 1.0;
+                if (frames[frame].outside != kTexture && (near_edge(u) || near_edge(v)))
+                {
+                    ++skipped;
+                    continue;
+                }
+                mismatches += view.word(x, y) != (inside ? kTexture : frames[frame].outside);
+            }
+        }
+        log.number("r57_border", "edge_pixels_skipped", skipped);
+        log.number("r57_border", "frame", frame);
+        log.hex("r57_border", "expected_outside", frames[frame].outside);
+        log.hex("r57_border", "corner", view.word(0, 0));
+        log.hex("r57_border", "center", view.word(kOutputWidth / 2, kOutputHeight / 2));
+        log.number("r57_border", "mismatches", mismatches);
+        log.number("r57_border", "pixels", kOutputWidth * kOutputHeight);
+        log.event("r57_border", mismatches == 0 ? "PASS" : "FAIL", mismatches == 0 ? 0 : -1, label);
+        passed += mismatches == 0;
+    }
+    outcome.command_built = status != PS5VK_TRIANGLE_FAILED;
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        outcome.stage_in_use = true;
+        return;
+    }
+    if (test.capture && status == PS5VK_TRIANGLE_OK)
+        log_driver_stages(triangle.device, log);
+    ps5vk_triangle_finish(&triangle);
+    outcome.passed = passed == std::size(frames);
+    log.number("r57_border", "passed_frames", passed);
+}
+
 // R18: the exact non-power-of-two mip chain named by vkQuake PID 210.
 void run_vulkan_padded_mips(const TestContext &test, TestOutcome &outcome, bool addresses = false,
                             unsigned width = 224, unsigned height = 195,
@@ -24860,6 +24988,7 @@ constexpr RunnerTest kRunnerTests[] = {
     {"r27-menu-alpha-raw", "r27-menu-alpha", run_vulkan_menu_alpha_raw},
     {"r27-menu-alpha", "r27-menu-alpha", run_vulkan_menu_alpha_frames},
     {"r26-lod-bias", "r26-lod-bias", run_vulkan_lod_bias_frames},
+    {"r57-border", "c7-mip", run_vulkan_border_frames},
     {"r18-padded-mips", "c7-mip", run_vulkan_padded_mip_frames},
     {"r18-mip-addresses", "c7-mip", run_vulkan_padded_mip_addresses},
     {"r18-small-mips", "c7-mip", run_vulkan_small_padded_mips},

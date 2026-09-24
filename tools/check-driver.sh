@@ -486,9 +486,10 @@ run_test() {
         c3_quad) replay=c3-quad
             compare=(compare-run "$quad_run" "$dump" --test c3-quad) ;;
         c4_texture) replay=c4-texture
-            # The swizzled view's frame is the PC test's own (vk_c4_texture_test.c):
-            # the runner's c4-texture case draws the first two.
-            compare=(compare-run "$texture_run" "$dump" --test c4-texture --uncaptured-tail 1) ;;
+            # The clamp-to-border frame (R57) and the swizzled view's frame are the
+            # PC test's own (vk_c4_texture_test.c), the last two submissions: the
+            # runner's c4-texture case draws the first two.
+            compare=(compare-run "$texture_run" "$dump" --test c4-texture --uncaptured-tail 2) ;;
         c4_rtt) replay=c4-rtt
             compare=(compare-run "$rtt_run" "$dump" --test c4-rtt) ;;
         c5_depth) replay=c5-depth

@@ -1072,6 +1072,14 @@ bool
 ps5vk_triangle_set_texture_lod_bias(struct ps5vk_triangle *triangle, float min_lod, float max_lod,
                                   float bias);
 
+/* R57: a single-level nearest sampler for the texture's set whose U and V axes
+ * use address mode `mode` (W stays clamp-to-edge) with border colour `border`,
+ * which is how a frame samples outside [0, 1]. Returns false when no sampler
+ * could be created. */
+bool
+ps5vk_triangle_set_texture_border(struct ps5vk_triangle *triangle, VkSamplerAddressMode mode,
+                                  VkBorderColor border);
+
 /* Phase C7: points the texture's set at a view of one level of the chain, level
  * 0 being the image itself. Returns false when no view could be created. */
 bool

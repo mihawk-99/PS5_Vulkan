@@ -1854,6 +1854,48 @@ ps5vk_triangle_set_texture_lod_bias(struct ps5vk_triangle *triangle, float min_l
    return true;
 }
 
+bool
+ps5vk_triangle_set_texture_border(struct ps5vk_triangle *triangle, VkSamplerAddressMode mode,
+                                  VkBorderColor border)
+{
+   if (triangle->texture_view == VK_NULL_HANDLE || triangle->texture_set == VK_NULL_HANDLE)
+      return false;
+   const VkSamplerCreateInfo info = {
+      .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+      .magFilter = VK_FILTER_NEAREST,
+      .minFilter = VK_FILTER_NEAREST,
+      .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+      .addressModeU = mode,
+      .addressModeV = mode,
+      .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+      .borderColor = border,
+   };
+   VkSampler sampler = VK_NULL_HANDLE;
+   char detail[64];
+   snprintf(detail, sizeof(detail), "address mode %d border %d", (int)mode, (int)border);
+   if (!step(triangle, "create_border_sampler",
+             CALL(triangle, CreateSampler)(triangle->device, &info, NULL, &sampler), detail))
+      return false;
+   if (triangle->texture_lod_sampler != VK_NULL_HANDLE)
+      CALL(triangle, DestroySampler)(triangle->device, triangle->texture_lod_sampler, NULL);
+   triangle->texture_lod_sampler = sampler;
+   const VkDescriptorImageInfo image_info = {
+      .sampler = sampler,
+      .imageView = triangle->texture_view,
+      .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+   };
+   const VkWriteDescriptorSet write = {
+      .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+      .dstSet = triangle->texture_set,
+      .dstBinding = 0,
+      .descriptorCount = 1,
+      .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      .pImageInfo = &image_info,
+   };
+   CALL(triangle, UpdateDescriptorSets)(triangle->device, 1, &write, 0, NULL);
+   return true;
+}
+
 VkQueryPool
 ps5vk_triangle_create_timestamp_pool(struct ps5vk_triangle *triangle, uint32_t count)
 {

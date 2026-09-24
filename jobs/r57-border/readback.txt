@@ -1,0 +1,42 @@
+{"schema":2,"event":"run_start","pid":290}
+{"schema":2,"event":"value","probe":"r57_border","field":"edge_pixels_skipped","value":0}
+{"schema":2,"event":"value","probe":"r57_border","field":"frame","value":0}
+{"schema":2,"event":"hex","probe":"r57_border","field":"expected_outside","value":"0xffc08040"}
+{"schema":2,"event":"hex","probe":"r57_border","field":"corner","value":"0xffc08040"}
+{"schema":2,"event":"hex","probe":"r57_border","field":"center","value":"0xffc08040"}
+{"schema":2,"event":"value","probe":"r57_border","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r57_border","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r57_border","status":"PASS","result":0,"detail":"clamp to edge frame 0"}
+{"schema":2,"event":"value","probe":"r57_border","field":"edge_pixels_skipped","value":512160}
+{"schema":2,"event":"value","probe":"r57_border","field":"frame","value":1}
+{"schema":2,"event":"hex","probe":"r57_border","field":"expected_outside","value":"0x0"}
+{"schema":2,"event":"hex","probe":"r57_border","field":"corner","value":"0x0"}
+{"schema":2,"event":"hex","probe":"r57_border","field":"center","value":"0xffc08040"}
+{"schema":2,"event":"value","probe":"r57_border","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r57_border","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r57_border","status":"PASS","result":0,"detail":"border transparent black frame 1"}
+{"schema":2,"event":"value","probe":"r57_border","field":"edge_pixels_skipped","value":512160}
+{"schema":2,"event":"value","probe":"r57_border","field":"frame","value":2}
+{"schema":2,"event":"hex","probe":"r57_border","field":"expected_outside","value":"0xff000000"}
+{"schema":2,"event":"hex","probe":"r57_border","field":"corner","value":"0xff000000"}
+{"schema":2,"event":"hex","probe":"r57_border","field":"center","value":"0xffc08040"}
+{"schema":2,"event":"value","probe":"r57_border","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r57_border","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r57_border","status":"PASS","result":0,"detail":"border opaque black frame 2"}
+{"schema":2,"event":"value","probe":"r57_border","field":"edge_pixels_skipped","value":512160}
+{"schema":2,"event":"value","probe":"r57_border","field":"frame","value":3}
+{"schema":2,"event":"hex","probe":"r57_border","field":"expected_outside","value":"0xffffffff"}
+{"schema":2,"event":"hex","probe":"r57_border","field":"corner","value":"0xffffffff"}
+{"schema":2,"event":"hex","probe":"r57_border","field":"center","value":"0xffc08040"}
+{"schema":2,"event":"value","probe":"r57_border","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r57_border","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r57_border","status":"PASS","result":0,"detail":"border opaque white frame 3"}
+{"schema":2,"event":"value","probe":"r57_border","field":"edge_pixels_skipped","value":512160}
+{"schema":2,"event":"value","probe":"r57_border","field":"frame","value":4}
+{"schema":2,"event":"hex","probe":"r57_border","field":"expected_outside","value":"0xffffffff"}
+{"schema":2,"event":"hex","probe":"r57_border","field":"corner","value":"0xffffffff"}
+{"schema":2,"event":"hex","probe":"r57_border","field":"center","value":"0xffc08040"}
+{"schema":2,"event":"value","probe":"r57_border","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r57_border","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r57_border","status":"PASS","result":0,"detail":"border integer opaque white frame 4"}
+{"schema":2,"event":"value","probe":"r57_border","field":"passed_frames","value":5}
