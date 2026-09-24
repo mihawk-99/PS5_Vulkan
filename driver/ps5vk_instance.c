@@ -90,6 +90,19 @@ ps5vk_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
       return vk_error(NULL, result);
    }
 
+   /* Opt-in: /app0/ps5vk-log.txt turns Mesa's messages on, so every refusal the
+    * driver explains with vk_errorf reaches stderr (the title's trace). Off by
+    * default, because a refusal repeated per draw would then log per frame. */
+   FILE *log_flag = fopen("/app0/ps5vk-log.txt", "rb");
+   if (log_flag != NULL) {
+      fclose(log_flag);
+      instance->vk.enable_debug_logging = true;
+   }
+
+   /* The one AGC initialisation, while the application's own code calls
+    * (ps5vk_agc_ensure). */
+   ps5vk_agc_ensure();
+
    instance->vk.physical_devices.enumerate = ps5vk_enumerate_physical_devices;
    instance->vk.physical_devices.destroy = ps5vk_physical_device_destroy;
 

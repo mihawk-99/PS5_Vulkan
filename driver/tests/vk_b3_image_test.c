@@ -144,8 +144,10 @@ check_formats(void)
        * sampled and transferred but no storage image. */
       {VK_FORMAT_R16_UNORM, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
        VK_IMAGE_USAGE_STORAGE_BIT, 0, "storage usage on a format without the bit"},
+      /* Mutable format is supported for same-size views (PPSSPP's presentation
+       * images); a sparse image is still refused. */
       {VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
-       VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT, "a create flag"},
+       VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_CREATE_SPARSE_BINDING_BIT, "a create flag"},
       /* The stencil formats are attachments and nothing else: the sampled usage
        * they do not claim is the refusal (round 12). */
       {VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,

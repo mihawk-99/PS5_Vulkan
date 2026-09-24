@@ -723,9 +723,14 @@ ps5vk_format_usage(const struct ps5vk_format *format)
     * the usage is created and its input-attachment uses are still refused where a
     * descriptor or a subpass would need them. Refusing the *image* refused
     * something the specification requires the driver to allow. */
+   /* The same table: TRANSIENT_ATTACHMENT needs an attachment feature too. It
+    * is a hint that the contents need not outlive a render pass (lazily
+    * allocated memory, which this device does not report); the image is
+    * created with ordinary memory and behaves as an attachment always does.
+    * PPSSPP's depth buffers ask for it. */
    if (features & (VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
                    VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT))
-      usage |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+      usage |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
    return usage;
 }
 
@@ -736,10 +741,14 @@ ps5vk_image_supported(VkFormat format, VkImageType type, VkImageTiling tiling,
                       VkImageUsageFlags usage, VkImageCreateFlags flags)
 {
    const struct ps5vk_format *const entry = ps5vk_find_format(format);
-   /* The one flag any probe has used is cube compatibility (D1): a 2D image
-    * whose layers are whole cubes, which is what makes a cube view and the
-    * descriptor's TYPE 11 possible. Every other flag is still unsupported. */
-   const VkImageCreateFlags allowed = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+   /* Cube compatibility (D1): a 2D image whose layers are whole cubes, which is
+    * what makes a cube view and the descriptor's TYPE 11 possible. Mutable
+    * format: views may name another format of the same texel size, whose
+    * surface layout is the same one (the tile mode follows the texel size);
+    * a view of another size is refused where it is created. PPSSPP's libretro
+    * presentation images ask for it. Every other flag is still unsupported. */
+   const VkImageCreateFlags allowed =
+      VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT | VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
    /* A stencil-bearing format is the single-level, single-layer attachment its
     * plane layout covers (ps5vk_image_stencil_plane): a chain or an array would
     * need AddrLib's per-level and per-layer plane bases, and an image with no
@@ -748,8 +757,21 @@ ps5vk_image_supported(VkFormat format, VkImageType type, VkImageTiling tiling,
    if (vk_format_has_stencil(format) &&
        (usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) == 0)
       return false;
+   /* A depth/stencil attachment may carry transfer and sampled usage its format
+    * does not report: PPSSPP creates every framebuffer's depth image with both
+    * whatever the format says, and uses neither unless a game copies or samples
+    * depth. The image is created; a copy or a sample of it is refused by name
+    * where it is recorded, which is where a use would be wrong. The format's
+    * reported features stay truthful, so an application that asks first is
+    * told no. */
+   VkImageUsageFlags tolerated = 0;
+   if (entry && vk_format_has_stencil(format) &&
+       (usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0)
+      tolerated = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                  VK_IMAGE_USAGE_SAMPLED_BIT;
    return entry && type == VK_IMAGE_TYPE_2D && tiling == VK_IMAGE_TILING_OPTIMAL &&
-          (flags & ~allowed) == 0 && usage != 0 && (usage & ~ps5vk_format_usage(entry)) == 0;
+          (flags & ~allowed) == 0 && usage != 0 &&
+          (usage & ~(ps5vk_format_usage(entry) | tolerated)) == 0;
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -1196,6 +1218,16 @@ ps5vk_CreateImageView_untimed(VkDevice _device, const VkImageViewCreateInfo *pCr
                       const VkAllocationCallbacks *pAllocator, VkImageView *pView)
 {
    VK_FROM_HANDLE(ps5vk_device, device, _device);
+   VK_FROM_HANDLE(vk_image, image, pCreateInfo->image);
+   /* A view in another format reinterprets the image's texels, which this
+    * driver does only when they are the same size (a mutable-format image,
+    * ps5vk_image_supported): the surface layout then stays the image's. */
+   if (pCreateInfo->format != image->format &&
+       vk_format_get_blocksize(pCreateInfo->format) != vk_format_get_blocksize(image->format))
+      return vk_errorf(device, VK_ERROR_FORMAT_NOT_SUPPORTED,
+                       "an image view in format %d of an image in format %d: texels of another "
+                       "size are not supported",
+                       (int)pCreateInfo->format, (int)image->format);
    struct vk_image_view *const view =
       vk_image_view_create(&device->vk, pCreateInfo, pAllocator, sizeof(*view));
    if (!view)

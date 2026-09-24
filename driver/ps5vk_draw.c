@@ -88,9 +88,6 @@
 #define PS5VK_CB_NUMBER_UINT 4u
 #define PS5VK_CB_NUMBER_SINT 5u
 #define PS5VK_CB_NUMBER_SRGB 6u
-/* The target size the hardware rendered (M2-M4, B4, B5). */
-#define PS5VK_TARGET_WIDTH 3840
-#define PS5VK_TARGET_HEIGHT 2160
 #define PS5VK_VIEWPORT_REGISTER_COUNT 15
 /* CB_BLEND0_CONTROL (0x1e0) and CB_COLOR_CONTROL (0x202), the two registers a
  * blending draw adds to its colour target's: the word the pipeline's
@@ -684,6 +681,11 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
     * size of the target, tiled like a colour attachment (Phase C5, the M4 step 1
     * canary's layout). */
    VkExtent2D extent = {0, 0};
+   /* The depth attachment's own extent: DB_DEPTH_SIZE_XY is what the depth
+    * surface's addressing derives its pitch from, so it is the depth image's
+    * size even where the colour attachment is smaller (Vulkan allows any
+    * attachment larger than the render area). */
+   VkExtent2D depth_target_extent = {0, 0};
    void *depth_address = NULL;
    /* A stencil-bearing depth attachment's stencil plane, or zero: the plane the
     * depth registers enable DB_STENCIL_INFO for (ps5vk_depth_registers). */
@@ -715,15 +717,13 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
           (depth_image->vk.samples != VK_SAMPLE_COUNT_1_BIT &&
            depth_image->vk.samples != VK_SAMPLE_COUNT_4_BIT) ||
           depth_image->storage != PS5VK_IMAGE_STORAGE_TILES ||
-          depth_extent.width != PS5VK_TARGET_WIDTH ||
-          depth_extent.height != PS5VK_TARGET_HEIGHT ||
           /* A stencil-bearing attachment must have the plane the image placed
            * for it: a format that has one and a shape that did not derive one is
            * a refusal, not a draw into whatever follows the depth surface. */
           (vk_format_has_stencil(depth_view->format) &&
            (depth_image->stencil_offset == 0 || depth_image->vk.samples != VK_SAMPLE_COUNT_1_BIT))) {
          ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                                 "depth attachments other than a single-level 3840x2160 "
+                                 "depth attachments other than a single-level tiled 2D "
                                  "D32_SFLOAT, D16_UNORM, D24_UNORM_S8_UINT or "
                                  "D32_SFLOAT_S8_UINT image, one or four samples, are not "
                                  "supported yet");
@@ -736,6 +736,7 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
       depth_attachment_image = depth_image;
       depth_format = depth_view->format;
       extent = depth_extent;
+      depth_target_extent = depth_extent;
    }
    /* The stencil attachment of a combined depth/stencil rendering: the same
     * image the depth attachment names, which is what Vulkan asks of an image
@@ -831,11 +832,9 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
           image->vk.array_layers != 1 ||
           (image->vk.samples != VK_SAMPLE_COUNT_1_BIT &&
            image->vk.samples != VK_SAMPLE_COUNT_4_BIT) ||
-          image->storage != PS5VK_IMAGE_STORAGE_TILES ||
-          image->vk.extent.width != PS5VK_TARGET_WIDTH ||
-          image->vk.extent.height != PS5VK_TARGET_HEIGHT) {
+          image->storage != PS5VK_IMAGE_STORAGE_TILES) {
          ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                                 "colour attachment %u is not a 3840x2160 one-mip one-layer "
+                                 "colour attachment %u is not a one-mip one-layer "
                                  "tiled 2D view this driver has a colour format word for",
                                  at);
          return;
@@ -892,8 +891,9 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
    cmd_buffer->stencil_bound = cmd_buffer->depth_bound &&
                                vk_format_has_stencil(depth_format) && stencil_address != 0;
    if (cmd_buffer->depth_bound)
-      ps5vk_depth_registers((uint64_t)(uintptr_t)depth_address, stencil_address, extent,
-                            depth_samples, depth_format, cmd_buffer->depth_registers);
+      ps5vk_depth_registers((uint64_t)(uintptr_t)depth_address, stencil_address,
+                            depth_target_extent, depth_samples, depth_format,
+                            cmd_buffer->depth_registers);
    cmd_buffer->target_extent = extent;
    cmd_buffer->rendering = true;
 
@@ -1182,8 +1182,14 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
    const uint32_t texel_bytes = vk_format_get_blocksize(image->vk.format);
    const uint32_t pitch_texels = align(image->vk.extent.width * texel_bytes, 256) / texel_bytes;
    const bool padded = !tiled && pitch_texels != image->vk.extent.width;
-   if (padded && (view->view_type != VK_IMAGE_VIEW_TYPE_2D || image->vk.array_layers != 1 ||
-                  pitch_texels > 0x4000)) {
+   /* A one-layer 2D_ARRAY view of a one-layer image is a 2D view to the
+    * descriptor (sampled->array below is the layer count's), so word 4 is free
+    * for the pitch as it is for a 2D view. PPSSPP samples every texture through
+    * such a view. */
+   const bool single_2d = image->vk.array_layers == 1 &&
+                          (view->view_type == VK_IMAGE_VIEW_TYPE_2D ||
+                           (view->view_type == VK_IMAGE_VIEW_TYPE_2D_ARRAY && view->layer_count == 1));
+   if (padded && (!single_2d || pitch_texels > 0x4000)) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                               "set %u binding %u needs a padded texture pitch of %u texels; "
                               "image %ux%ux%u format %u mips %u layers %u view %u name %s; "
@@ -1224,8 +1230,7 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
    sampled->address = image->address;
    sampled->extent = (VkExtent2D){image->vk.extent.width, image->vk.extent.height};
    sampled->format_word = entry->image_format << 20;
-   sampled->pitch_texels = !tiled && view->view_type == VK_IMAGE_VIEW_TYPE_2D &&
-                           image->vk.array_layers == 1 && (padded || image->vk.mip_levels > 1)
+   sampled->pitch_texels = !tiled && single_2d && (padded || image->vk.mip_levels > 1)
                               ? pitch_texels : 0;
    sampled->dst_sel = entry->dst_sel;
    /* Only a combined image sampler carries a sampler's words; a storage image's
@@ -1649,10 +1654,12 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
                                              (unsigned)set, (unsigned)binding->binding);
                      return false;
                   }
-                  if (written->size == 0 ||
-                      ((written->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||
-                        written->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC) &&
-                       written->size % binding->stride != 0)) {
+                  /* A uniform range that is not a whole number of 16-byte
+                   * records is rounded up to one when the descriptor is written:
+                   * a shader reads only the members its block declares, and
+                   * uniform buffers have no bounds checking to preserve (PPSSPP
+                   * binds a 4-byte block). */
+                  if (written->size == 0) {
                      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                                              "set %u binding %u covers %" PRIu64 " bytes, not a whole "
                                              "number of %u-byte elements", (unsigned)set, (unsigned)binding->binding,
@@ -1795,7 +1802,7 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
                }
                descriptor[0] = (uint32_t)address;
                descriptor[1] = (uint32_t)(address >> 32) | (binding->stride << 16);
-               descriptor[2] = (uint32_t)(written->size / binding->stride);
+               descriptor[2] = (uint32_t)DIV_ROUND_UP(written->size, binding->stride);
                descriptor[3] = PS5VK_UNIFORM_BUFFER_FLAGS;
             }
          }
@@ -1973,6 +1980,11 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
       if (pipeline->vertex_bindings[binding].used)
          binding_count = binding + 1;
    }
+   /* A pipeline may declare bindings its compiled vertex stage reads nothing
+    * from (PPSSPP's do, for attributes the shader leaves unused): with no table
+    * in the stage's metadata there is nothing to fetch, and no table to build. */
+   if (!metadata[PS5VK_PIPELINE_STAGE_VERTEX]->vertex_buffer_table_valid)
+      binding_count = 0;
    if (binding_count != 0) {
       const size_t table_bytes = binding_count * PS5VK_VERTEX_RECORD_WORDS * sizeof(uint32_t);
       uint32_t *const table =
@@ -2163,10 +2175,17 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
                                              .value = pipeline->blend_control};
       blend[1] = (struct ps5vk_agc_register){.offset = PS5VK_COLOR_CONTROL_REGISTER,
                                              .value = PS5VK_COLOR_CONTROL_WORD};
-      for (uint32_t index = 0; index < blend_constant_count; index++)
+      /* A pipeline with dynamic blend constants takes the four the command
+       * buffer holds (vkCmdSetBlendConstants), as floats' bits. */
+      const float *const dynamic_constants = cmd_buffer->vk.dynamic_graphics_state.cb.blend_constants;
+      for (uint32_t index = 0; index < blend_constant_count; index++) {
+         uint32_t value = pipeline->blend_constants[index];
+         if (pipeline->blend_constants_dynamic)
+            memcpy(&value, &dynamic_constants[index], sizeof(value));
          blend[PS5VK_BLEND_REGISTER_COUNT + index] =
             (struct ps5vk_agc_register){.offset = (uint16_t)(PS5VK_BLEND_CONSTANT_REGISTER + index),
-                                        .value = pipeline->blend_constants[index]};
+                                        .value = value};
+      }
    }
    if (raster_count != 0) {
       struct ps5vk_agc_register *raster =

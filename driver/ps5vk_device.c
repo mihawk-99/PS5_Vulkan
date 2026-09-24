@@ -30,6 +30,23 @@ static void
 ps5vk_agc_init(void)
 {
    ps5vk_agc_result = sceAgcInit(PS5VK_AGC_VERSION);
+   if (ps5vk_agc_result != 0) {
+      char line[96];
+      snprintf(line, sizeof(line), "[ps5vk] sceAgcInit(%d) failed: 0x%08x\n", PS5VK_AGC_VERSION,
+               (unsigned)ps5vk_agc_result);
+      fputs(line, stderr);
+   }
+}
+
+/* AGC is initialised once per process, and from the application's own code:
+ * vkCreateInstance calls this too. A libretro core that negotiates the device
+ * (PPSSPP) makes the first vkCreateDevice from its own code, which a title loads
+ * into anonymous memory, and sceAgcInit made there failed where the same call
+ * from the frontend succeeds. */
+void
+ps5vk_agc_ensure(void)
+{
+   call_once(&ps5vk_agc_once, ps5vk_agc_init);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL
@@ -39,7 +56,7 @@ ps5vk_CreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreateInfo *pC
    VK_FROM_HANDLE(ps5vk_physical_device, physical_device, physicalDevice);
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
 
-   call_once(&ps5vk_agc_once, ps5vk_agc_init);
+   ps5vk_agc_ensure();
    if (ps5vk_agc_result != 0)
       return vk_errorf(physical_device, VK_ERROR_INITIALIZATION_FAILED,
                        "sceAgcInit(%d) failed: 0x%08x", PS5VK_AGC_VERSION,

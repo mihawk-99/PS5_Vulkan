@@ -1356,6 +1356,10 @@ struct ps5vk_pipeline {
    bool blend_uses_constants;
    /* The four blend constants as the registers hold them, the float's bits. */
    uint32_t blend_constants[4];
+   /* The pipeline declares VK_DYNAMIC_STATE_BLEND_CONSTANTS: the draw takes the
+    * four from vkCmdSetBlendConstants (the command buffer's dynamic state)
+    * instead of blend_constants. */
+   bool blend_constants_dynamic;
    /* R1: the pipeline's PA_SU_SC_MODE_CNTL word (0x205), from cullMode and
     * frontFace, or 0 for a pipeline that culls nothing -- which is the state
     * every draw before R1 ran with, so a draw that does not cull records no
@@ -1715,6 +1719,10 @@ sceKernelGetProcessTimeCounter(void);
 
 /* The PS5 kernel: libkernel on the console, host/ps5/ps5_host.cpp on the PC.
  * Declared as the test runner declares them (src/diagnostics.cpp). */
+/* sceAgcInit, once per process (ps5vk_device.c). */
+void
+ps5vk_agc_ensure(void);
+
 int64_t
 sceKernelGetDirectMemorySize(void);
 

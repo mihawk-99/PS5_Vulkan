@@ -1489,9 +1489,10 @@ ps5vk_draw_refusal(const VkGraphicsPipelineCreateInfo *info,
           state != VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK &&
           state != VK_DYNAMIC_STATE_STENCIL_WRITE_MASK &&
           state != VK_DYNAMIC_STATE_STENCIL_REFERENCE &&
-          state != VK_DYNAMIC_STATE_DEPTH_BIAS)
+          state != VK_DYNAMIC_STATE_DEPTH_BIAS &&
+          state != VK_DYNAMIC_STATE_BLEND_CONSTANTS)
          return "drawing with dynamic state other than the viewport, scissor, depth and stencil "
-                "state, and the depth bias (VK_DYNAMIC_STATE_DEPTH_BIAS), is not supported yet";
+                "state, the depth bias and the blend constants is not supported yet";
    }
    /* The depth bias's clamp, refused in the static form here and in the dynamic
     * form at the draw (ps5vk_draw.c): Vulkan clamps the bias to
@@ -1552,12 +1553,10 @@ ps5vk_draw_refusal(const VkGraphicsPipelineCreateInfo *info,
             return "drawing with blending into an integer colour attachment, which the "
                    "hardware bypasses and Vulkan forbids";
       }
-      /* 0xf writes every channel and 0 writes none, which is what vk_meta's
-       * depth clear asks for; anything between them would need the target's
-       * channel order. */
-      if (blend->pAttachments[index].colorWriteMask != 0xf &&
-          blend->pAttachments[index].colorWriteMask != 0)
-         return "drawing with colour write masks other than RGBA or none is not supported yet";
+      /* Every write mask draws: CB_TARGET_MASK and CB_SHADER_MASK take the
+       * pipeline's per-attachment nibbles (colour_write_mask, ps5vk_draw.c), in
+       * Vulkan's R, G, B, A order, as RADV programs them -- the component swap of
+       * a BGRA target is applied after the mask. */
    }
    if (!viewport || viewport->viewportCount != 1 || viewport->scissorCount != 1)
       return "drawing without one viewport and one scissor is not supported yet";
@@ -1940,6 +1939,8 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
    pipeline->line_rasterizer = line;
    pipeline->blend_control = blend_control;
    pipeline->blend_uses_constants = blend_uses_constants;
+   pipeline->blend_constants_dynamic =
+      blend_uses_constants && ps5vk_state_is_dynamic(info, VK_DYNAMIC_STATE_BLEND_CONSTANTS);
    for (unsigned index = 0; index < 4; index++) {
       const float value = blend_uses_constants ? info->pColorBlendState->blendConstants[index] : 0.0f;
       memcpy(&pipeline->blend_constants[index], &value, sizeof(value));
