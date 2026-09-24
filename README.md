@@ -142,13 +142,24 @@ toolchain.
   store that comes with them — are refused by name rather than compiled into a
   fault. The vkQuake port uses compatible paths instead of requiring these
   kernels to compile.
+- ✅ **A hardware-rendered emulator works.** PPSSPP, as a RetroArch core, runs
+  God of War: Ghost of Sparta and Yu-Gi-Oh! GX Tag Force at 10× internal
+  resolution (4800×2720) with 16× anisotropy, at full speed on a 120 Hz display.
+  What it needed is general driver work, not PPSSPP cases: every draw restates
+  the context registers that persist between draws (target mask, blend, colour
+  control, clip and rasteriser mode); a device-local memory type beside the
+  host-visible one; a three-image FIFO swapchain whose present does not wait for
+  the flip; GPU blits and copies through Mesa's `vk_meta` with push descriptors;
+  component mapping composed onto the view's swizzle; and CPU image copies that
+  evict and fence once per copy rather than per row. Loading a save state went
+  from 21.5 s to 61 ms.
 - ❌ **A title cannot load a graphics module at run time.** Every `dlopen` and
   `sceKernelLoadStartModule` of a repository-built `.so` is refused by the
   console, so the driver is delivered *linked* into the title; the untried route
   is publishing application exports from the module writer.
 - ❌ **Occlusion queries are coarse.** One `ZPASS_DONE` count is 16 samples, so
   `occlusionQueryPrecise` is reported false.
-- ❌ **Broad application acceptance is incomplete.** RetroArch and vkQuake run;
+- ❌ **Broad application acceptance is incomplete.** RetroArch, PPSSPP and vkQuake run;
   vkQuake still needs systematic movement/fire/save/load, all-map and long-soak
   acceptance. Other applications remain separate compatibility work.
 
@@ -167,7 +178,7 @@ toolchain.
 | — | The console SIGFPE at `jobs/aco-min` | ✅ fixed: the runner's sampled-format table ran a row it never filled in |
 | Rung 1.1–1.4 | One commit a rung, each gated by a CTS subset | ❌ |
 | Phase E1 | CTS-style semantic validation against the advertised set | ❌ recipe written |
-| Real applications | RetroArch ✅ · vkQuake at up to 120 FPS at 4K, acceptance 🔄 · other frontends ❌ | 🔄 in progress |
+| Real applications | RetroArch ✅ · PPSSPP (hardware-rendered) ✅ tested games · vkQuake at up to 120 FPS at 4K, acceptance 🔄 · other frontends ❌ | 🔄 in progress |
 
 ## vkQuake and performance
 
@@ -214,14 +225,9 @@ nothing ([R47](jobs/r47-shipped-cache/)).
 
 ### What is still open
 
-- **Refresh reporting.** The WSI still reports one 3840×2160 mode at 60 Hz, FIFO,
-  although the display runs up to 120 Hz under VRR. The driver should enumerate
-  VideoOut's modes, select 120 Hz at swapchain creation when the title's metadata
-  allows it (the port sets `attribute3 0x80040`), restore it at close, keep the
-  60 Hz fallback and report what it measured.
-- **Colour targets are 3840×2160 only.** Rendering into a smaller colour image is
-  refused by name, which is why vkQuake's raster warp path (`r_waterwarpcompute 0`)
-  cannot run; its default compute path does.
+- **MSAA beyond 4×, with render pass 2.** PPSSPP's MSAA needs
+  `VK_KHR_create_renderpass2` and depth/stencil resolve, and 8 samples; neither
+  is offered yet.
 - **Multiple colour attachments** are still refused (`v0-mrt`), and that case
   stops the test runner.
 
@@ -290,7 +296,7 @@ repository because a console run measured them.
 | Device API version | 1.0 |
 | Extensions | `VK_KHR_surface`, `VK_KHR_display`, `VK_KHR_swapchain`, `VK_KHR_get_physical_device_properties2`, `VK_EXT_debug_report`, `VK_EXT_debug_utils` |
 | Queue families | 1 |
-| Features | `robustBufferAccess` |
+| Features | `robustBufferAccess`, `samplerAnisotropy` (16×) |
 | Limits | 97 of 106 required limits compared against the specification, 0 missing |
 | Formats | 179 required: 58 reported, 0 missing a required feature, 55 conditional only |
 | Commands | 137 required 1.0 commands: 90 driver, 47 runtime, 0 refused, 0 gap |

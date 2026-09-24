@@ -64,6 +64,21 @@ ps5vk_direct_mapping_destroy(struct ps5vk_direct_mapping *mapping)
 }
 
 void
+ps5vk_evict_cpu_lines(const void *address, size_t bytes)
+{
+   const uintptr_t first = (uintptr_t)address & ~(uintptr_t)63;
+   const uintptr_t end = (uintptr_t)address + bytes;
+   for (uintptr_t at = first; at < end; at += 64)
+      _mm_clflush((const void *)at);
+}
+
+void
+ps5vk_cpu_fence(void)
+{
+   _mm_mfence();
+}
+
+void
 ps5vk_flush_cpu_cache(const void *address, size_t bytes)
 {
    const char *const begin = address;

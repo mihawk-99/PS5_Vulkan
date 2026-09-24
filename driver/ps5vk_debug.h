@@ -157,6 +157,15 @@ ps5vk_debug_submission_steps(VkDevice device, ps5vk_debug_stage *steps, uint32_t
 int
 ps5vk_debug_video_handle(VkDevice device);
 
+/* The driver's profiling clock, in nanoseconds (the TSC), and when the last
+ * vkQueuePresentKHR on that clock presented, 0 before any: an application's
+ * own sampling profiler reads them to tell a stalled frame from a running one
+ * without a hook in its frame loop. */
+uint64_t
+ps5vk_debug_now_ns(void);
+uint64_t
+ps5vk_debug_last_present_ns(void);
+
 /* Whether VideoOut outlives the swapchain that presents through it. Retained, a
  * destroyed swapchain leaves its last presented image on screen and the output
  * in its mode, and the next swapchain -- on any device -- presents through the

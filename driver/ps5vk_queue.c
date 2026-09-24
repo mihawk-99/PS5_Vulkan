@@ -2146,8 +2146,12 @@ ps5vk_rgba8_texel_bytes(VkFormat format)
  * has (the console run that found this is in docs/HARDWARE_FINDINGS.md). The
  * run length is the largest span the map keeps contiguous (PS5VK_TILED_RUN_BYTES,
  * ps5vk_private.h). */
-void
-ps5vk_image_copy_execute(const struct ps5vk_memory_copy *copy)
+/* One pass of an image copy over its runs: evicting the source lines it will
+ * read, copying, or evicting the destination lines it wrote. */
+enum ps5vk_copy_pass { PS5VK_COPY_EVICT_SOURCE, PS5VK_COPY_RUNS, PS5VK_COPY_EVICT_DESTINATION };
+
+static void
+ps5vk_image_copy_pass(const struct ps5vk_memory_copy *copy, enum ps5vk_copy_pass pass)
 {
    const uint32_t texel_bytes = copy->source_texel_bytes;
    const uint64_t row_bytes = (uint64_t)copy->width * texel_bytes;
@@ -2156,16 +2160,27 @@ ps5vk_image_copy_execute(const struct ps5vk_memory_copy *copy)
    const uint64_t run_texels = !copy->source_side.tiled && !copy->destination_side.tiled
                                   ? MAX2(copy->width, 1u)
                                   : MAX2(PS5VK_TILED_RUN_BYTES / texel_bytes, 1u);
+   uint64_t last_line = UINT64_MAX;
    for (uint32_t row = 0; row < copy->height; row++) {
       for (uint64_t at = 0; at < row_bytes; at += run_texels * texel_bytes) {
          const uint64_t run_bytes = MIN2(row_bytes - at, run_texels * texel_bytes);
-         const uint64_t source_at = ps5vk_image_copy_address(
-            &copy->source_side, copy->source_x + (int32_t)(at / texel_bytes),
-            copy->source_y + (int32_t)row, texel_bytes, 0);
-         const uint64_t destination_at = ps5vk_image_copy_address(
-            &copy->destination_side, copy->destination_x + (uint32_t)(at / texel_bytes),
-            copy->destination_y + row, texel_bytes, 0);
-         ps5vk_flush_cpu_cache((const void *)(uintptr_t)source_at, (size_t)run_bytes);
+         const uint64_t source_at = pass == PS5VK_COPY_EVICT_DESTINATION ? 0 :
+            ps5vk_image_copy_address(&copy->source_side,
+                                     copy->source_x + (int32_t)(at / texel_bytes),
+                                     copy->source_y + (int32_t)row, texel_bytes, 0);
+         const uint64_t destination_at = pass == PS5VK_COPY_EVICT_SOURCE ? 0 :
+            ps5vk_image_copy_address(&copy->destination_side,
+                                     copy->destination_x + (uint32_t)(at / texel_bytes),
+                                     copy->destination_y + row, texel_bytes, 0);
+         if (pass != PS5VK_COPY_RUNS) {
+            /* A run lies within one line unless it is a whole row; a run in
+             * the line just evicted needs no second eviction. */
+            const uint64_t address = pass == PS5VK_COPY_EVICT_SOURCE ? source_at : destination_at;
+            if (run_bytes > 64 || (address >> 6) != last_line)
+               ps5vk_evict_cpu_lines((const void *)(uintptr_t)address, (size_t)run_bytes);
+            last_line = (address + run_bytes - 1) >> 6;
+            continue;
+         }
          if (copy->reverse_texel_bytes == 0) {
             memcpy((void *)(uintptr_t)destination_at, (const void *)(uintptr_t)source_at,
                    (size_t)run_bytes);
@@ -2179,9 +2194,23 @@ ps5vk_image_copy_execute(const struct ps5vk_memory_copy *copy)
                   to[texel + byte] = from[texel + texel_bytes - 1u - byte];
             }
          }
-         ps5vk_flush_cpu_cache((const void *)(uintptr_t)destination_at, (size_t)run_bytes);
       }
    }
+}
+
+/* A CPU image copy: every source line it reads is evicted first and every
+ * destination line it wrote after, as before, but in two sweeps with one fence
+ * each instead of an eviction and a fence around each 16-byte run. A 3840x2160
+ * readback (RetroArch's save-state thumbnail) took 972 ms that way and froze the
+ * game on every save (2026-09-24). */
+void
+ps5vk_image_copy_execute(const struct ps5vk_memory_copy *copy)
+{
+   ps5vk_image_copy_pass(copy, PS5VK_COPY_EVICT_SOURCE);
+   ps5vk_cpu_fence();
+   ps5vk_image_copy_pass(copy, PS5VK_COPY_RUNS);
+   ps5vk_image_copy_pass(copy, PS5VK_COPY_EVICT_DESTINATION);
+   ps5vk_cpu_fence();
 }
 
 VkResult

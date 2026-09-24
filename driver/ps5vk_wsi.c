@@ -1027,6 +1027,22 @@ ps5vk_QueuePresentKHR(VkQueue _queue, const VkPresentInfoKHR *pPresentInfo)
             ps5vk_video_out_watch(video, index, ps5vk_profile_now());
          else
             ps5vk_output_last_present_ns = ps5vk_profile_now();
+         /* With profiling on, every 1200th presented image's content: how many
+          * of the handover check's 64 sampled texels are not black. */
+         if (queue->profile.enabled && ++video->content_checks % 1200u == 0) {
+            const uint8_t *const image = (const uint8_t *)video->buffers.address +
+                                         (size_t)index * PS5VK_SWAPCHAIN_IMAGE_BYTES;
+            const size_t stride = PS5VK_SWAPCHAIN_IMAGE_BYTES / PS5VK_HANDOVER_SAMPLES;
+            unsigned lit = 0;
+            for (unsigned i = 0; i < PS5VK_HANDOVER_SAMPLES; i++) {
+               const uint32_t *const texel =
+                  (const uint32_t *)(image + i * stride + (stride / 2 & ~(size_t)63));
+               ps5vk_flush_cpu_cache(texel, 64);
+               lit += (*texel & 0x00ffffffu) != 0;
+            }
+            fprintf(stderr, "[ps5vk] presented content: image %u, %u of %u sampled texels lit\n",
+                    index, lit, PS5VK_HANDOVER_SAMPLES);
+         }
          const int64_t marker = ++video->flip_marker;
          result = ps5vk_queue_flip(queue, video->handle, index, marker,
                                    (ps5vk_ab_flags & PS5VK_AB_SYNC_PRESENT) != 0);
@@ -1046,6 +1062,18 @@ ps5vk_QueuePresentKHR(VkQueue _queue, const VkPresentInfoKHR *pPresentInfo)
       queue->profile.last_return_ns = ps5vk_profile_now();
    ps5vk_profile_leave(queue, PS5VK_PROFILE_AFTER_PRESENT);
    return overall;
+}
+
+uint64_t
+ps5vk_debug_now_ns(void)
+{
+   return ps5vk_profile_now();
+}
+
+uint64_t
+ps5vk_debug_last_present_ns(void)
+{
+   return __atomic_load_n(&ps5vk_output_last_present_ns, __ATOMIC_RELAXED);
 }
 
 int

@@ -132,6 +132,12 @@ ps5vk_direct_mapping_destroy(struct ps5vk_direct_mapping *mapping);
  * wrote, and before the CPU reads what the GPU wrote. */
 void
 ps5vk_flush_cpu_cache(const void *address, size_t bytes);
+/* ps5vk_flush_cpu_cache's evictions without its fence, for a caller that
+ * evicts many ranges and then fences once with ps5vk_cpu_fence. */
+void
+ps5vk_evict_cpu_lines(const void *address, size_t bytes);
+void
+ps5vk_cpu_fence(void);
 
 struct ps5vk_instance {
    struct vk_instance vk;
@@ -1469,6 +1475,8 @@ struct ps5vk_video_out {
     * the one VideoOut last showed is queued, the one equal to it is on screen,
     * and any other is free to render into (ps5vk_wsi.c). */
    int64_t image_marker[PS5VK_SWAPCHAIN_IMAGES];
+   /* Presents counted for the profile's content report (ps5vk_wsi.c). */
+   uint32_t content_checks;
 };
 
 struct ps5vk_swapchain {
