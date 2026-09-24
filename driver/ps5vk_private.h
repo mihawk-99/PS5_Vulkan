@@ -1421,14 +1421,23 @@ struct ps5vk_pipeline {
 /* A swapchain's images: VideoOut's two registered framebuffers. */
 #define PS5VK_SWAPCHAIN_IMAGES 2
 
-/* VideoOut and its framebuffers (ps5vk_wsi.c), owned by the newest swapchain
- * of a chain of replacements. */
+/* VideoOut and its framebuffers (ps5vk_wsi.c): one per process, presented
+ * through by the newest swapchain of a chain of replacements, and kept on screen
+ * between swapchains while the application retains it (ps5vk_display_retain). */
 struct ps5vk_video_out {
    int handle;
    bool registered;
    /* VideoOut accepted its high-frame-rate output for this handle, which is
     * restored before the handle closes. */
    bool high_frame_rate;
+   /* A swapchain presents through it. */
+   bool owned;
+   /* The handover report (ps5vk_wsi.c, ps5vk_video_out_watch): whether the
+    * output outlived the previous swapchain, when this swapchain took it, and
+    * how many presents it has watched and found black since. */
+   bool kept;
+   uint64_t previous_present_ns, taken_ns;
+   uint32_t watched, black;
    struct ps5vk_direct_mapping buffers;
    /* The buffer on screen, or UINT32_MAX before the first flip. */
    uint32_t shown;

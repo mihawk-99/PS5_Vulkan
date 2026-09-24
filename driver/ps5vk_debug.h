@@ -21,6 +21,7 @@
 #ifndef PS5VK_DEBUG_H
 #define PS5VK_DEBUG_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include <vulkan/vulkan.h>
@@ -155,6 +156,18 @@ ps5vk_debug_submission_steps(VkDevice device, ps5vk_debug_stage *steps, uint32_t
  * presents has to know it (tools/golden.py, a driver run's replay). */
 int
 ps5vk_debug_video_handle(VkDevice device);
+
+/* Whether VideoOut outlives the swapchain that presents through it. Retained, a
+ * destroyed swapchain leaves its last presented image on screen and the output
+ * in its mode, and the next swapchain -- on any device -- presents through the
+ * same framebuffers, so an application that tears its whole Vulkan context down
+ * and builds it again (RetroArch, on loading or closing content) shows its last
+ * frame meanwhile rather than a blank panel and an output-mode switch. Released
+ * (false, the default), VideoOut closes with its swapchain, and a retained
+ * output no swapchain holds is closed now, its mode restored: an application
+ * that retains calls this with false before it exits. */
+void
+ps5vk_display_retain(bool retain);
 
 #ifdef __cplusplus
 }

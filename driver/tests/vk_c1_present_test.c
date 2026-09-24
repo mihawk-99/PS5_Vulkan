@@ -18,8 +18,10 @@
  *
  * Afterwards: a second swapchain on the surface is refused while the first
  * holds VideoOut, and a replacement passing it as oldSwapchain retires it, so
- * acquiring from the old one reports VK_ERROR_OUT_OF_DATE_KHR. Neither
- * submits. PS5VK_PROBES names the probes directory. The PS5 build only links.
+ * acquiring from the old one reports VK_ERROR_OUT_OF_DATE_KHR. Run directly,
+ * a retained VideoOut (ps5vk_display_retain) outlives its swapchain, serves the
+ * next one, is still refused to a second, and closes when released. None of
+ * these submits. PS5VK_PROBES names the probes directory. The PS5 build only links.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -212,6 +214,47 @@ check_replacement(struct ps5vk_triangle *triangle)
    VK_FUNCTION(triangle->instance, DestroySwapchainKHR)(triangle->device, replacement, NULL);
 }
 
+#if defined(PS5VK_TEST_DIRECT)
+static VkResult
+create_swapchain(struct ps5vk_triangle *triangle, VkSwapchainKHR *swapchain)
+{
+   VkSwapchainCreateInfoKHR info = triangle->swapchain_info;
+   info.oldSwapchain = VK_NULL_HANDLE;
+   *swapchain = VK_NULL_HANDLE;
+   return VK_FUNCTION(triangle->instance, CreateSwapchainKHR)(triangle->device, &info, NULL,
+                                                              swapchain);
+}
+
+static void
+check_retention(struct ps5vk_triangle *triangle)
+{
+   PFN_vkDestroySwapchainKHR destroy = VK_FUNCTION(triangle->instance, DestroySwapchainKHR);
+   ps5vk_display_retain(true);
+   VkSwapchainKHR first = VK_NULL_HANDLE;
+   VkResult result = create_swapchain(triangle, &first);
+   if (result == VK_SUCCESS)
+      destroy(triangle->device, first, NULL);
+   VkSwapchainKHR next = VK_NULL_HANDLE;
+   if (result == VK_SUCCESS)
+      result = create_swapchain(triangle, &next);
+   check(result == VK_SUCCESS, "a retained VideoOut outlives its swapchain and serves the next");
+   VkSwapchainKHR second = VK_NULL_HANDLE;
+   const VkResult refused = create_swapchain(triangle, &second);
+   check(refused == VK_ERROR_NATIVE_WINDOW_IN_USE_KHR,
+         "a retained VideoOut is still refused to a second swapchain");
+   if (refused == VK_SUCCESS)
+      destroy(triangle->device, second, NULL);
+   if (next != VK_NULL_HANDLE)
+      destroy(triangle->device, next, NULL);
+   ps5vk_display_retain(false);
+   VkSwapchainKHR after = VK_NULL_HANDLE;
+   result = create_swapchain(triangle, &after);
+   check(result == VK_SUCCESS, "a released VideoOut closes, and a swapchain opens it afresh");
+   if (after != VK_NULL_HANDLE)
+      destroy(triangle->device, after, NULL);
+}
+#endif
+
 int
 main(void)
 {
@@ -263,6 +306,9 @@ main(void)
                "the program presents only a drawn image");
          check_refusals(&triangle);
          check_replacement(&triangle);
+#if defined(PS5VK_TEST_DIRECT)
+         check_retention(&triangle);
+#endif
       }
       if (status != PS5VK_TRIANGLE_IN_FLIGHT)
          ps5vk_triangle_finish(&triangle);

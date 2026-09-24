@@ -11,7 +11,7 @@
  * VK_KHR_display drives Linux DRM, so these objects are the driver's own;
  * surfaces use the loader's VkIcdSurfaceDisplay layout.
  *
- * A swapchain owns VideoOut and its two framebuffers, opened and registered
+ * A swapchain presents through VideoOut and its two framebuffers, opened and registered
  * as the test runner does (M2): two 32 MiB tiled B8G8R8A8 images in one
  * 64 MiB direct-memory allocation. Presentation follows run pid 134
  * (c1-present): a submission that renders into a swapchain image starts with
@@ -35,6 +35,7 @@
 #include "ps5vk_private.h"
 
 #include <assert.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -91,13 +92,32 @@ static bool ps5vk_title_declares_high_frame_rate(void);
 #define PS5VK_VIDEO_OUT_MODE_HIGH_FRAME_RATE 15
 #define PS5VK_VIDEO_OUT_MODE_RESTORE 1
 
-/* Which modes the display offers, settled once and without changing the output:
- * the 59.94 Hz mode always, and the 119.88 Hz mode first when the title's own
+/* The process's VideoOut (struct ps5vk_video_out): opened when the modes are
+ * settled or a swapchain first needs it, and closed with its swapchain unless
+ * the application retains it (ps5vk_display_retain). A VideoOut handle and its
+ * framebuffers are the process's, not a device's, so a retained output serves
+ * the next device's swapchain as well. */
+static pthread_mutex_t ps5vk_output_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct ps5vk_video_out *ps5vk_output;
+static bool ps5vk_output_retained;
+/* When the process last presented, on any output: the start of the gap a
+ * handover report measures. */
+static uint64_t ps5vk_output_last_present_ns;
+
+static struct ps5vk_video_out *ps5vk_output_open_handle(bool high_frame_rate);
+static void ps5vk_output_close(void);
+
+/* Which modes the display offers, settled once per physical device: the
+ * 59.94 Hz mode always, and the 119.88 Hz mode first when the title's own
  * metadata declares high-frame-rate support -- without it the console refuses
  * the mode (0x80290016), which is what was measured before the port declared
- * it -- and VideoOut reports the output supported. Selecting it waits for a
- * swapchain on a surface made from that mode (ps5vk_video_out_open), because
- * switching an HDMI output can blank the panel. */
+ * it -- VideoOut reports the output supported, and VideoOut accepts it. The
+ * output is configured here rather than at swapchain creation so that the
+ * refresh a mode reports is the one the panel runs at: an application that
+ * sizes its timing from the mode (RetroArch's video_refresh_rate) would
+ * otherwise believe 119.88 Hz where the console refused it. The switch happens
+ * once, before the first frame, and the swapchain presents through the same
+ * handle (ps5vk_video_out_open). */
 static void
 ps5vk_display_settle_modes(struct ps5vk_physical_device *device)
 {
@@ -111,13 +131,19 @@ ps5vk_display_settle_modes(struct ps5vk_physical_device *device)
    };
    if (!ps5vk_title_declares_high_frame_rate())
       return;
-   const int handle = sceVideoOutOpen(PS5VK_VIDEO_OUT_USER, 0, 0, NULL);
-   if (handle < 0)
-      return;
-   const int supported =
-      sceVideoOutIsOutputSupported(handle, PS5VK_VIDEO_OUT_MODE_HIGH_FRAME_RATE, NULL, NULL, NULL);
-   sceVideoOutClose(handle);
-   device->high_mode_offered = supported > 0;
+   pthread_mutex_lock(&ps5vk_output_lock);
+   /* An output a swapchain holds keeps its mode; one retained without a
+    * swapchain that is not in the high-frame-rate mode gets another try. */
+   if (ps5vk_output != NULL && !ps5vk_output->owned && !ps5vk_output->high_frame_rate)
+      ps5vk_output_close();
+   if (ps5vk_output == NULL)
+      ps5vk_output = ps5vk_output_open_handle(true);
+   device->high_mode_offered = ps5vk_output != NULL && ps5vk_output->high_frame_rate;
+   /* A refused output is not kept open: the swapchain opens its own. */
+   if (ps5vk_output != NULL && !ps5vk_output->owned && !ps5vk_output->registered &&
+       !ps5vk_output->high_frame_rate)
+      ps5vk_output_close();
+   pthread_mutex_unlock(&ps5vk_output_lock);
 }
 
 static VkIcdSurfaceBase *
@@ -450,6 +476,8 @@ ps5vk_video_out_close(struct ps5vk_video_out *video)
          sceVideoOutConfigureOutput(video->handle, PS5VK_VIDEO_OUT_MODE_RESTORE, NULL, NULL, NULL);
       if (restored != 0)
          mesa_loge("sceVideoOutConfigureOutput(restore) failed: 0x%08x", (unsigned)restored);
+      else
+         fputs("[ps5vk] output: default mode restored\n", stderr);
       video->high_frame_rate = false;
    }
    if (video->registered) {
@@ -464,45 +492,68 @@ ps5vk_video_out_close(struct ps5vk_video_out *video)
    video->registered = false;
 }
 
-/* Opens VideoOut at flip rate 0, maps two cleared framebuffers and registers
- * them as SDR buffers, as the test runner does (open_video_target). */
-static VkResult
-ps5vk_video_out_open(struct ps5vk_device *device, struct ps5vk_video_out *video, bool high_frame_rate)
+/* Closes the process's output. Called with ps5vk_output_lock held. */
+static void
+ps5vk_output_close(void)
 {
+   if (ps5vk_output == NULL)
+      return;
+   ps5vk_video_out_close(ps5vk_output);
+   free(ps5vk_output);
+   ps5vk_output = NULL;
+}
+
+/* Opens VideoOut and, when asked, configures its high-frame-rate output on the
+ * fresh handle, before the flip rate, which is where the console accepted it. A
+ * refusal is not an error: the output presents at 59.94 Hz, and says so once.
+ * NULL when VideoOut does not open. */
+static struct ps5vk_video_out *
+ps5vk_output_open_handle(bool high_frame_rate)
+{
+   struct ps5vk_video_out *const video = calloc(1, sizeof(*video));
+   if (video == NULL)
+      return NULL;
    *video = (struct ps5vk_video_out){.handle = -1, .buffers = {.start = -1}, .shown = UINT32_MAX};
    video->handle = sceVideoOutOpen(PS5VK_VIDEO_OUT_USER, 0, 0, NULL);
-   if (video->handle < 0)
-      return vk_errorf(device, VK_ERROR_INITIALIZATION_FAILED, "sceVideoOutOpen failed: 0x%08x",
-                       (unsigned)video->handle);
-   /* The surface's mode asked for the high-frame-rate output: configure it on the
-    * fresh handle, before the flip rate, which is where the console accepted it.
-    * A refusal is not an error: the swapchain presents at 59.94 Hz, and says so
-    * once. */
+   if (video->handle < 0) {
+      mesa_loge("sceVideoOutOpen failed: 0x%08x", (unsigned)video->handle);
+      free(video);
+      return NULL;
+   }
    if (high_frame_rate) {
-      const int configured = sceVideoOutConfigureOutput(
+      const int supported = sceVideoOutIsOutputSupported(
          video->handle, PS5VK_VIDEO_OUT_MODE_HIGH_FRAME_RATE, NULL, NULL, NULL);
+      const int configured =
+         supported > 0 ? sceVideoOutConfigureOutput(
+                            video->handle, PS5VK_VIDEO_OUT_MODE_HIGH_FRAME_RATE, NULL, NULL, NULL)
+                       : supported;
       video->high_frame_rate = configured == 0;
       char line[160];
       snprintf(line, sizeof(line),
                configured == 0 ? "[ps5vk] output: 119.88 Hz selected\n"
-                               : "[ps5vk] output: 119.88 Hz refused (0x%08x); presenting at 59.94 Hz\n",
-               (unsigned)configured);
+               : supported > 0 ? "[ps5vk] output: 119.88 Hz refused (0x%08x); presenting at 59.94 Hz\n"
+                               : "[ps5vk] output: 119.88 Hz not supported (%d); presenting at 59.94 Hz\n",
+               configured);
       fputs(line, stderr);
    }
+   return video;
+}
+
+/* Maps two cleared framebuffers and registers them as SDR buffers at flip rate
+ * 0, as the test runner does (open_video_target). */
+static VkResult
+ps5vk_video_out_register(struct ps5vk_device *device, struct ps5vk_video_out *video)
+{
    int result = sceVideoOutSetFlipRate(video->handle, 0);
-   if (result != 0) {
-      ps5vk_video_out_close(video);
+   if (result != 0)
       return vk_errorf(device, VK_ERROR_INITIALIZATION_FAILED,
                        "sceVideoOutSetFlipRate failed: 0x%08x", (unsigned)result);
-   }
    const size_t bytes = (size_t)(PS5VK_SWAPCHAIN_IMAGES * PS5VK_SWAPCHAIN_IMAGE_BYTES);
    result = ps5vk_direct_mapping_create(&video->buffers, bytes, PS5VK_SWAPCHAIN_ALIGNMENT);
-   if (result != 0) {
-      ps5vk_video_out_close(video);
+   if (result != 0)
       return vk_errorf(device, VK_ERROR_OUT_OF_DEVICE_MEMORY,
                        "the framebuffers could not be mapped in the address window: 0x%08x",
                        (unsigned)result);
-   }
    memset(video->buffers.address, 0, bytes);
    ps5vk_flush_cpu_cache(video->buffers.address, bytes);
 
@@ -516,14 +567,81 @@ ps5vk_video_out_open(struct ps5vk_device *device, struct ps5vk_video_out *video,
                                   PS5VK_DISPLAY_WIDTH, PS5VK_DISPLAY_HEIGHT, 0, 0, 0);
    result = sceVideoOutRegisterBuffers2(video->handle, 0, 0, buffers, PS5VK_SWAPCHAIN_IMAGES,
                                         attribute, 0, NULL);
-   if (result != 0) {
-      ps5vk_video_out_close(video);
+   if (result != 0)
       return vk_errorf(device, VK_ERROR_INITIALIZATION_FAILED,
                        "sceVideoOutRegisterBuffers2 failed: 0x%08x", (unsigned)result);
-   }
    video->registered = true;
    ps5vk_video_out_probe_vblank(video->handle);
    return VK_SUCCESS;
+}
+
+/* The output a new swapchain presents through, in the mode its surface asked
+ * for: the retained or settled one when its mode matches, a fresh one
+ * otherwise. A retained output keeps its framebuffers and the image on screen,
+ * which stays there until the new swapchain's first present. */
+static VkResult
+ps5vk_video_out_open(struct ps5vk_device *device, bool high_frame_rate,
+                     struct ps5vk_video_out **opened)
+{
+   pthread_mutex_lock(&ps5vk_output_lock);
+   if (ps5vk_output != NULL && ps5vk_output->owned) {
+      pthread_mutex_unlock(&ps5vk_output_lock);
+      return vk_errorf(device, VK_ERROR_NATIVE_WINDOW_IN_USE_KHR,
+                       "VideoOut belongs to another swapchain");
+   }
+   /* A mode other than the output's is a fresh output: switching a registered
+    * output is not what the console was measured doing. The high-frame-rate
+    * mode is offered only where the output took it, so a refused one stays. */
+   if (ps5vk_output != NULL && high_frame_rate && !ps5vk_output->high_frame_rate)
+      high_frame_rate = false;
+   if (ps5vk_output != NULL && ps5vk_output->high_frame_rate != high_frame_rate)
+      ps5vk_output_close();
+   if (ps5vk_output == NULL)
+      ps5vk_output = ps5vk_output_open_handle(high_frame_rate);
+   if (ps5vk_output == NULL) {
+      pthread_mutex_unlock(&ps5vk_output_lock);
+      return vk_errorf(device, VK_ERROR_INITIALIZATION_FAILED, "sceVideoOutOpen failed");
+   }
+   if (!ps5vk_output->registered) {
+      const VkResult result = ps5vk_video_out_register(device, ps5vk_output);
+      if (result != VK_SUCCESS) {
+         ps5vk_output_close();
+         pthread_mutex_unlock(&ps5vk_output_lock);
+         return result;
+      }
+   }
+   ps5vk_output->owned = true;
+   ps5vk_output->kept = ps5vk_output->shown != UINT32_MAX;
+   ps5vk_output->previous_present_ns = ps5vk_output_last_present_ns;
+   ps5vk_output->taken_ns = ps5vk_profile_now();
+   ps5vk_output->watched = 0;
+   ps5vk_output->black = 0;
+   *opened = ps5vk_output;
+   pthread_mutex_unlock(&ps5vk_output_lock);
+   return VK_SUCCESS;
+}
+
+/* The swapchain lets its output go: kept, with its image on screen, while the
+ * application retains it, closed otherwise. */
+static void
+ps5vk_video_out_release(struct ps5vk_video_out *video)
+{
+   pthread_mutex_lock(&ps5vk_output_lock);
+   assert(video == ps5vk_output);
+   video->owned = false;
+   if (!ps5vk_output_retained)
+      ps5vk_output_close();
+   pthread_mutex_unlock(&ps5vk_output_lock);
+}
+
+void
+ps5vk_display_retain(bool retain)
+{
+   pthread_mutex_lock(&ps5vk_output_lock);
+   ps5vk_output_retained = retain;
+   if (!retain && ps5vk_output != NULL && !ps5vk_output->owned)
+      ps5vk_output_close();
+   pthread_mutex_unlock(&ps5vk_output_lock);
 }
 
 /* --- VK_KHR_swapchain ------------------------------------------------------ */
@@ -572,8 +690,7 @@ ps5vk_swapchain_free(struct ps5vk_device *device, struct ps5vk_swapchain *swapch
          vk_image_destroy(&device->vk, NULL, &swapchain->images[index]->vk);
    }
    if (swapchain->video) {
-      ps5vk_video_out_close(swapchain->video);
-      vk_free(&device->vk.alloc, swapchain->video);
+      ps5vk_video_out_release(swapchain->video);
       device->video_out = NULL;
    }
    vk_object_free(&device->vk, allocator, swapchain);
@@ -645,19 +762,13 @@ ps5vk_CreateSwapchainKHR(VkDevice _device, const VkSwapchainCreateInfoKHR *pCrea
 
    struct ps5vk_video_out *video = old ? old->video : NULL;
    if (!video) {
-      video = vk_zalloc(&device->vk.alloc, sizeof(*video), 8, VK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
-      if (!video) {
-         vk_object_free(&device->vk, pAllocator, swapchain);
-         return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
-      }
       const VkIcdSurfaceDisplay *const surface =
          (const VkIcdSurfaceDisplay *)(uintptr_t)info->surface;
       const struct ps5vk_display *const mode =
          (const struct ps5vk_display *)(uintptr_t)surface->displayMode;
       const VkResult opened =
-         ps5vk_video_out_open(device, video, mode != NULL && mode->high_frame_rate);
+         ps5vk_video_out_open(device, mode != NULL && mode->high_frame_rate, &video);
       if (opened != VK_SUCCESS) {
-         vk_free(&device->vk.alloc, video);
          vk_object_free(&device->vk, pAllocator, swapchain);
          return opened;
       }
@@ -770,6 +881,60 @@ ps5vk_AcquireNextImage2KHR(VkDevice _device, const VkAcquireNextImageInfoKHR *pA
    return result;
 }
 
+/* Presents a new swapchain's report watches: long enough for an application
+ * that rebuilds its context to draw its first real frame. */
+#define PS5VK_HANDOVER_WATCH_PRESENTS 600u
+#define PS5VK_HANDOVER_SAMPLES 64u
+
+/* Whether a presented image is black: every one of a spread of sampled texels
+ * has zero colour. The submission that drew it has returned, so the GPU is done
+ * with it; the sampled lines are flushed so the CPU reads what it wrote. */
+static bool
+ps5vk_video_out_image_black(const struct ps5vk_video_out *video, uint32_t index)
+{
+   const uint8_t *const image =
+      (const uint8_t *)video->buffers.address + (size_t)index * PS5VK_SWAPCHAIN_IMAGE_BYTES;
+   const size_t stride = PS5VK_SWAPCHAIN_IMAGE_BYTES / PS5VK_HANDOVER_SAMPLES;
+   for (unsigned i = 0; i < PS5VK_HANDOVER_SAMPLES; i++) {
+      const uint32_t *const texel =
+         (const uint32_t *)(image + i * stride + (stride / 2 & ~(size_t)63));
+      ps5vk_flush_cpu_cache(texel, 64);
+      if ((*texel & 0x00ffffffu) != 0)
+         return false;
+   }
+   return true;
+}
+
+/* One line per swapchain, after its first image that is not black (or its first
+ * PS5VK_HANDOVER_WATCH_PRESENTS): whether VideoOut outlived the previous
+ * swapchain, how long nothing was presented between the two, and how many black
+ * presents followed. What the panel showed meanwhile follows from the first: a
+ * kept output shows the previous image, a reopened one nothing. */
+static void
+ps5vk_video_out_watch(struct ps5vk_video_out *video, uint32_t index, uint64_t now)
+{
+   const uint64_t previous = video->previous_present_ns;
+   ps5vk_output_last_present_ns = now;
+   if (video->watched >= PS5VK_HANDOVER_WATCH_PRESENTS)
+      return;
+   video->watched++;
+   const bool black = ps5vk_video_out_image_black(video, index);
+   video->black += black ? 1u : 0u;
+   if (black && video->watched < PS5VK_HANDOVER_WATCH_PRESENTS)
+      return;
+   char line[256];
+   snprintf(line, sizeof(line),
+            "[ps5vk] swapchain handover: output %s; %.1f ms from the previous present to "
+            "this swapchain, first picture %.1f ms after it, %u black present%s before\n",
+            video->kept ? "kept, previous image on screen" : "opened",
+            previous != 0 && video->taken_ns > previous
+               ? (double)(video->taken_ns - previous) / 1e6 : 0.0,
+            (double)(now - video->taken_ns) / 1e6, video->black - (black ? 1u : 0u),
+            video->black - (black ? 1u : 0u) == 1 ? "" : "s");
+   fputs(line, stderr);
+   video->watched = PS5VK_HANDOVER_WATCH_PRESENTS;
+}
+
 /* The more severe of two presentation results. */
 static VkResult
 ps5vk_present_result(VkResult current, VkResult next)
@@ -811,6 +976,10 @@ ps5vk_QueuePresentKHR(VkQueue _queue, const VkPresentInfoKHR *pPresentInfo)
          /* Valid usage: the image was acquired and not yet presented. */
          assert(swapchain->acquired == index);
          struct ps5vk_video_out *const video = swapchain->video;
+         if (video->watched < PS5VK_HANDOVER_WATCH_PRESENTS)
+            ps5vk_video_out_watch(video, index, ps5vk_profile_now());
+         else
+            ps5vk_output_last_present_ns = ps5vk_profile_now();
          result = ps5vk_queue_flip(queue, video->handle, index, ++video->flip_marker);
          if (result == VK_SUCCESS)
             video->shown = index;

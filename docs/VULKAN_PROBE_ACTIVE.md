@@ -23,16 +23,18 @@ bounded marker spin; R40 vkCmdExecuteCommands timed (0.14 ms, ruled out);
 R42 (jobs/r42-parallel-blit) blits on five threads; R43
 (jobs/r43-hitch-recorder) a per-frame hitch report; R46 (jobs/r46-nir-cache)
 the internal NIR cache; R47 (jobs/r47-shipped-cache) one cache directory per
-build, 0777, which the port harvests and ships.
+build, 0777, which the port harvests and ships; R51 (jobs/r51-output-mode)
+119.88 Hz selected where the title declares it, 59.94 Hz otherwise; R53
+(jobs/r53-output-retention) one VideoOut per process, configured when the modes
+are listed (a refused 119.88 Hz is never offered) and, retained by the
+application (`ps5vk_display_retain`), kept with its image across swapchains so
+RetroArch's context rebuilds no longer blank the panel.
 
 Next, in order:
-1. Report the refresh truthfully: enumerate VideoOut's modes, select 120 Hz at
-   swapchain creation when the metadata allows it, restore it at close, keep
-   the 60 Hz fallback, and report the measured rate instead of 60000.
-2. Colour targets other than 3840x2160 (vkQuake's raster warp path renders
+1. Colour targets other than 3840x2160 (vkQuake's raster warp path renders
    512x512 and is refused), then multiple colour attachments (v0-mrt, which
    also stops the runner).
-3. The port's gameplay/stability acceptance.
+2. The port's gameplay/stability acceptance.
 
 The test runner on the console (PPSA99988) holds the R46 build. An intermittent
 texture glitch seen in play is set aside until it can be captured.
