@@ -94,6 +94,34 @@ main(void)
             "a view of the format whose uniform texel buffer the probe proved is created");
       VK_FUNCTION(instance, DestroyBufferView)(device, view, NULL);
 
+      /* R72: a view of more texels than the 1.0 minimum, 65536: Dolphin's
+       * 16 MiB texel stream buffer, four million RGBA8 texels. */
+      const VkBufferCreateInfo large_info = {
+         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+         .size = 16u * 1024u * 1024u,
+         .usage = VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT,
+         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+      };
+      VkBuffer large = VK_NULL_HANDLE;
+      VkBufferView large_view = VK_NULL_HANDLE;
+      const VkBufferViewCreateInfo large_view_info = {
+         .sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO,
+         .format = VK_FORMAT_R8G8B8A8_UNORM,
+         .offset = 0,
+         .range = VK_WHOLE_SIZE,
+      };
+      VkBufferViewCreateInfo large_view_named = large_view_info;
+      const bool large_made =
+         VK_FUNCTION(instance, CreateBuffer)(device, &large_info, NULL, &large) == VK_SUCCESS;
+      large_view_named.buffer = large;
+      check(large_made &&
+               VK_FUNCTION(instance, CreateBufferView)(device, &large_view_named, NULL, &large_view) ==
+                  VK_SUCCESS &&
+               large_view != VK_NULL_HANDLE,
+            "a view of four million texels, Dolphin's 16 MiB texel stream buffer, is created");
+      VK_FUNCTION(instance, DestroyBufferView)(device, large_view, NULL);
+      VK_FUNCTION(instance, DestroyBuffer)(device, large, NULL);
+
       VkBufferViewCreateInfo refused = view_info;
       refused.format = VK_FORMAT_R32G32B32_SFLOAT;
       view = VK_NULL_HANDLE;

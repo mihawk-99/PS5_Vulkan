@@ -82,6 +82,8 @@ check_properties(VkInstance instance, VkPhysicalDevice physical)
          "limits of unsupported features are 0");
    check(l->maxFragmentDualSrcAttachments == 1,
          "one dual-source attachment, as dualSrcBlend asks (R71)");
+   check(l->maxTexelBufferElements == UINT32_MAX,
+         "texel buffers of the 32-bit NUM_RECORDS count, as RADV reports (R72)");
    check(l->maxViewports == 1 && l->maxSamplerAnisotropy == 16.0f &&
             l->maxDrawIndexedIndexValue == 0xffffff && l->maxDrawIndirectCount == 1,
          "single viewport, 16x anisotropy, 24-bit indices, single indirect draw");

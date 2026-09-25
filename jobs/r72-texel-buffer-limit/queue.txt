@@ -1,0 +1,12 @@
+# R72: texel buffers of the 32-bit record count. The texel-buffer format probes
+# (fetch, integer, store, atomic) beside the dual-source probe.
+hold 1
+m2-solid
+v0-formats-texel-buffer
+v0-formats-texel-buffer-uint
+v0-formats-texel-buffer-sint
+v0-formats-texel-buffer-store
+v0-formats-texel-buffer-atomic
+r71-dual-source
+m2-solid
+exit

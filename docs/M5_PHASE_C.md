@@ -9355,3 +9355,12 @@ dual-source attachment and maps the SRC1 factors to 15-18. PID 630:
 r71-dual-source, the constant-blend frame with the second source as the factor,
 reads 0xff88586c in all 8294400 pixels. RE4 draws its scene as desktop Dolphin
 does. jobs/r71-dual-source.
+
+## 2026-09-25 — R72: texel buffers of the 32-bit record count
+
+maxTexelBufferElements was Vulkan 1.0's minimum, 65536, and Dolphin sizes its
+texel stream buffer by it: 64 KiB, so GPU texture decoding failed to fit a 64 KiB
+texture ("Failed to allocate 65536 bytes from texel buffer", Resident Evil 4,
+accurate profile). The descriptor's NUM_RECORDS word is 32-bit, as RADV's is,
+and the driver now reports UINT32_MAX as RADV does. PID 649: the texel-buffer
+probes pass; RE4 shows no error. jobs/r72-texel-buffer-limit.

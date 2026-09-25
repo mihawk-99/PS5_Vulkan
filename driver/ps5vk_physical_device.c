@@ -89,7 +89,13 @@ ps5vk_get_properties(struct vk_properties *p)
       .maxImageDimension3D = 256,
       .maxImageDimensionCube = 16384,
       .maxImageArrayLayers = 256,
-      .maxTexelBufferElements = 65536,
+      /* R72: a texel buffer's descriptor holds its element count in the 32-bit
+       * NUM_RECORDS word (range / texel bytes, ps5vk_draw.c), as RADV's does,
+       * and RADV reports UINT32_MAX. The 1.0 minimum this said before, 65536,
+       * sized Dolphin's texel stream buffer at 64 KiB (it takes the smaller of
+       * 16 MiB and this), and GPU texture decoding then failed to fit a 64 KiB
+       * texture in it. */
+      .maxTexelBufferElements = UINT32_MAX,
       .maxUniformBufferRange = 16384,
       .maxStorageBufferRange = UINT32_C(1) << 27,
       .maxPushConstantsSize = 128,
