@@ -237,7 +237,7 @@ static VkResult ps5vk_compute_pipeline_compile(struct ps5vk_device *device,
    const size_t code_bytes = output.machine_code_size;
    const size_t mapping_bytes = (size_t)ALIGN_POT(code_bytes, PS5VK_DIRECT_PAGE_BYTES);
    const int32_t mapped = ps5vk_direct_mapping_create(&pipeline->compute.code, mapping_bytes,
-                                                       PS5VK_DIRECT_PAGE_BYTES);
+                                                       PS5VK_DIRECT_PAGE_BYTES, PS5VK_DIRECT_COMPUTE);
    if (mapped != 0)
    {
       psbc_free_output(&output);

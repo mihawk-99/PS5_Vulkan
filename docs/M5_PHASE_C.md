@@ -9520,3 +9520,15 @@ are equal, and the release at offset 0 is gone from the log. On the console
 (RetroArch title 9c623566, with that port's patch 0092) four reloads of Melee
 hold the bytes at 592 MiB and add two small mappings a reload
 (../PS5_RetroArch docs/PHASE_LOG.md, Profile 9).
+
+## 2026-09-25 — The profile names what holds direct memory
+
+`direct_live` says how many mappings the driver holds; after Profile 9's
+reloads it still grew by two a reload, and nothing said whose they were. Each
+mapping now carries what it is for -- `memory` (VkDeviceMemory), `stage` (a
+graphics pipeline's workspace), `compute`, `tables` (a command buffer's
+register tables), `query`, `queue` (the submission buffer and stamps) or
+`display` (the output's framebuffers) -- and the profile line ends with
+`direct_kinds=memory:N,stage:N,...`, the live mappings of each. The b3 memory
+test's direct build requires an allocation to be one more `memory` mapping of
+its pages, no other kind's, until it is freed.

@@ -24,6 +24,15 @@
  * count that only grows over a long run. */
 static uint64_t ps5vk_direct_live_count;
 static uint64_t ps5vk_direct_live_bytes;
+static uint64_t ps5vk_direct_kind_count[PS5VK_DIRECT_KIND_COUNT];
+static uint64_t ps5vk_direct_kind_bytes[PS5VK_DIRECT_KIND_COUNT];
+
+static const char *const ps5vk_direct_kind_names[PS5VK_DIRECT_KIND_COUNT] = {
+   [PS5VK_DIRECT_MEMORY] = "memory", [PS5VK_DIRECT_STAGE] = "stage",
+   [PS5VK_DIRECT_COMPUTE] = "compute", [PS5VK_DIRECT_TABLES] = "tables",
+   [PS5VK_DIRECT_QUERY] = "query", [PS5VK_DIRECT_QUEUE] = "queue",
+   [PS5VK_DIRECT_DISPLAY] = "display",
+};
 
 void
 ps5vk_direct_memory_live(uint64_t *count, uint64_t *bytes)
@@ -32,11 +41,37 @@ ps5vk_direct_memory_live(uint64_t *count, uint64_t *bytes)
    *bytes = p_atomic_read(&ps5vk_direct_live_bytes);
 }
 
+void
+ps5vk_direct_memory_kind_live(enum ps5vk_direct_kind kind, uint64_t *count, uint64_t *bytes)
+{
+   *count = p_atomic_read(&ps5vk_direct_kind_count[kind]);
+   *bytes = p_atomic_read(&ps5vk_direct_kind_bytes[kind]);
+}
+
+const char *
+ps5vk_direct_memory_kinds(char *out, size_t size)
+{
+   size_t used = 0;
+   out[0] = '\0';
+   for (unsigned kind = 0; kind < PS5VK_DIRECT_KIND_COUNT && used < size; kind++) {
+      const int written =
+         snprintf(out + used, size - used, "%s%s:%" PRIu64, kind == 0 ? "" : ",",
+                  ps5vk_direct_kind_names[kind], p_atomic_read(&ps5vk_direct_kind_count[kind]));
+      if (written < 0)
+         break;
+      used += (size_t)written;
+   }
+   return out;
+}
+
 int32_t
-ps5vk_direct_mapping_create(struct ps5vk_direct_mapping *mapping, size_t bytes, size_t alignment)
+ps5vk_direct_mapping_create(struct ps5vk_direct_mapping *mapping, size_t bytes, size_t alignment,
+                            enum ps5vk_direct_kind kind)
 {
    assert(bytes != 0 && bytes % PS5VK_DIRECT_PAGE_BYTES == 0);
-   *mapping = (struct ps5vk_direct_mapping){.start = -1, .bytes = bytes, .address = NULL};
+   assert(kind < PS5VK_DIRECT_KIND_COUNT);
+   *mapping =
+      (struct ps5vk_direct_mapping){.start = -1, .bytes = bytes, .address = NULL, .kind = kind};
 
    int64_t start = -1;
    int32_t result = sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), bytes,
@@ -46,6 +81,8 @@ ps5vk_direct_mapping_create(struct ps5vk_direct_mapping *mapping, size_t bytes, 
    mapping->start = start;
    p_atomic_inc(&ps5vk_direct_live_count);
    p_atomic_add(&ps5vk_direct_live_bytes, (uint64_t)bytes);
+   p_atomic_inc(&ps5vk_direct_kind_count[kind]);
+   p_atomic_add(&ps5vk_direct_kind_bytes[kind], (uint64_t)bytes);
 
    void *address = NULL;
    result = sceKernelMapDirectMemory(&address, bytes, PS5VK_MAP_PROTECTION, 0, start, alignment);
@@ -79,6 +116,8 @@ ps5vk_direct_mapping_destroy(struct ps5vk_direct_mapping *mapping)
                    (uint64_t)mapping->start, mapping->bytes, (unsigned)result);
       p_atomic_dec(&ps5vk_direct_live_count);
       p_atomic_add(&ps5vk_direct_live_bytes, -(int64_t)mapping->bytes);
+      p_atomic_dec(&ps5vk_direct_kind_count[mapping->kind]);
+      p_atomic_add(&ps5vk_direct_kind_bytes[mapping->kind], -(int64_t)mapping->bytes);
    }
    mapping->start = -1;
    mapping->address = NULL;

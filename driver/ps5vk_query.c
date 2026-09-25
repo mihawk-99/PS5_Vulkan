@@ -200,7 +200,8 @@ ps5vk_CreateQueryPool(VkDevice _device, const VkQueryPoolCreateInfo *pCreateInfo
    pool->type = pCreateInfo->queryType;
    pool->count = pCreateInfo->queryCount;
    const int32_t mapped =
-      ps5vk_direct_mapping_create(&pool->mapping, mapping_bytes, PS5VK_DIRECT_PAGE_BYTES);
+      ps5vk_direct_mapping_create(&pool->mapping, mapping_bytes, PS5VK_DIRECT_PAGE_BYTES,
+                                  PS5VK_DIRECT_QUERY);
    if (mapped != 0) {
       vk_object_free(&device->vk, pAllocator, pool);
       return vk_errorf(device, VK_ERROR_OUT_OF_DEVICE_MEMORY,

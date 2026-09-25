@@ -106,6 +106,19 @@ ps5vk_address_range_valid(uint64_t address, uint64_t bytes)
 
 /* A GPU-visible direct-memory allocation, mapped for the CPU and the GPU at
  * one address inside the address window (ps5vk_direct_memory.c). */
+/* What a direct mapping is for; the profile counts live mappings by kind, so a
+ * leak names its owner (direct_kinds). */
+enum ps5vk_direct_kind {
+   PS5VK_DIRECT_MEMORY,  /* VkDeviceMemory */
+   PS5VK_DIRECT_STAGE,   /* a graphics pipeline's stage workspace */
+   PS5VK_DIRECT_COMPUTE, /* a compute pipeline's code */
+   PS5VK_DIRECT_TABLES,  /* a command buffer's register-table chunk */
+   PS5VK_DIRECT_QUERY,   /* a query pool's counters */
+   PS5VK_DIRECT_QUEUE,   /* the queue's submission buffer and stamps */
+   PS5VK_DIRECT_DISPLAY, /* the output's framebuffers */
+   PS5VK_DIRECT_KIND_COUNT,
+};
+
 struct ps5vk_direct_mapping {
    /* sceKernelAllocateDirectMemory's start, or -1 before it succeeds. */
    int64_t start;
@@ -113,6 +126,8 @@ struct ps5vk_direct_mapping {
    size_t bytes;
    /* The CPU and GPU address, or NULL before it is mapped. */
    void *address;
+   /* What it is for (the profile's direct_kinds). */
+   enum ps5vk_direct_kind kind;
 };
 
 /* ps5vk_direct_mapping_create's result for memory mapped outside the window. */
@@ -122,11 +137,20 @@ struct ps5vk_direct_mapping {
 void
 ps5vk_direct_memory_live(uint64_t *count, uint64_t *bytes);
 
+/* The same for one kind of mapping. */
+void
+ps5vk_direct_memory_kind_live(enum ps5vk_direct_kind kind, uint64_t *count, uint64_t *bytes);
+
+/* The live mappings by kind, "memory:N,stage:N,...", for the profile line. */
+const char *
+ps5vk_direct_memory_kinds(char *out, size_t size);
+
 /* Allocates and maps bytes of direct memory at alignment. Returns 0, the
  * failing sceKernel result, or PS5VK_DIRECT_OUTSIDE_WINDOW; on failure
  * nothing stays allocated. */
 int32_t
-ps5vk_direct_mapping_create(struct ps5vk_direct_mapping *mapping, size_t bytes, size_t alignment);
+ps5vk_direct_mapping_create(struct ps5vk_direct_mapping *mapping, size_t bytes, size_t alignment,
+                            enum ps5vk_direct_kind kind);
 
 /* Unmaps and releases whatever of mapping exists. */
 void

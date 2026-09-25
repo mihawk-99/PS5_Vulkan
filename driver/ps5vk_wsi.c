@@ -562,7 +562,8 @@ ps5vk_video_out_register(struct ps5vk_device *device, struct ps5vk_video_out *vi
       return vk_errorf(device, VK_ERROR_INITIALIZATION_FAILED,
                        "sceVideoOutSetFlipRate failed: 0x%08x", (unsigned)result);
    const size_t bytes = (size_t)(PS5VK_SWAPCHAIN_IMAGES * PS5VK_SWAPCHAIN_IMAGE_BYTES);
-   result = ps5vk_direct_mapping_create(&video->buffers, bytes, PS5VK_SWAPCHAIN_ALIGNMENT);
+   result = ps5vk_direct_mapping_create(&video->buffers, bytes, PS5VK_SWAPCHAIN_ALIGNMENT,
+                                        PS5VK_DIRECT_DISPLAY);
    if (result != 0)
       return vk_errorf(device, VK_ERROR_OUT_OF_DEVICE_MEMORY,
                        "the framebuffers could not be mapped in the address window: 0x%08x",

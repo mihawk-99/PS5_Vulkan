@@ -1409,7 +1409,7 @@ ps5vk_pipeline_create_shaders(struct ps5vk_device *device, struct ps5vk_pipeline
    }
 
    const int32_t mapped = ps5vk_direct_mapping_create(&shaders->stage, shaders->stage_bytes,
-                                                      PS5VK_DIRECT_PAGE_BYTES);
+                                                      PS5VK_DIRECT_PAGE_BYTES, PS5VK_DIRECT_STAGE);
    if (mapped != 0)
       return vk_errorf(device, VK_ERROR_OUT_OF_DEVICE_MEMORY,
                        "the stage workspace could not be mapped in the address window: 0x%08x",

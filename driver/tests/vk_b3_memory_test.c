@@ -12,6 +12,16 @@
 
 #include "ps5vk_test.h"
 
+#if defined(PS5VK_TEST_DIRECT)
+/* The driver's count of the direct memory it holds, by kind
+ * (driver/ps5vk_private.h); only the direct build links the driver's internals. */
+enum { DIRECT_MEMORY = 0, DIRECT_STAGE = 1 };
+void
+ps5vk_direct_memory_kind_live(int kind, uint64_t *count, uint64_t *bytes);
+const char *
+ps5vk_direct_memory_kinds(char *out, size_t size);
+#endif
+
 #define PAGE_BYTES 0x4000u
 #define LARGE_BYTES 0x200000u
 #define SMALL_COUNT 16u
@@ -150,6 +160,36 @@ main(void)
                   VK_SUCCESS,
             "flush and invalidate succeed on coherent memory");
    }
+
+#if defined(PS5VK_TEST_DIRECT)
+   {
+      /* The profile names a leak's owner by counting live mappings by kind: an
+       * allocation is one more "memory" mapping of its pages and no other
+       * kind's, and freeing it takes exactly that back. */
+      uint64_t count0 = 0, bytes0 = 0, stage0 = 0, stage_bytes0 = 0;
+      ps5vk_direct_memory_kind_live(DIRECT_MEMORY, &count0, &bytes0);
+      ps5vk_direct_memory_kind_live(DIRECT_STAGE, &stage0, &stage_bytes0);
+      struct mapping counted;
+      const bool made = allocate(instance, device, 4 * PAGE_BYTES, &counted);
+      uint64_t count1 = 0, bytes1 = 0, stage1 = 0, stage_bytes1 = 0;
+      ps5vk_direct_memory_kind_live(DIRECT_MEMORY, &count1, &bytes1);
+      ps5vk_direct_memory_kind_live(DIRECT_STAGE, &stage1, &stage_bytes1);
+      char kinds[160];
+      const bool named = strncmp(ps5vk_direct_memory_kinds(kinds, sizeof(kinds)), "memory:", 7) == 0 &&
+                         strstr(kinds, ",display:") != NULL;
+      release(instance, device, &counted);
+      uint64_t count2 = 0, bytes2 = 0;
+      ps5vk_direct_memory_kind_live(DIRECT_MEMORY, &count2, &bytes2);
+      if (count1 != count0 + 1 || count2 != count0)
+         printf("  (memory mappings %llu -> %llu -> %llu; kinds %s)\n",
+                (unsigned long long)count0, (unsigned long long)count1,
+                (unsigned long long)count2, kinds);
+      check(made && count1 == count0 + 1 && bytes1 == bytes0 + 4 * PAGE_BYTES &&
+               stage1 == stage0 && stage_bytes1 == stage_bytes0 && count2 == count0 &&
+               bytes2 == bytes0 && named,
+            "an allocation is one live memory mapping of its pages until it is freed");
+   }
+#endif
 
    struct mapping small[SMALL_COUNT];
    bool all_mapped = true;

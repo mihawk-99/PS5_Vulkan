@@ -213,7 +213,7 @@ ps5vk_cmd_buffer_table(struct ps5vk_cmd_buffer *cmd_buffer, size_t bytes, size_t
       *node = (struct ps5vk_table_chunk){};
       const int32_t result =
          ps5vk_direct_mapping_create(&node->mapping, PS5VK_TABLE_CHUNK_BYTES,
-                                     PS5VK_DIRECT_PAGE_BYTES);
+                                     PS5VK_DIRECT_PAGE_BYTES, PS5VK_DIRECT_TABLES);
       if (result != 0) {
          free(node);
          ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_DEVICE_MEMORY,

@@ -64,7 +64,8 @@ ps5vk_AllocateMemory_untimed(VkDevice _device, const VkMemoryAllocateInfo *pAllo
    }
 
    const int32_t result =
-      ps5vk_direct_mapping_create(&memory->direct, (size_t)bytes, (size_t)alignment);
+      ps5vk_direct_mapping_create(&memory->direct, (size_t)bytes, (size_t)alignment,
+                                  PS5VK_DIRECT_MEMORY);
    if (result != 0) {
       ps5vk_device_memory_release(device, memory, pAllocator);
       return vk_errorf(device, VK_ERROR_OUT_OF_DEVICE_MEMORY,
