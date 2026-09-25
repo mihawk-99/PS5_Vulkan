@@ -1559,6 +1559,64 @@ ps5vk_event_execute(struct ps5vk_queue *queue, const struct ps5vk_memory_copy *r
  * observes everything recorded before it (C4). The end packets of a step land
  * on the first words of the step after it, so the words as they were built are
  * kept aside and put back before each step runs. */
+/* One record the queue is about to run on the CPU, counted by kind for the
+ * profile's cpu_copies. */
+static void
+ps5vk_profile_cpu_copy(struct ps5vk_queue_profile *p, const struct ps5vk_memory_copy *copy)
+{
+   enum ps5vk_cpu_copy_kind kind = PS5VK_CPU_COPY_OTHER;
+   uint64_t bytes = 0;
+   const uint64_t texels = (uint64_t)copy->width * copy->height;
+   if (copy->image_write) {
+      kind = PS5VK_CPU_COPY_UPLOAD;
+      bytes = texels * copy->destination_texel_bytes;
+   } else if (copy->image_copy) {
+      kind = copy->source_side.tiled && !copy->destination_side.tiled ? PS5VK_CPU_COPY_READBACK
+                                                                      : PS5VK_CPU_COPY_IMAGE;
+      bytes = texels * copy->source_texel_bytes;
+   } else if (copy->blit) {
+      kind = PS5VK_CPU_COPY_BLIT;
+      bytes = texels * copy->destination_texel_bytes;
+   } else if (copy->resolve) {
+      kind = PS5VK_CPU_COPY_RESOLVE;
+      bytes = texels * copy->destination_texel_bytes;
+   } else if (copy->clear) {
+      kind = PS5VK_CPU_COPY_CLEAR;
+      bytes = texels * copy->destination_texel_bytes;
+   } else if (copy->query || copy->event_action != PS5VK_EVENT_ACTION_NONE) {
+      kind = PS5VK_CPU_COPY_OTHER;
+   } else if (copy->fill) {
+      kind = PS5VK_CPU_COPY_FILL;
+      bytes = copy->bytes;
+   } else {
+      kind = PS5VK_CPU_COPY_BYTES;
+      bytes = copy->bytes;
+   }
+   p->cpu_copies[kind]++;
+   p->cpu_copy_bytes[kind] += bytes;
+}
+
+/* The window's cpu_copies as kind:records/KiB, the kinds with none left out. */
+static const char *
+ps5vk_profile_cpu_copies(const struct ps5vk_queue_profile *p, char *text, size_t size)
+{
+   static const char *const names[PS5VK_CPU_COPY_KINDS] = {
+      "upload", "readback", "image", "blit", "resolve", "clear", "fill", "bytes", "other"};
+   size_t at = 0;
+   text[0] = '\0';
+   for (unsigned kind = 0; kind < PS5VK_CPU_COPY_KINDS; kind++) {
+      if (p->cpu_copies[kind] == 0)
+         continue;
+      const int wrote = snprintf(text + at, size - at, "%s%s:%" PRIu64 "/%" PRIu64,
+                                 at ? "," : "", names[kind], p->cpu_copies[kind],
+                                 p->cpu_copy_bytes[kind] / 1024);
+      if (wrote < 0 || (size_t)wrote >= size - at)
+         break;
+      at += (size_t)wrote;
+   }
+   return at ? text : "none";
+}
+
 static VkResult
 ps5vk_queue_run_copy_steps(struct ps5vk_queue *queue, const struct vk_queue_submit *submit,
                            uint32_t *const stream, size_t capacity, uint32_t *const marker,
@@ -1660,6 +1718,8 @@ ps5vk_queue_run_copy_steps(struct ps5vk_queue *queue, const struct vk_queue_subm
       const uint64_t copy_started = queue->profile.enabled ? ps5vk_profile_now() : 0;
       for (; at < split_count && split[at].offset == end; at++) {
          const struct ps5vk_memory_copy *const copy = split[at].copy;
+         if (queue->profile.enabled)
+            ps5vk_profile_cpu_copy(&queue->profile, copy);
          if (copy->resolve) {
             ps5vk_resolve_execute(copy);
             continue;
@@ -1677,6 +1737,8 @@ ps5vk_queue_run_copy_steps(struct ps5vk_queue *queue, const struct vk_queue_subm
             if (!parallel)
                for (unsigned i = 0; i < wave; i++)
                   ps5vk_blit_execute(split[at + i].copy);
+            for (unsigned i = 1; queue->profile.enabled && i < wave; i++)
+               ps5vk_profile_cpu_copy(&queue->profile, split[at + i].copy);
             at += wave - 1;
             continue;
          }
@@ -2172,6 +2234,7 @@ ps5vk_queue_flip_presented(struct ps5vk_queue *queue, uint64_t started, bool fir
             /* Both summary lines go out as one write: see the note on
              * ps5vk_queue_profile_report2 for what a second one costs. */
             char line[3072];
+            char copies[320];
             snprintf(line, sizeof(line),
                     "[ps5vk] profile frames=%" PRIu64 " steps/frame=%.2f "
                     "queue_ms=%.3f flush_ms=%.3f gpu_ms=%.3f flip_ms=%.3f "
@@ -2180,7 +2243,8 @@ ps5vk_queue_flip_presented(struct ps5vk_queue *queue, uint64_t started, bool fir
                     "late_ms=%.3f wait_max_ms=%.3f work_max_ms=%.3f late_max_ms=%.3f "
                     "later_steps=%" PRIu64 " later_step_ms=%.3f suspend_mode=%u rescues=%" PRIu64
                     " flag_refusals=%" PRIu64 " async_steps=%" PRIu64 " pending_waits=%" PRIu64
-                    " pending_wait_ms=%.3f gpu_barriers=%" PRIu64 " step_waits=%" PRIu64 "\n",
+                    " pending_wait_ms=%.3f gpu_barriers=%" PRIu64 " step_waits=%" PRIu64
+                    " cpu_copies=%s\n",
                     p->frames,
                     (double)p->steps / p->frames, p->queue_ns * ms, p->flush_ns * ms,
                     p->gpu_ns * ms, p->flip_ns * ms,
@@ -2194,7 +2258,8 @@ ps5vk_queue_flip_presented(struct ps5vk_queue *queue, uint64_t started, bool fir
                     p->stamp_late_max_ns / 1000000.0, p->later_steps,
                     ps5vk_per_ms(p->later_step_ns, p->later_steps), p->suspend_mode, p->rescues,
                     p->flag_refusals, p->async_steps, p->pending_waits,
-                    p->pending_wait_ns * ms, p->gpu_barriers, p->step_waits);
+                    p->pending_wait_ns * ms, p->gpu_barriers, p->step_waits,
+                    ps5vk_profile_cpu_copies(p, copies, sizeof(copies)));
             ps5vk_queue_profile_report2(p, now, line, sizeof(line));
          }
          /* last_return_ns and last_present_ns carry across a window: the

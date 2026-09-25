@@ -267,6 +267,22 @@ enum ps5vk_profile_slot {
  * quantised to the refresh, not one whose work happens to take that long. */
 #define PS5VK_PERIOD_BUCKETS 17
 
+/* The work a submission's split points run on the CPU, by kind, as the profile
+ * counts it (ps5vk_queue.c, ps5vk_profile_cpu_copy). A readback is an image
+ * copy out of tiled storage into a linear side; an image copy is any other. */
+enum ps5vk_cpu_copy_kind {
+   PS5VK_CPU_COPY_UPLOAD,
+   PS5VK_CPU_COPY_READBACK,
+   PS5VK_CPU_COPY_IMAGE,
+   PS5VK_CPU_COPY_BLIT,
+   PS5VK_CPU_COPY_RESOLVE,
+   PS5VK_CPU_COPY_CLEAR,
+   PS5VK_CPU_COPY_FILL,
+   PS5VK_CPU_COPY_BYTES,
+   PS5VK_CPU_COPY_OTHER,
+   PS5VK_CPU_COPY_KINDS
+};
+
 struct ps5vk_queue_profile {
    bool enabled;
    uint64_t since, frames, steps, queue_ns, flush_ns, gpu_ns, flip_ns, flush_bytes;
@@ -335,6 +351,9 @@ struct ps5vk_queue_profile {
     * between command buffers), and steps that began with a GPU wait for the
     * step before them. */
    uint64_t gpu_barriers, step_waits;
+   /* The CPU's share of the transfers: records run at split points by kind,
+    * and the bytes they moved (for an image, its region's texels). */
+   uint64_t cpu_copies[PS5VK_CPU_COPY_KINDS], cpu_copy_bytes[PS5VK_CPU_COPY_KINDS];
 };
 
 struct ps5vk_queue {
