@@ -9589,3 +9589,26 @@ compiles nothing: 267 pipelines in 59 ms, no invalid entry. The cache unit test
 now checks a stored output loads both from memory and, after a flush, from its
 file, and check-shader-cache's fresh-process warm launch still skips every
 compile.
+
+## 2026-09-25 — the runner-cases gate is green again
+
+tools/check-runner-cases.sh had not passed since before R75: its host runner did
+not build (R79 fixed that), and once it did, two things kept it red, neither a
+driver fault.
+
+- Seven runner cases mapped memory of type 0 -- c2-transfers, c7-clear,
+  r17-descriptor-array, r71-dual-source, c8-depth4-copy, v0-vertex-formats-8888
+  and v0-blit-dst, their readback buffers or an image's storage. Type 0 has been
+  device-local since 0062cdf and never maps, so each case failed on the map, and
+  c7-clear then read through the null pointer and took the runner down. They
+  now map type 1, the driver's mappable type (driver/tests/ps5vk_test.h, the
+  same constant). On the console, PID 145: all seven PASS.
+- c2-indirect and b8-secondary are compared with the console's b4-headless
+  frame, and since 0062cdf the driver writes each draw's blend, clip and
+  rasterizer words where the console frame left the defaults: CB_BLEND0_CONTROL,
+  CB_COLOR_CONTROL, PA_CL_CLIP_CNTL and PA_SU_SC_MODE_CNTL, four records more.
+  check-driver.sh already declares those registers restated; this gate now does
+  the same. A fresh console capture of b4-headless (PID 144) holds the same
+  table as the golden, so the golden stays.
+
+The gate: every case PASS, both drawing cases identical, 206 PASS records.

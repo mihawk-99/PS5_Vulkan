@@ -161,9 +161,17 @@ for case in "${drawing_cases[@]}"; do
         status=1
         continue
     fi
+    # The registers the driver writes in every draw's table because context
+    # registers keep their last value between draws -- the write mask, blend,
+    # clip and rasterizer words (driver/ps5vk_draw.c; check-driver.sh restates
+    # the same five): a console frame that left their defaults in place writes
+    # none of them.
     if python3 "$root/tools/golden.py" compare-submission "$drawing_golden" "$dump" \
             --draws 1 --extra-sh-register 0x8c --extra-sh-register 0x0c \
-            --expect-record 0x111=0x44870000 > "$work/$case.compare" 2>&1; then
+            --expect-record 0x111=0x44870000 --restated-cx-register 0x08e \
+            --restated-cx-register 0x1e0 --restated-cx-register 0x202 \
+            --restated-cx-register 0x204 --restated-cx-register 0x205 \
+            > "$work/$case.compare" 2>&1; then
         printf '%-20s %s\n' "$case" "PASS (submission identical)"
     else
         printf '%-20s %s\n' "$case" "FAIL (submission differs)"

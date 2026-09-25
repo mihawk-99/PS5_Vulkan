@@ -67,6 +67,10 @@ bool runner_exit_requested() noexcept
 
 namespace
 {
+// The driver's mappable memory type: type 0 is device-local and never maps
+// (0062cdf), so what a case maps -- a readback buffer, an image's storage --
+// comes from type 1 (driver/tests/ps5vk_test.h, PS5VK_TEST_HOST_MEMORY_TYPE).
+constexpr std::uint32_t kHostMemoryType = 1;
 constexpr std::size_t kProbeBytes = 0x10000;
 constexpr std::size_t kCommandWords = 256;
 
@@ -15052,7 +15056,7 @@ void run_vulkan_transfers(const TestContext &test, TestOutcome &outcome) noexcep
     {
         buffer_requirements(triangle.device, buffer, &requirements);
         const VkMemoryAllocateInfo memory_info{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr,
-                                               requirements.size, 0};
+                                               requirements.size, kHostMemoryType};
         objects = allocate_memory(triangle.device, &memory_info, nullptr, &memory) == VK_SUCCESS &&
                   bind_memory(triangle.device, buffer, memory, 0) == VK_SUCCESS &&
                   map_memory(triangle.device, memory, 0, VK_WHOLE_SIZE, 0, &mapped) == VK_SUCCESS &&
@@ -15334,7 +15338,7 @@ void run_vulkan_image_clear(const TestContext &test, TestOutcome &outcome) noexc
         VkMemoryRequirements buffer_need{};
         buffer_requirements(triangle.device, state.buffer, &buffer_need);
         const VkMemoryAllocateInfo buffer_memory{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr,
-                                                 buffer_need.size, 0};
+                                                 buffer_need.size, kHostMemoryType};
         return allocate_memory(triangle.device, &buffer_memory, nullptr, &state.buffer_memory) ==
                    VK_SUCCESS &&
                bind_buffer(triangle.device, state.buffer, state.buffer_memory, 0) == VK_SUCCESS &&
@@ -23676,7 +23680,7 @@ bool transfer16_round_trip(const ps5vk_triangle &triangle, JsonLog &log) noexcep
         VkMemoryRequirements need{};
         buffer_requirements(triangle.device, state.buffer, &need);
         const VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr,
-                                            need.size, 0};
+                                            need.size, kHostMemoryType};
         return allocate_memory(triangle.device, &allocate, nullptr, &state.memory) == VK_SUCCESS &&
                bind_buffer(triangle.device, state.buffer, state.memory, 0) == VK_SUCCESS &&
                map_memory(triangle.device, state.memory, 0, VK_WHOLE_SIZE, 0, &state.mapped) ==
@@ -24143,7 +24147,7 @@ bool copy_depth4_image(const ps5vk_triangle &triangle, JsonLog &log) noexcept
         image_requirements(triangle.device, side.image, &need);
         side.bytes = need.size;
         const VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr,
-                                            need.size, 0};
+                                            need.size, kHostMemoryType};
         return allocate_memory(triangle.device, &allocate, nullptr, &side.memory) == VK_SUCCESS &&
                bind_image(triangle.device, side.image, side.memory, 0) == VK_SUCCESS &&
                map_memory(triangle.device, side.memory, 0, VK_WHOLE_SIZE, 0, &side.mapped) ==
@@ -24472,7 +24476,7 @@ bool transfer_format_row(const ps5vk_triangle &triangle, VkPhysicalDevice physic
         VkMemoryRequirements need{};
         buffer_requirements(triangle.device, state.buffer, &need);
         const VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr,
-                                            need.size, 0};
+                                            need.size, kHostMemoryType};
         return allocate_memory(triangle.device, &allocate, nullptr, &state.memory) == VK_SUCCESS &&
                bind_buffer(triangle.device, state.buffer, state.memory, 0) == VK_SUCCESS &&
                map_memory(triangle.device, state.memory, 0, VK_WHOLE_SIZE, 0, &state.mapped) ==
@@ -25200,7 +25204,7 @@ bool blit_destination_row(const ps5vk_triangle &triangle, VkImage source_image,
             VkMemoryRequirements need{};
             buffer_requirements(triangle.device, readback, &need);
             const VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr,
-                                                need.size, 0};
+                                                need.size, kHostMemoryType};
             made = allocate_memory(triangle.device, &allocate, nullptr, &readback_memory) ==
                        VK_SUCCESS &&
                    bind_buffer(triangle.device, readback, readback_memory, 0) == VK_SUCCESS &&
@@ -25415,7 +25419,7 @@ void run_vulkan_blit_destination_formats(const TestContext &test, TestOutcome &o
             VkMemoryRequirements need{};
             buffer_requirements(triangle.device, source_buffer, &need);
             const VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr,
-                                                need.size, 0};
+                                                need.size, kHostMemoryType};
             source_made = allocate_memory(triangle.device, &allocate, nullptr,
                                           &source_buffer_memory) == VK_SUCCESS &&
                           bind_buffer(triangle.device, source_buffer, source_buffer_memory, 0) ==
