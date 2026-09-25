@@ -309,6 +309,11 @@ struct ps5vk_queue_profile {
    uint64_t stamp_steps, stamp_missing, stamp_wait_ns, stamp_work_ns, stamp_late_ns;
    uint64_t stamp_wait_max_ns, stamp_work_max_ns, stamp_late_max_ns;
    uint64_t later_steps, later_step_ns;
+   /* R68: the window's submission mode, and the steps whose marker had not
+    * arrived after PS5VK_RESCUE_POLLS sleeps without a suspend point, which
+    * then passed one. */
+   unsigned suspend_mode;
+   uint64_t rescues, flag_refusals;
 };
 
 struct ps5vk_queue {
@@ -347,6 +352,8 @@ struct ps5vk_queue {
     * the first two. */
    struct ps5vk_direct_mapping stamps;
    bool start_stamped;
+   /* Profile windows reported so far, which picks R68's submission mode. */
+   uint32_t profile_windows;
    /* The workers that resample blits in parallel (ps5vk_queue.c), started on
     * first use; refused when none could start. */
    struct ps5vk_blit_pool *blit_pool;
@@ -1830,6 +1837,9 @@ ps5vk_meta_copy(struct ps5vk_cmd_buffer *cmd_buffer, const VkCopyImageInfo2 *inf
 #define PS5VK_AB_BASE_MIP (1u << 8) /* sampled views read their base level only */
 #define PS5VK_AB_NO_D24 (1u << 9) /* D24_UNORM_S8_UINT reports no features */
 #define PS5VK_AB_SYNC_PRESENT (1u << 10) /* a present waits until its flip is shown */
+/* R68: with the profile on, each ten-second window uses the next submission
+ * mode (ps5vk_queue.c, ps5vk_queue_suspend_mode). */
+#define PS5VK_AB_SUBMIT_CYCLE (1u << 11)
 extern unsigned ps5vk_ab_flags;
 void
 ps5vk_ab_load(void);

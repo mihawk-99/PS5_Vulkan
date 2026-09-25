@@ -89,6 +89,16 @@
  * spin is bounded, and past it the wait is exactly the sleeping one it was. */
 #define PS5VK_MARKER_SPIN_NS UINT64_C(1500000)
 
+/* R68's submission modes (PS5VK_AB_SUBMIT_CYCLE): 0 passes a suspend point
+ * after every submission, as the driver always has; 1 after flips only; 2
+ * after none; 3 after flips only, with the work submitted with its
+ * description's flag byte set; 4 the flag with a suspend point after every
+ * submission. A step submitted without one whose marker has not arrived after
+ * this many 1 ms sleeps passes one then, so no mode can hang the queue; a
+ * flagged submission the driver refuses is submitted again without the flag. */
+#define PS5VK_SUSPEND_MODES 5u
+#define PS5VK_RESCUE_POLLS 20u
+
 /* R31's attribution of the application's own time. Each instrumented entry
  * point closes the stretch since the previous one returned and opens its own, so
  * the stretches partition the wall clock that the queue and flip intervals do
@@ -1134,6 +1144,22 @@ ps5vk_blit_wave_execute(struct ps5vk_queue *queue, const struct ps5vk_copy_split
    return true;
 }
 
+/* Whether a submission passes a suspend point right after it: always, unless a
+ * profiled diagnostic run cycles R68's modes. */
+static bool
+ps5vk_queue_suspends(const struct ps5vk_queue *queue, bool flip)
+{
+   switch (queue->profile.suspend_mode) {
+   case 1:
+   case 3:
+      return flip;
+   case 2:
+      return false;
+   default:
+      return true;
+   }
+}
+
 /* The words a step ends with: the barrier and the marker, and while profiling
  * the end timestamp before them. */
 static size_t
@@ -1255,13 +1281,23 @@ ps5vk_queue_run_step(struct ps5vk_queue *queue, const struct vk_queue_submit *su
       .word_count = word_count,
    };
    const uint64_t started = queue->profile.enabled ? ps5vk_profile_now() : 0;
+   description.flag = queue->profile.suspend_mode >= 3 ? 1 : 0;
    int32_t result = sceAgcDriverSubmitDcb(&description);
+   if (result != 0 && description.flag != 0) {
+      queue->profile.flag_refusals++;
+      description.flag = 0;
+      result = sceAgcDriverSubmitDcb(&description);
+   }
    if (result != 0)
       return vk_queue_set_lost(&queue->vk, "sceAgcDriverSubmitDcb failed: 0x%08x",
                                (unsigned)result);
-   result = sceAgcSuspendPoint();
-   if (result != 0)
-      return vk_queue_set_lost(&queue->vk, "sceAgcSuspendPoint failed: 0x%08x", (unsigned)result);
+   bool suspended = ps5vk_queue_suspends(queue, false);
+   if (suspended) {
+      result = sceAgcSuspendPoint();
+      if (result != 0)
+         return vk_queue_set_lost(&queue->vk, "sceAgcSuspendPoint failed: 0x%08x",
+                                  (unsigned)result);
+   }
    /* Everything up to here is the submission call itself; the wait below is the
     * driver's own polling, and the difference between the two is what says
     * whether a "gpu" interval is the GPU or the check granularity. */
@@ -1293,6 +1329,14 @@ ps5vk_queue_run_step(struct ps5vk_queue *queue, const struct vk_queue_submit *su
          return VK_SUCCESS;
       }
       sceKernelUsleep(PS5VK_MARKER_POLL_MICROSECONDS);
+      if (!suspended && poll + 1 == PS5VK_RESCUE_POLLS) {
+         suspended = true;
+         queue->profile.rescues++;
+         result = sceAgcSuspendPoint();
+         if (result != 0)
+            return vk_queue_set_lost(&queue->vk, "sceAgcSuspendPoint failed: 0x%08x",
+                                     (unsigned)result);
+      }
    }
    return vk_queue_set_lost(&queue->vk, "completion marker 0x%08x not written within 2 s", value);
 }
@@ -1854,7 +1898,8 @@ ps5vk_queue_flip_presented(struct ps5vk_queue *queue, uint64_t started, bool fir
                     "flush_MiB/frame=%.2f copy_ms=%.3f sync_wait_ms=%.3f sync_signal_ms=%.3f "
                     "stamped=%" PRIu64 "/%" PRIu64 " display_wait_ms=%.3f gpu_work_ms=%.3f "
                     "late_ms=%.3f wait_max_ms=%.3f work_max_ms=%.3f late_max_ms=%.3f "
-                    "later_steps=%" PRIu64 " later_step_ms=%.3f\n", p->frames,
+                    "later_steps=%" PRIu64 " later_step_ms=%.3f suspend_mode=%u rescues=%" PRIu64
+                    " flag_refusals=%" PRIu64 "\n", p->frames,
                     (double)p->steps / p->frames, p->queue_ns * ms, p->flush_ns * ms,
                     p->gpu_ns * ms, p->flip_ns * ms,
                     (double)p->flush_bytes / (p->frames * 1048576.0),
@@ -1865,7 +1910,8 @@ ps5vk_queue_flip_presented(struct ps5vk_queue *queue, uint64_t started, bool fir
                     ps5vk_per_ms(p->stamp_late_ns, p->stamp_steps),
                     p->stamp_wait_max_ns / 1000000.0, p->stamp_work_max_ns / 1000000.0,
                     p->stamp_late_max_ns / 1000000.0, p->later_steps,
-                    ps5vk_per_ms(p->later_step_ns, p->later_steps));
+                    ps5vk_per_ms(p->later_step_ns, p->later_steps), p->suspend_mode, p->rescues,
+                    p->flag_refusals);
             ps5vk_queue_profile_report2(p, now, line, sizeof(line));
          }
          /* last_return_ns and last_present_ns carry across a window: the
@@ -1875,7 +1921,13 @@ ps5vk_queue_flip_presented(struct ps5vk_queue *queue, uint64_t started, bool fir
          uint64_t hitch_calls[PS5VK_HITCH_KINDS], hitch_ns[PS5VK_HITCH_KINDS];
          memcpy(hitch_calls, p->frame_hitch_calls, sizeof(hitch_calls));
          memcpy(hitch_ns, p->frame_hitch_ns, sizeof(hitch_ns));
+         if (p->since != 0)
+            queue->profile_windows++;
+         const unsigned suspend_mode = (ps5vk_ab_flags & PS5VK_AB_SUBMIT_CYCLE)
+                                          ? queue->profile_windows % PS5VK_SUSPEND_MODES
+                                          : 0;
          *p = (struct ps5vk_queue_profile){.enabled = true,
+                                           .suspend_mode = suspend_mode,
                                            .since = now,
                                            .last_return_ns = now,
                                            .last_present_ns = now,
@@ -1943,10 +1995,14 @@ ps5vk_queue_flip(struct ps5vk_queue *queue, int video, uint32_t buffer_index, in
    if (result != 0)
       return vk_queue_set_lost(&queue->vk, "sceAgcDriverSubmitDcb failed for a flip: 0x%08x",
                                (unsigned)result);
-   result = sceAgcSuspendPoint();
-   if (result != 0)
-      return vk_queue_set_lost(&queue->vk, "sceAgcSuspendPoint failed after a flip: 0x%08x",
-                               (unsigned)result);
+   /* A flip whose shown status is waited for always passes one: that wait
+    * has no rescue of its own. */
+   if (wait_shown || ps5vk_queue_suspends(queue, true)) {
+      result = sceAgcSuspendPoint();
+      if (result != 0)
+         return vk_queue_set_lost(&queue->vk, "sceAgcSuspendPoint failed after a flip: 0x%08x",
+                                  (unsigned)result);
+   }
    /* A FIFO present returns once the flip is queued: VideoOut shows it at a
     * later vblank while the application goes on to its next frame, and the
     * acquire of an image still on screen or queued is what waits
@@ -2359,6 +2415,7 @@ ps5vk_queue_init(struct ps5vk_device *device, struct ps5vk_queue *queue,
       fclose(profile);
    queue->stamps = (struct ps5vk_direct_mapping){.start = -1};
    queue->start_stamped = false;
+   queue->profile_windows = 0;
    if (queue->profile.enabled) {
       ps5vk_queue_probe_costs(&queue->profile);
       ps5vk_hitch_armed = true;

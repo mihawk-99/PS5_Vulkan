@@ -3294,3 +3294,18 @@ restart after the same split fetched vertex 0xffff correctly with no write
 before it. Whether the reset comes from the console's submission path or the
 GPU's own state handling is not known; the driver treats a split like the start
 of a command buffer. Evidence: jobs/r65-restart-split.
+
+## 2026-09-24 — the suspend point is what starts a submission promptly (R68)
+
+On my PS5 Pro, a work submission followed by sceAgcSuspendPoint starts on the
+GPU within tens of microseconds. Without the suspend point it starts about one
+refresh later: at 119.88 Hz the stamps (R67) put the start 7.8 ms after the
+submission call for every step, and FCEUmm drops from 120 presents a second to
+80. The GPU work itself is unchanged (0.10 ms). Setting the submit
+description's flag byte to 1 changes nothing, with or without the suspend
+point, and the console accepts it. A tester's PS5 (not a Pro, 1080p 120 Hz
+display) shows the late start *with* the suspend point after every submission:
+0.11 ms of work, 7.97 ms late, the same 80 presents a second. What differs
+between the two consoles is not known; the system-call cost probe reads the same
+on both (about 800 ns). Evidence: the submit-cycle A/B word (R68,
+docs/M5_PHASE_C.md), and the tester's trace from the R67 build.

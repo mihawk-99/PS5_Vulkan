@@ -9243,3 +9243,27 @@ as before. vk_v0_topology_test runs its split frame again with profiling on and
 asserts the first step starts with a stamp and every step ends with one (and
 that neither is there without it). The tester's build carries this, to tell
 which of the three the 8 ms are.
+
+## 2026-09-24 — R68: submission modes, cycled under the profile
+
+The tester's R67 trace answered R67's question: display_wait_ms=0.000,
+gpu_work_ms=0.111, late_ms=7.97 and later_step_ms=8.32 per step. The GPU
+reaches every submission about one 120 Hz refresh after it is made, and with
+1.5 steps and a synchronous wait per present that is two thirds of full speed.
+
+ps5vk-ab.txt's word submit-cycle (read now whether or not ps5vk-log.txt is
+present) makes each ten-second profile window use the next of five modes, named
+in the profile line as suspend_mode: 0 a suspend point after every submission
+(what the driver does), 1 after flips only, 2 after none, 3 as 1 with the submit
+description's flag byte set, 4 as 0 with the flag. A step submitted without a
+suspend point whose marker has not arrived after 20 ms of sleeps passes one then
+(rescues=), and a flagged submission the console refused would be resubmitted
+without the flag (flag_refusals=).
+
+Console (my Pro, FCEUmm, 1943, 70 s, two cycles): modes 0 and 4 late_ms 0.04,
+1200 presents in 10 s; modes 1, 2 and 3 late_ms 7.77-7.79, later_step_ms
+8.11-8.25, 800-805 presents; no rescues, no refusals. So on the Pro the suspend
+point is what starts the work, and without it the Pro behaves like the tester's
+console does with it (docs/HARDWARE_FINDINGS.md). Nothing found starts the
+tester's work sooner, so the queue has to stop waiting for each submission
+before taking the next: R69.

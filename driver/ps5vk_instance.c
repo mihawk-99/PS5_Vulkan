@@ -98,8 +98,10 @@ ps5vk_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
       fclose(log_flag);
       instance->vk.enable_debug_logging = true;
       ps5vk_census_enabled = true;
-      ps5vk_ab_load();
    }
+   /* The diagnostic A/B switches do not need the log: R68's submission modes
+    * are read by the profile alone, which logs nothing per frame. */
+   ps5vk_ab_load();
    FILE *dump_flag = fopen("/app0/ps5vk-spirv-dump.txt", "rb");
    if (dump_flag != NULL) {
       fclose(dump_flag);

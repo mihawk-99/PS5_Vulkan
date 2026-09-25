@@ -23,8 +23,8 @@
 bool ps5vk_census_enabled;
 unsigned ps5vk_ab_flags;
 
-/* /app0/ps5vk-ab.txt, read once with the log flag: words naming which path a
- * diagnostic run replaces (ps5vk_private.h, PS5VK_AB_*). */
+/* /app0/ps5vk-ab.txt, read at instance creation when it is there: words naming
+ * which path a diagnostic run replaces (ps5vk_private.h, PS5VK_AB_*). */
 void
 ps5vk_ab_load(void)
 {
@@ -55,6 +55,8 @@ ps5vk_ab_load(void)
          ps5vk_ab_flags |= PS5VK_AB_CPU_TRANSFERS;
       else if (!strcmp(word, "tile-padded"))
          ps5vk_ab_flags |= PS5VK_AB_TILE_PADDED;
+      else if (!strcmp(word, "submit-cycle"))
+         ps5vk_ab_flags |= PS5VK_AB_SUBMIT_CYCLE;
    }
    fclose(file);
    char line[64];
