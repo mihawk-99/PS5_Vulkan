@@ -65,7 +65,7 @@
 # bindings.txt layout the title needs when the shaders read resources,
 # SHA256SUMS and PROVENANCE.txt, after checking the compiler metadata.
 #
-# Run from the repository root:  bash tools/build-probe-shaders.sh m2|m3-uniform|v0-robust|m3-vertex|m3-texture|m4-depth|m4-blend|b7-corner|b8-corner|c1-clear|c3-quad|c7-mip|c7-mip-linear|c7-diag|c2-instance|c8-sampleid|v0-vertex-sint|v0-vertex-uint|v0-vertex-bytes-float|v0-vertex-bytes-uint|v0-vertex-bytes-sint|v0-array|v0-cube|v0-push|v0-texture-uint|v0-texture-sint|v0-target-uint|v0-target-sint|r71-dual-source
+# Run from the repository root:  bash tools/build-probe-shaders.sh m2|m3-uniform|v0-robust|m3-vertex|m3-texture|m4-depth|m4-blend|b7-corner|b8-corner|c1-clear|c3-quad|c7-mip|c7-mip-linear|c7-diag|c2-instance|c8-sampleid|v0-vertex-sint|v0-vertex-uint|v0-vertex-bytes-float|v0-vertex-bytes-uint|v0-vertex-bytes-sint|v0-array|v0-cube|v0-push|v0-texture-uint|v0-texture-sint|v0-target-uint|v0-target-sint|r71-dual-source|r79-lod-bias-range
 set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -546,6 +546,17 @@ r26-lod-bias)
     vertex_source=shaders/c7/band.vert
     pixel_source=shaders/c7/lod-bias.frag
     output=probes/r26-lod-bias
+    vertex_flags=(--address32-hi 2
+        --vertex-attribute 0:r32g32_float:0:0:16:4
+        --vertex-attribute 1:r32g32_float:0:8:16:4)
+    pixel_flags=(--address32-hi 2 --descriptor-binding 0:0:combined_image_sampler:1:0:48)
+    ;;
+r79-lod-bias-range)
+    # R79: R26's geometry and binding, a pixel stage whose derivatives select
+    # LOD 5 of a ten-level chain, for biases past +/-2.
+    vertex_source=shaders/c7/band.vert
+    pixel_source=shaders/c7/lod-bias-wide.frag
+    output=probes/r79-lod-bias-range
     vertex_flags=(--address32-hi 2
         --vertex-attribute 0:r32g32_float:0:0:16:4
         --vertex-attribute 1:r32g32_float:0:8:16:4)
@@ -1241,7 +1252,7 @@ elif set_name == "r27-menu-alpha":
                 *vertex_input("vertex attributes: location 0 r32g32b32_float offset 0, "
                               "location 1 r32g32_float offset 12, location 2 b8g8r8a8_unorm "
                               "offset 20, stride 24, binding 0")]
-elif set_name in ("c7-mip", "c7-mip-linear", "r26-lod-bias"):
+elif set_name in ("c7-mip", "c7-mip-linear", "r26-lod-bias", "r79-lod-bias-range"):
     bindings = [("address32_hi", expected_hi),
                 *vertex_input("vertex attributes: location 0 r32g32_float offset 0, "
                               "location 1 r32g32_float offset 8, stride 16, binding 0"),

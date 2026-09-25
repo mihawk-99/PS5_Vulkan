@@ -9532,3 +9532,33 @@ register tables), `query`, `queue` (the submission buffer and stamps) or
 `direct_kinds=memory:N,stage:N,...`, the live mappings of each. The b3 memory
 test's direct build requires an allocation to be one more `memory` mapping of
 its pages, no other kind's, until it is freed.
+
+## 2026-09-25 — R79: sampler LOD bias to +/-16
+
+Mario Kart Wii (Dolphin) asks for samplers biased -2.1875, -3 and -3.1875. The
+device reported maxSamplerLodBias 2 -- Vulkan's minimum, kept since the first
+version -- and refused them, so everything they textured drew black: on Luigi
+Circuit, the grass bank and palm tree left of the track. Dolphin's biases
+break Vulkan's valid usage against a limit of 2, but the limit was the
+driver's own choice, not the hardware's: word 2's LOD_BIAS field is signed with
+8 fraction bits in 14 bits, room for +/-32 (R26's encoding, Mesa's
+ac_build_sampler_descriptor), and RADV reports 16 on the same generation.
+
+The device now reports 16. R79's probe (jobs/r79-lod-bias-range) draws a
+ten-level chain whose derivatives select LOD 5 and changes only the bias across
+twelve frames, -16 to +16: every level from -5 to +4, exact half-level blends,
+and the chain's two ends at +/-8 and +/-16, where a narrower field would wrap.
+PID 121: every pixel of all twelve 4K frames matches, and R26's eight frames
+pass unchanged. The c4 texture test's host checks accept -16, -3.1875 and +16 and
+refuse +/-16.01. Mario Kart Wii from my save state then draws the grass bank and
+palm tree with no refusal (../PS5_RetroArch klog/mkw-base-*, mkw-r79-*).
+
+The same round regenerated conformance_inventory/device_report.json, stale since
+R5: dual-source blending (R71), anisotropy, the 16384 image limits and R78's
+sample counts had not reached it. And the host runner's driver build had failed
+since R75-R77 on -Werror: log_expected_refusal lost its last caller there and is
+gone. With its runner building again, tools/check-runner-cases.sh runs and fails
+in ways that predate this round: c2-transfers crashes creating its buffers, and
+c2-indirect and b8-secondary no longer match their goldens (a context table five
+registers longer, which fits R78's sample locations written at one sample). That
+gate is the next driver item.

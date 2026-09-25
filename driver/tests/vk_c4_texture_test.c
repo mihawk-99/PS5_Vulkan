@@ -255,13 +255,18 @@ main(void)
       }
       check(frames == 2, "two frames submitted the textured square with different samplers");
       if (status == PS5VK_TRIANGLE_OK) {
+         /* R79: the range is word 2's, +/-16 as RADV reports it; Dolphin's -3.1875
+          * (Mario Kart Wii) was refused while the device reported +/-2. */
          check(ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, -2.0f) &&
                   ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, -0.5f) &&
                   ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, 0.5f) &&
-                  ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, 2.0f),
+                  ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, 2.0f) &&
+                  ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, -3.1875f) &&
+                  ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, -16.0f) &&
+                  ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, 16.0f),
                "sampler biases of both signs and fractions inside the advertised range create");
-         check(!ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, 2.01f) &&
-                  !ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, -2.01f) &&
+         check(!ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, 16.01f) &&
+                  !ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, -16.01f) &&
                   !ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, NAN) &&
                   !ps5vk_triangle_set_texture_lod_bias(&triangle, 0, 4, INFINITY),
                "out-of-range and non-finite sampler biases are refused");

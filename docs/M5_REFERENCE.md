@@ -692,7 +692,7 @@ allocator and encoders can execute, and says so.
 | `timestampComputeAndGraphics` | on since V0-query recorded the clock and the driver implemented `vkCmdWriteTimestamp` (pids 143 and 144); the limits report it true with a 10 ns period |
 | `standardSampleLocations` off | C8; 1.4 requires it on, so `V4-queries` |
 | `pointSizeRange` and `lineWidthRange` 1 to 1 | `V4-lines` raises them for 1.4 |
-| `maxSamplerLodBias` 2.0, `maxSamplerAnisotropy` 1.0 | C4 for the LOD bias. Anisotropy is accepted at the reported 1.0 and is a no-op there; above it the sampler is refused by name, and `samplerAnisotropy` stays FALSE (`v0-sampler-anisotropy`) |
+| `maxSamplerLodBias` 16.0 (R79; 2.0 until then), `maxSamplerAnisotropy` 1.0 | R26 and R79 for the LOD bias (`jobs/r26-lod-bias`, `jobs/r79-lod-bias-range`). Anisotropy is accepted at the reported 1.0 and is a no-op there; above it the sampler is refused by name, and `samplerAnisotropy` stays FALSE (`v0-sampler-anisotropy`) |
 | `maxViewports` 1, `viewportBoundsRange` -8192 to 8191 | C2 and C5. 1.4 raises the bounds range to 15360 |
 | `nonCoherentAtomSize` 256, buffer/image granularity 131072 | C1-C5, D1 |
 

@@ -1,0 +1,6 @@
+hold 1
+capture
+m2-solid
+r79-lod-bias-range
+r26-lod-bias
+exit

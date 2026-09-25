@@ -17161,23 +17161,6 @@ void run_vulkan_sample_location_frames(const TestContext &test, TestOutcome &out
 // in tiles. Until R77 the first was refused; R77 renders the resolve into rows,
 // so both now submit, and the two resolved frames -- one read in rows, the other
 // through the tiles -- have to hold the same pixels.
-// The report a frame the case *expects* to be refused is given. The harness
-// installs a VK_EXT_debug_utils messenger and forwards every warning and error
-// the driver logs through the report (driver/tests/ps5vk_triangle.c,
-// forward_message), which is how a refusal's sentence reaches a run's klog --
-// every item in both request documents was found that way. A refused frame whose
-// report is NULL loses the sentence, so the frames a probe expects to fail get
-// this one: it logs the driver's message at INFO, because the refusal is the
-// measurement and not a failure of the frame.
-void log_expected_refusal(void *context, const char *name, bool passed, int result,
-                          const char *detail) noexcept
-{
-    (void)passed;
-    char probe[64]{};
-    std::snprintf(probe, sizeof(probe), "agc_expected_%s", name);
-    static_cast<JsonLog *>(context)->event(probe, "INFO", result, detail);
-}
-
 void run_vulkan_resolve_usage_frames(const TestContext &test, TestOutcome &outcome) noexcept
 {
     JsonLog &log = test.log;
@@ -21837,6 +21820,101 @@ void run_vulkan_lod_bias_frames(const TestContext &test, TestOutcome &outcome) n
     ps5vk_triangle_finish(&triangle);
     outcome.passed = passed == std::size(biases);
     log.number("r26_lod_bias", "passed_frames", passed);
+}
+
+// R79: sampler biases past +/-2. Dolphin asks for -2.1875 to -3.1875 in Mario Kart
+// Wii, and a device that reported +/-2 refused those samplers, which left the
+// scenery they textured black. A ten-level chain of a 512-square image, one grey
+// a level, and derivatives of 1/16 a pixel (probes/r79-lod-bias-range) select
+// LOD 5: biases from -5 to +4 land on levels 0 to 9, half-level biases on an
+// exact blend of two levels, and +/-8 and +/-16 on the chain's two ends -- where
+// a field too narrow for them would wrap and land somewhere else. (A 2048-square
+// chain's 22 MB of staging texels is more than the runner's heap gives.)
+void run_vulkan_lod_bias_range_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const float vertices[] = {-1, -1, 0, 0, 1, -1, 1, 0, 1, 1, 1, 1, -1, 1, 0, 1};
+    const std::uint16_t indices[] = {0, 1, 2, 2, 3, 0};
+    constexpr unsigned kLevels = 10;
+    // Twenty apart, so a level's grey is never the blend of two others.
+    constexpr std::uint8_t kGreys[kLevels] = {10, 30, 50, 70, 90, 110, 130, 150, 170, 190};
+    std::array<std::uint8_t, kLevels * 4> colours{};
+    for (unsigned level = 0; level < kLevels; ++level)
+    {
+        for (unsigned channel = 0; channel < 3; ++channel)
+            colours[level * 4 + channel] = kGreys[level];
+        colours[level * 4 + 3] = 255;
+    }
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    input.vertex_data = vertices;
+    input.vertex_count = 4;
+    input.vertex_stride = 16;
+    input.index_data = indices;
+    input.index_count = 6;
+    input.attribute_count = 2;
+    input.attributes[0] = {0, 0, VK_FORMAT_R32G32_SFLOAT, 0};
+    input.attributes[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, 8};
+    input.texture_data = colours.data();
+    input.texture_width = input.texture_height = 512;
+    input.texture_levels = kLevels;
+    input.texture_level_colours = colours.data();
+    input.texture_mip_linear = true;
+    input.texture_max_lod = kLevels - 1;
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    ps5vk_triangle triangle{};
+    auto status = ps5vk_triangle_create(&triangle, &input);
+    constexpr float biases[] = {0, -3, -5, 4, 3.5f, -2.5f, -3.5f, -16, 16, -8, 8, 0};
+    constexpr unsigned greys[] = {110, 50, 10, 190, 180, 60, 40, 10, 190, 10, 190, 110};
+    static_assert(std::size(biases) == std::size(greys));
+    unsigned passed = 0;
+    for (unsigned frame = 0; frame < std::size(biases) && status == PS5VK_TRIANGLE_OK; ++frame)
+    {
+        if (!ps5vk_triangle_set_texture_lod_bias(&triangle, 0, kLevels - 1, biases[frame]))
+        {
+            status = PS5VK_TRIANGLE_FAILED;
+            break;
+        }
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (status != PS5VK_TRIANGLE_OK || triangle.target_bytes < kFramebufferBytes)
+            break;
+        char label[64]{};
+        std::snprintf(label, sizeof(label), "LOD bias %g frame %u", biases[frame], frame);
+        if (test.capture)
+            log_driver_submission(triangle.device, label, log);
+        const FramebufferView view{static_cast<const std::uint32_t *>(triangle.target),
+                                   kTiledRgba8Layout};
+        const std::uint32_t expected = 0xff000000u | greys[frame] * 0x010101u;
+        unsigned mismatches = 0;
+        for (unsigned y = 0; y < kOutputHeight; ++y)
+            for (unsigned x = 0; x < kOutputWidth; ++x)
+                mismatches += view.word(x, y) != expected;
+        log.number("r79_lod_bias_range", "frame", frame);
+        log.hex("r79_lod_bias_range", "expected", expected);
+        log.hex("r79_lod_bias_range", "center", view.word(kOutputWidth / 2, kOutputHeight / 2));
+        log.number("r79_lod_bias_range", "mismatches", mismatches);
+        log.number("r79_lod_bias_range", "pixels", kOutputWidth * kOutputHeight);
+        log.event("r79_lod_bias_range", mismatches == 0 ? "PASS" : "FAIL", mismatches == 0 ? 0 : -1,
+                  label);
+        passed += mismatches == 0;
+    }
+    outcome.command_built = status != PS5VK_TRIANGLE_FAILED;
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        outcome.stage_in_use = true;
+        return;
+    }
+    if (test.capture && status == PS5VK_TRIANGLE_OK)
+        log_driver_stages(triangle.device, log);
+    ps5vk_triangle_finish(&triangle);
+    outcome.passed = passed == std::size(biases);
+    log.number("r79_lod_bias_range", "passed_frames", passed);
 }
 
 // R59: gl_FragCoord's z and w in a fragment shader (Dolphin's fog and depth
@@ -26572,6 +26650,7 @@ constexpr RunnerTest kRunnerTests[] = {
     {"r27-menu-alpha-raw", "r27-menu-alpha", run_vulkan_menu_alpha_raw},
     {"r27-menu-alpha", "r27-menu-alpha", run_vulkan_menu_alpha_frames},
     {"r26-lod-bias", "r26-lod-bias", run_vulkan_lod_bias_frames},
+    {"r79-lod-bias-range", "r79-lod-bias-range", run_vulkan_lod_bias_range_frames},
     {"r57-border", "c7-mip", run_vulkan_border_frames},
     {"r58-restart", "m3-vertex", run_vulkan_restart_frames},
     {"r59-fragcoord", "r59-fragcoord", run_vulkan_frag_coord_frames},

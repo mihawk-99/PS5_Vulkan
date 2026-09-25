@@ -141,7 +141,7 @@ ps5vk_get_properties(struct vk_properties *p)
       .mipmapPrecisionBits = 4,
       .maxDrawIndexedIndexValue = (UINT32_C(1) << 24) - 1, /* no fullDrawIndexUint32 */
       .maxDrawIndirectCount = 1,                           /* no multiDrawIndirect */
-      .maxSamplerLodBias = 2.0f,
+      .maxSamplerLodBias = 16.0f, /* R79: word 2's signed 6.8 LOD_BIAS, the range RADV reports */
       .maxSamplerAnisotropy = 16.0f, /* samplerAnisotropy, 2^MAX_ANISO_RATIO 4 */
       .maxViewports = 1,            /* no multiViewport */
       .maxViewportDimensions = {16384, 16384},

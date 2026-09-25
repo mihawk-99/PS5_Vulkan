@@ -3362,3 +3362,13 @@ a band through pixel centres blends every edge texel by half at two, four and
 eight samples, rendered in 128x64 and 64x32 four-byte tiles for two and eight
 and resolved by vk_meta through a 2D_MSAA descriptor (r78-sample-locations, PID
 790).
+
+## 2026-09-25 — sampler LOD bias to +/-16 (R79)
+
+PID 121 extends R26 to the bias range the driver now reports. A 512-square,
+ten-level chain, one grey a level, sampled with derivatives that select LOD 5:
+biases 0, -3, -5, +4, +3.5, -2.5, -3.5, -16, +16, -8, +8, 0 produce exactly the
+level (or the exact half-level blend) each names, the chain's first level at
+-8 and -16 and its last at +8 and +16, over all 8,294,400 pixels of each frame.
+Word 2's 14-bit signed 6.8 field carries +/-16 without wrapping. Evidence:
+jobs/r79-lod-bias-range.

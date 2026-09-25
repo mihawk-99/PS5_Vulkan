@@ -1,0 +1,74 @@
+{"schema":2,"event":"run_start","pid":121}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"frame","value":0}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"expected","value":"0xff6e6e6e"}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"center","value":"0xff6e6e6e"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r79_lod_bias_range","status":"PASS","result":0,"detail":"LOD bias 0 frame 0"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"frame","value":1}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"expected","value":"0xff323232"}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"center","value":"0xff323232"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r79_lod_bias_range","status":"PASS","result":0,"detail":"LOD bias -3 frame 1"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"frame","value":2}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"expected","value":"0xff0a0a0a"}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"center","value":"0xff0a0a0a"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r79_lod_bias_range","status":"PASS","result":0,"detail":"LOD bias -5 frame 2"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"frame","value":3}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"expected","value":"0xffbebebe"}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"center","value":"0xffbebebe"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r79_lod_bias_range","status":"PASS","result":0,"detail":"LOD bias 4 frame 3"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"frame","value":4}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"expected","value":"0xffb4b4b4"}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"center","value":"0xffb4b4b4"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r79_lod_bias_range","status":"PASS","result":0,"detail":"LOD bias 3.5 frame 4"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"frame","value":5}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"expected","value":"0xff3c3c3c"}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"center","value":"0xff3c3c3c"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r79_lod_bias_range","status":"PASS","result":0,"detail":"LOD bias -2.5 frame 5"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"frame","value":6}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"expected","value":"0xff282828"}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"center","value":"0xff282828"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r79_lod_bias_range","status":"PASS","result":0,"detail":"LOD bias -3.5 frame 6"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"frame","value":7}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"expected","value":"0xff0a0a0a"}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"center","value":"0xff0a0a0a"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r79_lod_bias_range","status":"PASS","result":0,"detail":"LOD bias -16 frame 7"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"frame","value":8}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"expected","value":"0xffbebebe"}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"center","value":"0xffbebebe"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r79_lod_bias_range","status":"PASS","result":0,"detail":"LOD bias 16 frame 8"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"frame","value":9}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"expected","value":"0xff0a0a0a"}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"center","value":"0xff0a0a0a"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r79_lod_bias_range","status":"PASS","result":0,"detail":"LOD bias -8 frame 9"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"frame","value":10}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"expected","value":"0xffbebebe"}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"center","value":"0xffbebebe"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r79_lod_bias_range","status":"PASS","result":0,"detail":"LOD bias 8 frame 10"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"frame","value":11}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"expected","value":"0xff6e6e6e"}
+{"schema":2,"event":"hex","probe":"r79_lod_bias_range","field":"center","value":"0xff6e6e6e"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r79_lod_bias_range","status":"PASS","result":0,"detail":"LOD bias 0 frame 11"}
+{"schema":2,"event":"value","probe":"r79_lod_bias_range","field":"passed_frames","value":12}

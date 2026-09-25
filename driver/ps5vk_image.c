@@ -1482,8 +1482,10 @@ ps5vk_CreateSampler_untimed(VkDevice _device, const VkSamplerCreateInfo *pCreate
    sampler->word = info->maxLod > 0.0f ? ((word & ~(UINT32_C(3) << 26)) | (mip_filter << 26))
                                        : word;
    /* GFX10 sampler word 2 carries signed 8-fraction-bit LOD bias in bits
-    * 0..13 (Mesa ac_build_sampler_descriptor). R26 measures implicit LOD
-    * selection for both signs and fractional biases on the console. */
+    * 0..13 (Mesa ac_build_sampler_descriptor), room for +/-32. R26 measures
+    * implicit LOD selection for both signs and fractional biases on the
+    * console, and R79 the reported +/-16: every level of a ten-level chain
+    * and both of its ends at +/-8 and +/-16. */
    sampler->word |= (uint32_t)(int32_t)(info->mipLodBias * 256.0f) & 0x3fffu;
    sampler->lod_word = ps5vk_sampler_unsigned_lod(info->minLod) |
                        (ps5vk_sampler_unsigned_lod(info->maxLod) << 12);
