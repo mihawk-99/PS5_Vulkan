@@ -2235,6 +2235,8 @@ ps5vk_queue_flip_presented(struct ps5vk_queue *queue, uint64_t started, bool fir
              * ps5vk_queue_profile_report2 for what a second one costs. */
             char line[3072];
             char copies[320];
+            uint64_t live_count = 0, live_bytes = 0;
+            ps5vk_direct_memory_live(&live_count, &live_bytes);
             snprintf(line, sizeof(line),
                     "[ps5vk] profile frames=%" PRIu64 " steps/frame=%.2f "
                     "queue_ms=%.3f flush_ms=%.3f gpu_ms=%.3f flip_ms=%.3f "
@@ -2244,7 +2246,7 @@ ps5vk_queue_flip_presented(struct ps5vk_queue *queue, uint64_t started, bool fir
                     "later_steps=%" PRIu64 " later_step_ms=%.3f suspend_mode=%u rescues=%" PRIu64
                     " flag_refusals=%" PRIu64 " async_steps=%" PRIu64 " pending_waits=%" PRIu64
                     " pending_wait_ms=%.3f gpu_barriers=%" PRIu64 " step_waits=%" PRIu64
-                    " cpu_copies=%s\n",
+                    " cpu_copies=%s direct_live=%" PRIu64 "/%" PRIu64 "MiB\n",
                     p->frames,
                     (double)p->steps / p->frames, p->queue_ns * ms, p->flush_ns * ms,
                     p->gpu_ns * ms, p->flip_ns * ms,
@@ -2259,7 +2261,8 @@ ps5vk_queue_flip_presented(struct ps5vk_queue *queue, uint64_t started, bool fir
                     ps5vk_per_ms(p->later_step_ns, p->later_steps), p->suspend_mode, p->rescues,
                     p->flag_refusals, p->async_steps, p->pending_waits,
                     p->pending_wait_ns * ms, p->gpu_barriers, p->step_waits,
-                    ps5vk_profile_cpu_copies(p, copies, sizeof(copies)));
+                    ps5vk_profile_cpu_copies(p, copies, sizeof(copies)), live_count,
+                    live_bytes >> 20);
             ps5vk_queue_profile_report2(p, now, line, sizeof(line));
          }
          /* last_return_ns and last_present_ns carry across a window: the

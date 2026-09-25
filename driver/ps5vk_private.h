@@ -118,6 +118,10 @@ struct ps5vk_direct_mapping {
 /* ps5vk_direct_mapping_create's result for memory mapped outside the window. */
 #define PS5VK_DIRECT_OUTSIDE_WINDOW INT32_C(-1)
 
+/* The direct memory the driver holds now: mappings and bytes (the profile). */
+void
+ps5vk_direct_memory_live(uint64_t *count, uint64_t *bytes);
+
 /* Allocates and maps bytes of direct memory at alignment. Returns 0, the
  * failing sceKernel result, or PS5VK_DIRECT_OUTSIDE_WINDOW; on failure
  * nothing stays allocated. */

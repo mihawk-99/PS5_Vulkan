@@ -17,6 +17,20 @@
 #include <immintrin.h>
 
 #include "util/log.h"
+#include "util/u_atomic.h"
+
+/* The direct memory the driver holds, mappings and bytes: the profile reports
+ * both every ten seconds, so an allocation that is never released shows as a
+ * count that only grows over a long run. */
+static uint64_t ps5vk_direct_live_count;
+static uint64_t ps5vk_direct_live_bytes;
+
+void
+ps5vk_direct_memory_live(uint64_t *count, uint64_t *bytes)
+{
+   *count = p_atomic_read(&ps5vk_direct_live_count);
+   *bytes = p_atomic_read(&ps5vk_direct_live_bytes);
+}
 
 int32_t
 ps5vk_direct_mapping_create(struct ps5vk_direct_mapping *mapping, size_t bytes, size_t alignment)
@@ -30,6 +44,8 @@ ps5vk_direct_mapping_create(struct ps5vk_direct_mapping *mapping, size_t bytes, 
    if (result != 0)
       return result;
    mapping->start = start;
+   p_atomic_inc(&ps5vk_direct_live_count);
+   p_atomic_add(&ps5vk_direct_live_bytes, (uint64_t)bytes);
 
    void *address = NULL;
    result = sceKernelMapDirectMemory(&address, bytes, PS5VK_MAP_PROTECTION, 0, start, alignment);
@@ -58,6 +74,8 @@ ps5vk_direct_mapping_destroy(struct ps5vk_direct_mapping *mapping)
       if (result != 0)
          mesa_loge("sceKernelReleaseDirectMemory(0x%" PRIx64 ", %zu bytes) failed: 0x%08x",
                    (uint64_t)mapping->start, mapping->bytes, (unsigned)result);
+      p_atomic_dec(&ps5vk_direct_live_count);
+      p_atomic_add(&ps5vk_direct_live_bytes, -(int64_t)mapping->bytes);
    }
    mapping->start = -1;
    mapping->address = NULL;
