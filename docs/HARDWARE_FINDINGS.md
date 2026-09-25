@@ -3309,3 +3309,20 @@ display) shows the late start *with* the suspend point after every submission:
 between the two consoles is not known; the system-call cost probe reads the same
 on both (about 800 ns). Evidence: the submit-cycle A/B word (R68,
 docs/M5_PHASE_C.md), and the tester's trace from the R67 build.
+
+## 2026-09-25 — a GPU wait in a user stream (R70)
+
+WAIT_REG_MEM64 (PKT3 0x93) with control 0x06000113 -- equal, memory, in the
+prefetch parser, the form sceAgcDriverWaitUntilSafeForRendering writes -- works
+in a stream the driver builds itself, waiting on a 32-bit value a RELEASE_MEM
+event 20 (CACHE_FLUSH_AND_INV_TS_EVENT, cache actions 12) wrote at the end of the
+pipe: the draw after it samples every texel of the image the draws before it
+rendered, where the RELEASE_MEM alone left the last rows unwritten (C4, PID
+614). The high word of the 64-bit compare is masked out, so the wait reads
+only the value the release wrote.
+
+## 2026-09-25 — dual-source blending (R71)
+
+A pixel shader's second colour (location 0, index 1), exported to MRT1 with
+MRT0's FP16 format, is what CB_BLEND0_CONTROL's SRC1 factors (15-18) read:
+0xff88586c in all 8294400 pixels of the probe (PID 630).

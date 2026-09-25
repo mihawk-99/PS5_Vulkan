@@ -27,6 +27,9 @@ Next, in order:
    Pro does too without the suspend point (R68). R69 stops waiting for a
    submission's last step, which holds FCEUmm at 120 presents a second in that
    condition on my Pro; the tester's build carries it, to confirm on theirs.
+   R70 replaced the render-to-texture splits with GPU barriers and R71 added
+   dual-source blending (Resident Evil 4's haze), both from the Dolphin
+   acceptance work (../PS5_RetroArch).
 2. The replays of jobs/r23-r29 differ from their goldens by the five
    per-draw context registers the per-draw-state round added (90 records
    against 85); re-capture them or restate the registers.

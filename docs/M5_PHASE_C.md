@@ -9323,3 +9323,35 @@ queue, as it did on 2026-09-15) and v0-sampler-anisotropy. c5-depth-nostate
 fails after the tests before it in its queue and passes after c5-depth-noclear,
 on both builds: it expects zeros in an attachment it loads with DONT_CARE, from
 recycled memory. Every runner ends its run with SIGSYS at exit, R66's included.
+
+## 2026-09-25 — R70: GPU barriers instead of submission splits
+
+A draw that samples an image the command buffer rendered carried the colour
+barrier and split the submission there, the split being the wait the barrier
+lacks (C4). Super Smash Bros. Melee's EFB copies split its frames into about 105
+steps a present, and every later draw that sampled anything rendered in the
+command buffer split again. The draw now carries a GPU barrier -- RELEASE_MEM of
+CACHE_FLUSH_AND_INV_TS_EVENT writing a fence value, then WAIT_REG_MEM64 in the
+prefetch parser, the form of the console's own wait-until-safe packet -- whose
+value the queue gives at submission. Only an image rendered since the command
+buffer's last barrier needs one; depth attachments count as rendered targets; a
+barrier goes between two command buffers of one submission where the second
+samples before its own; and a submission whose predecessor may still run (R69)
+first waits on the GPU for that step's marker. The fence is two words of the
+submission buffer below the marker (a separate mapping moved every later
+allocation and broke the host replays). PID 614: c4-rtt, c4-texture and
+v0-subpass PASS; PID 615 re-captured golden/c4-rtt as one submission. Melee:
+0.07 steps and 0.19 ms of queue time a present, from 105.8 and 2.8 ms.
+jobs/r70-gpu-barrier.
+
+## 2026-09-25 — R71: dual-source blending
+
+Resident Evil 4's frame came out as its haze colour. A FIFO log from the console
+plays correctly in desktop Dolphin, and desktop Dolphin reproduces the console's
+frame with dual-source blending forced off (logic ops off changes nothing): the
+driver did not report dualSrcBlend. The compiler already exports the second
+colour to MRT1 (psbc_compile.c); the driver now reports the feature and one
+dual-source attachment and maps the SRC1 factors to 15-18. PID 630:
+r71-dual-source, the constant-blend frame with the second source as the factor,
+reads 0xff88586c in all 8294400 pixels. RE4 draws its scene as desktop Dolphin
+does. jobs/r71-dual-source.
