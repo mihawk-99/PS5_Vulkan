@@ -9202,3 +9202,15 @@ The test harness gained split_between_passes (a fill between two passes, a
 loading second pass, one pipeline a pass). vk_v0_topology_test asserts the
 three restart changes of a split frame. R64's probe code moved its pixel check
 into r64_check, shared with R65.
+
+## 2026-09-24 — R66: uniform buffers bound their loads
+
+R62's uniform and push-constant descriptors set OOB_SELECT to 2, which Mesa's
+register header names DISABLED (only NUM_RECORDS == 0 is out of range), not RAW
+(3, what RADV writes): a load past the bound range read the memory after it,
+past the buffer's end included, against the robustBufferAccess the driver
+reports. The probe binds 16 of R62's 64 rows: before the fix (PID 511) rows 17,
+40 and 63 drew their real colours; with OOB_SELECT 3 (PID 512) they read zero,
+and R62, r15-dynamic-pair, d1-dynamic-ubo, v0-push-constant and R63 pass in the
+same run. Storage buffers already used 3. jobs/r66-uniform-bounds; the host's
+uniform-entry check asserts 3.

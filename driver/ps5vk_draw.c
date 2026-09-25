@@ -171,9 +171,11 @@
  * address high with the element stride, element count, flags
  * (src/diagnostics.cpp, kUniformBufferFlags). */
 #define PS5VK_UNIFORM_BUFFER_FLAGS (0xfacu | (77u << 12))
-/* Word 3's OOB_SELECT, bits 28-29: 2 is raw, a byte offset checked against
- * NUM_RECORDS (RADV's V_008F0C_OOB_SELECT_RAW). */
-#define PS5VK_BUFFER_OOB_SELECT_RAW (2u << 28)
+/* Word 3's OOB_SELECT, bits 28-29: 3 is raw, a byte offset checked against
+ * NUM_RECORDS (RADV's V_008F0C_OOB_SELECT_RAW). R62 wrote 2, which is DISABLED
+ * (only NUM_RECORDS == 0 is out of range), so a load past the bound range read
+ * whatever memory followed it (R66, jobs/r66-uniform-bounds). */
+#define PS5VK_BUFFER_OOB_SELECT_RAW (3u << 28)
 /* A texel buffer's word 3 is the view's own: the format entry's DST_SEL
  * selectors (the same field, and the same three-bit channel numbers, the image
  * descriptor's word 1 takes), the view's GFX10 format word in the FORMAT field
@@ -1922,8 +1924,8 @@ ps5vk_cmd_buffer_shader_resources(struct ps5vk_cmd_buffer *cmd_buffer,
                 * RADV writes one for GFX10 and later: STRIDE 0, NUM_RECORDS the
                 * range in bytes (rounded up to whole 16-byte rows, as a block
                 * smaller than one -- PPSSPP binds 4 bytes -- always has been),
-                * and OOB_SELECT raw, which bounds-checks the byte offset against
-                * NUM_RECORDS. The canary's structured form (STRIDE 16, a count
+                * and OOB_SELECT raw (3, R66), which bounds-checks the byte offset
+                * against NUM_RECORDS. The canary's structured form (STRIDE 16, a count
                 * of rows, OOB_SELECT 0) checked each offset against the stride,
                 * so every load past the first 16 bytes read zero: Dolphin's
                 * matrices, fog constants and texture matrices were all zero

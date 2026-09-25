@@ -1,0 +1,32 @@
+{"schema":2,"event":"run_start","pid":512}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"row","value":3}
+{"schema":2,"event":"hex","probe":"r66_uniform_bounds","field":"center","value":"0xff55f30c"}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"band_mismatches","value":0}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"row","value":17}
+{"schema":2,"event":"hex","probe":"r66_uniform_bounds","field":"center","value":"0x0"}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"band_mismatches","value":0}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"row","value":40}
+{"schema":2,"event":"hex","probe":"r66_uniform_bounds","field":"center","value":"0x0"}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"band_mismatches","value":0}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"row","value":63}
+{"schema":2,"event":"hex","probe":"r66_uniform_bounds","field":"center","value":"0x0"}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"band_mismatches","value":0}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r66_uniform_bounds","status":"PASS","result":0,"detail":"16 of 64 rows bound: rows 17, 40 and 63 read zero"}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"row","value":3}
+{"schema":2,"event":"hex","probe":"r66_uniform_bounds","field":"center","value":"0xff55f30c"}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"band_mismatches","value":0}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"row","value":17}
+{"schema":2,"event":"hex","probe":"r66_uniform_bounds","field":"center","value":"0xffdfba45"}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"band_mismatches","value":0}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"row","value":40}
+{"schema":2,"event":"hex","probe":"r66_uniform_bounds","field":"center","value":"0xff615da2"}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"band_mismatches","value":0}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"row","value":63}
+{"schema":2,"event":"hex","probe":"r66_uniform_bounds","field":"center","value":"0xffe700ff"}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"band_mismatches","value":0}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r66_uniform_bounds","status":"PASS","result":0,"detail":"all 64 rows bound"}
+{"schema":2,"event":"value","probe":"r66_uniform_bounds","field":"passed_frames","value":2}

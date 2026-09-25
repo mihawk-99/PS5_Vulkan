@@ -145,9 +145,10 @@ static inline bool
 test_table_uniform_entry(const uint32_t *entry, uint32_t bytes)
 {
    /* R62: a byte-addressed buffer -- no element stride, NUM_RECORDS the bound
-    * range in bytes, OOB_SELECT raw (2) in word 3's bits 28-29. */
+    * range in bytes; R66: OOB_SELECT raw (3) in word 3's bits 28-29, which
+    * checks each load against NUM_RECORDS (2 disables the check). */
    return entry[0] != 0 && (entry[1] >> 16) == 0 && entry[2] == bytes &&
-          ((entry[3] >> 28) & 3u) == 2u;
+          ((entry[3] >> 28) & 3u) == 3u;
 }
 
 /* The combined image sampler's twelve words, as far as a caller can know them

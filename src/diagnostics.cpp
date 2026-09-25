@@ -22242,6 +22242,148 @@ void run_vulkan_restart_split_frames(const TestContext &test, TestOutcome &outco
     log.number("r65_restart_split", "passed_frames", passed);
 }
 
+// R66: a uniform buffer's descriptor bounds its loads. R62 wrote the uniform and
+// push-constant descriptors with OOB_SELECT 2, which Mesa's register header names
+// DISABLED (only NUM_RECORDS == 0 is out of range), where RADV writes RAW (3,
+// offset >= NUM_RECORDS): loads past the bound range read whatever memory follows
+// it, past the buffer's own end included, which robustBufferAccess forbids. The
+// probe binds 16 of R62's 64 rows and draws R62's bands (rows 3, 17, 40, 63): row
+// 3 is in range, and the other three must read zero, a transparent black pixel.
+// The control binds all 64 rows.
+void run_vulkan_uniform_bounds_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    std::array<float, 64 * 4> rows{};
+    for (unsigned row = 0; row < 64; ++row)
+    {
+        rows[row * 4 + 0] = row / 63.0f;
+        rows[row * 4 + 1] = (63 - row) / 63.0f;
+        rows[row * 4 + 2] = ((row * 7) % 64) / 63.0f;
+        rows[row * 4 + 3] = 1.0f;
+    }
+    constexpr std::uint8_t kIndices[4] = {3, 17, 40, 63};
+    struct Frame
+    {
+        const char *name;
+        std::uint32_t range_rows;
+    };
+    static const Frame kFrames[] = {
+        {"16 of 64 rows bound: rows 17, 40 and 63 read zero", 16},
+        {"all 64 rows bound", 64},
+    };
+    unsigned passed = 0;
+    for (const Frame &frame : kFrames)
+    {
+        struct Record
+        {
+            float x, y;
+            std::uint8_t index[4];
+        };
+        std::array<Record, 16> vertices{};
+        std::array<std::uint16_t, 24> indices{};
+        for (unsigned band = 0; band < 4; ++band)
+        {
+            const float left = -1.0f + 0.5f * band, right = left + 0.5f;
+            const float corners[4][2] = {
+                {left, -1.0f}, {right, -1.0f}, {right, 1.0f}, {left, 1.0f}};
+            for (unsigned corner = 0; corner < 4; ++corner)
+                vertices[band * 4 + corner] = {
+                    corners[corner][0], corners[corner][1], {kIndices[band], 0, 0, 0}};
+            const std::uint16_t base = static_cast<std::uint16_t>(band * 4);
+            const std::uint16_t quad[6] = {base,
+                                           static_cast<std::uint16_t>(base + 1),
+                                           static_cast<std::uint16_t>(base + 2),
+                                           static_cast<std::uint16_t>(base + 2),
+                                           static_cast<std::uint16_t>(base + 3),
+                                           base};
+            std::copy(std::begin(quad), std::end(quad), indices.begin() + band * 6);
+        }
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = vertices.data();
+        input.vertex_count = 16;
+        input.vertex_stride = sizeof(Record);
+        input.index_data = indices.data();
+        input.index_count = 24;
+        input.attribute_count = 2;
+        input.attributes[0] = {0, 0, VK_FORMAT_R32G32_SFLOAT, 0};
+        input.attributes[1] = {1, 0, VK_FORMAT_R8G8B8A8_UINT, 8};
+        input.uniform_data = rows.data();
+        input.uniform_bytes = sizeof(rows);
+        input.uniform_range_bytes = frame.range_rows * 16;
+        input.uniform_stages = VK_SHADER_STAGE_VERTEX_BIT;
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+            return;
+        ps5vk_triangle triangle{};
+        auto status = ps5vk_triangle_create(&triangle, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        outcome.command_built = outcome.command_built || status != PS5VK_TRIANGLE_FAILED;
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            return;
+        }
+        const bool drew = status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes;
+        if (test.capture && drew)
+        {
+            log_driver_submission(triangle.device, frame.name, log);
+            log_driver_stages(triangle.device, log);
+        }
+        if (drew)
+        {
+            const FramebufferView view{static_cast<const std::uint32_t *>(triangle.target),
+                                       kTiledRgba8Layout};
+            unsigned mismatches = 0;
+            for (unsigned band = 0; band < 4; ++band)
+            {
+                const unsigned row = kIndices[band];
+                const bool in_range = row < frame.range_rows;
+                std::uint32_t expected = 0;
+                if (in_range)
+                    for (unsigned channel = 0; channel < 4; ++channel)
+                        expected |=
+                            static_cast<std::uint32_t>(rows[row * 4 + channel] * 255.0f + 0.5f)
+                            << (8 * channel);
+                unsigned band_mismatches = 0;
+                for (unsigned y = 0; y < kOutputHeight; ++y)
+                    for (unsigned x = band * kOutputWidth / 4; x < (band + 1) * kOutputWidth / 4;
+                         ++x)
+                    {
+                        const std::uint32_t word = view.word(x, y);
+                        bool good = true;
+                        for (unsigned channel = 0; channel < 4; ++channel)
+                            good = good &&
+                                   std::abs(
+                                       static_cast<int>((word >> (8 * channel)) & 0xffu) -
+                                       static_cast<int>((expected >> (8 * channel)) & 0xffu)) <= 1;
+                        band_mismatches += good ? 0u : 1u;
+                    }
+                log.number("r66_uniform_bounds", "row", row);
+                log.hex("r66_uniform_bounds", "center",
+                        view.word(band * kOutputWidth / 4 + kOutputWidth / 8, kOutputHeight / 2));
+                log.number("r66_uniform_bounds", "band_mismatches", band_mismatches);
+                mismatches += band_mismatches;
+            }
+            log.number("r66_uniform_bounds", "mismatches", mismatches);
+            log.number("r66_uniform_bounds", "pixels", kOutputWidth * kOutputHeight);
+            log.event("r66_uniform_bounds", mismatches == 0 ? "PASS" : "FAIL",
+                      mismatches == 0 ? 0 : -1, frame.name);
+            passed += mismatches == 0;
+        }
+        ps5vk_triangle_finish(&triangle);
+        if (status != PS5VK_TRIANGLE_OK)
+            break;
+    }
+    outcome.passed = passed == std::size(kFrames);
+    log.number("r66_uniform_bounds", "passed_frames", passed);
+}
+
 // R62: a uniform array indexed by a vertex attribute, the way Dolphin picks each
 // vertex's transform matrix. A 64-row uniform array holds a distinct colour per
 // row; four vertical bands carry indices 3, 17, 40 and 63 in an R8G8B8A8_UINT
@@ -26069,6 +26211,7 @@ constexpr RunnerTest kRunnerTests[] = {
     {"r63-skinned", "r63-skinned", run_vulkan_skinned_record_frames},
     {"r64-restart-strips", "m3-vertex", run_vulkan_restart_strip_frames},
     {"r65-restart-split", "m3-vertex", run_vulkan_restart_split_frames},
+    {"r66-uniform-bounds", "r62-uniform-index", run_vulkan_uniform_bounds_frames},
     {"r18-padded-mips", "c7-mip", run_vulkan_padded_mip_frames},
     {"r18-mip-addresses", "c7-mip", run_vulkan_padded_mip_addresses},
     {"r18-small-mips", "c7-mip", run_vulkan_small_padded_mips},

@@ -1,0 +1,10 @@
+hold 1
+capture
+m2-solid
+r66-uniform-bounds
+r62-uniform-index
+r15-dynamic-pair
+d1-dynamic-ubo
+v0-push-constant
+r63-skinned
+exit
