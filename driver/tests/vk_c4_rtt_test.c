@@ -14,16 +14,16 @@
  * the whole of a second colour image through the same pipeline, its own
  * full-target quad and the nearest sampler; the second is the canary's square,
  * sampling that image. One command buffer is what the case is about: the driver
- * orders a render and a later sample of the same image by putting its colour
- * barrier (RELEASE_MEM event 45, the packet the M4 runner recorded) in the
- * words before the draw that samples it AND splitting the submission there
- * (driver/ps5vk_draw.c, ps5vk_cmd_buffer_split): the flush alone leaves the
+ * orders a render and a later sample of the same image with a GPU barrier in the
+ * words before the draw that samples it (R70: RELEASE_MEM of
+ * CACHE_FLUSH_AND_INV_TS_EVENT writing a fence, then WAIT_REG_MEM64 on it;
+ * driver/ps5vk_draw.c, ps5vk_cmd_buffer_gpu_barrier). A flush alone leaves the
  * image's most recently written rows unflushed when the sample's first fetches
  * run, which the console measured as a run-varying band of the frame's top
  * rows reading zero while the image itself held every texel
- * (docs/M5_PHASE_C.md, C4). The wait the split adds is the queue's own step
- * marker, the same one its CPU copies rely on; the barrier that ends every
- * submission covers a render in an earlier submission and nothing else
+ * (docs/M5_PHASE_C.md, C4); until R70 the wait was a submission split and the
+ * queue's step marker. The barrier that ends every submission covers a render
+ * in an earlier submission, whose marker the next one waits for
  * (driver/ps5vk_queue.c). The image is the program's target size because that
  * is the one colour attachment size the driver records, and the frame's own
  * pass and geometry are exactly the ones vk_c4_texture_test.c draws, so the
@@ -263,47 +263,47 @@ main(void)
       check(frames == 1, "one frame recorded both passes and submitted");
 #if defined(PS5VK_TEST_DIRECT)
       if (status == PS5VK_TRIANGLE_OK) {
-         /* The draw that samples the image splits the submission, so the GPU
-          * ran this frame as two steps: the fill pass, then the draw that
-          * samples it, whose words open with the colour barrier. The runner's
-          * capture reads every step (driver/ps5vk_queue.c,
-          * ps5vk_debug_submission_steps), so this checks what a golden of this
-          * frame holds -- the words of each step whole, its end packets
-          * included. Only the direct build calls it: the loader build sees the
-          * driver through its ICD, which exports no such symbol
-          * (driver/ps5vk_icd.map). */
+         /* R70: the draw that samples the image no longer splits the
+          * submission. Its words open with a GPU barrier -- RELEASE_MEM of
+          * CACHE_FLUSH_AND_INV_TS_EVENT writing a fence value, then
+          * WAIT_REG_MEM64 until the fence holds it -- so the frame reaches
+          * the GPU as one step, and the queue gave the barrier a value the
+          * release and the wait share (driver/ps5vk_draw.c,
+          * ps5vk_cmd_buffer_gpu_barrier; driver/ps5vk_queue.c). The runner's
+          * capture reads every step (ps5vk_debug_submission_steps), so this
+          * checks what a golden of this frame holds. Only the direct build
+          * calls it: the loader build sees the driver through its ICD, which
+          * exports no such symbol (driver/ps5vk_icd.map). */
          ps5vk_debug_stage steps[4] = {{0}};
          const uint32_t count = ps5vk_debug_submission_steps(triangle.device, steps, 4);
-         check(count == 2, "the submission reached the GPU as two steps: the render, then the "
-                           "draw that samples it");
-         if (count == 2) {
-            const uint32_t *const fill = steps[0].address;
-            const uint32_t *const sample = steps[1].address;
-            const uint32_t fill_words = (uint32_t)(steps[0].bytes / sizeof(uint32_t));
-            const uint32_t sample_words = (uint32_t)(steps[1].bytes / sizeof(uint32_t));
-            /* A RELEASE_MEM header with six payload words, and the colour
-             * barrier's payload (event 45, control 12): the two packets the
-             * queue ends every step with, 8 words each (ps5vk_queue.c,
-             * PS5VK_STREAM_END_WORDS). A capture that read them out of the
-             * stream after the whole submission would find the next step's
-             * words there instead, which is what the queue's own copy of each
-             * step is for. */
+         check(count == 1, "the submission reached the GPU as one step: the render, a GPU "
+                           "barrier and the draw that samples it");
+         if (count == 1) {
+            const uint32_t *const frame = steps[0].address;
+            const uint32_t frame_words = (uint32_t)(steps[0].bytes / sizeof(uint32_t));
             const uint32_t kReleaseMem = UINT32_C(0xc0064900);
             const uint32_t kBarrier = UINT32_C(0x0000c52d);
-            /* AGC's type-3 header: opcode 0x9f is a context-register table load,
-             * 0x49 a RELEASE_MEM. */
-            check(steps[0].bytes % sizeof(uint32_t) == 0 &&
-                     fill[0] == (UINT32_C(3) << 30 | UINT32_C(0x3) << 16 | UINT32_C(0x9f) << 8),
-                  "the first step's words are the fill pass's: its context table load comes first");
-            check(steps[1].bytes % sizeof(uint32_t) == 0 &&
-                     sample[0] == (UINT32_C(3) << 30 | UINT32_C(6) << 16 | UINT32_C(0x49) << 8),
-                  "the second step opens with the colour barrier, then the frame's draw");
-            check(fill_words >= 16 && sample_words >= 16 && fill[fill_words - 16] == kReleaseMem &&
-                     fill[fill_words - 15] == kBarrier && fill[fill_words - 8] == kReleaseMem &&
-                     fill[fill_words - 3] != 0 && sample[sample_words - 16] == kReleaseMem &&
-                     sample[sample_words - 15] == kBarrier &&
-                     sample[sample_words - 8] == kReleaseMem && sample[sample_words - 3] != 0,
-                  "each step's words end with its own barrier and completion marker, whole");
+            const uint32_t kGpuBarrier = UINT32_C(0x0000c514);
+            const uint32_t kWaitMem64 = UINT32_C(0xc0079300);
+            uint32_t barriers = 0;
+            uint32_t at = 0;
+            for (uint32_t w = 0; w + 17 <= frame_words; w++) {
+               if (frame[w] == kReleaseMem && frame[w + 1] == kGpuBarrier) {
+                  barriers++;
+                  at = w;
+               }
+            }
+            check(barriers == 1, "one GPU barrier in the frame's words");
+            check(barriers == 1 && at > 0 && frame[at + 8] == kWaitMem64 &&
+                     frame[at + 9] == UINT32_C(0x06000113) && frame[at + 5] != 0 &&
+                     frame[at + 12] == frame[at + 5] && frame[at + 3] == frame[at + 10] &&
+                     frame[at + 4] == frame[at + 11],
+                  "the barrier releases a fence value and waits in the prefetch parser until the "
+                  "same address holds it");
+            check(frame_words >= 16 && frame[frame_words - 16] == kReleaseMem &&
+                     frame[frame_words - 15] == kBarrier && frame[frame_words - 8] == kReleaseMem &&
+                     frame[frame_words - 3] != 0,
+                  "the step's words end with its barrier and completion marker, whole");
          }
       }
 #endif

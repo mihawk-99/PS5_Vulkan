@@ -1,0 +1,11 @@
+# R70: GPU barriers instead of submission splits. Render to texture in one
+# command buffer (c4-rtt, with capture for its golden), the texture and subpass
+# input probes that sample what the frame rendered, m2-solid first and last.
+hold 1
+capture
+m2-solid
+c4-rtt
+c4-texture
+v0-subpass
+m2-solid
+exit

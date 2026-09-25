@@ -741,6 +741,9 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
    cmd_buffer->rendering = false;
    if (vk_command_buffer_has_error(&cmd_buffer->vk))
       return;
+   /* R70: the targets this rendering registers start here. */
+   const uint32_t first_target =
+      (uint32_t)util_dynarray_num_elements(&cmd_buffer->targets, struct ps5vk_render_target);
 
    /* Mesa's render passes set LOCAL_READ_CONCURRENT_ACCESS_CONTROL, which
     * describes concurrent input-attachment access and changes nothing
@@ -974,6 +977,25 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
          device->target_base_values[at] = cmd_buffer->target_registers[at][0].value;
       }
    }
+   /* R70: the depth attachment is a target too -- a draw that samples it
+    * after this rendering needs the GPU barrier that flushes the depth caches.
+    * It never has a wait packet (video -1). */
+   if (depth_attachment_image != NULL) {
+      struct ps5vk_render_target *const target =
+         util_dynarray_grow(&cmd_buffer->targets, struct ps5vk_render_target, 1);
+      if (!target) {
+         ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
+                                 "no memory to track the depth target");
+         return;
+      }
+      *target = (struct ps5vk_render_target){
+         .memory = depth_attachment_image->memory,
+         .address = depth_address,
+         .bytes = (size_t)depth_attachment_image->size,
+         .video = -1,
+         .buffer_index = 0,
+      };
+   }
    cmd_buffer->depth_bound = depth_address != NULL;
    cmd_buffer->depth_format = cmd_buffer->depth_bound ? depth_format : VK_FORMAT_UNDEFINED;
    cmd_buffer->stencil_bound = cmd_buffer->depth_bound &&
@@ -984,6 +1006,8 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
                             cmd_buffer->depth_registers);
    cmd_buffer->target_extent = extent;
    cmd_buffer->rendering = true;
+   cmd_buffer->pass_first_target = first_target;
+   cmd_buffer->pass_drawn = false;
    if (ps5vk_census_enabled) {
       const VkRenderingAttachmentInfo *const c =
          info->colorAttachmentCount > 0 ? &info->pColorAttachments[0] : NULL;
@@ -1091,6 +1115,13 @@ ps5vk_CmdEndRendering(VkCommandBuffer commandBuffer)
          }
       }
    }
+   /* R70: a rendering drawn into since the last GPU barrier leaves its
+    * targets to be covered by the next one, including those registered before
+    * that barrier. */
+   if (cmd_buffer->pass_drawn && cmd_buffer->pass_first_target < cmd_buffer->barrier_targets)
+      cmd_buffer->barrier_targets = cmd_buffer->pass_first_target;
+   cmd_buffer->pass_first_target = UINT32_MAX;
+   cmd_buffer->pass_drawn = false;
    cmd_buffer->depth_bound = false;
    cmd_buffer->stencil_bound = false;
    cmd_buffer->rendering = false;
@@ -1302,10 +1333,19 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
     * the packet and splits the submission (ps5vk_cmd_draw,
     * ps5vk_cmd_buffer_split). What the queue writes ends a submission, which
     * orders a render in an earlier submission and nothing else. */
+   /* R70: only a render since the command buffer's last GPU barrier needs
+    * another; one before it is in memory already. The active rendering's
+    * targets count once a draw has gone into them since the barrier. */
+   if (util_dynarray_num_elements(&cmd_buffer->fence_patches, uint32_t) == 0)
+      cmd_buffer->samples_early = true;
    bool rendered_here = false;
+   uint32_t index = 0;
    util_dynarray_foreach (&cmd_buffer->targets, struct ps5vk_render_target, target) {
-      if ((uint64_t)(uintptr_t)target->address == image->address)
+      const bool since = index >= cmd_buffer->barrier_targets ||
+                         (cmd_buffer->pass_drawn && index >= cmd_buffer->pass_first_target);
+      if (since && (uint64_t)(uintptr_t)target->address == image->address)
          rendered_here = true;
+      index++;
    }
    /* The descriptor drops the address's low byte, which images keep zero:
     * ps5vk_image.c aligns them to it. */
@@ -2536,14 +2576,11 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
     * barrier below flushes the colour buffers, but a flush is not a wait, and
     * without the wait the draws behind it fetch the image's most recently
     * written rows before they have drained (docs/M5_PHASE_C.md, C4). */
-   if (colour_barrier && !ps5vk_cmd_buffer_split(cmd_buffer))
+   if (colour_barrier && !ps5vk_cmd_buffer_gpu_barrier(cmd_buffer))
       return;
    /* The order the recorded streams use: the three register tables, both
     * stages' user data, then the draw. */
    bool encoded =
-      (!colour_barrier ||
-       sceAgcCbReleaseMem(&command, PS5VK_COLOUR_BARRIER_EVENT, PS5VK_COLOUR_BARRIER_CONTROL, 1,
-                          0, NULL, 0, 0, 0, 1, 0, 0) != NULL) &&
       sceAgcDcbSetCxRegistersIndirect(&command, cx, cx_count) &&
       sceAgcDcbSetUcRegistersIndirect(&command, stage + shaders->uniform_offset,
                                       PS5VK_STAGE_UNIFORM_RECORDS) &&
@@ -2640,6 +2677,9 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
    memcpy(recorded, words, draw_words * sizeof(*words));
    if (restart_changes)
       cmd_buffer->primitive_restart = restart;
+   /* The rendering's targets hold a write the last GPU barrier does not
+    * cover (R70). */
+   cmd_buffer->pass_drawn = true;
    if (draw_queue)
       ps5vk_profile_leave(draw_queue, PS5VK_PROFILE_AFTER_DRAW);
 }
@@ -2996,6 +3036,74 @@ ps5vk_cmd_buffer_writes_range(const struct ps5vk_cmd_buffer *cmd_buffer, uint64_
          return true;
    }
    return false;
+}
+
+/* R70's packets. RELEASE_MEM (PKT3 0x49) with event 20,
+ * CACHE_FLUSH_AND_INV_TS_EVENT, which flushes the colour and depth caches
+ * where RADV uses it (gfx10_cs_emit_cache_flush), event index 5 and cache
+ * actions 12 -- the vector and L1 invalidations the render-to-texture barrier
+ * already carried (event 45) -- writing a 32-bit value to memory at the end of
+ * the pipe; then WAIT_REG_MEM64 (PKT3 0x93) in the prefetch parser until that
+ * value is there, in the form the console's own wait-until-safe packet has
+ * (control 0x06000113: equal, memory, PFP; poll interval 0x40). The high word
+ * is masked out, so the wait compares the 32 bits the release wrote. */
+#define PS5VK_PKT3(opcode, count) (UINT32_C(0xc0000000) | ((uint32_t)(count) << 16) | ((uint32_t)(opcode) << 8))
+#define PS5VK_GPU_BARRIER_EVENT 20u
+#define PS5VK_GPU_BARRIER_CACHE_ACTIONS 12u
+#define PS5VK_WAIT_MEM_EQUAL_PFP UINT32_C(0x06000113)
+
+void
+ps5vk_marker_wait_words(uint32_t *words, uint64_t address, uint32_t value)
+{
+   const uint32_t packet[PS5VK_MARKER_WAIT_WORDS] = {
+      PS5VK_PKT3(0x93, 7), PS5VK_WAIT_MEM_EQUAL_PFP, (uint32_t)address, (uint32_t)(address >> 32),
+      value, 0, UINT32_MAX, 0, 0x40,
+   };
+   memcpy(words, packet, sizeof(packet));
+}
+
+void
+ps5vk_gpu_barrier_words(uint32_t *words, uint64_t fence_address, uint32_t value)
+{
+   const uint32_t release[8] = {
+      PS5VK_PKT3(0x49, 6),
+      (PS5VK_GPU_BARRIER_CACHE_ACTIONS << 12) | (5u << 8) | PS5VK_GPU_BARRIER_EVENT,
+      UINT32_C(0x20000000), (uint32_t)fence_address, (uint32_t)(fence_address >> 32), value, 0, 0,
+   };
+   memcpy(words, release, sizeof(release));
+   ps5vk_marker_wait_words(words + 8, fence_address, value);
+}
+
+/* A GPU barrier in the command buffer's words: everything recorded before it
+ * has rendered, its colour and depth writes are in memory and the texture
+ * caches hold none of their old lines when the words after it run. It replaces
+ * the submission split R4's render-to-texture draws took (C4), whose wait was
+ * the CPU's: a CPU wait is a whole refresh on a console that starts the next
+ * submission at the next vblank (R68), and Super Smash Bros. Melee's EFB copies
+ * split its frames into about a hundred steps. The fence value is the queue's
+ * to give at submission (ps5vk_queue.c), so a command buffer submitted again
+ * never finds a stale value from its last run. */
+bool
+ps5vk_cmd_buffer_gpu_barrier(struct ps5vk_cmd_buffer *cmd_buffer)
+{
+   struct ps5vk_device *const device =
+      container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk);
+   if (!device->queue_initialized || device->queue.fence == NULL)
+      return ps5vk_cmd_buffer_split(cmd_buffer);
+   const uint32_t offset = (uint32_t)util_dynarray_num_elements(&cmd_buffer->words, uint32_t);
+   uint32_t *const words = util_dynarray_grow(&cmd_buffer->words, uint32_t, PS5VK_GPU_BARRIER_WORDS);
+   uint32_t *const patch = util_dynarray_grow(&cmd_buffer->fence_patches, uint32_t, 1);
+   if (words == NULL || patch == NULL) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
+                              "no memory to record a GPU barrier");
+      return false;
+   }
+   ps5vk_gpu_barrier_words(words, (uint64_t)(uintptr_t)device->queue.fence, 0);
+   *patch = offset;
+   cmd_buffer->barrier_targets =
+      (uint32_t)util_dynarray_num_elements(&cmd_buffer->targets, struct ps5vk_render_target);
+   cmd_buffer->pass_drawn = false;
+   return true;
 }
 
 /* R69: a submission's last step is not waited for, so an earlier submission

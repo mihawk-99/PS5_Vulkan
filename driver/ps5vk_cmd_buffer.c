@@ -84,6 +84,11 @@ ps5vk_cmd_buffer_clear_state(struct ps5vk_cmd_buffer *cmd_buffer)
    cmd_buffer->pipeline = NULL;
    cmd_buffer->primitive_restart = false;
    cmd_buffer->primitive_restart_splits = 0;
+   util_dynarray_clear(&cmd_buffer->fence_patches);
+   cmd_buffer->barrier_targets = 0;
+   cmd_buffer->pass_first_target = UINT32_MAX;
+   cmd_buffer->pass_drawn = false;
+   cmd_buffer->samples_early = false;
    /* A set bound before the reset does not stay bound: the recording that
     * follows is a new command buffer's, and a stale set there would be one the
     * application never bound in it (ps5vk_descriptor_set.c). */
@@ -115,6 +120,8 @@ ps5vk_cmd_buffer_create(struct vk_command_pool *pool, VkCommandBufferLevel level
    }
    util_dynarray_init(&cmd_buffer->words, NULL);
    util_dynarray_init(&cmd_buffer->targets, NULL);
+   util_dynarray_init(&cmd_buffer->fence_patches, NULL);
+   cmd_buffer->pass_first_target = UINT32_MAX;
    util_dynarray_init(&cmd_buffer->copies, NULL);
    util_dynarray_init(&cmd_buffer->push_sets, NULL);
    ps5vk_cmd_buffer_clear_state(cmd_buffer);
@@ -161,6 +168,7 @@ ps5vk_cmd_buffer_destroy(struct vk_command_buffer *vk_cmd_buffer)
    util_dynarray_foreach (&cmd_buffer->copies, struct ps5vk_memory_copy, copy)
       free(copy->owned_source);
    util_dynarray_fini(&cmd_buffer->targets);
+   util_dynarray_fini(&cmd_buffer->fence_patches);
    util_dynarray_fini(&cmd_buffer->copies);
    util_dynarray_fini(&cmd_buffer->words);
    vk_command_buffer_finish(&cmd_buffer->vk);

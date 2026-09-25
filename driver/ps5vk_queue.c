@@ -1785,19 +1785,22 @@ ps5vk_queue_run(struct ps5vk_queue *queue, const struct vk_queue_submit *submit)
    const size_t buffer_capacity = queue->submission.bytes / sizeof(uint32_t) - 1 -
                                   PS5VK_SWAPCHAIN_IMAGES * PS5VK_FLIP_SLOT_WORDS;
    uint32_t *const marker = buffer + buffer_capacity;
+   /* Streams stop at R70's fence, which lies just below the marker. */
+   const size_t usable_capacity = (size_t)(queue->fence - buffer);
    size_t footprint = ps5vk_queue_end_words(queue) + 2 * PS5VK_TIMESTAMP_EVENT_WORDS +
-                      PS5VK_SWAPCHAIN_IMAGES * sceAgcDriverGetWaitRenderingPacketSizeInDwords();
+                      PS5VK_SWAPCHAIN_IMAGES * sceAgcDriverGetWaitRenderingPacketSizeInDwords() +
+                      PS5VK_MARKER_WAIT_WORDS;
    for (uint32_t i = 0; i < submit->command_buffer_count; i++) {
       const struct ps5vk_cmd_buffer *const cmd_buffer =
          container_of(submit->command_buffers[i], struct ps5vk_cmd_buffer, vk);
-      footprint += util_dynarray_num_elements(&cmd_buffer->words, uint32_t);
+      footprint += util_dynarray_num_elements(&cmd_buffer->words, uint32_t) + PS5VK_GPU_BARRIER_WORDS;
    }
    VkResult placed;
-   const size_t base = ps5vk_queue_stream_base(queue, buffer_capacity, footprint, &placed);
+   const size_t base = ps5vk_queue_stream_base(queue, usable_capacity, footprint, &placed);
    if (placed != VK_SUCCESS)
       return placed;
    uint32_t *const stream = buffer + base;
-   const size_t capacity = buffer_capacity - base;
+   const size_t capacity = usable_capacity - base;
    size_t words = 0;
 
    /* The steps this submission runs as, which the runner's capture reads whole
@@ -1818,6 +1821,19 @@ ps5vk_queue_run(struct ps5vk_queue *queue, const struct vk_queue_submit *submit)
       ps5vk_flush_cpu_cache(stamps, 2 * sizeof(uint64_t));
       ps5vk_timestamp_packet(stream + words, ps5vk_queue_stamp_address(queue, PS5VK_STAMP_START));
       words += PS5VK_TIMESTAMP_EVENT_WORDS;
+   }
+   /* R70: the step before this submission may still be running (R69), and
+    * nothing in these words orders their reads after its writes: the GPU
+    * waits for its marker first. Its end packets flushed and invalidated the
+    * caches, so what it rendered is in memory once the marker is. */
+   mtx_lock(&queue->lock);
+   const uint32_t previous = queue->submitted_value;
+   mtx_unlock(&queue->lock);
+   if (previous != 0 && !ps5vk_marker_reached(ps5vk_queue_poll(queue), previous)) {
+      ps5vk_marker_wait_words(stream + words, (uint64_t)(uintptr_t)queue->marker, previous);
+      words += PS5VK_MARKER_WAIT_WORDS;
+      if (queue->profile.enabled)
+         queue->profile.step_waits++;
    }
    const uint32_t wait_words = sceAgcDriverGetWaitRenderingPacketSizeInDwords();
    uint32_t waited = 0;
@@ -1879,7 +1895,34 @@ ps5vk_queue_run(struct ps5vk_queue *queue, const struct vk_queue_submit *submit)
       }
       if (count != 0)
          memcpy(stream + words, util_dynarray_begin(&cmd_buffer->words), count * sizeof(uint32_t));
+      /* R70: each GPU barrier the command buffer recorded gets its fence value
+       * now, one the fence has never held. */
+      util_dynarray_foreach (&cmd_buffer->fence_patches, uint32_t, patch) {
+         queue->fence_value = queue->fence_value == UINT32_MAX ? 1 : queue->fence_value + 1;
+         stream[words + *patch + PS5VK_GPU_BARRIER_VALUE_WORD] = queue->fence_value;
+         stream[words + *patch + PS5VK_GPU_BARRIER_REF_WORD] = queue->fence_value;
+         if (queue->profile.enabled)
+            queue->profile.gpu_barriers++;
+      }
       words += count;
+      /* The next command buffer's reads follow this one's renders only through
+       * a GPU barrier between them: the words run as one stream. It is needed
+       * where this one rendered and the next samples before a barrier of its
+       * own. */
+      const struct ps5vk_cmd_buffer *const next =
+         i + 1 < submit->command_buffer_count
+            ? container_of(submit->command_buffers[i + 1], struct ps5vk_cmd_buffer, vk)
+            : NULL;
+      if (next != NULL && next->samples_early &&
+          util_dynarray_num_elements(&cmd_buffer->targets, struct ps5vk_render_target) != 0 &&
+          queue->fence != NULL) {
+         queue->fence_value = queue->fence_value == UINT32_MAX ? 1 : queue->fence_value + 1;
+         ps5vk_gpu_barrier_words(stream + words, (uint64_t)(uintptr_t)queue->fence,
+                                 queue->fence_value);
+         words += PS5VK_GPU_BARRIER_WORDS;
+         if (queue->profile.enabled)
+            queue->profile.gpu_barriers++;
+      }
    }
 
    /* The next submission starts past these words and their end packets. */
@@ -2137,7 +2180,8 @@ ps5vk_queue_flip_presented(struct ps5vk_queue *queue, uint64_t started, bool fir
                     "late_ms=%.3f wait_max_ms=%.3f work_max_ms=%.3f late_max_ms=%.3f "
                     "later_steps=%" PRIu64 " later_step_ms=%.3f suspend_mode=%u rescues=%" PRIu64
                     " flag_refusals=%" PRIu64 " async_steps=%" PRIu64 " pending_waits=%" PRIu64
-                    " pending_wait_ms=%.3f\n", p->frames,
+                    " pending_wait_ms=%.3f gpu_barriers=%" PRIu64 " step_waits=%" PRIu64 "\n",
+                    p->frames,
                     (double)p->steps / p->frames, p->queue_ns * ms, p->flush_ns * ms,
                     p->gpu_ns * ms, p->flip_ns * ms,
                     (double)p->flush_bytes / (p->frames * 1048576.0),
@@ -2150,7 +2194,7 @@ ps5vk_queue_flip_presented(struct ps5vk_queue *queue, uint64_t started, bool fir
                     p->stamp_late_max_ns / 1000000.0, p->later_steps,
                     ps5vk_per_ms(p->later_step_ns, p->later_steps), p->suspend_mode, p->rescues,
                     p->flag_refusals, p->async_steps, p->pending_waits,
-                    p->pending_wait_ns * ms);
+                    p->pending_wait_ns * ms, p->gpu_barriers, p->step_waits);
             ps5vk_queue_profile_report2(p, now, line, sizeof(line));
          }
          /* last_return_ns and last_present_ns carry across a window: the
@@ -2703,6 +2747,11 @@ ps5vk_queue_init(struct ps5vk_device *device, struct ps5vk_queue *queue,
    queue->marker = (uint32_t *)queue->submission.address +
                    queue->submission.bytes / sizeof(uint32_t) - 1 -
                    PS5VK_SWAPCHAIN_IMAGES * PS5VK_FLIP_SLOT_WORDS;
+   /* R70's fence: the eight-byte-aligned pair of words at least two below the
+    * marker, which no stream reaches (ps5vk_queue_run's capacity stops at it).
+    * The buffer was zeroed above. */
+   queue->fence = (uint32_t *)((uintptr_t)(queue->marker - 3) & ~(uintptr_t)7);
+   queue->fence_value = 0;
 
    queue->vk.driver_submit = ps5vk_queue_submit;
    return VK_SUCCESS;

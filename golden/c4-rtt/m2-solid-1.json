@@ -1,12 +1,12 @@
 {
  "schema": 1,
  "source": {
-  "klog": "capture-state.log",
-  "pid": 214
+  "klog": "klog-20260925-011240.log",
+  "pid": 615
  },
  "test": "m2-solid",
  "sequence": 1,
- "frame": 1,
+ "frame": 2,
  "flips_before": 0,
  "buffer": 0,
  "regions": {

@@ -409,9 +409,9 @@ ps5vk_dispatch(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t groupCountX, uint32
    if (!ps5vk_cmd_buffer_shader_resources(cmd_buffer, pipeline, &metadata, &stage_bit, 1,
                                           user_data, &colour_barrier))
       return;
-   /* The split completes and flushes preceding colour writes before compute
-    * samples them, just as the draw path does. */
-   if (colour_barrier && !ps5vk_cmd_buffer_split(cmd_buffer))
+   /* The GPU barrier completes and flushes preceding colour and depth writes
+    * before compute samples them, just as the draw path does (R70). */
+   if (colour_barrier && !ps5vk_cmd_buffer_gpu_barrier(cmd_buffer))
       return;
 
    const uint64_t code_address = (uint64_t)(uintptr_t)pipeline->compute.code.address;

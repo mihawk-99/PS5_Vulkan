@@ -331,6 +331,10 @@ struct ps5vk_queue_profile {
    /* R69: steps submitted without waiting for them, and the waits for such
     * steps that had to block (fences, semaphores, CPU copies, query reads). */
    uint64_t async_steps, pending_waits, pending_wait_ns;
+   /* R70: GPU barriers the submissions carried (in command buffers, and
+    * between command buffers), and steps that began with a GPU wait for the
+    * step before them. */
+   uint64_t gpu_barriers, step_waits;
 };
 
 struct ps5vk_queue {
@@ -368,6 +372,12 @@ struct ps5vk_queue {
     * Mapped only while profiling; start_stamped says the running step carries
     * the first two. */
    struct ps5vk_direct_mapping stamps;
+   /* R70: the word the GPU barriers' RELEASE_MEM writes and their
+    * WAIT_REG_MEM polls -- eight-byte aligned, in the words the submission
+    * buffer keeps below the marker, so no allocation moves -- and the last
+    * value the queue gave a barrier. */
+   uint32_t *fence;
+   uint32_t fence_value;
    bool start_stamped;
    /* Profile windows reported so far, which picks R68's submission mode. */
    uint32_t profile_windows;
@@ -395,6 +405,26 @@ struct ps5vk_blit_part {
    uint32_t row_begin, row_end;
    uint64_t source_low, source_high, destination_low, destination_high;
 };
+
+/* R70: a GPU barrier -- RELEASE_MEM of CACHE_FLUSH_AND_INV_TS_EVENT (colour
+ * and depth caches flushed, the vector and L1 caches invalidated) writing
+ * value to fence_address, then WAIT_REG_MEM64 until it is there -- in
+ * PS5VK_GPU_BARRIER_WORDS words, the value at PS5VK_GPU_BARRIER_VALUE_WORD
+ * and PS5VK_GPU_BARRIER_REF_WORD. ps5vk_marker_wait_words is the wait alone,
+ * PS5VK_MARKER_WAIT_WORDS words, for a 32-bit value at address. */
+#define PS5VK_GPU_BARRIER_WORDS 17u
+#define PS5VK_GPU_BARRIER_VALUE_WORD 5u
+#define PS5VK_GPU_BARRIER_REF_WORD 12u
+#define PS5VK_MARKER_WAIT_WORDS 9u
+void
+ps5vk_gpu_barrier_words(uint32_t *words, uint64_t fence_address, uint32_t value);
+void
+ps5vk_marker_wait_words(uint32_t *words, uint64_t address, uint32_t value);
+/* Records a GPU barrier into a command buffer (ps5vk_draw.c); false when it
+ * refused the recording. */
+struct ps5vk_cmd_buffer;
+bool
+ps5vk_cmd_buffer_gpu_barrier(struct ps5vk_cmd_buffer *cmd_buffer);
 
 /* R69: waits until the GPU has run the queue's steps up to value, then evicts
  * what they wrote from the CPU caches; VK_TIMEOUT once abs_timeout_ns (the
@@ -726,6 +756,20 @@ struct ps5vk_cmd_buffer {
     * how many copies were recorded when it was last known; ps5vk_draw.c). */
    bool primitive_restart;
    uint32_t primitive_restart_splits;
+   /* R70: where the last GPU barrier fell (ps5vk_draw.c,
+    * ps5vk_cmd_buffer_gpu_barrier). A target registered at or after
+    * barrier_targets was rendered since, as is the active rendering's own
+    * (from pass_first_target, UINT32_MAX outside one) once a draw has gone into
+    * it since (pass_drawn). fence_patches holds the word offset of each
+    * barrier's fence value, which the queue fills at submission. */
+   uint32_t barrier_targets;
+   uint32_t pass_first_target;
+   bool pass_drawn;
+   struct util_dynarray fence_patches;
+   /* A draw sampled an image before the command buffer's first GPU barrier:
+    * what an earlier command buffer in the same submission rendered reaches
+    * it only through a barrier the queue puts between them. */
+   bool samples_early;
    /* The descriptor sets bound for the next draws, by set index
     * (vkCmdBindDescriptorSets; ps5vk_descriptor_set.c), and the dynamic offset
     * each was bound with (VkBindDescriptorSetsInfo.pDynamicOffsets, D1). */
