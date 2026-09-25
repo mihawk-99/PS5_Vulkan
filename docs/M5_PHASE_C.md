@@ -9214,3 +9214,32 @@ reports. The probe binds 16 of R62's 64 rows: before the fix (PID 511) rows 17,
 and R62, r15-dynamic-pair, d1-dynamic-ubo, v0-push-constant and R63 pass in the
 same run. Storage buffers already used 3. jobs/r66-uniform-bounds; the host's
 uniform-entry check asserts 3.
+
+## 2026-09-24 — R67: the profile stamps each submission with the GPU clock
+
+A tester on a PS5 (not a Pro) with a 1080p 120 Hz display ran every RetroArch
+core at two thirds of full speed: the profile showed 80 presents a second
+against the 120 the 119.88 Hz output needs at swap interval 2, with each step
+taking about 8 ms from the submission call to its marker (gpu_ms 12.2 per
+present at 1.5 steps, poll_ms 8.1, no step done inside the 1.5 ms marker spin).
+My PS5 Pro, also at 119.88 Hz, takes 0.25 ms for the same frame. The wall time
+alone cannot say whether those 8 ms are VideoOut holding the target image
+(the swapchain wait packet), the GPU's own work, or the GPU reaching the
+submission late.
+
+With ps5vk-profile.txt present the queue now maps a small stamp buffer and adds
+three GPU timestamps (the RELEASE_MEM that vkCmdWriteTimestamp uses): one at
+the start of a submission's first step, one after its swapchain wait packets,
+and one before every step's end packets. The ten-second profile line gains
+stamped= (first steps with all three stamps / first steps), display_wait_ms,
+gpu_work_ms, late_ms (the step's wall time beyond both: the GPU starting late
+or the marker being seen late) with their maxima, and later_step_ms for the
+steps after a split, which carry only the end stamp. Without the profile file
+nothing is mapped and the words are the ones they were.
+
+Console (my Pro, FCEUmm, 1943, 30 s): stamped=1199/1199, display_wait_ms=0.000,
+gpu_work_ms=0.102, late_ms=0.041, later_step_ms=0.217, 120 presents a second
+as before. vk_v0_topology_test runs its split frame again with profiling on and
+asserts the first step starts with a stamp and every step ends with one (and
+that neither is there without it). The tester's build carries this, to tell
+which of the three the 8 ms are.

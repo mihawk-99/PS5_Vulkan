@@ -72,6 +72,12 @@
 #define PS5VK_COMPLETION_EVENT 40
 #define PS5VK_COMPLETION_CONTROL 0x30c
 #define PS5VK_STREAM_END_WORDS 16
+/* The profile's stamp slots (struct ps5vk_queue, stamps). */
+#define PS5VK_STAMP_START 0
+#define PS5VK_STAMP_WAITED 1
+#define PS5VK_STAMP_END 2
+#define PS5VK_STAMP_BYTES UINT64_C(0x10000)
+#define PS5VK_STAMP_TICK_NS 10
 
 /* The test runner's marker wait: 1 ms sleeps for up to 2 s. */
 #define PS5VK_MARKER_POLLS 2000
@@ -1128,6 +1134,59 @@ ps5vk_blit_wave_execute(struct ps5vk_queue *queue, const struct ps5vk_copy_split
    return true;
 }
 
+/* The words a step ends with: the barrier and the marker, and while profiling
+ * the end timestamp before them. */
+static size_t
+ps5vk_queue_end_words(const struct ps5vk_queue *queue)
+{
+   return PS5VK_STREAM_END_WORDS + (queue->stamps.address != NULL ? PS5VK_TIMESTAMP_EVENT_WORDS : 0);
+}
+
+/* The GPU address of one of the profile's stamp slots. */
+static uint64_t
+ps5vk_queue_stamp_address(const struct ps5vk_queue *queue, unsigned slot)
+{
+   return (uint64_t)(uintptr_t)queue->stamps.address + slot * sizeof(uint64_t);
+}
+
+/* R67: splits a step's wall time by the GPU's clock. The first step of a
+ * submission carries a stamp before its swapchain wait packets and one after
+ * them, and every step one before its end packets, so wait is the time VideoOut
+ * held the target image, work the step's own work after it, and late whatever
+ * the wall time from the submission call to the marker holds beyond both: the
+ * GPU reaching the step late, or the marker being seen late (the marker spin,
+ * then 1 ms sleeps). The GPU clock is 100 MHz (V0-query's timestamp probe). */
+static void
+ps5vk_queue_profile_stamps(struct ps5vk_queue *queue, uint64_t step_ns)
+{
+   struct ps5vk_queue_profile *const p = &queue->profile;
+   const volatile uint64_t *const stamps = queue->stamps.address;
+   if (!queue->start_stamped) {
+      p->later_steps++;
+      p->later_step_ns += step_ns;
+      return;
+   }
+   queue->start_stamped = false;
+   ps5vk_flush_cpu_cache((const void *)stamps, 3 * sizeof(uint64_t));
+   const uint64_t start = stamps[PS5VK_STAMP_START];
+   const uint64_t waited = stamps[PS5VK_STAMP_WAITED];
+   const uint64_t end = stamps[PS5VK_STAMP_END];
+   if (start == 0 || waited < start || end < waited) {
+      p->stamp_missing++;
+      return;
+   }
+   const uint64_t wait_ns = (waited - start) * PS5VK_STAMP_TICK_NS;
+   const uint64_t work_ns = (end - waited) * PS5VK_STAMP_TICK_NS;
+   const uint64_t late_ns = step_ns > wait_ns + work_ns ? step_ns - wait_ns - work_ns : 0;
+   p->stamp_steps++;
+   p->stamp_wait_ns += wait_ns;
+   p->stamp_work_ns += work_ns;
+   p->stamp_late_ns += late_ns;
+   p->stamp_wait_max_ns = MAX2(p->stamp_wait_max_ns, wait_ns);
+   p->stamp_work_max_ns = MAX2(p->stamp_work_max_ns, work_ns);
+   p->stamp_late_max_ns = MAX2(p->stamp_late_max_ns, late_ns);
+}
+
 /* Submits the words [start, end) of the stream with the colour-buffer barrier
  * and a completion marker, and waits for the marker: the whole submission when
  * it has no copies, or one step of a submission the copies split. Everything
@@ -1149,6 +1208,15 @@ ps5vk_queue_run_step(struct ps5vk_queue *queue, const struct vk_queue_submit *su
    queue->marker_value = queue->marker_value == UINT32_MAX ? 1 : queue->marker_value + 1;
    const uint32_t value = queue->marker_value;
    *marker = 0;
+   if (queue->stamps.address != NULL) {
+      if (command.up + PS5VK_TIMESTAMP_EVENT_WORDS > command.top)
+         return vk_queue_set_lost(&queue->vk, "no room for the profile's end timestamp");
+      uint64_t *const stamps = queue->stamps.address;
+      stamps[PS5VK_STAMP_END] = 0;
+      ps5vk_flush_cpu_cache(&stamps[PS5VK_STAMP_END], sizeof(uint64_t));
+      ps5vk_timestamp_packet(command.up, ps5vk_queue_stamp_address(queue, PS5VK_STAMP_END));
+      command.up += PS5VK_TIMESTAMP_EVENT_WORDS;
+   }
    const uint32_t *const barrier =
       sceAgcCbReleaseMem(&command, PS5VK_BARRIER_EVENT, PS5VK_BARRIER_CONTROL, 1, 0, NULL, 0, 0,
                          0, 1, 0, 0);
@@ -1218,6 +1286,8 @@ ps5vk_queue_run_step(struct ps5vk_queue *queue, const struct vk_queue_submit *su
             p->poll_ns += now - submitted;
             p->polls += poll;
             p->poll_first_hits += poll == 0;
+            if (queue->stamps.address != NULL)
+               ps5vk_queue_profile_stamps(queue, now - started);
          }
          ps5vk_queue_flush_targets(queue, submit);
          return VK_SUCCESS;
@@ -1303,7 +1373,7 @@ ps5vk_queue_run_copy_steps(struct ps5vk_queue *queue, const struct vk_queue_subm
     * (R6: two render passes with the resolve recorded between them; the check
     * below names that arithmetic instead of repeating it). */
    const size_t capture_steps = (size_t)split_count + 1;
-   const size_t capture_words = (size_t)words + capture_steps * PS5VK_STREAM_END_WORDS;
+   const size_t capture_words = (size_t)words + capture_steps * ps5vk_queue_end_words(queue);
    if (queue->step_capture_words < capture_words) {
       free(queue->step_capture);
       queue->step_capture = malloc(capture_words * sizeof(uint32_t));
@@ -1336,7 +1406,7 @@ ps5vk_queue_run_copy_steps(struct ps5vk_queue *queue, const struct vk_queue_subm
           * a frame (docs/M5_PHASE_C.md, R6). The check is here rather than only
           * in the size below so that a future change to how steps are counted
           * names itself instead of writing past the buffer. */
-         const size_t step_words = (size_t)(end - start) + PS5VK_STREAM_END_WORDS;
+         const size_t step_words = (size_t)(end - start) + ps5vk_queue_end_words(queue);
          if (capture_at + step_words > queue->step_capture_words) {
             fprintf(stderr, "[ps5vk] step capture overflow: %zu words at %zu, buffer %zu\n",
                     step_words, capture_at, queue->step_capture_words);
@@ -1354,7 +1424,7 @@ ps5vk_queue_run_copy_steps(struct ps5vk_queue *queue, const struct vk_queue_subm
             break;
          /* The end packets of this step take the reserve the stream keeps for
           * them, which is where the next step's copy starts. */
-         capture_at += (size_t)(end - start) + PS5VK_STREAM_END_WORDS;
+         capture_at += (size_t)(end - start) + ps5vk_queue_end_words(queue);
       }
       /* Every copy recorded at this offset runs now, in record order: the GPU
        * has finished the words before it and has not seen the words after. A
@@ -1476,6 +1546,18 @@ ps5vk_queue_run(struct ps5vk_queue *queue, const struct vk_queue_submit *submit)
    /* A submission that renders into a swapchain image starts with the image's
     * wait packet: the GPU waits until VideoOut no longer scans that buffer out
     * (M2, C1). There is one VideoOut, so each buffer waits once. */
+   const size_t end_words = ps5vk_queue_end_words(queue);
+   /* While profiling, the first step starts with a timestamp and has another
+    * after the wait packets (ps5vk_queue_profile_stamps); both fit, as the
+    * buffer holds far more than two packets and the end words. */
+   uint64_t *const stamps = queue->stamps.address;
+   if (stamps != NULL) {
+      stamps[PS5VK_STAMP_START] = 0;
+      stamps[PS5VK_STAMP_WAITED] = 0;
+      ps5vk_flush_cpu_cache(stamps, 2 * sizeof(uint64_t));
+      ps5vk_timestamp_packet(stream + words, ps5vk_queue_stamp_address(queue, PS5VK_STAMP_START));
+      words += PS5VK_TIMESTAMP_EVENT_WORDS;
+   }
    const uint32_t wait_words = sceAgcDriverGetWaitRenderingPacketSizeInDwords();
    uint32_t waited = 0;
    for (uint32_t i = 0; i < submit->command_buffer_count; i++) {
@@ -1484,7 +1566,7 @@ ps5vk_queue_run(struct ps5vk_queue *queue, const struct vk_queue_submit *submit)
       util_dynarray_foreach (&cmd_buffer->targets, struct ps5vk_render_target, target) {
          if (target->video < 0 || (waited & (UINT32_C(1) << target->buffer_index)))
             continue;
-         if (wait_words > capacity - PS5VK_STREAM_END_WORDS - words)
+         if (wait_words > capacity - end_words - words)
             return vk_errorf(queue, VK_ERROR_OUT_OF_DEVICE_MEMORY,
                              "no room for a wait packet in the submission buffer");
          uint32_t *up = stream + words;
@@ -1498,6 +1580,11 @@ ps5vk_queue_run(struct ps5vk_queue *queue, const struct vk_queue_submit *submit)
          waited |= UINT32_C(1) << target->buffer_index;
       }
    }
+   if (stamps != NULL) {
+      ps5vk_timestamp_packet(stream + words, ps5vk_queue_stamp_address(queue, PS5VK_STAMP_WAITED));
+      words += PS5VK_TIMESTAMP_EVENT_WORDS;
+      queue->start_stamped = true;
+   }
 
    /* The copies and synchronization splits the command buffers recorded, and
     * the stream offset each of them falls at: the submission is split into
@@ -1508,10 +1595,10 @@ ps5vk_queue_run(struct ps5vk_queue *queue, const struct vk_queue_submit *submit)
       const struct ps5vk_cmd_buffer *const cmd_buffer =
          container_of(submit->command_buffers[i], struct ps5vk_cmd_buffer, vk);
       const size_t count = util_dynarray_num_elements(&cmd_buffer->words, uint32_t);
-      if (count > capacity - PS5VK_STREAM_END_WORDS - words) {
+      if (count > capacity - end_words - words) {
          util_dynarray_fini(&splits);
          return vk_errorf(queue, VK_ERROR_OUT_OF_DEVICE_MEMORY,
-                          "a submission of more than %zu words", capacity - PS5VK_STREAM_END_WORDS);
+                          "a submission of more than %zu words", capacity - end_words);
       }
       /* A copy or split falls after the words its command buffer had recorded
        * when the application recorded it, which is that command buffer's
@@ -1720,6 +1807,13 @@ ps5vk_queue_profile_report2(struct ps5vk_queue_profile *p, uint64_t now, char *l
    p->report_write_ns = ps5vk_profile_now() - written;
 }
 
+/* A total over a count, in milliseconds each; zero for no count. */
+static double
+ps5vk_per_ms(uint64_t ns, uint64_t count)
+{
+   return count != 0 ? (double)ns / ((double)count * 1000000.0) : 0.0;
+}
+
 /* A flip counted as presented: the frame count, its period since the previous
  * one and, every ten seconds, the profile's summary lines. started is when the
  * present began; first_hit whether VideoOut had shown it at the first look. */
@@ -1753,15 +1847,25 @@ ps5vk_queue_flip_presented(struct ps5vk_queue *queue, uint64_t started, bool fir
             const double ms = 1.0 / ((double)p->frames * 1000000.0);
             /* Both summary lines go out as one write: see the note on
              * ps5vk_queue_profile_report2 for what a second one costs. */
-            char line[2048];
+            char line[3072];
             snprintf(line, sizeof(line),
                     "[ps5vk] profile frames=%" PRIu64 " steps/frame=%.2f "
                     "queue_ms=%.3f flush_ms=%.3f gpu_ms=%.3f flip_ms=%.3f "
-                    "flush_MiB/frame=%.2f copy_ms=%.3f sync_wait_ms=%.3f sync_signal_ms=%.3f\n", p->frames,
+                    "flush_MiB/frame=%.2f copy_ms=%.3f sync_wait_ms=%.3f sync_signal_ms=%.3f "
+                    "stamped=%" PRIu64 "/%" PRIu64 " display_wait_ms=%.3f gpu_work_ms=%.3f "
+                    "late_ms=%.3f wait_max_ms=%.3f work_max_ms=%.3f late_max_ms=%.3f "
+                    "later_steps=%" PRIu64 " later_step_ms=%.3f\n", p->frames,
                     (double)p->steps / p->frames, p->queue_ns * ms, p->flush_ns * ms,
                     p->gpu_ns * ms, p->flip_ns * ms,
                     (double)p->flush_bytes / (p->frames * 1048576.0),
-                    p->copy_ns * ms, p->sync_wait_ns * ms, p->sync_signal_ns * ms);
+                    p->copy_ns * ms, p->sync_wait_ns * ms, p->sync_signal_ns * ms,
+                    p->stamp_steps, p->stamp_steps + p->stamp_missing,
+                    ps5vk_per_ms(p->stamp_wait_ns, p->stamp_steps),
+                    ps5vk_per_ms(p->stamp_work_ns, p->stamp_steps),
+                    ps5vk_per_ms(p->stamp_late_ns, p->stamp_steps),
+                    p->stamp_wait_max_ns / 1000000.0, p->stamp_work_max_ns / 1000000.0,
+                    p->stamp_late_max_ns / 1000000.0, p->later_steps,
+                    ps5vk_per_ms(p->later_step_ns, p->later_steps));
             ps5vk_queue_profile_report2(p, now, line, sizeof(line));
          }
          /* last_return_ns and last_present_ns carry across a window: the
@@ -2253,9 +2357,16 @@ ps5vk_queue_init(struct ps5vk_device *device, struct ps5vk_queue *queue,
                                                  getenv("PS5VK_PROFILE") != NULL};
    if (profile)
       fclose(profile);
+   queue->stamps = (struct ps5vk_direct_mapping){.start = -1};
+   queue->start_stamped = false;
    if (queue->profile.enabled) {
       ps5vk_queue_probe_costs(&queue->profile);
       ps5vk_hitch_armed = true;
+      /* The stamps are the profile's own: without them it runs as before. */
+      if (ps5vk_direct_mapping_create(&queue->stamps, PS5VK_STAMP_BYTES, PS5VK_STAMP_BYTES) != 0)
+         ps5vk_direct_mapping_destroy(&queue->stamps);
+      else
+         memset(queue->stamps.address, 0, PS5VK_STAMP_BYTES);
    }
    queue->marker_value = 0;
    queue->last_words = 0;
@@ -2293,6 +2404,7 @@ ps5vk_queue_finish(struct ps5vk_queue *queue)
    vk_queue_finish(&queue->vk);
    ps5vk_blit_pool_destroy(queue);
    ps5vk_direct_mapping_destroy(&queue->submission);
+   ps5vk_direct_mapping_destroy(&queue->stamps);
    free(queue->step_capture);
 }
 

@@ -301,6 +301,14 @@ struct ps5vk_queue_profile {
    /* One per swapchain image (PS5VK_SWAPCHAIN_IMAGES, ps5vk_wsi.c). */
    uint64_t present_index[2];
    uint32_t present_period[PS5VK_PERIOD_BUCKETS];
+   /* R67: the GPU's own clock around each submission's first step
+    * (ps5vk_queue.c, ps5vk_queue_profile_stamps): the swapchain wait packets,
+    * the rest of the step's work, and what the step's wall time holds beyond
+    * both -- the GPU starting late, or the marker being seen late. Later steps
+    * have no start stamp and only their wall time. */
+   uint64_t stamp_steps, stamp_missing, stamp_wait_ns, stamp_work_ns, stamp_late_ns;
+   uint64_t stamp_wait_max_ns, stamp_work_max_ns, stamp_late_max_ns;
+   uint64_t later_steps, later_step_ns;
 };
 
 struct ps5vk_queue {
@@ -333,6 +341,12 @@ struct ps5vk_queue {
    uint32_t *step_capture;
    size_t step_capture_words;
    struct ps5vk_queue_profile profile;
+   /* Where the GPU writes the profile's timestamps: three 64-bit clocks, the
+    * first step's start, the end of its swapchain waits and the step's end.
+    * Mapped only while profiling; start_stamped says the running step carries
+    * the first two. */
+   struct ps5vk_direct_mapping stamps;
+   bool start_stamped;
    /* The workers that resample blits in parallel (ps5vk_queue.c), started on
     * first use; refused when none could start. */
    struct ps5vk_blit_pool *blit_pool;
@@ -345,6 +359,13 @@ struct ps5vk_blit_part {
    uint32_t row_begin, row_end;
    uint64_t source_low, source_high, destination_low, destination_high;
 };
+
+/* The timestamp packet (ps5vk_query.c): PS5VK_TIMESTAMP_EVENT_WORDS words that
+ * make the GPU write its 100 MHz clock, as 64 bits, to address once the work
+ * before them has finished. */
+#define PS5VK_TIMESTAMP_EVENT_WORDS 8
+void
+ps5vk_timestamp_packet(uint32_t *words, uint64_t address);
 
 /* Closes the application stretch since the previous instrumented entry point
  * left and opens this one's; ps5vk_profile_leave records when it handed control

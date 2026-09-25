@@ -50,7 +50,6 @@
  * EOP_INT_SEL(SEND_DATA_AFTER_WR_CONFIRM) | EOP_DATA_SEL(TIMESTAMP) in Mesa's
  * encoding (sid.h). The packet is eight words: a RELEASE_MEM of seven is
  * refused by the runner's own framing check. The clock is about 100 MHz. */
-#define PS5VK_TIMESTAMP_EVENT_WORDS 8
 #define PS5VK_TIMESTAMP_PACKET UINT32_C(0xc0064900)
 #define PS5VK_TIMESTAMP_EVENT UINT32_C(0x0030c528)
 #define PS5VK_TIMESTAMP_SELECT UINT32_C(0x63000000)
@@ -99,16 +98,10 @@ ps5vk_cmd_buffer_occlusion_sample(struct ps5vk_cmd_buffer *cmd_buffer,
    util_dynarray_append(&cmd_buffer->targets, target);
 }
 
-/* Appends one timestamp write of a query's counter to a command buffer, and
- * registers the pool with it as a target the way the occlusion sample does:
- * submission evicts the counter's cache line once the GPU has run, which is
- * what makes the clock readable. */
-static void
-ps5vk_cmd_buffer_timestamp_sample(struct ps5vk_cmd_buffer *cmd_buffer,
-                                  struct ps5vk_query_pool *pool, uint32_t query)
+void
+ps5vk_timestamp_packet(uint32_t *words, uint64_t address)
 {
-   const uint64_t address = ps5vk_query_counter(pool, query, 0);
-   const uint32_t words[PS5VK_TIMESTAMP_EVENT_WORDS] = {
+   const uint32_t packet[PS5VK_TIMESTAMP_EVENT_WORDS] = {
       PS5VK_TIMESTAMP_PACKET,
       PS5VK_TIMESTAMP_EVENT,
       PS5VK_TIMESTAMP_SELECT,
@@ -118,9 +111,20 @@ ps5vk_cmd_buffer_timestamp_sample(struct ps5vk_cmd_buffer *cmd_buffer,
       0,
       0,
    };
+   memcpy(words, packet, sizeof(packet));
+}
+
+/* Appends one timestamp write of a query's counter to a command buffer, and
+ * registers the pool with it as a target the way the occlusion sample does:
+ * submission evicts the counter's cache line once the GPU has run, which is
+ * what makes the clock readable. */
+static void
+ps5vk_cmd_buffer_timestamp_sample(struct ps5vk_cmd_buffer *cmd_buffer,
+                                  struct ps5vk_query_pool *pool, uint32_t query)
+{
    uint32_t *const recorded =
       util_dynarray_grow(&cmd_buffer->words, uint32_t, PS5VK_TIMESTAMP_EVENT_WORDS);
-   memcpy(recorded, words, sizeof(words));
+   ps5vk_timestamp_packet(recorded, ps5vk_query_counter(pool, query, 0));
 
    const struct ps5vk_render_target target = {
       .always = true,

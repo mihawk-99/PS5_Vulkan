@@ -22,7 +22,10 @@ minimap spill it had. The Dolphin goal is paused at R66 while I look at
 performance problems testers reported.
 
 Next, in order:
-1. The testers' performance reports (in progress).
+1. The testers' performance reports (in progress): a PS5 with a 1080p 120 Hz
+   display takes ~8 ms a submission step where my Pro takes 0.25 ms; R67's
+   profile stamps (docs/M5_PHASE_C.md) split that into display wait, GPU work
+   and late start, and the tester's build carries them.
 2. The replays of jobs/r23-r29 differ from their goldens by the five
    per-draw context registers the per-draw-state round added (90 records
    against 85); re-capture them or restate the registers.

@@ -94,6 +94,8 @@ static const uint16_t kConsistent[6] = {0, 1, 2, 1, 3, 2};
  * first, DRAW_INDEX_2 PKT3(0x27, 4) with the index count first. */
 #define DRAW_INDEX_AUTO_HEADER 0xc0012d00u
 #define DRAW_INDEX_2_HEADER 0xc0042700u
+/* RELEASE_MEM writing the GPU clock (ps5vk_query.c), the profile's stamps. */
+#define TIMESTAMP_HEADER 0xc0064900u
 
 #if defined(PS5VK_TEST_DIRECT)
 /* The count of the submission's last packet with this header, or 0 for none:
@@ -343,8 +345,12 @@ draw_frame(const struct frame *frame, const uint32_t *vertex, size_t vertex_byte
  * split and before its draw. */
 static void
 restart_across_split(const uint32_t *vertex, size_t vertex_bytes, const uint32_t *pixel,
-                     size_t pixel_bytes)
+                     size_t pixel_bytes, bool profiled)
 {
+   /* R67: the queue maps its profile stamps when it is created with profiling
+    * on, and every step then carries the timestamps. */
+   if (profiled)
+      setenv("PS5VK_PROFILE", "1", 1);
    struct steps steps = {0};
    const struct ps5vk_triangle_report report = {&steps, record_step};
    struct ps5vk_triangle_input input = {0};
@@ -369,10 +375,13 @@ restart_across_split(const uint32_t *vertex, size_t vertex_bytes, const uint32_t
    input.split_between_passes = true;
    struct ps5vk_triangle triangle = {0};
    enum ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+   if (profiled)
+      unsetenv("PS5VK_PROFILE");
    if (status == PS5VK_TRIANGLE_OK)
       status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
    check(status == PS5VK_TRIANGLE_OK && steps.failed == NULL,
-         "restart across a split: the frame records, submits and signals its fence");
+         profiled ? "profiled split: the frame records, submits and signals its fence"
+                  : "restart across a split: the frame records, submits and signals its fence");
    if (status == PS5VK_TRIANGLE_OK) {
       ps5vk_debug_stage parts[4] = {{0}};
       const uint32_t count = ps5vk_debug_submission_steps(triangle.device, parts, 4);
@@ -394,6 +403,24 @@ restart_across_split(const uint32_t *vertex, size_t vertex_bytes, const uint32_t
       if (total.count != 3 || total.after_event != 3 || after.before_draw < 1)
          printf("  (%u steps, %u changes, %u behind the event, %u before the second step's draw)\n",
                 count, total.count, total.after_event, after.before_draw);
+      /* The first step starts with a timestamp, and every step's end packets
+       * (the last 16 words, barrier and marker) follow one; without profiling
+       * neither is there. */
+      unsigned stamped_ends = 0;
+      for (uint32_t at = 0; at < count && at < 4; at++) {
+         const uint32_t *const words = parts[at].address;
+         const uint32_t length = (uint32_t)(parts[at].bytes / sizeof(uint32_t));
+         stamped_ends += length >= 24 && words[length - 24] == TIMESTAMP_HEADER;
+      }
+      const bool stamped_start =
+         count != 0 && parts[0].bytes >= 4 && ((const uint32_t *)parts[0].address)[0] == TIMESTAMP_HEADER;
+      if (profiled) {
+         check(stamped_start && stamped_ends == count,
+               "profiled split: the first step starts with a timestamp and every step ends with one");
+      } else {
+         check(!stamped_start && stamped_ends == 0,
+               "restart across a split: no timestamps without profiling");
+      }
    }
    if (status != PS5VK_TRIANGLE_IN_FLIGHT)
       ps5vk_triangle_finish(&triangle);
@@ -510,8 +537,10 @@ main(void)
    for (size_t at = 0; vertex && pixel && at < sizeof(kFrames) / sizeof(kFrames[0]); at++)
       draw_frame(&kFrames[at], vertex, vertex_bytes, pixel, pixel_bytes);
 #if defined(PS5VK_TEST_DIRECT)
-   if (vertex && pixel)
-      restart_across_split(vertex, vertex_bytes, pixel, pixel_bytes);
+   if (vertex && pixel) {
+      restart_across_split(vertex, vertex_bytes, pixel, pixel_bytes, false);
+      restart_across_split(vertex, vertex_bytes, pixel, pixel_bytes, true);
+   }
 #endif
 
 #if defined(__linux__)
