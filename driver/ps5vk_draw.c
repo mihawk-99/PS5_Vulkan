@@ -54,6 +54,8 @@
 
 #include "ps5vk_private.h"
 
+#include <pthread.h>
+
 #include "vk_format.h"
 #include "vk_framebuffer.h"
 #include "vk_render_pass.h"
@@ -300,6 +302,26 @@ ps5vk_default_register(uint16_t offset, uint32_t *value)
    return false;
 }
 
+/* R73: target 0's defaults, read once. AGC's context defaults do not change in a
+ * process, and every colour target of every rendering read all sixteen again --
+ * a call into AGC and a scan of its whole table each -- which Wind Waker's EFB
+ * copies, a rendering each, made one of the main thread's largest costs (the
+ * title's CPU sampler: 85-140 of a ten-second window's ~420 late-frame
+ * samples; none after). */
+static uint32_t ps5vk_target_defaults[PS5VK_TARGET_REGISTER_COUNT];
+static bool ps5vk_target_defaults_found;
+static pthread_once_t ps5vk_target_defaults_once = PTHREAD_ONCE_INIT;
+
+static void
+ps5vk_target_defaults_init(void)
+{
+   bool found = true;
+   for (unsigned index = 0; index < PS5VK_TARGET_REGISTER_COUNT; index++)
+      found = found && ps5vk_default_register(ps5vk_target_offsets[index][0],
+                                              &ps5vk_target_defaults[index]);
+   ps5vk_target_defaults_found = found;
+}
+
 /* The 16 CB_COLOR0 registers as AGC's own context defaults hold them: what a
  * rendering with no colour attachment keeps, so a draw that writes no colour
  * still programs a target (vk_meta's depth clear is the pass that needs this).
@@ -319,15 +341,12 @@ ps5vk_default_target_registers(struct ps5vk_agc_register *records, uint32_t targ
     * (R7 step 1b; before this, target 1's uncomputed fields -- CB_COLOR1_BASE_EXT
     * among them -- kept values no target wrote, and the console's clear reached
     * attachment 0 while attachment 1 stayed at zero). */
-   struct ps5vk_agc_register first[PS5VK_TARGET_REGISTER_COUNT];
-   for (unsigned index = 0; index < PS5VK_TARGET_REGISTER_COUNT; index++) {
-      first[index] = (struct ps5vk_agc_register){.offset = ps5vk_target_offsets[index][0]};
-      if (!ps5vk_default_register(first[index].offset, &first[index].value))
-         return false;
-   }
+   pthread_once(&ps5vk_target_defaults_once, ps5vk_target_defaults_init);
+   if (!ps5vk_target_defaults_found)
+      return false;
    for (unsigned index = 0; index < PS5VK_TARGET_REGISTER_COUNT; index++) {
       records[index] = (struct ps5vk_agc_register){
-         .offset = ps5vk_target_offsets[index][target], .value = first[index].value};
+         .offset = ps5vk_target_offsets[index][target], .value = ps5vk_target_defaults[index]};
    }
    return true;
 }

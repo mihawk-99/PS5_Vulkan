@@ -9364,3 +9364,18 @@ texture ("Failed to allocate 65536 bytes from texel buffer", Resident Evil 4,
 accurate profile). The descriptor's NUM_RECORDS word is 32-bit, as RADV's is,
 and the driver now reports UINT32_MAX as RADV does. PID 649: the texel-buffer
 probes pass; RE4 shows no error. jobs/r72-texel-buffer-limit.
+
+## 2026-09-25 — R73: target defaults read once
+
+Wind Waker, accurate profile, held full speed (every steady ten-second window
+played 480000 of 480000 audio frames) but logged 32 frame periods over 40 ms in
+130 seconds. The title's CPU sampler (stall-ms 30) put 85-140 of each window's
+~420 late-frame samples under ps5vk_default_register: every colour target of
+every rendering starts from CB_COLOR0's sixteen AGC context defaults, and each
+was read again, a call into AGC and a scan of its whole default table; the
+game's EFB copies are a rendering each. The defaults do not change within a process, so the
+driver reads them once (pthread_once) and copies them per rendering. The host
+gate's packets are unchanged. Title 5253301f, same state and pad script: no
+sample under the default table, frame periods over 40 ms 32 → 14, full speed.
+The remaining hitches are 40-51 ms periods with no driver object creation in
+them; they are the next item.
