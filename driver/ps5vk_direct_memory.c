@@ -69,7 +69,10 @@ ps5vk_direct_mapping_destroy(struct ps5vk_direct_mapping *mapping)
          mesa_loge("sceKernelMunmap(%p, %zu bytes) failed: 0x%08x", mapping->address,
                    mapping->bytes, (unsigned)result);
    }
-   if (mapping->start >= 0) {
+   /* A mapping that was never created -- a zeroed one, such as a graphics
+    * pipeline's compute code -- holds no bytes, and there is nothing to release
+    * or to count. */
+   if (mapping->start >= 0 && mapping->bytes != 0) {
       const int32_t result = sceKernelReleaseDirectMemory(mapping->start, mapping->bytes);
       if (result != 0)
          mesa_loge("sceKernelReleaseDirectMemory(0x%" PRIx64 ", %zu bytes) failed: 0x%08x",

@@ -9498,3 +9498,25 @@ GPU work 5.0, 14.0 and 10.0 ms (Profile 3, the same without MSAA, 2.1, 3.8 and
 2.6 ms) with the CPU waiting on the GPU in the queue. The multisampled surfaces
 are uncompressed -- no FMASK, CMASK or HTILE -- so 8x at 6x moves every sample's
 bytes; compressed MSAA and depth are this profile's performance lead.
+
+## 2026-09-25 — A zeroed mapping is neither released nor counted
+
+The profile's `direct_live` count (0cc8bc5) is how a soak or a reload stress
+tells a leak from a plateau, and it was wrong in one direction. A graphics
+pipeline has no compute code, so its compute mapping stays as the pipeline's
+zeroed allocation left it: start 0, no bytes. `ps5vk_direct_mapping_destroy`
+took any start of 0 or more as a mapping it had made, so destroying the
+pipeline called sceKernelReleaseDirectMemory at offset 0 for no bytes and took
+a mapping off the count. On the PC the host model refuses the release (the
+b6 test's log carried one refusal for each pipeline destroyed) and the count
+wrapped below zero; on the console Dolphin's four reloads of Profile 9 read
+a count lower than the mappings it held.
+
+A mapping is now released and counted only when it has bytes. The b6 pipeline
+test's direct build builds and destroys a graphics pipeline and requires the
+live count and bytes to be where they were: before the fix it read one mapping
+fewer (the count already wrapped from the pipelines before it), after it they
+are equal, and the release at offset 0 is gone from the log. On the console
+(RetroArch title 9c623566, with that port's patch 0092) four reloads of Melee
+hold the bytes at 592 MiB and add two small mappings a reload
+(../PS5_RetroArch docs/PHASE_LOG.md, Profile 9).

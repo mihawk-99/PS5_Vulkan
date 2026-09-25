@@ -20,6 +20,13 @@
 
 #include "ps5vk_test.h"
 
+#if defined(PS5VK_TEST_DIRECT)
+/* The driver's own count of the direct memory it holds (driver/ps5vk_private.h);
+ * only the direct build links the driver's internals. */
+void
+ps5vk_direct_memory_live(uint64_t *count, uint64_t *bytes);
+#endif
+
 static VkInstance g_instance;
 static VkPhysicalDevice g_physical;
 static VkDevice g_device;
@@ -379,6 +386,24 @@ check_probe_pipelines(void)
          printf("  (%s: vkCreateGraphicsPipelines returned %d)\n", set->set, result);
       check(vertex_same && pixel_same, what);
    }
+
+#if defined(PS5VK_TEST_DIRECT)
+   /* A graphics pipeline has no compute code, and destroying its zeroed
+    * compute mapping once released direct memory at offset 0 and took one
+    * mapping off the count the profile reports -- a count that fell by one
+    * for every pipeline Dolphin destroyed. Building and destroying one now
+    * leaves the count and the bytes where they were. */
+   uint64_t count_before = 0, bytes_before = 0, count_after = 0, bytes_after = 0;
+   ps5vk_direct_memory_live(&count_before, &bytes_before);
+   const VkResult built = build_and_dump(probes, directory, "m2-live", "m2", &kProbeSets[0]);
+   ps5vk_direct_memory_live(&count_after, &bytes_after);
+   if (count_after != count_before || bytes_after != bytes_before)
+      printf("  (live mappings %llu -> %llu, bytes %llu -> %llu)\n",
+             (unsigned long long)count_before, (unsigned long long)count_after,
+             (unsigned long long)bytes_before, (unsigned long long)bytes_after);
+   check(built == VK_SUCCESS && count_after == count_before && bytes_after == bytes_before,
+         "building and destroying a graphics pipeline leaves the live direct memory as it was");
+#endif
 
    /* The export-format rule from one SPIR-V: m4-depth's shaders with blending
     * enabled must give m4-blend's pixel package, and without it m4-depth's. */
