@@ -167,9 +167,23 @@ struct ps5vk_sync {
    mtx_t lock;
    cnd_t changed;
    bool signaled;
+   /* R69: signalled by a submission the GPU may still be running -- the
+    * signal holds once queue's marker reaches value. NULL when the signal is
+    * complete. */
+   struct ps5vk_queue *queue;
+   uint32_t value;
 };
 
 extern const struct vk_sync_type ps5vk_sync_type;
+
+/* R69: signals sync once queue's marker reaches value (a submission's
+ * signal), and whether sync is such a signal from queue: a wait on it by a
+ * later submission to the same queue needs no CPU wait, as the GPU runs the
+ * queue's submissions in order. */
+void
+ps5vk_sync_signal_pending(struct vk_sync *sync, struct ps5vk_queue *queue, uint32_t value);
+bool
+ps5vk_sync_pending_on(struct vk_sync *sync, const struct ps5vk_queue *queue);
 
 /* An event (ps5vk_sync.c, Phase B5): the same host flag a binary sync object
  * is, with Vulkan's event semantics. vkSetEvent and vkResetEvent set and clear
@@ -314,6 +328,9 @@ struct ps5vk_queue_profile {
     * then passed one. */
    unsigned suspend_mode;
    uint64_t rescues, flag_refusals;
+   /* R69: steps submitted without waiting for them, and the waits for such
+    * steps that had to block (fences, semaphores, CPU copies, query reads). */
+   uint64_t async_steps, pending_waits, pending_wait_ns;
 };
 
 struct ps5vk_queue {
@@ -354,6 +371,18 @@ struct ps5vk_queue {
    bool start_stamped;
    /* Profile windows reported so far, which picks R68's submission mode. */
    uint32_t profile_windows;
+   /* R69: the submissions the GPU may still be running (ps5vk_queue.c). The
+    * marker word is a rising count: submitted_value is the value of the last
+    * step submitted and completed_value the newest one seen in the marker;
+    * retire holds the CPU cache ranges to evict once a value is reached
+    * (struct ps5vk_retire_range); ring_head is the word the next submission's
+    * stream starts at. lock guards all but ring_head, which only the
+    * submitting thread uses, against waits on other threads. */
+   mtx_t lock;
+   uint32_t *marker;
+   uint32_t submitted_value, completed_value;
+   uint32_t ring_head;
+   struct util_dynarray retire;
    /* The workers that resample blits in parallel (ps5vk_queue.c), started on
     * first use; refused when none could start. */
    struct ps5vk_blit_pool *blit_pool;
@@ -366,6 +395,19 @@ struct ps5vk_blit_part {
    uint32_t row_begin, row_end;
    uint64_t source_low, source_high, destination_low, destination_high;
 };
+
+/* R69: waits until the GPU has run the queue's steps up to value, then evicts
+ * what they wrote from the CPU caches; VK_TIMEOUT once abs_timeout_ns (the
+ * os_time_get_nano clock) passes, the device lost after two seconds without
+ * progress. ps5vk_queue_wait_idle waits for everything submitted, and
+ * ps5vk_queue_wait_range for the submissions that wrote a mapped range the
+ * CPU is about to read (a query pool's counters). */
+VkResult
+ps5vk_queue_wait_value(struct ps5vk_queue *queue, uint32_t value, uint64_t abs_timeout_ns);
+VkResult
+ps5vk_queue_wait_idle(struct ps5vk_queue *queue);
+VkResult
+ps5vk_queue_wait_range(struct ps5vk_queue *queue, const void *address, uint64_t bytes);
 
 /* The timestamp packet (ps5vk_query.c): PS5VK_TIMESTAMP_EVENT_WORDS words that
  * make the GPU write its 100 MHz clock, as 64 bits, to address once the work
@@ -1017,6 +1059,9 @@ ps5vk_specialization_options(struct ps5vk_device *device, const VkSpecialization
  * indirect draw and dispatch read their parameters when they are recorded, so
  * one whose parameters the same command buffer writes is refused
  * (ps5vk_draw.c, ps5vk_compute.c). */
+/* Waits for every submission the device's queue has made (R69, ps5vk_draw.c). */
+void
+ps5vk_cmd_buffer_wait_submitted(struct ps5vk_cmd_buffer *cmd_buffer);
 bool
 ps5vk_cmd_buffer_writes_range(const struct ps5vk_cmd_buffer *cmd_buffer, uint64_t address,
                               uint64_t bytes);

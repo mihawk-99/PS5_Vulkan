@@ -3,13 +3,16 @@
  * Copyright (C) 2026 Mihawk-99
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Milestone 5 Phase B5 (docs/M5_PHASE_B.md). Submission is synchronous
- * (ps5vk_queue.c): it waits on its input syncs, has the GPU run the streams,
- * waits for the completion marker and then signals its output syncs, all
- * before vkQueueSubmit returns. A binary sync object is therefore a flag
- * under a mutex and condition variable, set and cleared on the CPU; waiting
- * in the submission is what makes it usable as a GPU wait. After lavapipe's
- * lvp_pipe_sync (Mesa, MIT), without its gallium fences.
+ * Milestone 5 Phase B5 (docs/M5_PHASE_B.md). A binary sync object is a flag
+ * under a mutex and condition variable, set and cleared on the CPU; a
+ * submission waits for its input syncs on the CPU before its streams run.
+ * After lavapipe's lvp_pipe_sync (Mesa, MIT), without its gallium fences.
+ *
+ * R69: a submission's last step is not waited for (ps5vk_queue.c), so the
+ * syncs it signals are set with the marker value that step writes: a wait on
+ * one waits for the flag and then for the GPU to reach that value. A wait by a
+ * later submission to the same queue skips the GPU part, since the queue's
+ * submissions run in order.
  */
 
 #include "ps5vk_private.h"
@@ -38,6 +41,8 @@ ps5vk_sync_init(struct vk_device *device, struct vk_sync *vk_sync, uint64_t init
       return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
    }
    sync->signaled = initial_value != 0;
+   sync->queue = NULL;
+   sync->value = 0;
    return VK_SUCCESS;
 }
 
@@ -51,12 +56,32 @@ ps5vk_sync_finish(struct vk_device *device, struct vk_sync *vk_sync)
 }
 
 static void
-ps5vk_sync_set(struct ps5vk_sync *sync, bool signaled)
+ps5vk_sync_set(struct ps5vk_sync *sync, bool signaled, struct ps5vk_queue *queue, uint32_t value)
 {
    mtx_lock(&sync->lock);
    sync->signaled = signaled;
+   sync->queue = signaled ? queue : NULL;
+   sync->value = value;
    cnd_broadcast(&sync->changed);
    mtx_unlock(&sync->lock);
+}
+
+void
+ps5vk_sync_signal_pending(struct vk_sync *vk_sync, struct ps5vk_queue *queue, uint32_t value)
+{
+   ps5vk_sync_set(ps5vk_sync_of(vk_sync), true, queue, value);
+}
+
+bool
+ps5vk_sync_pending_on(struct vk_sync *vk_sync, const struct ps5vk_queue *queue)
+{
+   if (vk_sync->type != &ps5vk_sync_type)
+      return false;
+   struct ps5vk_sync *const sync = ps5vk_sync_of(vk_sync);
+   mtx_lock(&sync->lock);
+   const bool pending = sync->signaled && sync->queue == queue;
+   mtx_unlock(&sync->lock);
+   return pending;
 }
 
 static VkResult
@@ -64,7 +89,7 @@ ps5vk_sync_signal(struct vk_device *device, struct vk_sync *vk_sync, uint64_t va
 {
    (void)device;
    assert(value == 0);
-   ps5vk_sync_set(ps5vk_sync_of(vk_sync), true);
+   ps5vk_sync_set(ps5vk_sync_of(vk_sync), true, NULL, 0);
    return VK_SUCCESS;
 }
 
@@ -72,7 +97,7 @@ static VkResult
 ps5vk_sync_reset(struct vk_device *device, struct vk_sync *vk_sync)
 {
    (void)device;
-   ps5vk_sync_set(ps5vk_sync_of(vk_sync), false);
+   ps5vk_sync_set(ps5vk_sync_of(vk_sync), false, NULL, 0);
    return VK_SUCCESS;
 }
 
@@ -83,10 +108,13 @@ ps5vk_sync_move(struct vk_device *device, struct vk_sync *vk_dst, struct vk_sync
    struct ps5vk_sync *const src = ps5vk_sync_of(vk_src);
    mtx_lock(&src->lock);
    const bool signaled = src->signaled;
+   struct ps5vk_queue *const queue = src->queue;
+   const uint32_t value = src->value;
    src->signaled = false;
+   src->queue = NULL;
    cnd_broadcast(&src->changed);
    mtx_unlock(&src->lock);
-   ps5vk_sync_set(ps5vk_sync_of(vk_dst), signaled);
+   ps5vk_sync_set(ps5vk_sync_of(vk_dst), signaled, queue, value);
    return VK_SUCCESS;
 }
 
@@ -122,7 +150,19 @@ ps5vk_sync_wait(struct vk_device *device, struct vk_sync *vk_sync, uint64_t wait
          break;
       }
    }
+   struct ps5vk_queue *const queue = result == VK_SUCCESS ? sync->queue : NULL;
+   const uint32_t value = sync->value;
    mtx_unlock(&sync->lock);
+   if (queue == NULL)
+      return result;
+   /* Signalled by a submission: done once the GPU has run it. */
+   result = ps5vk_queue_wait_value(queue, value, abs_timeout_ns);
+   if (result == VK_SUCCESS) {
+      mtx_lock(&sync->lock);
+      if (sync->queue == queue && sync->value == value)
+         sync->queue = NULL;
+      mtx_unlock(&sync->lock);
+   }
    return result;
 }
 

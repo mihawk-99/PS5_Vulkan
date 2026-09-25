@@ -500,6 +500,7 @@ ps5vk_CmdDispatchIndirect(VkCommandBuffer commandBuffer, VkBuffer _buffer, VkDev
                               "split-point read is a later step (docs/M5_REFERENCE.md)");
       return;
    }
+   ps5vk_cmd_buffer_wait_submitted(cmd_buffer);
    ps5vk_flush_cpu_cache((const void *)(uintptr_t)address, command_bytes);
    uint32_t counts[3] = {0, 0, 0};
    memcpy(counts, (const void *)(uintptr_t)address, command_bytes);

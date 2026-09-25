@@ -9267,3 +9267,59 @@ point is what starts the work, and without it the Pro behaves like the tester's
 console does with it (docs/HARDWARE_FINDINGS.md). Nothing found starts the
 tester's work sooner, so the queue has to stop waiting for each submission
 before taking the next: R69.
+
+## 2026-09-24 — R69: the queue does not wait for a submission's last step
+
+R68 showed that a submission can start up to a refresh after it is made (on my
+Pro without the suspend point, on a tester's PS5 with it), and the queue waited
+for every step before returning, so it ran at most one step a refresh: FCEUmm's
+1.5 steps a present at 120 Hz gave 80 presents a second. Games on the console
+submit a frame and go on; so does the queue now.
+
+- A submission's last step is submitted and not waited for. Steps before a
+  split still are, since the CPU copies after them (and a copy with no step
+  before it in its submission waits for the queue to drain).
+- The completion marker is a rising count; it is no longer cleared before a
+  step, since earlier steps may still write it. A step is done once the marker
+  has reached its value (a signed difference, so the count may wrap).
+- Streams follow one another in the submission buffer, 64-byte aligned, while
+  earlier ones may still run; with nothing in flight a stream starts at the
+  buffer's start as before, and one that no longer fits waits for the queue.
+- Fences and semaphores a submission signals are set with the marker value of
+  its last step; waiting on one waits for that value. A semaphore another
+  submission to the same queue signalled needs no CPU wait in a submission or a
+  present: the flip and the words follow it in the queue, and the flip's
+  RELEASE_MEM fires at the end of the pipe.
+- The post-step cache evictions of mapped targets and query pools are kept per
+  value and run when the value is reached; vkGetQueryPoolResults waits for the
+  submissions that wrote its pool; an indirect draw or dispatch, whose
+  parameters are read while recording, waits for the queue.
+- Swapchain destruction and replacement, device destruction, and the two
+  present-time diagnostics that read the image (the handover watch, the
+  profiled content check) wait for the queue.
+
+The profile line gains async_steps, pending_waits and pending_wait_ms.
+vk_b5_lost_test now expects the submission accepted and the fence wait to lose
+the device.
+
+Console (my Pro, FCEUmm, 1943, the submit-cycle A/B so that modes 1-3 reproduce
+the tester's late start): every mode holds 1198-1201 presents in 10 s, against
+800-805 in R68's modes 1-3; modes 0 and 4 take 0.06 ms a submission. Wind Waker
+from the Outset Island save state plays 3600 frames and exits cleanly, with
+half the audio silence of the R66 build (122216 samples against 240454).
+vkQuake's R32 fixture (start map, then E1M1, then quit; my configs snapshotted
+and restored by build/r29b-preserve.py) holds 118 FPS in both steady windows
+(1178-1180 presents in 10 s), every last step unwaited, no refusal.
+
+The runner's 149 tests ran in five queues of at most 31 (jobs/regression's
+"all" is now refused as more than 32 tests, and a battery file must be named
+queue.txt or the runner falls back to every test and walks off its own table).
+Every failure has an R66 twin: the same queues on an R66 runner built from
+92a3c11 fail the same tests in the same order -- the memory-type-0 map refusals
+(c2-transfers, c7-clear, v0-blit-dst, v0-transfer-16, v0-transfer-formats),
+c5-depth-noclear, c8-depth4-copy, v0-lines, the information probes (c0-dispatch,
+e2-module-load, unknowns-depth4x-map/single), b8-indirect (which stops its
+queue, as it did on 2026-09-15) and v0-sampler-anisotropy. c5-depth-nostate
+fails after the tests before it in its queue and passes after c5-depth-noclear,
+on both builds: it expects zeros in an attachment it loads with DONT_CARE, from
+recycled memory. Every runner ends its run with SIGSYS at exit, R66's included.

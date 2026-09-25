@@ -6,8 +6,10 @@
  * Milestone 5 Phase B5 (docs/M5_PHASE_B.md). tools/check-driver.sh runs the
  * direct PC build with PS5_HOST_DROP_COMPLETION_MARKERS=1, so no submitted
  * completion marker is ever written, as when the GPU never runs a stream.
- * The driver must not report success: the submission loses the device, the
- * fence reports it, and the lost queue refuses further submissions.
+ * The driver must not report success. A submission's last step is not waited
+ * for (R69), so the submission itself is accepted; waiting for its fence finds
+ * the marker never arrives and loses the device, the fence reports it, and the
+ * lost queue refuses further submissions.
  */
 
 #include "ps5vk_test.h"
@@ -58,8 +60,11 @@ main(void)
       };
       const VkSubmitInfo without_buffers = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO};
       const __typeof__(&vkQueueSubmit) queue_submit = VK_FUNCTION(instance, QueueSubmit);
-      check(queue_submit(queue, 1, &with_buffer, fence) == VK_ERROR_DEVICE_LOST,
-            "a submission whose completion marker never arrives loses the device");
+      check(queue_submit(queue, 1, &with_buffer, fence) == VK_SUCCESS,
+            "a submission is accepted without waiting for its last step");
+      check(VK_FUNCTION(instance, WaitForFences)(device, 1, &fence, VK_TRUE,
+                                                 UINT64_C(5000000000)) == VK_ERROR_DEVICE_LOST,
+            "waiting for a submission whose completion marker never arrives loses the device");
       check(VK_FUNCTION(instance, GetFenceStatus)(device, fence) == VK_ERROR_DEVICE_LOST,
             "its fence reports the lost device");
       check(queue_submit(queue, 1, &without_buffers, VK_NULL_HANDLE) == VK_ERROR_DEVICE_LOST,

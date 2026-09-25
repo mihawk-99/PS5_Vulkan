@@ -3,22 +3,32 @@
  * Copyright (C) 2026 Mihawk-99
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Milestone 5 Phase B5 (docs/M5_PHASE_B.md). Submission is synchronous, in
- * Mesa's immediate mode (the only sync type has no timeline):
+ * Milestone 5 Phase B5 (docs/M5_PHASE_B.md). Submission runs in Mesa's
+ * immediate mode (the only sync type has no timeline):
  * 1. wait for the submission's input syncs (semaphores);
  * 2. copy the command buffers' PM4 words into the queue's GPU-visible
  *    submission buffer;
  * 3. end the stream as ps5-opengl ends a frame it does not present: the
- *    colour-buffer barrier, then a completion marker that has a value unique
- *    to this submission written into the buffer's last word (Phase B4);
- * 4. submit with sceAgcDriverSubmitDcb, pass sceAgcSuspendPoint and poll the
- *    marker as the test runner does: flush its cache line, compare, sleep
- *    1 ms, for up to 2 s;
- * 5. signal the output syncs (fences and semaphores).
+ *    colour-buffer barrier, then a completion marker that writes a value unique
+ *    to this step into the buffer's last word (Phase B4);
+ * 4. submit with sceAgcDriverSubmitDcb and pass sceAgcSuspendPoint;
+ * 5. signal the output syncs (fences and semaphores) with the marker value
+ *    they wait for.
+ * R69: the last step is not waited for. The console starts a submission up to a
+ * refresh after it is made (docs/HARDWARE_FINDINGS.md, R68), so a queue that
+ * waited for each one ran at most one submission a refresh. The marker is a
+ * rising count instead of a flag; a sync signalled by a submission holds once
+ * the marker reaches its value (ps5vk_sync.c), and what the CPU reads of the
+ * GPU's work -- a fence's memory, a query pool, the source of a CPU copy --
+ * waits for that value first (ps5vk_queue_wait_value). The marker poll is the
+ * test runner's: flush the cache line, compare, spin briefly, then sleep 1 ms,
+ * for up to 2 s without progress. Streams follow one another in the buffer
+ * while earlier ones may still run (ps5vk_queue_stream_base).
  * A command buffer's copies (vkCmdCopyBuffer, Phase C2, ps5vk_cmd_buffer.c) are
  * CPU memcpys: memory is shared, so the submission is split at each copy -- the
- * words before it run and complete, the CPU copies, and the words after it run
- * next -- which keeps Vulkan's command order. A draw that samples a target an
+ * words before it run and are waited for (with every submission before them),
+ * the CPU copies, and the words after it run next -- which keeps Vulkan's
+ * command order. A draw that samples a target an
  * earlier draw in the same command buffer rendered into splits the submission
  * the same way, with no copy to run: the colour flush such a draw carries is
  * not a wait, so the step boundary and its marker are what let the sample see
@@ -26,8 +36,8 @@
  * CPU and GPU share memory, and the colour targets the command buffers render
  * to stay mapped for the application, so their CPU cache lines are evicted
  * before submission, keeping a CPU write from reaching memory after the
- * GPU's, and again once the marker arrives, so the CPU reads what the GPU
- * wrote; the test runner flushes its targets the same way (flush_gpu_data).
+ * GPU's, and again once the marker passes the step, so the CPU reads what the
+ * GPU wrote; the test runner flushes its targets the same way (flush_gpu_data).
  * A submission without command buffers has nothing for the GPU and only
  * signals. A marker that never arrives loses the device.
  *
@@ -37,8 +47,10 @@
  * here is safe for readback. The suspend point takes ~125 µs whatever the
  * stream holds; heavier work than seen so far may need later polls.
  *
- * Once vkQueueSubmit returns, the GPU no longer reads anything the
- * submission pointed at, so command buffers may reuse their register tables.
+ * The GPU may read what a submission points at until its marker value is
+ * reached; Vulkan's own rules (a command buffer is reset or freed, and a
+ * resource destroyed, only once its submissions have completed) keep the
+ * application from changing it before then.
  *
  * Presentation (Phase C1, run pid 134): a submission rendering into a
  * swapchain image starts with that image's wait packet, and a present
@@ -357,6 +369,147 @@ ps5vk_queue_flush_targets(struct ps5vk_queue *queue, const struct vk_queue_submi
    }
    if (queue->profile.enabled)
       queue->profile.flush_ns += ps5vk_profile_now() - started;
+}
+
+/* R69: a range to evict from the CPU caches once the GPU has run the step
+ * whose marker value is value: what ps5vk_queue_flush_targets evicts after a
+ * step it waits for, kept for a step it does not. */
+struct ps5vk_retire_range {
+   uint32_t value;
+   const void *address;
+   size_t bytes;
+};
+
+/* Whether a marker at current has passed value: the count rises by one a step
+ * and wraps past zero, so the comparison is the difference's sign. */
+static bool
+ps5vk_marker_reached(uint32_t current, uint32_t value)
+{
+   return (int32_t)(current - value) >= 0;
+}
+
+/* Evicts the ranges the completed steps wrote. Called with the lock held. */
+static void
+ps5vk_queue_retire_locked(struct ps5vk_queue *queue)
+{
+   struct ps5vk_retire_range *const ranges = util_dynarray_begin(&queue->retire);
+   const unsigned count = util_dynarray_num_elements(&queue->retire, struct ps5vk_retire_range);
+   unsigned kept = 0;
+   for (unsigned i = 0; i < count; i++) {
+      if (ps5vk_marker_reached(queue->completed_value, ranges[i].value))
+         ps5vk_flush_cpu_cache(ranges[i].address, ranges[i].bytes);
+      else
+         ranges[kept++] = ranges[i];
+   }
+   queue->retire.size = kept * sizeof(struct ps5vk_retire_range);
+}
+
+/* Reads the marker once, records how far the GPU has come and evicts what that
+ * completed; returns the newest completed value. A marker outside the values
+ * in flight is not taken: nothing but the queue's own steps write it. */
+static uint32_t
+ps5vk_queue_poll(struct ps5vk_queue *queue)
+{
+   ps5vk_flush_cpu_cache(queue->marker, sizeof(*queue->marker));
+   const uint32_t seen = *(volatile const uint32_t *)queue->marker;
+   mtx_lock(&queue->lock);
+   if (ps5vk_marker_reached(seen, queue->completed_value) &&
+       ps5vk_marker_reached(queue->submitted_value, seen))
+      queue->completed_value = seen;
+   ps5vk_queue_retire_locked(queue);
+   const uint32_t completed = queue->completed_value;
+   mtx_unlock(&queue->lock);
+   return completed;
+}
+
+/* Keeps a step's post-run evictions (ps5vk_queue_flush_targets' ranges) for
+ * when the GPU reaches value. */
+static void
+ps5vk_queue_defer_targets(struct ps5vk_queue *queue, const struct vk_queue_submit *submit,
+                          uint32_t value)
+{
+   mtx_lock(&queue->lock);
+   for (uint32_t i = 0; i < submit->command_buffer_count; i++) {
+      const struct ps5vk_cmd_buffer *const cmd_buffer =
+         container_of(submit->command_buffers[i], struct ps5vk_cmd_buffer, vk);
+      util_dynarray_foreach (&cmd_buffer->targets, struct ps5vk_render_target, target) {
+         if (!target->always && (target->memory == NULL || !target->memory->host_mapped))
+            continue;
+         if (ps5vk_target_already_flushed(submit, i, target))
+            continue;
+         const struct ps5vk_retire_range range = {value, target->address, target->bytes};
+         util_dynarray_append(&queue->retire, range);
+      }
+   }
+   mtx_unlock(&queue->lock);
+}
+
+VkResult
+ps5vk_queue_wait_value(struct ps5vk_queue *queue, uint32_t value, uint64_t abs_timeout_ns)
+{
+   if (ps5vk_marker_reached(ps5vk_queue_poll(queue), value))
+      return VK_SUCCESS;
+   if (abs_timeout_ns == 0 || os_time_get_nano() >= abs_timeout_ns)
+      return VK_TIMEOUT;
+   /* The marker poll's shape: a bounded spin, then 1 ms sleeps, for up to two
+    * seconds of no progress. */
+   const uint64_t begun = ps5vk_profile_now();
+   VkResult result = VK_SUCCESS;
+   for (const uint64_t until = begun + PS5VK_MARKER_SPIN_NS;;) {
+      if (ps5vk_marker_reached(ps5vk_queue_poll(queue), value))
+         goto done;
+      if (ps5vk_profile_now() >= until)
+         break;
+      _mm_pause();
+   }
+   for (unsigned poll = 0;; poll++) {
+      if (ps5vk_marker_reached(ps5vk_queue_poll(queue), value))
+         goto done;
+      if (os_time_get_nano() >= abs_timeout_ns) {
+         result = VK_TIMEOUT;
+         goto done;
+      }
+      if (poll == PS5VK_MARKER_POLLS) {
+         result = vk_queue_set_lost(&queue->vk, "completion marker 0x%08x not written within 2 s",
+                                    value);
+         goto done;
+      }
+      sceKernelUsleep(PS5VK_MARKER_POLL_MICROSECONDS);
+   }
+done:
+   if (queue->profile.enabled) {
+      queue->profile.pending_waits++;
+      queue->profile.pending_wait_ns += ps5vk_profile_now() - begun;
+   }
+   return result;
+}
+
+VkResult
+ps5vk_queue_wait_idle(struct ps5vk_queue *queue)
+{
+   mtx_lock(&queue->lock);
+   const uint32_t value = queue->submitted_value;
+   mtx_unlock(&queue->lock);
+   return ps5vk_queue_wait_value(queue, value, UINT64_MAX);
+}
+
+VkResult
+ps5vk_queue_wait_range(struct ps5vk_queue *queue, const void *address, uint64_t bytes)
+{
+   const uint64_t low = (uint64_t)(uintptr_t)address;
+   bool found = false;
+   uint32_t value = 0;
+   mtx_lock(&queue->lock);
+   util_dynarray_foreach (&queue->retire, struct ps5vk_retire_range, range) {
+      const uint64_t start = (uint64_t)(uintptr_t)range->address;
+      if (start < low + bytes && low < start + range->bytes &&
+          (!found || ps5vk_marker_reached(range->value, value))) {
+         value = range->value;
+         found = true;
+      }
+   }
+   mtx_unlock(&queue->lock);
+   return found ? ps5vk_queue_wait_value(queue, value, UINT64_MAX) : VK_SUCCESS;
 }
 
 /* One split of a submission and the stream offset its step ends at: the words
@@ -1214,14 +1367,15 @@ ps5vk_queue_profile_stamps(struct ps5vk_queue *queue, uint64_t step_ns)
 }
 
 /* Submits the words [start, end) of the stream with the colour-buffer barrier
- * and a completion marker, and waits for the marker: the whole submission when
- * it has no copies, or one step of a submission the copies split. Everything
- * the step holds has run once this returns, so the caller may copy on the CPU
- * (ps5vk_queue_run). */
+ * and a completion marker: the whole submission when it has no copies, or one
+ * step of a submission the copies split. With wait, everything the step holds
+ * has run once this returns, so the caller may copy on the CPU
+ * (ps5vk_queue_run); a submission's last step is not waited for (R69), and
+ * what waits for it later is the marker value it leaves in submitted_value. */
 static VkResult
 ps5vk_queue_run_step(struct ps5vk_queue *queue, const struct vk_queue_submit *submit,
                      uint32_t *const stream, size_t capacity, uint32_t *const marker,
-                     uint32_t start, uint32_t end, uint32_t *capture)
+                     uint32_t start, uint32_t end, uint32_t *capture, bool wait)
 {
    struct ps5vk_agc_command_buffer command = {
       .bottom = stream + start,
@@ -1230,10 +1384,11 @@ ps5vk_queue_run_step(struct ps5vk_queue *queue, const struct vk_queue_submit *su
       .down = stream + capacity,
       .callback = (uintptr_t)ps5vk_agc_out_of_space,
    };
-   /* Zero is the marker word's cleared value, so no submission carries it. */
+   /* The marker word is a rising count that starts at zero (R69: it is no
+    * longer cleared before a step, since earlier steps may still write it), so
+    * no step carries zero. */
    queue->marker_value = queue->marker_value == UINT32_MAX ? 1 : queue->marker_value + 1;
    const uint32_t value = queue->marker_value;
-   *marker = 0;
    if (queue->stamps.address != NULL) {
       if (command.up + PS5VK_TIMESTAMP_EVENT_WORDS > command.top)
          return vk_queue_set_lost(&queue->vk, "no room for the profile's end timestamp");
@@ -1281,6 +1436,9 @@ ps5vk_queue_run_step(struct ps5vk_queue *queue, const struct vk_queue_submit *su
       .word_count = word_count,
    };
    const uint64_t started = queue->profile.enabled ? ps5vk_profile_now() : 0;
+   mtx_lock(&queue->lock);
+   queue->submitted_value = value;
+   mtx_unlock(&queue->lock);
    description.flag = queue->profile.suspend_mode >= 3 ? 1 : 0;
    int32_t result = sceAgcDriverSubmitDcb(&description);
    if (result != 0 && description.flag != 0) {
@@ -1291,6 +1449,9 @@ ps5vk_queue_run_step(struct ps5vk_queue *queue, const struct vk_queue_submit *su
    if (result != 0)
       return vk_queue_set_lost(&queue->vk, "sceAgcDriverSubmitDcb failed: 0x%08x",
                                (unsigned)result);
+   /* R68's modes apply to a step not waited for as well, which has no rescue
+    * of its own: without a suspend point the GPU starts it at the next vblank
+    * (docs/HARDWARE_FINDINGS.md), and a later wait for it finds it done. */
    bool suspended = ps5vk_queue_suspends(queue, false);
    if (suspended) {
       result = sceAgcSuspendPoint();
@@ -1302,17 +1463,27 @@ ps5vk_queue_run_step(struct ps5vk_queue *queue, const struct vk_queue_submit *su
     * driver's own polling, and the difference between the two is what says
     * whether a "gpu" interval is the GPU or the check granularity. */
    const uint64_t submitted = queue->profile.enabled ? ps5vk_profile_now() : 0;
+   if (!wait) {
+      /* Its evictions wait for the marker, and its stamps are not read: the
+       * next submission's first step writes them again. */
+      ps5vk_queue_defer_targets(queue, submit, value);
+      queue->start_stamped = false;
+      if (queue->profile.enabled) {
+         queue->profile.async_steps++;
+         queue->profile.submit_call_ns += submitted - started;
+      }
+      return VK_SUCCESS;
+   }
+   (void)marker;
 
    /* The bounded spin: a marker seen here counts as found at the first check. */
    for (const uint64_t until = ps5vk_profile_now() + PS5VK_MARKER_SPIN_NS;;) {
-      ps5vk_flush_cpu_cache(marker, sizeof(*marker));
-      if (*marker == value || ps5vk_profile_now() >= until)
+      if (ps5vk_marker_reached(ps5vk_queue_poll(queue), value) || ps5vk_profile_now() >= until)
          break;
       _mm_pause();
    }
    for (unsigned poll = 0; poll < PS5VK_MARKER_POLLS; poll++) {
-      ps5vk_flush_cpu_cache(marker, sizeof(*marker));
-      if (*marker == value) {
+      if (ps5vk_marker_reached(ps5vk_queue_poll(queue), value)) {
          if (queue->profile.enabled) {
             struct ps5vk_queue_profile *const p = &queue->profile;
             const uint64_t now = ps5vk_profile_now();
@@ -1437,8 +1608,8 @@ ps5vk_queue_run_copy_steps(struct ps5vk_queue *queue, const struct vk_queue_subm
       const uint32_t end = at < split_count ? split[at].offset : words;
       /* A step with no words is a copy and nothing for the GPU to do -- a
        * command buffer that only records copies, which is the staging upload's
-       * first one. There is nothing to submit and nothing to wait for: the
-       * step before it has already completed, so the copy runs now. Submitting
+       * first one. There is nothing to submit: the step before it has
+       * completed, or the queue is waited for below, so the copy runs then. Submitting
        * it anyway would put an empty stream and its marker in front of the
        * frame the capture reads. */
       if (end != start) {
@@ -1462,8 +1633,10 @@ ps5vk_queue_run_copy_steps(struct ps5vk_queue *queue, const struct vk_queue_subm
             break;
          }
          memcpy(stream + start, saved + start, (size_t)(end - start) * sizeof(uint32_t));
+         /* The step after the last split is the submission's last and is not
+          * waited for; every other one is, since copies follow it. */
          result = ps5vk_queue_run_step(queue, submit, stream, capacity, marker, start, end,
-                                       queue->step_capture + capture_at);
+                                       queue->step_capture + capture_at, at < split_count);
          if (result != VK_SUCCESS)
             break;
          /* The end packets of this step take the reserve the stream keeps for
@@ -1476,6 +1649,14 @@ ps5vk_queue_run_copy_steps(struct ps5vk_queue *queue, const struct vk_queue_subm
        * and the marker waited for above have already done all the work of
        * (a draw that samples a target this submission rendered into,
        * ps5vk_draw.c). */
+      /* Copies with no step before them in this submission follow the
+       * submissions before it, which may still be running (R69); after a step
+       * this is already so, since the step was waited for. */
+      if (end == start && at < split_count) {
+         result = ps5vk_queue_wait_idle(queue);
+         if (result != VK_SUCCESS)
+            break;
+      }
       const uint64_t copy_started = queue->profile.enabled ? ps5vk_profile_now() : 0;
       for (; at < split_count && split[at].offset == end; at++) {
          const struct ps5vk_memory_copy *const copy = split[at].copy;
@@ -1573,14 +1754,50 @@ ps5vk_queue_run_copy_steps(struct ps5vk_queue *queue, const struct vk_queue_subm
    return result;
 }
 
+/* R69: where a submission's stream starts in the buffer. With nothing in
+ * flight that is the buffer's start, as it always was; otherwise the stream
+ * follows the one before it, on its own cache lines, since the GPU may still
+ * be reading the earlier ones, and a stream that no longer fits waits for the
+ * queue to drain and starts over. footprint is the most words the stream and
+ * its end packets can take. */
+static size_t
+ps5vk_queue_stream_base(struct ps5vk_queue *queue, size_t capacity, size_t footprint,
+                        VkResult *result)
+{
+   *result = VK_SUCCESS;
+   mtx_lock(&queue->lock);
+   const uint32_t submitted = queue->submitted_value;
+   mtx_unlock(&queue->lock);
+   if (ps5vk_marker_reached(ps5vk_queue_poll(queue), submitted))
+      return 0;
+   const size_t base = ALIGN_POT((size_t)queue->ring_head, 16);
+   if (base <= capacity && footprint <= capacity - base)
+      return base;
+   *result = ps5vk_queue_wait_idle(queue);
+   return 0;
+}
+
 /* Steps 2 to 4 for a submission with command buffers. */
 static VkResult
 ps5vk_queue_run(struct ps5vk_queue *queue, const struct vk_queue_submit *submit)
 {
-   uint32_t *const stream = queue->submission.address;
-   const size_t capacity = queue->submission.bytes / sizeof(uint32_t) - 1 -
-                           PS5VK_SWAPCHAIN_IMAGES * PS5VK_FLIP_SLOT_WORDS;
-   uint32_t *const marker = stream + capacity;
+   uint32_t *const buffer = queue->submission.address;
+   const size_t buffer_capacity = queue->submission.bytes / sizeof(uint32_t) - 1 -
+                                  PS5VK_SWAPCHAIN_IMAGES * PS5VK_FLIP_SLOT_WORDS;
+   uint32_t *const marker = buffer + buffer_capacity;
+   size_t footprint = ps5vk_queue_end_words(queue) + 2 * PS5VK_TIMESTAMP_EVENT_WORDS +
+                      PS5VK_SWAPCHAIN_IMAGES * sceAgcDriverGetWaitRenderingPacketSizeInDwords();
+   for (uint32_t i = 0; i < submit->command_buffer_count; i++) {
+      const struct ps5vk_cmd_buffer *const cmd_buffer =
+         container_of(submit->command_buffers[i], struct ps5vk_cmd_buffer, vk);
+      footprint += util_dynarray_num_elements(&cmd_buffer->words, uint32_t);
+   }
+   VkResult placed;
+   const size_t base = ps5vk_queue_stream_base(queue, buffer_capacity, footprint, &placed);
+   if (placed != VK_SUCCESS)
+      return placed;
+   uint32_t *const stream = buffer + base;
+   const size_t capacity = buffer_capacity - base;
    size_t words = 0;
 
    /* The steps this submission runs as, which the runner's capture reads whole
@@ -1665,13 +1882,15 @@ ps5vk_queue_run(struct ps5vk_queue *queue, const struct vk_queue_submit *submit)
       words += count;
    }
 
+   /* The next submission starts past these words and their end packets. */
+   queue->ring_head = (uint32_t)(base + words + end_words);
    VkResult result;
    if (util_dynarray_num_elements(&splits, struct ps5vk_copy_split) == 0) {
       /* Without copies or splits the submission is one step of every word,
        * ended by the barrier and the marker, as every frame recorded so far
        * has been. */
-      result =
-         ps5vk_queue_run_step(queue, submit, stream, capacity, marker, 0, (uint32_t)words, NULL);
+      result = ps5vk_queue_run_step(queue, submit, stream, capacity, marker, 0, (uint32_t)words,
+                                    NULL, false);
    } else {
       result = ps5vk_queue_run_copy_steps(queue, submit, stream, capacity, marker, (uint32_t)words,
                                           &splits);
@@ -1696,8 +1915,14 @@ ps5vk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
          p->app_pre_submit_ns += started - p->last_return_ns;
       p->submit_calls++;
    }
-   VkResult result = vk_sync_wait_many(device, submit->wait_count, submit->waits,
-                                       VK_SYNC_WAIT_COMPLETE, UINT64_MAX);
+   /* A semaphore an earlier submission to this queue signalled needs no CPU
+    * wait: the GPU runs this queue's submissions in order (R69). */
+   VkResult result = VK_SUCCESS;
+   for (uint32_t i = 0; i < submit->wait_count && result == VK_SUCCESS; i++) {
+      if (!ps5vk_sync_pending_on(submit->waits[i].sync, queue))
+         result = vk_sync_wait(device, submit->waits[i].sync, submit->waits[i].wait_value,
+                               VK_SYNC_WAIT_COMPLETE, UINT64_MAX);
+   }
    if (queue->profile.enabled)
       queue->profile.sync_wait_ns += ps5vk_profile_now() - started;
    if (result != VK_SUCCESS)
@@ -1708,7 +1933,19 @@ ps5vk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
          return result;
    }
    const uint64_t signal_started = queue->profile.enabled ? ps5vk_profile_now() : 0;
-   result = vk_sync_signal_many(device, submit->signal_count, submit->signals);
+   /* The signals hold once the GPU reaches the last step submitted -- this
+    * submission's, or for one without command buffers the one before it. */
+   mtx_lock(&queue->lock);
+   const uint32_t submitted = queue->submitted_value;
+   mtx_unlock(&queue->lock);
+   const bool pending = !ps5vk_marker_reached(ps5vk_queue_poll(queue), submitted);
+   for (uint32_t i = 0; i < submit->signal_count && result == VK_SUCCESS; i++) {
+      struct vk_sync *const sync = submit->signals[i].sync;
+      if (pending && sync->type == &ps5vk_sync_type)
+         ps5vk_sync_signal_pending(sync, queue, submitted);
+      else
+         result = vk_sync_signal(device, sync, submit->signals[i].signal_value);
+   }
    if (queue->profile.enabled) {
       const uint64_t finished = ps5vk_profile_now();
       queue->profile.sync_signal_ns += finished - signal_started;
@@ -1899,7 +2136,8 @@ ps5vk_queue_flip_presented(struct ps5vk_queue *queue, uint64_t started, bool fir
                     "stamped=%" PRIu64 "/%" PRIu64 " display_wait_ms=%.3f gpu_work_ms=%.3f "
                     "late_ms=%.3f wait_max_ms=%.3f work_max_ms=%.3f late_max_ms=%.3f "
                     "later_steps=%" PRIu64 " later_step_ms=%.3f suspend_mode=%u rescues=%" PRIu64
-                    " flag_refusals=%" PRIu64 "\n", p->frames,
+                    " flag_refusals=%" PRIu64 " async_steps=%" PRIu64 " pending_waits=%" PRIu64
+                    " pending_wait_ms=%.3f\n", p->frames,
                     (double)p->steps / p->frames, p->queue_ns * ms, p->flush_ns * ms,
                     p->gpu_ns * ms, p->flip_ns * ms,
                     (double)p->flush_bytes / (p->frames * 1048576.0),
@@ -1911,7 +2149,8 @@ ps5vk_queue_flip_presented(struct ps5vk_queue *queue, uint64_t started, bool fir
                     p->stamp_wait_max_ns / 1000000.0, p->stamp_work_max_ns / 1000000.0,
                     p->stamp_late_max_ns / 1000000.0, p->later_steps,
                     ps5vk_per_ms(p->later_step_ns, p->later_steps), p->suspend_mode, p->rescues,
-                    p->flag_refusals);
+                    p->flag_refusals, p->async_steps, p->pending_waits,
+                    p->pending_wait_ns * ms);
             ps5vk_queue_profile_report2(p, now, line, sizeof(line));
          }
          /* last_return_ns and last_present_ns carry across a window: the
@@ -2428,10 +2667,21 @@ ps5vk_queue_init(struct ps5vk_device *device, struct ps5vk_queue *queue,
    queue->marker_value = 0;
    queue->last_words = 0;
    queue->last_stream = NULL;
+   queue->submitted_value = 0;
+   queue->completed_value = 0;
+   queue->ring_head = 0;
+   util_dynarray_init(&queue->retire, NULL);
+   if (mtx_init(&queue->lock, mtx_plain) != thrd_success) {
+      ps5vk_direct_mapping_destroy(&queue->stamps);
+      vk_queue_finish(&queue->vk);
+      return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
+   }
 
    const int32_t mapped = ps5vk_direct_mapping_create(&queue->submission, PS5VK_SUBMISSION_BYTES,
                                                       PS5VK_SUBMISSION_BYTES);
    if (mapped != 0) {
+      mtx_destroy(&queue->lock);
+      ps5vk_direct_mapping_destroy(&queue->stamps);
       vk_queue_finish(&queue->vk);
       return vk_errorf(device, VK_ERROR_OUT_OF_DEVICE_MEMORY,
                        "the queue's submission buffer could not be mapped in the address "
@@ -2450,6 +2700,9 @@ ps5vk_queue_init(struct ps5vk_device *device, struct ps5vk_queue *queue,
    /* Until the first submission the capture reads from the buffer's start,
     * which is where the words of the first one will lie. */
    queue->last_stream = queue->submission.address;
+   queue->marker = (uint32_t *)queue->submission.address +
+                   queue->submission.bytes / sizeof(uint32_t) - 1 -
+                   PS5VK_SWAPCHAIN_IMAGES * PS5VK_FLIP_SLOT_WORDS;
 
    queue->vk.driver_submit = ps5vk_queue_submit;
    return VK_SUCCESS;
@@ -2458,7 +2711,12 @@ ps5vk_queue_init(struct ps5vk_device *device, struct ps5vk_queue *queue,
 void
 ps5vk_queue_finish(struct ps5vk_queue *queue)
 {
+   /* The GPU may still run the last submission (R69); its buffers go below. */
+   if (queue->submission.address != NULL && !vk_device_is_lost(queue->vk.base.device))
+      ps5vk_queue_wait_idle(queue);
    vk_queue_finish(&queue->vk);
+   util_dynarray_fini(&queue->retire);
+   mtx_destroy(&queue->lock);
    ps5vk_blit_pool_destroy(queue);
    ps5vk_direct_mapping_destroy(&queue->submission);
    ps5vk_direct_mapping_destroy(&queue->stamps);

@@ -2981,9 +2981,9 @@ ps5vk_meta_copy(struct ps5vk_cmd_buffer *cmd_buffer, const VkCopyImageInfo2 *inf
  * recorded, which is what a CPU-side driver can do, and Vulkan says they are
  * read at execution time: a write this command buffer records would land after
  * the read, so such a draw is refused by name rather than recorded with stale
- * parameters. A write in an earlier submission has already run -- this driver's
- * submissions are synchronous -- and one recorded after the draw does not
- * affect it, so only the records made so far matter. */
+ * parameters. A write in an earlier submission has run once the queue is idle,
+ * which the read waits for (ps5vk_cmd_buffer_wait_submitted), and one recorded
+ * after the draw does not affect it, so only the records made so far matter. */
 bool
 ps5vk_cmd_buffer_writes_range(const struct ps5vk_cmd_buffer *cmd_buffer, uint64_t address,
                               uint64_t bytes)
@@ -2996,6 +2996,18 @@ ps5vk_cmd_buffer_writes_range(const struct ps5vk_cmd_buffer *cmd_buffer, uint64_
          return true;
    }
    return false;
+}
+
+/* R69: a submission's last step is not waited for, so an earlier submission
+ * may still be writing what a recording is about to read on the CPU -- an
+ * indirect command's parameters. This waits for everything submitted. */
+void
+ps5vk_cmd_buffer_wait_submitted(struct ps5vk_cmd_buffer *cmd_buffer)
+{
+   struct ps5vk_device *const device =
+      container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk);
+   if (device->queue_initialized)
+      ps5vk_queue_wait_idle(&device->queue);
 }
 
 /* The indirect draw's parameters, read from the buffer the application bound.
@@ -3028,6 +3040,7 @@ ps5vk_cmd_draw_indirect(struct ps5vk_cmd_buffer *cmd_buffer, VkBuffer _buffer, V
                               "read is a later step (docs/M5_REFERENCE.md)");
       return;
    }
+   ps5vk_cmd_buffer_wait_submitted(cmd_buffer);
    ps5vk_flush_cpu_cache((const void *)(uintptr_t)first_address,
                          (size_t)((uint64_t)(draw_count - 1u) * stride + command_bytes));
    for (uint32_t draw = 0; draw < draw_count; draw++) {

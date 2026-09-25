@@ -8,8 +8,8 @@
  * buffer adds the PM4 words recorded into it (ps5vk_draw.c), which submission
  * copies into the queue's GPU-visible buffer (ps5vk_queue.c), and the register
  * tables those words point at. The tables live in GPU-visible chunks the
- * command buffer keeps across resets: submission is synchronous, so once
- * vkQueueSubmit returns the GPU no longer reads them.
+ * command buffer keeps across resets: Vulkan resets a command buffer only once
+ * its submissions have completed, so by then the GPU no longer reads them.
  */
 
 #include "ps5vk_private.h"
@@ -76,8 +76,9 @@ ps5vk_cmd_buffer_clear_state(struct ps5vk_cmd_buffer *cmd_buffer)
    util_dynarray_foreach (&cmd_buffer->copies, struct ps5vk_memory_copy, copy)
       free(copy->owned_source);
    util_dynarray_clear(&cmd_buffer->copies);
-   /* The chunks stay mapped across resets -- submission is synchronous -- but
-    * the next recording starts at the first of them again. */
+   /* The chunks stay mapped across resets -- a command buffer is reset only
+    * once its submissions have completed -- but the next recording starts at
+    * the first of them again. */
    cmd_buffer->table_chunk = cmd_buffer->table_chunks;
    cmd_buffer->table_bytes_used = 0;
    cmd_buffer->pipeline = NULL;

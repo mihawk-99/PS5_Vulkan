@@ -22,10 +22,11 @@ minimap spill it had. The Dolphin goal is paused at R66 while I look at
 performance problems testers reported.
 
 Next, in order:
-1. The testers' performance reports (in progress): a PS5 with a 1080p 120 Hz
-   display takes ~8 ms a submission step where my Pro takes 0.25 ms; R67's
-   profile stamps (docs/M5_PHASE_C.md) split that into display wait, GPU work
-   and late start, and the tester's build carries them.
+1. The testers' performance reports: a tester's PS5 starts every submission
+   about a refresh late (R67's stamps: 0.11 ms of work, 7.97 ms late), which my
+   Pro does too without the suspend point (R68). R69 stops waiting for a
+   submission's last step, which holds FCEUmm at 120 presents a second in that
+   condition on my Pro; the tester's build carries it, to confirm on theirs.
 2. The replays of jobs/r23-r29 differ from their goldens by the five
    per-draw context registers the per-draw-state round added (90 records
    against 85); re-capture them or restate the registers.

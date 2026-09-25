@@ -17,11 +17,10 @@
  * A pool is one mapping the GPU writes and the CPU reads: two eight-byte
  * counters per query, the first sampled where vkCmdBeginQuery is recorded and
  * the second where vkCmdEndQuery is. vkGetQueryPoolResults subtracts them and
- * multiplies by sixteen, so a query answers in samples. Submission is
- * synchronous (ps5vk_queue.c), so a query's counters have been written by the
- * time vkQueueSubmit returns, and the sample registers the pool with the
- * command buffer so that submission evicts the counters' cache lines before the
- * CPU reads them.
+ * multiplies by sixteen, so a query answers in samples. The sample registers
+ * the pool with the command buffer, so the queue knows which submissions write
+ * it: reading results waits for them and evicts the counters' cache lines
+ * before the CPU reads them (ps5vk_queue.c, ps5vk_queue_wait_range).
  *
  * The count is coarse: one count covers sixteen samples, so a result is always
  * a multiple of sixteen. The device therefore reports occlusionQueryPrecise
@@ -303,8 +302,8 @@ ps5vk_query_result(const struct ps5vk_query_pool *pool, uint32_t query)
 }
 
 /* Whether a query's result has been written. An occlusion pair is meaningful as
- * soon as its samples have run -- submission is synchronous, so by the time a
- * result is asked for they have -- while a timestamp's counter is zero until
+ * soon as its samples have run -- reading results waits for the submissions
+ * that wrote the pool, so by then they have -- while a timestamp's counter is zero until
  * the GPU writes the clock into it, which is what tells a query that ran and
  * read zero apart from one no command ever wrote. */
 static uint64_t
@@ -363,9 +362,12 @@ ps5vk_GetQueryPoolResults(VkDevice _device, VkQueryPool queryPool, uint32_t firs
    const bool wide = (flags & VK_QUERY_RESULT_64_BIT) != 0;
    const bool available = (flags & VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) != 0;
    (void)dataSize;
-   /* Submission is synchronous, so every sample the command buffers recorded
-    * has run by the time this is asked: the results are available -- Vulkan's
-    * VK_QUERY_RESULT_WAIT_BIT asks for exactly that and needs no wait here. */
+   /* A submission's last step is not waited for (R69), so the samples it
+    * recorded may still be on their way: this waits for the submissions that
+    * wrote the pool, which makes every result available -- what
+    * VK_QUERY_RESULT_WAIT_BIT asks for, and a wait the rest may take. */
+   if (device->queue_initialized)
+      ps5vk_queue_wait_range(&device->queue, pool->mapping.address, pool->mapping.bytes);
    ps5vk_flush_cpu_cache(pool->mapping.address, pool->mapping.bytes);
    for (uint32_t index = 0; index < queryCount; index++) {
       /* Both counters carry the hardware's valid bit, so the difference is the

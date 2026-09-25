@@ -688,6 +688,10 @@ static void
 ps5vk_swapchain_free(struct ps5vk_device *device, struct ps5vk_swapchain *swapchain,
                      const VkAllocationCallbacks *allocator)
 {
+   /* The GPU may still render into the images or have their flips queued
+    * (R69). */
+   if (device->queue_initialized)
+      ps5vk_queue_wait_idle(&device->queue);
    for (uint32_t index = 0; index < PS5VK_SWAPCHAIN_IMAGES; index++) {
       if (swapchain->images[index])
          vk_image_destroy(&device->vk, NULL, &swapchain->images[index]->vk);
@@ -756,6 +760,10 @@ ps5vk_CreateSwapchainKHR(VkDevice _device, const VkSwapchainCreateInfoKHR *pCrea
    if (!old && device->video_out)
       return vk_errorf(device, VK_ERROR_NATIVE_WINDOW_IN_USE_KHR,
                        "VideoOut belongs to another swapchain");
+   /* The new swapchain takes over the old one's VideoOut buffers, which the
+    * GPU may still be rendering into (R69). */
+   if (old && device->queue_initialized)
+      ps5vk_queue_wait_idle(&device->queue);
 
    struct ps5vk_swapchain *const swapchain =
       vk_object_zalloc(&device->vk, pAllocator, sizeof(*swapchain), VK_OBJECT_TYPE_SWAPCHAIN_KHR);
@@ -1001,13 +1009,16 @@ ps5vk_QueuePresentKHR(VkQueue _queue, const VkPresentInfoKHR *pPresentInfo)
       container_of(queue->vk.base.device, struct ps5vk_device, vk);
    ps5vk_profile_enter(queue, PS5VK_PROFILE_AFTER_PRESENT);
 
-   /* Submission is synchronous, so the semaphores a present waits on were
-    * signalled when their submissions returned; waiting confirms it, and the
-    * present consumes them. */
+   /* The present consumes the semaphores it waits on. One a submission to this
+    * queue signalled needs no CPU wait: the flip is submitted to the same
+    * queue behind that submission's words, and the GPU runs them in order
+    * (R69). Any other is waited for. */
    for (uint32_t i = 0; i < pPresentInfo->waitSemaphoreCount; i++) {
       VK_FROM_HANDLE(vk_semaphore, semaphore, pPresentInfo->pWaitSemaphores[i]);
       struct vk_sync *const sync = vk_semaphore_get_active_sync(semaphore);
-      VkResult result = vk_sync_wait(&device->vk, sync, 0, VK_SYNC_WAIT_COMPLETE, UINT64_MAX);
+      VkResult result = ps5vk_sync_pending_on(sync, queue)
+                           ? VK_SUCCESS
+                           : vk_sync_wait(&device->vk, sync, 0, VK_SYNC_WAIT_COMPLETE, UINT64_MAX);
       if (result == VK_SUCCESS)
          result = vk_sync_reset(&device->vk, sync);
       if (result != VK_SUCCESS)
@@ -1023,13 +1034,20 @@ ps5vk_QueuePresentKHR(VkQueue _queue, const VkPresentInfoKHR *pPresentInfo)
          /* Valid usage: the image was acquired and not yet presented. */
          assert(swapchain->acquired == index);
          struct ps5vk_video_out *const video = swapchain->video;
-         if (video->watched < PS5VK_HANDOVER_WATCH_PRESENTS)
+         /* The two diagnostics below read the image the GPU renders, so they
+          * wait for it: the rendering may still be running (R69). The watch
+          * looks at a swapchain's first few presents only, and the content
+          * check at one present in 1200 with the profile on. */
+         if (video->watched < PS5VK_HANDOVER_WATCH_PRESENTS) {
+            ps5vk_queue_wait_idle(queue);
             ps5vk_video_out_watch(video, index, ps5vk_profile_now());
-         else
+         } else {
             ps5vk_output_last_present_ns = ps5vk_profile_now();
+         }
          /* With profiling on, every 1200th presented image's content: how many
           * of the handover check's 64 sampled texels are not black. */
          if (queue->profile.enabled && ++video->content_checks % 1200u == 0) {
+            ps5vk_queue_wait_idle(queue);
             const uint8_t *const image = (const uint8_t *)video->buffers.address +
                                          (size_t)index * PS5VK_SWAPCHAIN_IMAGE_BYTES;
             const size_t stride = PS5VK_SWAPCHAIN_IMAGE_BYTES / PS5VK_HANDOVER_SAMPLES;
