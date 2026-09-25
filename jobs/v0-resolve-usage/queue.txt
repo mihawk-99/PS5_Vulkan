@@ -3,15 +3,13 @@
 #
 # v0-resolve-usage records the same four-sample resolve twice: once into a
 # destination declared the way the specification asks -- TRANSFER_DST and
-# SAMPLED, no colour-attachment bit -- which this driver stores in rows and
-# refuses to resolve into, and once into the same frame with COLOR_ATTACHMENT
-# added, which is the workaround the requesting project carries as W5. The pair
-# is the request's own probe: the first must be refused (the refusal ends the
-# recording, which is what the case reads), the second must submit. The runner
-# installs no debug messenger, so the refusal's sentence itself is not in this
-# klog; an application's own messenger is where it appears
-# (docs/M5_PHASE_C.md, R5). m2-solid and c8-resolve are the regressions behind
-# it.
+# SAMPLED, no colour-attachment bit -- which this driver stores in rows, and once
+# into the same frame with COLOR_ATTACHMENT added, which is the workaround the
+# requesting project carries as W5 and is stored in tiles. Until R77 the first
+# was refused; since R77 both submit (the first is rendered into rows by the GPU
+# resolve), and the two resolved frames must hold the same pixels, read one in
+# rows and the other through the tiles, fold for fold (docs/M5_PHASE_C.md, R5 and
+# R77; PID 783 passed). m2-solid and c8-resolve are the regressions behind it.
 hold 60
 v0-resolve-usage
 c8-resolve

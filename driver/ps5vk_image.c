@@ -2382,6 +2382,9 @@ ps5vk_CmdResolveImage2KHR(VkCommandBuffer commandBuffer, const VkResolveImageInf
                               (unsigned)source->vk.samples, (unsigned)destination->vk.samples);
       return;
    }
+   /* R76: on the GPU when the images allow it (ps5vk_draw.c). */
+   if (ps5vk_meta_resolve(cmd_buffer, info))
+      return;
    /* R5: the sentence names the usage bit that decides an image's storage rather
     * than tiling alone, because an application that follows the specification --
     * a resolve destination with TRANSFER_DST and SAMPLED, which is what the
@@ -2391,17 +2394,18 @@ ps5vk_CmdResolveImage2KHR(VkCommandBuffer commandBuffer, const VkResolveImageInf
     * move every sampled image's descriptor -- tiling is chosen from the usage
     * bits, and a texture upload declares TRANSFER_DST -- so the sentence is the
     * cheaper half of the request's two options. */
+   /* R77: the destination may be stored in rows -- a TRANSFER_DST and SAMPLED
+    * image, which is what the specification asks of a resolve's destination
+    * (PS5_VULKAN_REQUESTS.md, R5) -- and the walk below writes it through its
+    * row pitch; the GPU path above takes the ones whose rows are whole 256-byte
+    * units. */
    if (!ps5vk_image_transfer_check(cmd_buffer, source, destination, "a resolve", true) ||
        source->storage != PS5VK_IMAGE_STORAGE_TILES ||
-       destination->storage != PS5VK_IMAGE_STORAGE_TILES ||
        vk_format_get_blocksize(source->vk.format) != 4) {
       ps5vk_cmd_buffer_refuse(
          cmd_buffer, VK_ERROR_UNKNOWN,
-         "a resolve needs two tiled four-byte images, and this driver makes an image tiled from "
-         "the COLOR_ATTACHMENT or DEPTH_STENCIL_ATTACHMENT usage bit (ps5vk_image_storage): a "
-         "destination declared TRANSFER_DST (and SAMPLED), which is what the specification asks "
-         "for, is stored in rows -- declare COLOR_ATTACHMENT on it to make it tiled "
-         "(PS5_VULKAN_REQUESTS.md, R5; C8's four-sample tile is the one measured)");
+         "a resolve needs a tiled four-byte source of the destination's format (C8's "
+         "four-sample tile is the one measured)");
       return;
    }
    const uint32_t after_words =

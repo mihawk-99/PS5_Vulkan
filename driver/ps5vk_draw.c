@@ -223,6 +223,11 @@
 #define PS5VK_TEXTURE_SWIZZLE_MASK UINT32_C(0x01f00000)
 #define PS5VK_TEXTURE_2D_ARRAY_KIND (UINT32_C(0xd) << 28)
 #define PS5VK_TEXTURE_CUBE_KIND (UINT32_C(0xb) << 28)
+/* R75: SQ_RSRC_IMG_TYPE's multisampled kinds, 2D_MSAA (14) and 2D_MSAA_ARRAY
+ * (15), as RADV writes them for a sampled multisampled image; the swizzle is
+ * the one the target was rendered in, as for any other tiled kind. */
+#define PS5VK_TEXTURE_2D_MSAA_KIND (UINT32_C(0xe) << 28)
+#define PS5VK_TEXTURE_2D_MSAA_ARRAY_KIND (UINT32_C(0xf) << 28)
 #define PS5VK_TEXTURE_SINGLE_LEVEL UINT32_C(0x00400000)
 #define PS5VK_TEXTURE_CLAMP_TO_EDGE (2u | (2u << 3) | (2u << 6))
 #define PS5VK_TEXTURE_LOD_RANGE UINT32_C(0x00fff000)
@@ -503,7 +508,7 @@ ps5vk_stencil_registers(const struct vk_dynamic_graphics_state *dynamic,
 static bool
 ps5vk_target_registers(uint64_t address, VkExtent2D extent,
                        const struct ps5vk_colour_format *colour, VkSampleCountFlagBits samples,
-                       struct ps5vk_agc_register *records, uint32_t target)
+                       bool linear, struct ps5vk_agc_register *records, uint32_t target)
 {
    if (!ps5vk_default_target_registers(records, target))
       return false;
@@ -554,10 +559,29 @@ ps5vk_target_registers(uint64_t address, VkExtent2D extent,
    records[12].value &= 0xffffff00u;
    records[13].value &= 0xffffff00u;
    records[14].value = (extent.height - 1u) | ((extent.width - 1u) << 14);
+   /* CB_COLORi_ATTRIB3's COLOR_SW_MODE (bits 14-18): 27, SW_64KB_R_X, for a tiled
+    * target; 0, SW_LINEAR, for one stored in rows (R77). A linear target's
+    * rows are its width's worth of bytes rounded up to 256, which is how this
+    * driver pads rows (ps5vk_image.c) and the pitch AddrLib gives a linear
+    * surface -- the colour block takes it from MIP0_WIDTH, as RADV programs it. */
    records[15].value =
-      (records[15].value & ~(0x1fffu | 0x7c000u | 0x03000000u | 0x44000000u)) | 0x6c000u |
-      0x01000000u | 0x44000000u;
+      (records[15].value & ~(0x1fffu | 0x7c000u | 0x03000000u | 0x44000000u)) |
+      (linear ? 0u : 0x6c000u) | 0x01000000u | 0x44000000u;
    return true;
+}
+
+/* R77: whether a one-sample, one-level, one-layer image stored in rows can be a
+ * colour target: its rows have to be whole 256-byte units, so that the pitch
+ * the colour block derives from the width is the one the image was laid out
+ * with. Dolphin's EFB-sized images are, at every internal resolution (640
+ * texels of four bytes is ten units). */
+bool
+ps5vk_linear_target(const struct ps5vk_image *image)
+{
+   return image->storage != PS5VK_IMAGE_STORAGE_TILES && image->vk.samples == VK_SAMPLE_COUNT_1_BIT &&
+          image->vk.mip_levels == 1 && image->vk.array_layers == 1 &&
+          image->vk.image_type == VK_IMAGE_TYPE_2D &&
+          (image->vk.extent.width * vk_format_get_blocksize(image->vk.format)) % 256u == 0;
 }
 
 /* gfx103 context register offsets: (address - 0x28000) / 4, the same scheme as
@@ -942,10 +966,11 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
           image->vk.array_layers != 1 ||
           (image->vk.samples != VK_SAMPLE_COUNT_1_BIT &&
            image->vk.samples != VK_SAMPLE_COUNT_4_BIT) ||
-          image->storage != PS5VK_IMAGE_STORAGE_TILES) {
+          (image->storage != PS5VK_IMAGE_STORAGE_TILES && !ps5vk_linear_target(image))) {
          ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                                 "colour attachment %u is not a one-mip one-layer "
-                                 "tiled 2D view this driver has a colour format word for",
+                                 "colour attachment %u is not a one-mip one-layer 2D view this "
+                                 "driver has a colour format word for, tiled or in rows of whole "
+                                 "256-byte units (R77)",
                                  at);
          return;
       }
@@ -965,6 +990,7 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
        * from their creation. */
       assert(image->address != 0);
       if (!ps5vk_target_registers(image->address, extent, format, image->vk.samples,
+                                  image->storage != PS5VK_IMAGE_STORAGE_TILES,
                                   cmd_buffer->target_registers[at], at)) {
          ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                                  "AGC's context defaults lack a colour target register");
@@ -1222,6 +1248,11 @@ struct ps5vk_sampled_image {
    uint32_t layer_count;
    bool array;
    bool cube;
+   /* R75: log2 of a multisampled image's sample count, 0 for one sample. The
+    * descriptor is then a 2D_MSAA kind whose level fields carry it, as RADV's
+    * (base level 0, last level and MAX_MIP log2(samples)): an image_load's
+    * sample index selects the sample. */
+   uint32_t sample_log2;
    /* Word 9: the sampler's LOD range, which only a multi-level view writes;
     * the single-level path keeps the canary's own word. */
    uint32_t lod_word;
@@ -1311,10 +1342,17 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
                               (unsigned)set, binding, view->layer_count);
       return false;
    }
-   if (image->vk.samples != VK_SAMPLE_COUNT_1_BIT) {
+   /* R75: a four-sample image is sampled in the tiles it was rendered in; C8
+    * measured that storage, and 4x is the one count the driver renders. */
+   if (image->vk.samples != VK_SAMPLE_COUNT_1_BIT &&
+       (image->vk.samples != VK_SAMPLE_COUNT_4_BIT || image->storage != PS5VK_IMAGE_STORAGE_TILES ||
+        image->vk.mip_levels != 1)) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                              "set %u binding %u samples a %u-sample image; 4x sampling is C8 "
-                              "(docs/M5_REFERENCE.md)", (unsigned)set, binding, (unsigned)image->vk.samples);
+                              "set %u binding %u samples a %u-sample image with %u levels in %s "
+                              "storage; a tiled single-level four-sample image is the one kind "
+                              "sampled (R75)", (unsigned)set, binding, (unsigned)image->vk.samples,
+                              image->vk.mip_levels,
+                              image->storage == PS5VK_IMAGE_STORAGE_TILES ? "tiled" : "row");
       return false;
    }
    const bool tiled = image->storage == PS5VK_IMAGE_STORAGE_TILES;
@@ -1400,6 +1438,7 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
                                 ? view->base_mip_level
                                 : view->base_mip_level + view->level_count - 1;
    sampled->image_last_mip_level = image->vk.mip_levels - 1;
+   sampled->sample_log2 = util_logbase2(image->vk.samples);
    sampled->tiled = tiled;
    ps5vk_census("sampled fmt %d view fmt %d %ux%u mips %u/%u layers %u viewtype %d tiled %d depth %d "
                 "pitch %u swz %d%d%d%d rendered_here %d sampler 0x%08x lod 0x%08x addr 0x%x",
@@ -1528,10 +1567,21 @@ ps5vk_write_image_descriptor(uint32_t *descriptor, const struct ps5vk_sampled_im
                                              (sampled->tiled ? PS5VK_TEXTURE_SWIZZLE : 0))
                                           : (sampled->tiled ? PS5VK_TEXTURE_2D_TILED_KIND
                                                             : PS5VK_TEXTURE_2D_KIND);
+   /* R75: a multisampled image is a 2D_MSAA kind in its tiles' swizzle, and its
+    * level fields carry the sample count's log2 (RADV's gfx10 texture
+    * descriptor). */
+   const uint32_t sampled_kind =
+      sampled->sample_log2 == 0
+         ? kind
+         : (sampled->array ? PS5VK_TEXTURE_2D_MSAA_ARRAY_KIND : PS5VK_TEXTURE_2D_MSAA_KIND) |
+              PS5VK_TEXTURE_SWIZZLE;
    const uint32_t swizzled_kind =
-      sampled->depth_tiles ? (kind & ~PS5VK_TEXTURE_SWIZZLE_MASK) | PS5VK_TEXTURE_SWIZZLE_Z : kind;
-   descriptor[3] = swizzled_kind | sampled->dst_sel | (sampled->base_mip_level << 12) |
-                   (sampled->last_mip_level << 16);
+      sampled->depth_tiles ? (sampled_kind & ~PS5VK_TEXTURE_SWIZZLE_MASK) | PS5VK_TEXTURE_SWIZZLE_Z
+                           : sampled_kind;
+   const uint32_t first_level = sampled->sample_log2 != 0 ? 0u : sampled->base_mip_level;
+   const uint32_t last_level =
+      sampled->sample_log2 != 0 ? sampled->sample_log2 : sampled->last_mip_level;
+   descriptor[3] = swizzled_kind | sampled->dst_sel | (first_level << 12) | (last_level << 16);
    /* Word 4 carries the layers (D1): DEPTH, the count minus one, at bits 0-12
     * and BASE_ARRAY, the first layer, at bits 16-28 -- the register database's
     * SQ_IMG_RSRC_WORD4 fields. A single-layer view writes word 4 as zero, which
@@ -1542,7 +1592,9 @@ ps5vk_write_image_descriptor(uint32_t *descriptor, const struct ps5vk_sampled_im
     * Only the guarded non-array 2D case uses this instead of layer fields. */
    if (sampled->pitch_texels != 0)
       descriptor[4] = sampled->pitch_texels - 1;
-   descriptor[5] = PS5VK_TEXTURE_SINGLE_LEVEL | (sampled->image_last_mip_level << 4);
+   descriptor[5] = PS5VK_TEXTURE_SINGLE_LEVEL |
+                   ((sampled->sample_log2 != 0 ? sampled->sample_log2
+                                                : sampled->image_last_mip_level) << 4);
    descriptor[8] = sampled->address_word;
    descriptor[9] = sampled->image_last_mip_level == 0 ? PS5VK_TEXTURE_LOD_RANGE : sampled->lod_word;
    descriptor[10] = sampled->sampler_word;
@@ -3031,6 +3083,56 @@ ps5vk_meta_copy(struct ps5vk_cmd_buffer *cmd_buffer, const VkCopyImageInfo2 *inf
       .filter = VK_FILTER_NEAREST,
    };
    return ps5vk_meta_blit(cmd_buffer, &blit);
+}
+
+/* R76: vkCmdResolveImage on the GPU. vk_meta renders the destination rectangle
+ * averaging the source's samples, which it fetches with the sample index
+ * (R75's multisampled descriptor), where the CPU path averaged every texel's
+ * four samples at a split point after waiting for the GPU. Dolphin resolves its
+ * multisampled EFB before every EFB copy and every frame's output, which at 6x
+ * is 48 million samples a resolve for the CPU. Eligible: a tiled four-sample
+ * image of a format the driver samples into a tiled one-sample colour target of
+ * the same format, one level and one layer, or into one stored in rows the
+ * colour block can render (R77, ps5vk_linear_target) -- Dolphin's resolve
+ * destination is TRANSFER_DST and SAMPLED, as the specification asks, which this
+ * driver stores in rows; anything else stays on the CPU path. The source needs
+ * no SAMPLED usage: Vulkan asks TRANSFER_SRC of a resolve's source, and a
+ * four-sample image is tiled, which is what the sampling reads
+ * (ps5vk_sampled_image). */
+bool
+ps5vk_meta_resolve(struct ps5vk_cmd_buffer *cmd_buffer, const VkResolveImageInfo2 *info)
+{
+   VK_FROM_HANDLE(ps5vk_image, source, info->srcImage);
+   VK_FROM_HANDLE(ps5vk_image, destination, info->dstImage);
+   if ((ps5vk_ab_flags & PS5VK_AB_CPU_TRANSFERS) || source->vk.format != destination->vk.format ||
+       source->vk.samples != VK_SAMPLE_COUNT_4_BIT ||
+       destination->vk.samples != VK_SAMPLE_COUNT_1_BIT ||
+       source->storage != PS5VK_IMAGE_STORAGE_TILES ||
+       (destination->storage != PS5VK_IMAGE_STORAGE_TILES && !ps5vk_linear_target(destination)) ||
+       source->vk.mip_levels != 1 ||
+       destination->vk.mip_levels != 1 || source->vk.array_layers != 1 ||
+       destination->vk.array_layers != 1 ||
+       ((destination->vk.usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) == 0 &&
+        !ps5vk_linear_target(destination)) ||
+       ps5vk_find_colour_format(destination->vk.format) == NULL ||
+       ps5vk_find_format(source->vk.format) == NULL)
+      return false;
+   for (uint32_t r = 0; r < info->regionCount; r++) {
+      const VkImageResolve2 *const region = &info->pRegions[r];
+      if (region->srcSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
+          region->dstSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
+          region->srcSubresource.layerCount != 1 || region->dstSubresource.layerCount != 1 ||
+          region->srcSubresource.baseArrayLayer != 0 || region->dstSubresource.baseArrayLayer != 0 ||
+          region->extent.depth != 1)
+         return false;
+   }
+   struct ps5vk_device *const device =
+      container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk);
+   struct ps5vk_meta_saved_state saved;
+   ps5vk_meta_save(cmd_buffer, &saved);
+   vk_meta_resolve_image2(&cmd_buffer->vk, &device->meta, info);
+   ps5vk_meta_restore(cmd_buffer, &saved);
+   return true;
 }
 
 /* ---------------- indirect draws (1.0's vkCmdDrawIndirect) ---------------- */

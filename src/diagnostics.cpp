@@ -1352,11 +1352,11 @@ struct FramebufferLayout
 };
 
 constexpr FramebufferLayout kTiledRgba8Layout{"tiled_rgba8", PixelOrder::TiledRgba8};
+constexpr FramebufferLayout kRowMajorLayout{"row_major", PixelOrder::RowMajor};
 constexpr std::size_t kTiledBlockPixels = 128;
 constexpr std::size_t kTiledBlockBytes = 0x10000;
 
 #ifdef AGC_LIVE_SUBMISSION_CANARY
-constexpr FramebufferLayout kRowMajorLayout{"row_major", PixelOrder::RowMajor};
 
 // Red-level tolerance for the card invariants (filtering and 8-bit rounding).
 constexpr std::uint32_t kPatternTolerance = 2;
@@ -12728,6 +12728,31 @@ void fold_frame(const std::uint32_t *words, ps5vk_resolve_folds &folds) noexcept
         folds.columns[column] = (folds.columns[column] ^ kResolveFoldSeed) * kResolveFoldPrime;
 }
 
+// The same folds as fold_frame, read through a view in pixel order: two frames
+// in different storage (rows and tiles) fold alike exactly when their pixels
+// are the same (R77).
+void fold_view(const FramebufferView &view, ps5vk_resolve_folds &folds) noexcept
+{
+    std::memset(&folds, 0, sizeof(folds));
+    for (std::uint32_t row = 0; row < PS5VK_TRIANGLE_HEIGHT; row++)
+    {
+        for (std::uint32_t column = 0; column < PS5VK_TRIANGLE_WIDTH; column++)
+        {
+            const std::size_t index = std::size_t{row} * PS5VK_TRIANGLE_WIDTH + column;
+            const std::uint32_t word = view.word(column, row);
+            folds.checksum = (folds.checksum ^ word) * kResolveFoldPrime;
+            folds.rows[row] = (folds.rows[row] ^ word) * kResolveFoldPrime;
+            folds.columns[column] = (folds.columns[column] ^ word) * kResolveFoldPrime;
+            if (index < kResolvePrefixWords)
+                folds.prefix[index] = word;
+        }
+    }
+    for (std::size_t row = 0; row < PS5VK_TRIANGLE_HEIGHT; row++)
+        folds.rows[row] = (folds.rows[row] ^ kResolveFoldSeed) * kResolveFoldPrime;
+    for (std::size_t column = 0; column < PS5VK_TRIANGLE_WIDTH; column++)
+        folds.columns[column] = (folds.columns[column] ^ kResolveFoldSeed) * kResolveFoldPrime;
+}
+
 // The colour the frame's load op clears to, as the driver's offscreen
 // R8G8B8A8 images store it: PS5VK_TRIANGLE_CLEAR_WORD's bytes, red low and
 // alpha high (rgba_bytes_word), which is the packing a colour attachment the
@@ -16972,13 +16997,13 @@ void run_vulkan_depth_bias_frames(const TestContext &test, TestOutcome &outcome)
 
 // R5 (PS5_VULKAN_REQUESTS.md): the resolve destination's usage. This driver
 // stores an image in tiles when it declares COLOR_ATTACHMENT or
-// DEPTH_STENCIL_ATTACHMENT and in rows otherwise, and its resolve only walks
-// tiled images -- so a destination declared the way the specification asks,
-// TRANSFER_DST and SAMPLED with no colour-attachment bit, is refused. The first
-// frame is that destination and the second is the same frame with
-// COLOR_ATTACHMENT added, which is the workaround the requesting project carries
-// as W5. The pair is the request's own probe, and the refusal's sentence in the
-// run's klog is what the reworded message is for.
+// DEPTH_STENCIL_ATTACHMENT and in rows otherwise. The first frame's destination
+// is declared the way the specification asks, TRANSFER_DST and SAMPLED with no
+// colour-attachment bit, so it is stored in rows; the second is the same frame
+// with COLOR_ATTACHMENT added (the requesting project's workaround W5), stored
+// in tiles. Until R77 the first was refused; R77 renders the resolve into rows,
+// so both now submit, and the two resolved frames -- one read in rows, the other
+// through the tiles -- have to hold the same pixels.
 // The report a frame the case *expects* to be refused is given. The harness
 // installs a VK_EXT_debug_utils messenger and forwards every warning and error
 // the driver logs through the report (driver/tests/ps5vk_triangle.c,
@@ -17000,7 +17025,6 @@ void run_vulkan_resolve_usage_frames(const TestContext &test, TestOutcome &outco
 {
     JsonLog &log = test.log;
     const ps5vk_triangle_report report{&log, log_vulkan_step};
-    const ps5vk_triangle_report refused_report{&log, log_expected_refusal};
     const VkVertexInputAttributeDescription attributes[2] = {
         {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
         {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8},
@@ -17016,7 +17040,10 @@ void run_vulkan_resolve_usage_frames(const TestContext &test, TestOutcome &outco
         {"destination TRANSFER_DST and SAMPLED", true},
         {"destination with COLOR_ATTACHMENT (the workaround)", false},
     };
-    bool refused = false;
+    // Static, as the resolve case's are: 96 KiB is not for a title's stack.
+    static ps5vk_resolve_folds rows_folds;
+    static ps5vk_resolve_folds tiled_folds;
+    bool rows_done = false;
     bool worked = false;
     for (const Frame &frame : kFrames)
     {
@@ -17025,10 +17052,7 @@ void run_vulkan_resolve_usage_frames(const TestContext &test, TestOutcome &outco
         input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
         input.pipeline_count = 1;
         input.load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        // The refused frame's steps are logged at INFO rather than as failures
-        // (its refusal is what the frame is for), but it keeps a report, so the
-        // driver's own sentence reaches this log through the harness's messenger.
-        input.report = frame.transfer_only ? &refused_report : &report;
+        input.report = &report;
         input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
         input.vertex_data = kResolveVertices;
         input.vertex_count = kSquareVertexCount;
@@ -17059,31 +17083,56 @@ void run_vulkan_resolve_usage_frames(const TestContext &test, TestOutcome &outco
                       "a submission did not complete; the program's objects stay allocated");
             return;
         }
+        // The frame's own bytes: a rows-stored target is exactly its texels, which
+        // is less than the tiled one's padded kFramebufferBytes.
+        constexpr std::size_t kFrameBytes = std::size_t{kOutputWidth} * kOutputHeight * 4u;
+        const bool drawn = status == PS5VK_TRIANGLE_OK && triangle.target != nullptr &&
+                           triangle.target_bytes >= kFrameBytes;
+        if (drawn)
+            flush_gpu_data(const_cast<void *>(triangle.target), kFrameBytes);
+        const auto *const words = static_cast<const std::uint32_t *>(triangle.target);
         if (frame.transfer_only)
         {
-            refused = status != PS5VK_TRIANGLE_OK;
-            log.event("agc_resolve_usage_frame", refused ? "INFO" : "FAIL", (long long)status,
-                      refused ? "the resolve was refused, as the usage bit requires"
-                              : "the resolve into a rows-stored destination was not refused");
+            rows_done = drawn;
+            if (drawn)
+                fold_view(FramebufferView{words, kRowMajorLayout}, rows_folds);
+            log.event("agc_resolve_usage_frame", rows_done ? "PASS" : "FAIL", (long long)status,
+                      rows_done ? "the resolve into the rows-stored destination submitted"
+                                : "the resolve into the rows-stored destination did not submit");
         }
         else
         {
-            worked = status == PS5VK_TRIANGLE_OK;
+            worked = drawn;
+            if (drawn)
+                fold_view(FramebufferView{words, kTiledRgba8Layout}, tiled_folds);
             log.event("agc_resolve_usage_frame", worked ? "PASS" : "FAIL", (long long)status,
                       worked ? "the same resolve submitted with the colour-attachment bit"
                              : "the workaround frame could not be recorded or submitted");
         }
         ps5vk_triangle_finish(&triangle);
     }
-    // The request's two halves: refused without the bit, submitted with it.
-    const bool passed = refused && worked;
-    log.number("agc_resolve_usage", "refused", refused ? 1u : 0u);
+    // R77: both submit, and the rows hold the tiles' pixels, row by row and column
+    // by column.
+    std::size_t differing_rows = 0;
+    std::size_t differing_columns = 0;
+    for (std::size_t row = 0; rows_done && worked && row < PS5VK_TRIANGLE_HEIGHT; row++)
+        differing_rows += rows_folds.rows[row] != tiled_folds.rows[row];
+    for (std::size_t column = 0; rows_done && worked && column < PS5VK_TRIANGLE_WIDTH; column++)
+        differing_columns += rows_folds.columns[column] != tiled_folds.columns[column];
+    const bool same = rows_done && worked && rows_folds.checksum == tiled_folds.checksum &&
+                      differing_rows == 0 && differing_columns == 0;
+    const bool passed = same;
+    log.number("agc_resolve_usage", "rows_submitted", rows_done ? 1u : 0u);
     log.number("agc_resolve_usage", "submitted", worked ? 1u : 0u);
+    log.number("agc_resolve_usage", "differing_rows", static_cast<long long>(differing_rows));
+    log.number("agc_resolve_usage", "differing_columns", static_cast<long long>(differing_columns));
+    log.hex("agc_resolve_usage", "first_rows_word", rows_folds.prefix[0]);
+    log.hex("agc_resolve_usage", "first_tiled_word", tiled_folds.prefix[0]);
     char detail[176]{};
     std::snprintf(detail, sizeof(detail),
-                  "the TRANSFER_DST and SAMPLED destination was %s and the "
-                  "COLOR_ATTACHMENT one %s",
-                  refused ? "refused" : "accepted", worked ? "submitted" : "refused");
+                  "the rows-stored resolve %s, the tiled one %s, and their pixels %s",
+                  rows_done ? "submitted" : "failed", worked ? "submitted" : "failed",
+                  same ? "match" : "differ");
     outcome.command_built = true;
     outcome.passed = passed;
     log.event("agc_resolve_usage", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);

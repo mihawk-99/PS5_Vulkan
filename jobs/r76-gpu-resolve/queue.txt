@@ -1,0 +1,11 @@
+# R75 and R76: a four-sample image sampled through a 2D_MSAA descriptor, and
+# vkCmdResolveImage drawn on the GPU by vk_meta, which samples it. c8-resolve
+# compares the resolved frame with the one-sample reference word for word; the
+# capture is golden/c8-resolve.
+# Upload: copy this file under the name queue.txt.
+capture
+hold 60
+m2-solid
+c8-msaa
+c8-resolve
+exit

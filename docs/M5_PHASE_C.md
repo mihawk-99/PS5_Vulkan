@@ -9418,3 +9418,45 @@ enable), each a wait for the GPU.
 Console: C1 PASS with the five-image replacement (PIDs 699, 701, 702), C4 PASS
 (PID 700); title 5beca7cc: RetroArch got five images and Wind Waker under
 Profile 2 ran at 100% in every steady window (was 88-99%). jobs/r74-swapchain-images.
+
+## 2026-09-25 — R75: a four-sample image is sampled
+
+The driver reported four-sample sampled images (sampledImageColorSampleCounts)
+and refused every draw that sampled one ("4x sampling is C8"). Dolphin samples its
+multisampled EFB whenever MSAA is on, so its MSAA was a refusal. A four-sample
+tiled image is now sampled through a 2D_MSAA (14) or 2D_MSAA_ARRAY (15)
+descriptor in the swizzle it was rendered in, with base level 0 and last level
+and MAX_MIP log2(4), as RADV writes it; the compiler lowers txf_ms to an
+image_load with the sample index as a coordinate. Single-sample descriptors are
+unchanged (host gate). Console: through R76's resolve, below.
+
+## 2026-09-25 — R76: vkCmdResolveImage on the GPU
+
+A resolve was a CPU walk at a split point: every texel's four samples averaged
+after the GPU finished, 48 million samples a resolve for Dolphin's EFB at 6x.
+vk_meta now draws the destination rectangle averaging the source's samples,
+which it fetches through R75's descriptor, when the source is a tiled
+four-sample image and the destination a one-sample colour target of its format;
+the source needs no SAMPLED usage (Vulkan asks TRANSFER_SRC of it). Console, PID
+777: c8-resolve PASS -- the resolved frame equals the one-sample reference word
+for word -- now as a draw (the resolved submission 55 -> 101 words, two more
+pipeline stages). golden/c8-resolve re-captured from that run; golden/c8-msaa,
+unchanged by this round, is kept. jobs/r76-gpu-resolve.
+
+## 2026-09-25 — R77: colour targets stored in rows
+
+Dolphin resolves its EFB into a texture declared TRANSFER_DST and SAMPLED, which
+is what the specification asks of a resolve's destination and what this driver
+stores in rows; neither resolve path wrote rows, and Profile 7's 4x MSAA stopped
+every game at its first resolve. A one-sample, one-level, one-layer 2D image in
+rows whose rows are whole 256-byte units is now a colour target: CB_COLORi_ATTRIB3's
+COLOR_SW_MODE is SW_LINEAR (0) instead of SW_64KB_R_X (27), and the colour block
+derives the pitch from MIP0_WIDTH, which for such an image is the row the driver
+laid out. R76's resolve takes such destinations, and the CPU resolve also writes
+rows as the fallback. Console, PID 783: v0-resolve-usage, which until now expected
+the TRANSFER_DST destination to be refused, resolves the same four-sample frame
+into rows and into tiles, and the two hold the same pixels (2160 row folds, 3840
+column folds and the checksum). Dolphin's EFB widths are whole units at every
+internal resolution (640 four-byte texels is ten). Profile 7 at 4x MSAA
+(title ea18aff2): RE4, Melee and Wind Waker at 100% in every steady window, no
+refusal, no resolve on the CPU, edges antialiased and nothing else changed.

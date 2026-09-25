@@ -1933,6 +1933,11 @@ bool
 ps5vk_meta_blit(struct ps5vk_cmd_buffer *cmd_buffer, const VkBlitImageInfo2 *info);
 bool
 ps5vk_meta_copy(struct ps5vk_cmd_buffer *cmd_buffer, const VkCopyImageInfo2 *info);
+bool
+ps5vk_meta_resolve(struct ps5vk_cmd_buffer *cmd_buffer, const VkResolveImageInfo2 *info);
+/* R77: an image stored in rows that the colour block can render into. */
+bool
+ps5vk_linear_target(const struct ps5vk_image *image);
 /* Diagnostic A/B switches, from /app0/ps5vk-ab.txt beside the log flag. */
 #define PS5VK_AB_FULL_MASK (1u << 0)  /* every colour write mask is RGBA */
 #define PS5VK_AB_CONST_ZERO (1u << 1) /* blend constants read as 0 */

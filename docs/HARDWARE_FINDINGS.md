@@ -3337,3 +3337,16 @@ words as an added multiple of eight, not an or-ed index: 0xc7010101 + 8 * buffer
 in its first packet and 0x800040a0 + 8 * buffer in its RELEASE_MEM. The two
 spellings agree for buffers 0-3; buffer 4 is 0xc7010121 and 0x800040c0 (C1, PID
 702), where an or into 0x800040a0 would leave 0x800040a0.
+
+## 2026-09-25 — sampling a four-sample image, and linear colour targets (R75-R77)
+
+A tiled four-sample RGBA8 image is sampled with image_load and a sample index
+through a descriptor of TYPE 2D_MSAA (14), SW_MODE 27 (the swizzle it was
+rendered in), BASE_LEVEL 0 and LAST_LEVEL and MAX_MIP 2: vk_meta's resolve
+through it averages the four samples to the one-sample frame's words exactly
+(C8, PID 777). The colour block renders an image in rows with COLOR_SW_MODE 0
+(SW_LINEAR) and no pitch register: for a 3840-texel RGBA8 image, whose rows are
+whole 256-byte units, the pitch it takes from MIP0_WIDTH is the row, and the
+rows it writes equal the tiled target's pixels (v0-resolve-usage, PID 783).
+Widths whose rows are not whole 256-byte units are not measured and are not
+rendered into.
