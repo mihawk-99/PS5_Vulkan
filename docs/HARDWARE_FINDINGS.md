@@ -3350,3 +3350,15 @@ whole 256-byte units, the pitch it takes from MIP0_WIDTH is the row, and the
 rows it writes equal the tiled target's pixels (v0-resolve-usage, PID 783).
 Widths whose rows are not whole 256-byte units are not measured and are not
 rendered into.
+
+## 2026-09-25 — the sample locations of the 2x2 quad, and two and eight samples (R78)
+
+PA_SC_AA_SAMPLE_LOCS_PIXEL_X0Y0_0, X1Y0_0, X0Y1_0 and X1Y1_0 are context
+registers 0x2fe, 0x302, 0x306 and 0x30a: four per pixel, samples 0-3 in _0 and
+4-7 in _1. A pixel whose register is not written keeps AGC's default pattern,
+which covers all or none of an edge pixel's samples on a line through pixel
+centres (C8's offsets, PID 791). With RADV's locations written for every pixel,
+a band through pixel centres blends every edge texel by half at two, four and
+eight samples, rendered in 128x64 and 64x32 four-byte tiles for two and eight
+and resolved by vk_meta through a 2D_MSAA descriptor (r78-sample-locations, PID
+790).

@@ -526,13 +526,22 @@ struct ps5vk_agc_register {
 #define PS5VK_STENCIL_REFMASK_REGISTER 0x10c
 #define PS5VK_STENCIL_REFMASK_BF_REGISTER 0x10d
 
-/* The rasterizer registers a four-sample draw adds to its context table
+/* The rasterizer registers a multisampled draw adds to its context table
  * (ps5vk_draw.c, ps5vk_multisample_registers): the sample count and distance,
- * the coverage mask, the four sample-location registers, the centroid
- * priorities, the rasterizer's MSAA enable and DB_EQAA (Phase C8). A
- * one-sample draw adds none: AGC's own context defaults already say one
- * sample, which is what every frame before C8 ran. */
-#define PS5VK_MULTISAMPLE_REGISTER_COUNT 11
+ * the coverage mask, a sample-location register for each pixel of the 2x2
+ * quad (two for each at eight samples), the centroid priorities, the
+ * rasterizer's MSAA enable and DB_EQAA (Phase C8, R78). A one-sample draw adds
+ * none: AGC's own context defaults already say one sample, which is what every
+ * frame before C8 ran. */
+#define PS5VK_MULTISAMPLE_REGISTER_COUNT 15
+/* The sample counts the driver renders, samples and resolves: 1, 2, 4 and 8
+ * (C8's four; R78's two and eight). */
+#define PS5VK_SAMPLE_COUNTS                                                                        \
+   (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_2_BIT | VK_SAMPLE_COUNT_4_BIT | VK_SAMPLE_COUNT_8_BIT)
+/* Whether a count is one of them above one. */
+#define PS5VK_MULTISAMPLED(samples)                                                                \
+   ((samples) == VK_SAMPLE_COUNT_2_BIT || (samples) == VK_SAMPLE_COUNT_4_BIT ||                   \
+    (samples) == VK_SAMPLE_COUNT_8_BIT)
 
 /* A colour target a command buffer renders into: its mapped memory, which the
  * CPU and the GPU share, and for a swapchain image the VideoOut handle and

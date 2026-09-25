@@ -9460,3 +9460,41 @@ column folds and the checksum). Dolphin's EFB widths are whole units at every
 internal resolution (640 four-byte texels is ten). Profile 7 at 4x MSAA
 (title ea18aff2): RE4, Melee and Wind Waker at 100% in every steady window, no
 refusal, no resolve on the CPU, edges antialiased and nothing else changed.
+
+## 2026-09-25 — R78: two and eight samples; every pixel's sample locations
+
+Profile 7 asks for 2x, 4x and 8x MSAA; the driver rendered one or four samples.
+It now renders, samples and resolves two and eight as well. A 64 KiB tile holds
+2^n texels of every sample, n = 16 - log2(texel bytes) - log2(samples), laid out
+2^ceil(n/2) wide and 2^floor(n/2) high (AddrLib's gfx10 block rule, which
+reproduces every measured tile and gives 128x64 at two samples and 64x32 at
+eight for four-byte texels); the count's log2 goes into CB_COLORi_ATTRIB's
+NUM_SAMPLES and NUM_FRAGMENTS, DB_Z_INFO, PA_SC_AA_CONFIG and DB_EQAA; the
+sample locations, MAX_SAMPLE_DIST and centroid priorities are RADV's for each
+count, eight samples writing each pixel's second locations register. A
+depth-only multisampled rendering now takes its sample count from the depth
+image. The CPU's copy and resolve walks stay C8's four samples; two and eight
+are rendered, sampled and resolved on the GPU only.
+
+The round also moved the locations to the right registers. Each pixel of the
+2x2 quad has four (sixteen samples of eight bits), so its pixels' first
+registers are 0x2fe, 0x302, 0x306 and 0x30a; C8 wrote 0x2fe, 0x300, 0x302 and
+0x304, which put the pattern in X0Y0 and X1Y0 and left X0Y1 and X1Y1 at AGC's
+defaults. A new probe measures it: r78-sample-locations draws a band whose edges
+run through pixel centres on an even and an odd line, at 2, 4 and 8 samples, both
+ways, and every texel of both edges must be the half-way blend. PID 790: all six
+frames pass with no wrong texel. PID 791, the same probe with C8's offsets:
+2160 wrong texels on each vertical pair, and the odd horizontal line covering
+all or none of its samples -- which is what four-sample rendering, and R77's 4x
+Dolphin runs, drew on every odd line. golden/c8-msaa and golden/c8-resolve
+re-captured (PID 790). jobs/r78-sample-counts.
+
+Profile 7 on title 95cf0a9c: 2x and 8x MSAA at 1x run RE4, Melee and Wind
+Waker at 100% in every steady window with antialiased edges, no refusal and no
+resolve on the CPU. The maximum torture (6x, 8x MSAA, ubershaders, 16x
+anisotropy, forced filtering) draws all three correctly and stably at 92-97%
+(RE4), 72-77% (Melee) and 60-64% (Wind Waker): GPU-bound, the stamped steps'
+GPU work 5.0, 14.0 and 10.0 ms (Profile 3, the same without MSAA, 2.1, 3.8 and
+2.6 ms) with the CPU waiting on the GPU in the queue. The multisampled surfaces
+are uncompressed -- no FMASK, CMASK or HTILE -- so 8x at 6x moves every sample's
+bytes; compressed MSAA and depth are this profile's performance lead.

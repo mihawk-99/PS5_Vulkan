@@ -1,0 +1,13 @@
+# R78: two and eight samples beside four, and the sample locations of every
+# pixel of the 2x2 quad. r78-sample-locations draws a band whose edges run through
+# pixel centres, on an even and an odd line, at 2, 4 and 8 samples, vertically and
+# horizontally, resolves it on the GPU and reads every texel of the edges: each is
+# the half-way blend. c8-msaa and c8-resolve are captured into their goldens.
+# Upload: copy this file under the name queue.txt.
+capture
+hold 60
+m2-solid
+c8-msaa
+c8-resolve
+r78-sample-locations
+exit

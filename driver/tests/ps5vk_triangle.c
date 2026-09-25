@@ -2513,10 +2513,11 @@ create_resolve_target(struct ps5vk_triangle *triangle, VkPhysicalDevice physical
 {
    if (!input->resolve_output)
       return true;
-   if (input->samples != VK_SAMPLE_COUNT_4_BIT)
+   if (input->samples != VK_SAMPLE_COUNT_2_BIT && input->samples != VK_SAMPLE_COUNT_4_BIT &&
+       input->samples != VK_SAMPLE_COUNT_8_BIT)
       return step(triangle, "resolve target", VK_ERROR_INITIALIZATION_FAILED,
-                  "a resolve renders into a four-sample image: pass samples = "
-                  "VK_SAMPLE_COUNT_4_BIT with resolve_output");
+                  "a resolve renders into a multisampled image: pass samples = 2, 4 or 8 "
+                  "with resolve_output");
    const VkImageCreateInfo image_info = {
       .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
       .imageType = VK_IMAGE_TYPE_2D,
@@ -2524,7 +2525,7 @@ create_resolve_target(struct ps5vk_triangle *triangle, VkPhysicalDevice physical
       .extent = {PS5VK_TRIANGLE_WIDTH, PS5VK_TRIANGLE_HEIGHT, 1},
       .mipLevels = 1,
       .arrayLayers = 1,
-      .samples = VK_SAMPLE_COUNT_4_BIT,
+      .samples = input->samples,
       .tiling = VK_IMAGE_TILING_OPTIMAL,
       .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
       .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
@@ -3030,9 +3031,13 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
 
    /* The colour targets. */
    /* Phase C8's sample count reaches the target's image, its passes and the
-    * pipelines through the program, and nothing else uses it. */
-   triangle->samples = input->samples == VK_SAMPLE_COUNT_4_BIT ? VK_SAMPLE_COUNT_4_BIT
-                                                               : VK_SAMPLE_COUNT_1_BIT;
+    * pipelines through the program, and nothing else uses it: four, or two or
+    * eight (R78). */
+   triangle->samples = input->samples == VK_SAMPLE_COUNT_2_BIT ||
+                             input->samples == VK_SAMPLE_COUNT_4_BIT ||
+                             input->samples == VK_SAMPLE_COUNT_8_BIT
+                          ? input->samples
+                          : VK_SAMPLE_COUNT_1_BIT;
    /* A resolve's destination is the program's own image, which is created
     * before the four-sample source is: the flag has to be set here, not in
     * create_resolve_target (Phase C8). */

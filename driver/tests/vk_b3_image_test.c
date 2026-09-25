@@ -105,14 +105,16 @@ check_formats(void)
                                              0, &ip);
    check(result == VK_SUCCESS && ip.maxExtent.width == 16384 && ip.maxExtent.height == 16384 &&
             ip.maxExtent.depth == 1 && ip.maxMipLevels == 13 && ip.maxArrayLayers == 256 &&
-            ip.sampleCounts == (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT) &&
+            ip.sampleCounts == (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_2_BIT |
+                                VK_SAMPLE_COUNT_4_BIT | VK_SAMPLE_COUNT_8_BIT) &&
             ip.maxResourceSize >= UINT64_C(1) << 31,
-         "a sampled 2D RGBA8 image: 16384 extent, 13 levels, 256 layers, 1 and 4 samples");
+         "a sampled 2D RGBA8 image: 16384 extent, 13 levels, 256 layers, 1, 2, 4 and 8 samples");
    result = image_format_properties(VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D,
                                     VK_IMAGE_TILING_OPTIMAL,
                                     VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 0, &ip);
-   check(result == VK_SUCCESS && ip.sampleCounts == (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT),
-         "a D32 depth attachment is supported with 1 and 4 samples");
+   check(result == VK_SUCCESS && ip.sampleCounts == (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_2_BIT |
+                                                     VK_SAMPLE_COUNT_4_BIT | VK_SAMPLE_COUNT_8_BIT),
+         "a D32 depth attachment is supported with 1, 2, 4 and 8 samples");
    /* The specification's Format Feature Dependent Image Usage Flags table (the
     * copy in .deps/native/vulkan-docs) requires VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT
     * of any format carrying COLOR_ATTACHMENT or DEPTH_STENCIL_ATTACHMENT, so the
@@ -269,6 +271,14 @@ check_storage(void)
    check(expect_storage(VK_FORMAT_R8G8B8A8_UNORM, 512, 512, 1, 1, VK_SAMPLE_COUNT_4_BIT,
                         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, 4 * MIB, 2 * MIB),
          "a 4x 512x512 colour attachment uses 64x64-texel tiles: 64 tiles in 4 MiB");
+   /* R78: AddrLib's block rule at two and eight samples, 128x64 and 64x32
+    * texels a 64 KiB tile. */
+   check(expect_storage(VK_FORMAT_R8G8B8A8_UNORM, 512, 512, 1, 1, VK_SAMPLE_COUNT_2_BIT,
+                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, 2 * MIB, 2 * MIB),
+         "a 2x 512x512 colour attachment uses 128x64-texel tiles: 32 tiles in 2 MiB");
+   check(expect_storage(VK_FORMAT_R8G8B8A8_UNORM, 512, 512, 1, 1, VK_SAMPLE_COUNT_8_BIT,
+                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, 8 * MIB, 2 * MIB),
+         "an 8x 512x512 colour attachment uses 64x32-texel tiles: 128 tiles in 8 MiB");
 
    VkImage huge;
    const VkResult result =

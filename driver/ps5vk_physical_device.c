@@ -164,14 +164,14 @@ ps5vk_get_properties(struct vk_properties *p)
       .maxFramebufferLayers = 256,
       /* Required for every implementation; multisampling is not yet probed
        * on the hardware (Phase C8). */
-      .framebufferColorSampleCounts = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT,
-      .framebufferDepthSampleCounts = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT,
+      .framebufferColorSampleCounts = PS5VK_SAMPLE_COUNTS,
+      .framebufferDepthSampleCounts = PS5VK_SAMPLE_COUNTS,
       .framebufferStencilSampleCounts = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT,
-      .framebufferNoAttachmentsSampleCounts = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT,
+      .framebufferNoAttachmentsSampleCounts = PS5VK_SAMPLE_COUNTS,
       .maxColorAttachments = PS5VK_MAX_COLOR_TARGETS,
-      .sampledImageColorSampleCounts = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT,
+      .sampledImageColorSampleCounts = PS5VK_SAMPLE_COUNTS,
       .sampledImageIntegerSampleCounts = VK_SAMPLE_COUNT_1_BIT,
-      .sampledImageDepthSampleCounts = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT,
+      .sampledImageDepthSampleCounts = PS5VK_SAMPLE_COUNTS,
       .sampledImageStencilSampleCounts = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT,
       .storageImageSampleCounts = VK_SAMPLE_COUNT_1_BIT, /* no storageImageMultisample */
       .maxSampleMaskWords = 1,

@@ -90,9 +90,11 @@ check_properties(VkInstance instance, VkPhysicalDevice physical)
    check(l->pointSizeRange[0] == 1.0f && l->pointSizeRange[1] == 1.0f &&
             l->lineWidthRange[1] == 1.0f && l->pointSizeGranularity == 0.0f,
          "points and lines of size 1 only");
-   check(l->framebufferColorSampleCounts == (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT) &&
+   /* R78: 1, 2, 4 and 8 samples render, sample and resolve. */
+   check(l->framebufferColorSampleCounts == (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_2_BIT |
+                                             VK_SAMPLE_COUNT_4_BIT | VK_SAMPLE_COUNT_8_BIT) &&
             l->storageImageSampleCounts == VK_SAMPLE_COUNT_1_BIT,
-         "required sample counts");
+         "required sample counts, and two and eight (R78)");
    check(l->minMemoryMapAlignment == 4096 && l->minUniformBufferOffsetAlignment == 256,
          "memory map and offset alignments");
 

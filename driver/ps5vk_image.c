@@ -810,7 +810,10 @@ ps5vk_GetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice physicalDevice,
       .maxExtent = {PS5VK_MAX_EXTENT_2D, PS5VK_MAX_EXTENT_2D, 1},
       .maxMipLevels = PS5VK_MAX_MIP_LEVELS,
       .maxArrayLayers = PS5VK_MAX_ARRAY_LAYERS,
-      .sampleCounts = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT,
+      /* A stencil format's plane is laid out for one sample only
+       * (ps5vk_image_stencil_plane), so its images are created with one. */
+      .sampleCounts = vk_format_has_stencil(info->format) ? VK_SAMPLE_COUNT_1_BIT
+                                                          : PS5VK_SAMPLE_COUNTS,
       .maxResourceSize = PS5VK_ADDRESS_WINDOW_BYTES,
    };
    return VK_SUCCESS;
@@ -849,17 +852,22 @@ ps5vk_tile_extent(unsigned texel_bytes, bool depth, VkSampleCountFlagBits sample
     * own table and whose tile is 256x128 texels (ps5vk_tiled_depth2_terms). */
    if (depth && texel_bytes != 2)
       texel_bytes = 4;
+   /* A 64 KiB tile holds 2^n texels of every sample, n = 16 - log2(texel bytes)
+    * - log2(samples), laid out 2^ceil(n/2) wide and 2^floor(n/2) high: AddrLib's
+    * gfx10 block dimension, which reproduces each measured tile (128x128 four
+    * bytes, 256x128 two, 64x64 four bytes at four samples) and gives 128x64 at
+    * two samples and 64x32 at eight (R78). */
+   unsigned log2_bytes = 2;
    switch (texel_bytes) {
-   case 1: *width = 256; *height = 256; break;
-   case 2: *width = 256; *height = 128; break;
-   case 8: *width = 128; *height = 64; break;
-   case 16: *width = 64; *height = 64; break;
-   default: *width = 128; *height = 128; break;
+   case 1: log2_bytes = 0; break;
+   case 2: log2_bytes = 1; break;
+   case 8: log2_bytes = 3; break;
+   case 16: log2_bytes = 4; break;
+   default: log2_bytes = 2; break;
    }
-   if (samples == VK_SAMPLE_COUNT_4_BIT) {
-      *width /= 2;
-      *height /= 2;
-   }
+   const unsigned n = 16u - log2_bytes - util_logbase2(samples);
+   *width = 1u << ((n + 1u) / 2u);
+   *height = 1u << (n / 2u);
 }
 
 /* Where one level of a row-layout image starts, its row pitch and its extent:
@@ -1981,7 +1989,11 @@ ps5vk_image_copy_side(struct ps5vk_image *image, const VkImageSubresourceLayers 
    if (element_bytes == 0)
       return false;
    /* A four-sample image's texel is its four samples, sixteen bytes of a
-    * four-byte format, and its tile is half as wide (ps5vk_tile_extent). */
+    * four-byte format, and its tile is half as wide (ps5vk_tile_extent). Two
+    * and eight samples have no measured texel map, so the CPU does not walk
+    * them (R78): the GPU renders, samples and resolves them. */
+   if (image->vk.samples != VK_SAMPLE_COUNT_1_BIT && image->vk.samples != VK_SAMPLE_COUNT_4_BIT)
+      return false;
    const uint32_t samples = image->vk.samples == VK_SAMPLE_COUNT_4_BIT ? 4u : 1u;
    *texel_bytes = element_bytes * samples;
    const bool tiled = image->storage == PS5VK_IMAGE_STORAGE_TILES;
@@ -2375,16 +2387,18 @@ ps5vk_CmdResolveImage2KHR(VkCommandBuffer commandBuffer, const VkResolveImageInf
    if (vk_command_buffer_has_error(&cmd_buffer->vk) || info->regionCount == 0 || source == NULL ||
        destination == NULL)
       return;
+   /* R76: on the GPU when the images allow it (ps5vk_draw.c), any sample
+    * count the driver renders (R78); the CPU walk below is C8's four. */
+   if (destination->vk.samples == VK_SAMPLE_COUNT_1_BIT && ps5vk_meta_resolve(cmd_buffer, info))
+      return;
    if (source->vk.samples != VK_SAMPLE_COUNT_4_BIT ||
        destination->vk.samples != VK_SAMPLE_COUNT_1_BIT) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                              "a resolve from %u samples into %u; C8 resolves four into one",
+                              "a resolve from %u samples into %u that the GPU path does not take; "
+                              "the CPU's is C8's four into one",
                               (unsigned)source->vk.samples, (unsigned)destination->vk.samples);
       return;
    }
-   /* R76: on the GPU when the images allow it (ps5vk_draw.c). */
-   if (ps5vk_meta_resolve(cmd_buffer, info))
-      return;
    /* R5: the sentence names the usage bit that decides an image's storage rather
     * than tiling alone, because an application that follows the specification --
     * a resolve destination with TRANSFER_DST and SAMPLED, which is what the

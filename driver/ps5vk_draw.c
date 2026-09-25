@@ -396,8 +396,7 @@ ps5vk_depth_registers(uint64_t address, uint64_t stencil_address, VkExtent2D ext
    const uint32_t z_format = format == VK_FORMAT_D16_UNORM   ? 1u
                              : format == VK_FORMAT_D24_UNORM_S8_UINT ? 2u
                                                                      : 3u;
-   const uint32_t z_info = (0x80000180u | z_format) |
-                           (samples == VK_SAMPLE_COUNT_4_BIT ? (2u << 2) : 0u);
+   const uint32_t z_info = (0x80000180u | z_format) | (util_logbase2(samples) << 2);
    const struct ps5vk_agc_register depth[PS5VK_DEPTH_REGISTER_COUNT] = {
       {0x010, 0, z_info}, /* DB_Z_INFO */
       {0x011, 0, stencil ? 0x20000181u : 0x20000180u}, /* DB_STENCIL_INFO */
@@ -538,7 +537,10 @@ ps5vk_target_registers(uint64_t address, VkExtent2D extent,
     * 15-16, the register database's NUM_SAMPLES and NUM_FRAGMENTS): a
     * four-sample target takes the 4x encoding, and a one-sample target the
     * AGC default the M2-M4 frames ran. */
-   const uint32_t sample_bits = samples == VK_SAMPLE_COUNT_4_BIT ? (2u | (2u << 3)) : 0u;
+   /* R78: log2 of the count in both fields, as for four (2, 2), for two and
+    * eight too. */
+   const uint32_t sample_log2 = util_logbase2(samples);
+   const uint32_t sample_bits = sample_log2 | (sample_log2 << 3);
    /* The fields are cleared before they are set: a second clear here emptied
     * them again, so every four-sample target was programmed as a one-sample one
     * and the console wrote one word a texel whatever the frame did
@@ -591,10 +593,17 @@ ps5vk_linear_target(const struct ps5vk_image *image)
 #define PS5VK_REG_PA_SC_CENTROID_PRIORITY_0 0x2f5 /* 0x28bd4 */
 #define PS5VK_REG_PA_SC_CENTROID_PRIORITY_1 0x2f6
 #define PS5VK_REG_PA_SC_AA_CONFIG 0x2f8     /* 0x28be0 */
+/* R78: each pixel of the 2x2 quad has four sample-location registers (sixteen
+ * samples of eight bits), so the quad's pixels are sixteen bytes apart:
+ * PA_SC_AA_SAMPLE_LOCS_PIXEL_X1Y0_0 is 0x28c08 (0x302), X0Y1_0 0x28c18 (0x306)
+ * and X1Y1_0 0x28c28 (0x30a) -- gfx103's register database. C8 wrote 0x300,
+ * 0x302 and 0x304, which are X0Y0_2, X1Y0_0 and X1Y0_2: X0Y0 and X1Y0 got the
+ * four-sample pattern and the quad's lower pixels, X0Y1 and X1Y1, kept AGC's
+ * defaults. The _1 registers carry samples 4-7, which eight samples use. */
 #define PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X0Y0 0x2fe /* 0x28bf8 */
-#define PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X1Y0 0x300 /* 0x28c08 */
-#define PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X0Y1 0x302 /* 0x28c18 */
-#define PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X1Y1 0x304 /* 0x28c28 */
+#define PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X1Y0 0x302 /* 0x28c08 */
+#define PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X0Y1 0x306 /* 0x28c18 */
+#define PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X1Y1 0x30a /* 0x28c28 */
 #define PS5VK_REG_PA_SC_AA_MASK_X0Y0_X1Y0 0x30e /* 0x28c38 */
 #define PS5VK_REG_PA_SC_AA_MASK_X0Y1_X1Y1 0x30f /* 0x28c3c */
 
@@ -604,7 +613,8 @@ ps5vk_linear_target(const struct ps5vk_image *image)
  * (0.875, 0.375), (0.125, 0.625), (0.625, 0.875) about the pixel centre. */
 #define PS5VK_SAMPLE_LOCATIONS_4X UINT32_C(0x622ae6ae)
 
-/* The rasterizer registers a four-sample draw adds: the sample count is what
+/* The rasterizer registers a multisampled draw adds (two, four or eight
+ * samples, C8 and R78): the sample count is what
  * decides whether the rasterizer covers one sample of a pixel or four, and the
  * CB_COLOR0_ATTRIB encoding alone leaves it at one -- which is what the console
  * measured before this (one word a texel in the four-sample target's storage,
@@ -623,34 +633,61 @@ ps5vk_multisample_registers(VkSampleCountFlagBits samples, uint32_t *count,
                             struct ps5vk_agc_register *records)
 {
    *count = 0;
-   if (samples != VK_SAMPLE_COUNT_4_BIT)
+   if (!PS5VK_MULTISAMPLED(samples))
       return;
-   const struct ps5vk_agc_register values[PS5VK_MULTISAMPLE_REGISTER_COUNT] = {
+   /* R78: RADV's gfx10 values for each count (radv_device.c): the sample
+    * locations -- FILL_SREG's four-bit x and y, in sixteenths of a pixel, for
+    * samples 0-3 in the first register and 4-7 in the second -- MAX_SAMPLE_DIST
+    * and the centroid priorities. Four samples keep C8's words. */
+   const uint32_t log2 = util_logbase2(samples);
+   uint32_t locations = PS5VK_SAMPLE_LOCATIONS_4X, locations_high = 0;
+   uint32_t distance = 6, centroid = 0x32103210u;
+   if (samples == VK_SAMPLE_COUNT_2_BIT) {
+      locations = 0x0000cc44u; /* (4, 4), (-4, -4) */
+      distance = 4;
+      centroid = 0x10101010u;
+   } else if (samples == VK_SAMPLE_COUNT_8_BIT) {
+      locations = 0xbd153fd1u;      /* (1, -3), (-1, 3), (5, 1), (-3, -5) */
+      locations_high = 0x9773f95bu; /* (-5, 5), (-7, -1), (3, 7), (7, -7) */
+      distance = 7;
+      centroid = 0x76543210u;
+   }
+   const struct ps5vk_agc_register values[11] = {
       /* PA_SC_AA_CONFIG: MSAA_NUM_SAMPLES (bits 0-2) and MSAA_EXPOSED_SAMPLES
-       * (bits 20-22) are log2(4) = 2, MAX_SAMPLE_DIST (bits 13-16) is 6. */
-      {PS5VK_REG_PA_SC_AA_CONFIG, 0, 2u | (6u << 13) | (2u << 20)},
+       * (bits 20-22) are the count's log2, MAX_SAMPLE_DIST (bits 13-16) the
+       * pattern's distance. */
+      {PS5VK_REG_PA_SC_AA_CONFIG, 0, log2 | (distance << 13) | (log2 << 20)},
       /* PA_SC_MODE_CNTL_0: MSAA_ENABLE (bit 0), the per-tile RB alternation and
        * the viewport scissor (bit 1), which every draw of this driver runs
        * with. */
       {PS5VK_REG_PA_SC_MODE_CNTL_0, 0, 0x23u},
       /* DB_EQAA: MAX_ANCHOR_SAMPLES (bits 0-2), MASK_EXPORT_NUM_SAMPLES (8-10)
-       * and ALPHA_TO_MASK_NUM_SAMPLES (12-14) are log2(4), PS_ITER_SAMPLES
-       * (4-6) is 0, and the quality bits are set. */
+       * and ALPHA_TO_MASK_NUM_SAMPLES (12-14) are the count's log2,
+       * PS_ITER_SAMPLES (4-6) is 0, and the quality bits are set. */
       {PS5VK_REG_DB_EQAA, 0,
-       2u | (2u << 8) | (2u << 12) | (1u << 16) | (1u << 17) | (1u << 20)},
-      {PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X0Y0, 0, PS5VK_SAMPLE_LOCATIONS_4X},
-      {PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X1Y0, 0, PS5VK_SAMPLE_LOCATIONS_4X},
-      {PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X0Y1, 0, PS5VK_SAMPLE_LOCATIONS_4X},
-      {PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X1Y1, 0, PS5VK_SAMPLE_LOCATIONS_4X},
-      /* The centroid priorities of the four-sample pattern: sample 0's
-       * distance first, as radv's centroid_priority_4x is. */
-      {PS5VK_REG_PA_SC_CENTROID_PRIORITY_0, 0, 0x32103210u},
-      {PS5VK_REG_PA_SC_CENTROID_PRIORITY_1, 0, 0x32103210u},
+       log2 | (log2 << 8) | (log2 << 12) | (1u << 16) | (1u << 17) | (1u << 20)},
+      {PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X0Y0, 0, locations},
+      {PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X1Y0, 0, locations},
+      {PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X0Y1, 0, locations},
+      {PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X1Y1, 0, locations},
+      {PS5VK_REG_PA_SC_CENTROID_PRIORITY_0, 0, centroid},
+      {PS5VK_REG_PA_SC_CENTROID_PRIORITY_1, 0, centroid},
       {PS5VK_REG_PA_SC_AA_MASK_X0Y0_X1Y0, 0, 0xffffffffu},
       {PS5VK_REG_PA_SC_AA_MASK_X0Y1_X1Y1, 0, 0xffffffffu},
    };
    memcpy(records, values, sizeof(values));
-   *count = PS5VK_MULTISAMPLE_REGISTER_COUNT;
+   *count = ARRAY_SIZE(values);
+   if (samples == VK_SAMPLE_COUNT_8_BIT) {
+      /* Samples 4-7 in each pixel's _1 register, the one after its _0. */
+      const uint16_t pixels[4] = {PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X0Y0,
+                                  PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X1Y0,
+                                  PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X0Y1,
+                                  PS5VK_REG_PA_SC_AA_SAMPLE_LOCS_X1Y1};
+      for (unsigned p = 0; p < 4; p++)
+         records[(*count)++] = (struct ps5vk_agc_register){(uint16_t)(pixels[p] + 1u), 0,
+                                                           locations_high};
+   }
+   assert(*count <= PS5VK_MULTISAMPLE_REGISTER_COUNT);
 }
 
 static uint32_t
@@ -842,7 +879,7 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
           !ps5vk_single_layer_2d_view(depth_view) ||
           depth_image->vk.mip_levels != 1 || depth_image->vk.array_layers != 1 ||
           (depth_image->vk.samples != VK_SAMPLE_COUNT_1_BIT &&
-           depth_image->vk.samples != VK_SAMPLE_COUNT_4_BIT) ||
+           !PS5VK_MULTISAMPLED(depth_image->vk.samples)) ||
           depth_image->storage != PS5VK_IMAGE_STORAGE_TILES ||
           /* A stencil-bearing attachment must have the plane the image placed
            * for it: a format that has one and a shape that did not derive one is
@@ -952,7 +989,10 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
          return;
       }
       cmd_buffer->colour_attachment_count = 1;
-      cmd_buffer->multisample_count = 0;
+      /* R78: a depth-only multisampled rendering rasterizes its depth image's
+       * samples; the colour attachment set them before, and there is none. */
+      ps5vk_multisample_registers(depth_samples, &cmd_buffer->multisample_count,
+                                  cmd_buffer->multisample_registers);
    }
    for (uint32_t at = 0; at < colour_count; at++) {
       const VkRenderingAttachmentInfo *const attachment = &info->pColorAttachments[at];
@@ -964,8 +1004,7 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
       if (view == NULL || image == NULL || format == NULL ||
           !ps5vk_single_layer_2d_view(view) || image->vk.mip_levels != 1 ||
           image->vk.array_layers != 1 ||
-          (image->vk.samples != VK_SAMPLE_COUNT_1_BIT &&
-           image->vk.samples != VK_SAMPLE_COUNT_4_BIT) ||
+          (image->vk.samples != VK_SAMPLE_COUNT_1_BIT && !PS5VK_MULTISAMPLED(image->vk.samples)) ||
           (image->storage != PS5VK_IMAGE_STORAGE_TILES && !ps5vk_linear_target(image))) {
          ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                                  "colour attachment %u is not a one-mip one-layer 2D view this "
@@ -1342,15 +1381,16 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
                               (unsigned)set, binding, view->layer_count);
       return false;
    }
-   /* R75: a four-sample image is sampled in the tiles it was rendered in; C8
-    * measured that storage, and 4x is the one count the driver renders. */
+   /* R75: a multisampled image is sampled in the tiles it was rendered in, at
+    * any count the driver renders (R78). */
    if (image->vk.samples != VK_SAMPLE_COUNT_1_BIT &&
-       (image->vk.samples != VK_SAMPLE_COUNT_4_BIT || image->storage != PS5VK_IMAGE_STORAGE_TILES ||
+       (!PS5VK_MULTISAMPLED(image->vk.samples) || image->storage != PS5VK_IMAGE_STORAGE_TILES ||
         image->vk.mip_levels != 1)) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                               "set %u binding %u samples a %u-sample image with %u levels in %s "
-                              "storage; a tiled single-level four-sample image is the one kind "
-                              "sampled (R75)", (unsigned)set, binding, (unsigned)image->vk.samples,
+                              "storage; a tiled single-level image of 2, 4 or 8 samples is what "
+                              "is sampled (R75, R78)", (unsigned)set, binding,
+                              (unsigned)image->vk.samples,
                               image->vk.mip_levels,
                               image->storage == PS5VK_IMAGE_STORAGE_TILES ? "tiled" : "row");
       return false;
@@ -3105,7 +3145,7 @@ ps5vk_meta_resolve(struct ps5vk_cmd_buffer *cmd_buffer, const VkResolveImageInfo
    VK_FROM_HANDLE(ps5vk_image, source, info->srcImage);
    VK_FROM_HANDLE(ps5vk_image, destination, info->dstImage);
    if ((ps5vk_ab_flags & PS5VK_AB_CPU_TRANSFERS) || source->vk.format != destination->vk.format ||
-       source->vk.samples != VK_SAMPLE_COUNT_4_BIT ||
+       !PS5VK_MULTISAMPLED(source->vk.samples) ||
        destination->vk.samples != VK_SAMPLE_COUNT_1_BIT ||
        source->storage != PS5VK_IMAGE_STORAGE_TILES ||
        (destination->storage != PS5VK_IMAGE_STORAGE_TILES && !ps5vk_linear_target(destination)) ||

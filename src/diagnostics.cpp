@@ -16995,6 +16995,163 @@ void run_vulkan_depth_bias_frames(const TestContext &test, TestOutcome &outcome)
     log.event("agc_depth_bias", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
 }
 
+// R78: the sample locations of every pixel of the 2x2 quad, at two, four and
+// eight samples. A band whose two edges run through pixel centres -- one on an
+// even line and one on an odd one, so both pixels of the quad on that axis are
+// crossed -- covers exactly half the samples of each edge pixel with the
+// standard locations (RADV's: no sample sits on a centre), in every pixel of the
+// edge; a pixel whose locations register was never written keeps AGC's default
+// pattern and covers all or none. Each frame resolves on the GPU into the
+// program's tiled target, and the check reads the edges: every texel of the two
+// blended lines is the half-way blend of the band's red and the clear colour,
+// and the lines beside them are the band and the clear.
+constexpr std::uint32_t kLocationBandFirst[2] = {1000, 500}; // even line
+constexpr std::uint32_t kLocationBandLast[2] = {1921, 1081}; // odd line
+
+bool location_blend(std::uint32_t word) noexcept
+{
+    // Half of 0xff and half of the clear's 0x40, 0x80 and 0xff, each rounded
+    // either way, with alpha one.
+    const std::uint32_t red = word & 0xffu, green = (word >> 8) & 0xffu;
+    const std::uint32_t blue = (word >> 16) & 0xffu, alpha = word >> 24;
+    return red >= 0x9eu && red <= 0xa1u && green >= 0x3fu && green <= 0x41u && blue >= 0x7eu &&
+           blue <= 0x81u && alpha == 0xffu;
+}
+
+void run_vulkan_sample_location_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8},
+    };
+    static constexpr VkSampleCountFlagBits kCounts[3] = {
+        VK_SAMPLE_COUNT_2_BIT, VK_SAMPLE_COUNT_4_BIT, VK_SAMPLE_COUNT_8_BIT};
+    constexpr std::uint32_t kBandWord = rgba_bytes_word(0xff, 0x00, 0x00);
+    constexpr std::size_t kFrameBytes = std::size_t{kOutputWidth} * kOutputHeight * 4u;
+    unsigned frames = 0;
+    unsigned passed_frames = 0;
+    for (const VkSampleCountFlagBits samples : kCounts)
+    {
+        for (unsigned axis = 0; axis < 2; axis++)
+        {
+            const bool vertical = axis == 0;
+            // The band between the two edges, each through the centres of its
+            // line: x (or y) = line + 0.5 in pixels.
+            const float first = static_cast<float>(kLocationBandFirst[axis]) + 0.5f;
+            const float last = static_cast<float>(kLocationBandLast[axis]) + 0.5f;
+            const float x0 = vertical ? first / (kOutputWidth / 2.0f) - 1.0f : -1.0f;
+            const float x1 = vertical ? last / (kOutputWidth / 2.0f) - 1.0f : 1.0f;
+            const float y0 = vertical ? -1.0f : 1.0f - last / (kOutputHeight / 2.0f);
+            const float y1 = vertical ? 1.0f : 1.0f - first / (kOutputHeight / 2.0f);
+            const float vertices[kSquareVertexCount * 6] = {
+                x0, y0, 1.0f, 0.0f, 0.0f, 1.0f, x1, y0, 1.0f, 0.0f, 0.0f, 1.0f,
+                x1, y1, 1.0f, 0.0f, 0.0f, 1.0f, x0, y1, 1.0f, 0.0f, 0.0f, 1.0f,
+            };
+            ps5vk_triangle_input input{};
+            input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+            input.pipeline_count = 1;
+            input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            input.report = &report;
+            input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+            input.vertex_data = vertices;
+            input.vertex_count = kSquareVertexCount;
+            input.vertex_stride = kVertexStride;
+            input.index_data = kIndices;
+            input.index_count = kIndexCount;
+            input.attribute_count = 2;
+            input.attributes[0] = attributes[0];
+            input.attributes[1] = attributes[1];
+            input.samples = samples;
+            input.resolve_output = true;
+            if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+                return;
+            ++frames;
+            log.number("agc_sample_locations", "samples", static_cast<long long>(samples));
+            log.number("agc_sample_locations", "vertical", vertical ? 1 : 0);
+            ps5vk_triangle triangle{};
+            ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+            if (status == PS5VK_TRIANGLE_OK)
+                status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+            if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+            {
+                outcome.stage_in_use = true;
+                log.event("agc_sample_locations", "FAIL", -1,
+                          "a submission did not complete; the program's objects stay allocated");
+                return;
+            }
+            bool passed = false;
+            if (status == PS5VK_TRIANGLE_OK && triangle.target != nullptr &&
+                triangle.target_bytes >= kFrameBytes)
+            {
+                flush_gpu_data(const_cast<void *>(triangle.target), triangle.target_bytes);
+                const FramebufferView view{static_cast<const std::uint32_t *>(triangle.target),
+                                           kTiledRgba8Layout};
+                // The blended lines, found along the first row (or column): the
+                // frame's orientation decides which lines they are, the
+                // centres through which the edges run decide that there are two.
+                const std::uint32_t extent = vertical ? kOutputWidth : kOutputHeight;
+                const std::uint32_t across = vertical ? kOutputHeight : kOutputWidth;
+                std::uint32_t lines[2] = {0, 0};
+                unsigned found = 0;
+                for (std::uint32_t at = 0; at < extent; at++)
+                {
+                    const std::uint32_t word = vertical ? view.word(at, 0) : view.word(0, at);
+                    if (word != kBandWord && word != kResolveClearWord)
+                    {
+                        if (found < 2)
+                            lines[found] = at;
+                        ++found;
+                    }
+                }
+                // Every texel of both lines is the blend, the band is inside
+                // them and the clear outside.
+                std::size_t wrong = 0;
+                for (unsigned edge = 0; found == 2 && edge < 2; edge++)
+                {
+                    const std::uint32_t line = lines[edge];
+                    const std::uint32_t inside = edge == 0 ? line + 1 : line - 1;
+                    const std::uint32_t outside = edge == 0 ? line - 1 : line + 1;
+                    for (std::uint32_t along = 0; along < across; along++)
+                    {
+                        const auto at = [&](std::uint32_t l)
+                        { return vertical ? view.word(l, along) : view.word(along, l); };
+                        wrong += !location_blend(at(line));
+                        wrong += at(inside) != kBandWord;
+                        wrong += at(outside) != kResolveClearWord;
+                    }
+                }
+                // One edge line even and one odd: both pixels of the quad.
+                const bool both_parities = found == 2 && ((lines[0] ^ lines[1]) & 1u) == 1u;
+                passed = found == 2 && wrong == 0 && both_parities;
+                log.number("agc_sample_locations", "blended_lines", found);
+                log.number("agc_sample_locations", "first_line", lines[0]);
+                log.number("agc_sample_locations", "second_line", lines[1]);
+                log.number("agc_sample_locations", "wrong_texels", static_cast<long long>(wrong));
+                if (found >= 1)
+                    log.hex("agc_sample_locations", "first_blend",
+                            vertical ? view.word(lines[0], 0) : view.word(0, lines[0]));
+            }
+            char detail[128]{};
+            std::snprintf(detail, sizeof(detail), "%u samples, %s edges through pixel centres",
+                          static_cast<unsigned>(samples), vertical ? "vertical" : "horizontal");
+            log.event("agc_sample_locations_frame", passed ? "PASS" : "FAIL", passed ? 0 : -1,
+                      detail);
+            passed_frames += passed ? 1u : 0u;
+            ps5vk_triangle_finish(&triangle);
+        }
+    }
+    outcome.command_built = true;
+    outcome.passed = frames == 6 && passed_frames == 6;
+    char detail[128]{};
+    std::snprintf(detail, sizeof(detail),
+                  "%u of %u frames blend every edge texel by half at 2, 4 and 8 samples",
+                  passed_frames, frames);
+    log.event("agc_sample_locations", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1,
+              detail);
+}
+
 // R5 (PS5_VULKAN_REQUESTS.md): the resolve destination's usage. This driver
 // stores an image in tiles when it declares COLOR_ATTACHMENT or
 // DEPTH_STENCIL_ATTACHMENT and in rows otherwise. The first frame's destination
@@ -26269,6 +26426,7 @@ constexpr RunnerTest kRunnerTests[] = {
     // resolved, and into a one-sample one, which the two readbacks must match
     // (run_vulkan_resolve_frames).
     {"c8-resolve", "m3-vertex", run_vulkan_resolve_frames},
+    {"r78-sample-locations", "m3-vertex", run_vulkan_sample_location_frames},
     // R6: one pass, two passes, and two passes with the resolve's copy between
     // them, each forty frames into one command buffer a frame
     // (run_vulkan_two_pass_frames).

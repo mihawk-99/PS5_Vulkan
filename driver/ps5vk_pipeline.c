@@ -1865,14 +1865,15 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
       return vk_errorf(device, VK_ERROR_UNKNOWN,
                        "a multisampled line list needs a probe of its own: only one-sample "
                        "lines are measured");
-   /* One sample or four (C8): the colour target's register block carries the
-    * count (ps5vk_draw.c, CB_COLOR0_ATTRIB.NUM_SAMPLES), and nothing in the
-    * compiled shader does. */
+   /* One sample, or two, four or eight (C8, R78): the colour target's register
+    * block carries the count (ps5vk_draw.c, CB_COLOR0_ATTRIB.NUM_SAMPLES), and
+    * the compiler is told it below. */
    if (info->pMultisampleState &&
        info->pMultisampleState->rasterizationSamples != VK_SAMPLE_COUNT_1_BIT &&
-       info->pMultisampleState->rasterizationSamples != VK_SAMPLE_COUNT_4_BIT)
+       !PS5VK_MULTISAMPLED(info->pMultisampleState->rasterizationSamples))
       return vk_errorf(device, VK_ERROR_UNKNOWN,
-                       "only one-sample and four-sample pipelines are supported");
+                       "a pipeline of %u samples; 1, 2, 4 and 8 are supported",
+                       (unsigned)info->pMultisampleState->rasterizationSamples);
 
    uint32_t push_constant_bytes = 0;
    VkShaderStageFlags push_constant_stages = 0;
@@ -1916,8 +1917,8 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
        * (docs/M5_PHASE_C.md). */
       .rasterization_samples =
          info->pMultisampleState &&
-               info->pMultisampleState->rasterizationSamples == VK_SAMPLE_COUNT_4_BIT
-            ? 4u
+               PS5VK_MULTISAMPLED(info->pMultisampleState->rasterizationSamples)
+            ? (uint32_t)info->pMultisampleState->rasterizationSamples
             : 0u,
    };
    struct ps5vk_vertex_binding vertex_bindings[PS5VK_MAX_VERTEX_BINDINGS] = {0};
