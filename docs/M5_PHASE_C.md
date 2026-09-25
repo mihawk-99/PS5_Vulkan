@@ -9562,3 +9562,30 @@ in ways that predate this round: c2-transfers crashes creating its buffers, and
 c2-indirect and b8-secondary no longer match their goldens (a context table five
 registers longer, which fits R78's sample locations written at one sample). That
 gate is the next driver item.
+
+## 2026-09-25 — R80: the shader cache writes its files on a thread of its own
+
+Rogue Leader stutters for its first half minute on a new driver build: each new
+pipeline stalls Dolphin, which creates them on the thread that draws. With an
+empty cache (the game from my save state, 120 s, 395 pipelines, 338 stages
+compiled), the compiles took 2,920 ms and pipeline creation 5,446 ms: 7.5 ms a
+compiled stage went to something other than the compiler. The CPU sampler named
+it: ps5vk_shader_cache_store, creating, writing and renaming each entry's file,
+with its fsync -- slow on the console's filesystem, and on the thread that
+asked for the pipeline.
+
+Dropping the fsync alone saved 0.6 ms a stage (6.9 ms remained). The store now
+copies the output into a queue that one writer thread drains, writing each file
+to a temporary name and renaming it as before; until its file is in place, a
+stored output loads from memory, and a device's destruction waits for the writes
+still pending, so the next launch finds everything. No fsync: a file a power cut
+leaves torn fails the load's size, key or checksum test and is compiled again.
+
+The same cold run on title e4babe86: 388 pipelines in 3,667 ms, 330 compiles in
+2,831 ms -- 2.5 ms a stage outside the compiler -- a third less pipeline time,
+the first three windows at 66, 76 and 86% where they were 62, 71 and 79, and 65
+late frames where there were 76. A warm run on the cache the writer filled
+compiles nothing: 267 pipelines in 59 ms, no invalid entry. The cache unit test
+now checks a stored output loads both from memory and, after a flush, from its
+file, and check-shader-cache's fresh-process warm launch still skips every
+compile.

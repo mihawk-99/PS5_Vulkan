@@ -49,11 +49,18 @@ int main(void)
       .machine_code = (void *)code, .machine_code_size = sizeof(code),
       .metadata = {.version = PSBC_SHADER_METADATA_VERSION}};
    ps5vk_shader_cache_store(&key, &source);
-   assert(ps5vk_shader_cache_load(&key, &output));
-   assert(output.size == sizeof(data) && output.machine_code_size == sizeof(code));
-   assert(!memcmp(output.data, data, sizeof(data)) && !memcmp(output.machine_code, code, sizeof(code)));
-   assert(!memcmp(&output.metadata, &source.metadata, sizeof(source.metadata)));
-   psbc_free_output(&output);
+   /* R80: the file is written by the cache's writer thread; a stored output
+    * loads at once, from memory until its file is in place, and from the file
+    * after the flush a device's destruction does. */
+   for (int from_file = 0; from_file < 2; from_file++) {
+      if (from_file)
+         ps5vk_shader_cache_flush();
+      assert(ps5vk_shader_cache_load(&key, &output));
+      assert(output.size == sizeof(data) && output.machine_code_size == sizeof(code));
+      assert(!memcmp(output.data, data, sizeof(data)) && !memcmp(output.machine_code, code, sizeof(code)));
+      assert(!memcmp(&output.metadata, &source.metadata, sizeof(source.metadata)));
+      psbc_free_output(&output);
+   }
    FILE *file = fopen(key.path, "r+b"); assert(file);
    assert(fseek(file, -1, SEEK_END) == 0); assert(fputc(42, file) != EOF); fclose(file);
    assert(!ps5vk_shader_cache_load(&key, &output));
@@ -62,6 +69,7 @@ int main(void)
    assert(!ps5vk_shader_cache_load(&key, &output));
    ps5vk_shader_cache_store(&key, &source);
    assert(ps5vk_shader_cache_load(&key, &output)); psbc_free_output(&output);
+   ps5vk_shader_cache_flush();
    unlink(key.path);
    puts("PASS: stable keys, input/option invalidation, exact output, corruption/truncation recovery");
    return 0;

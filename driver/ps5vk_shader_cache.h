@@ -18,4 +18,6 @@ bool ps5vk_shader_cache_nir_key(const struct nir_shader *nir,
 bool ps5vk_shader_cache_load(const struct ps5vk_shader_cache_key *key, PsbcShaderOutput *output);
 void ps5vk_shader_cache_store(const struct ps5vk_shader_cache_key *key,
                               const PsbcShaderOutput *output);
+/* Returns once every stored output's file is in place (a device's destruction). */
+void ps5vk_shader_cache_flush(void);
 #endif

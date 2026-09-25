@@ -11,6 +11,7 @@
  */
 
 #include "ps5vk_private.h"
+#include "ps5vk_shader_cache.h"
 
 #include <assert.h>
 
@@ -134,6 +135,9 @@ ps5vk_DestroyDevice(VkDevice _device, const VkAllocationCallbacks *pAllocator)
    ps5vk_meta_finish(device);
    if (device->queue_initialized)
       ps5vk_queue_finish(&device->queue);
+   /* The shader cache's writer finishes the files it was given (R80), so the
+    * next launch finds every pipeline this one compiled. */
+   ps5vk_shader_cache_flush();
    psbc_shutdown();
    vk_device_finish(&device->vk);
    vk_free(&device->vk.alloc, device);

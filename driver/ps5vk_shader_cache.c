@@ -3,7 +3,12 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Called under the existing compiler mutex. Save after each successful compile,
- * so a later application crash preserves completed work. Cache failures are
+ * so a later application crash preserves completed work. The file is written
+ * by a writer thread (R80): creating, writing and renaming a small file took
+ * about 3.5 ms a stage on the console, on the thread that asked for the
+ * pipeline -- Dolphin's, which draws nothing meanwhile. Until its file is in
+ * place, a stored output is loaded from memory, and a device's destruction
+ * waits for the writes still pending (ps5vk_shader_cache_flush). Cache failures are
  * misses, never Vulkan errors. NIR meta shaders use Mesa serialization as input.
  */
 #include "ps5vk_shader_cache.h"
@@ -11,6 +16,8 @@
 #include "util/detect_os.h"
 #include "util/mesa-blake3.h"
 #include <errno.h>
+#include <pthread.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -147,9 +154,68 @@ checksum(const struct cache_header *header, const PsbcShaderOutput *output, unsi
    _mesa_blake3_final(&hash, sum);
 }
 
+/* A stored output waiting for its file: the header with its checksum and copies
+ * of the two buffers. Immutable once queued, so a load reads it while the
+ * writer writes it; it leaves the queue, under the lock, once its file is in
+ * place. */
+struct cache_job {
+   struct cache_job *next;
+   char path[1024];
+   struct cache_header header;
+   void *data;
+   void *code;
+};
+
+static pthread_mutex_t cache_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t cache_queued = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t cache_drained = PTHREAD_COND_INITIALIZER;
+static struct cache_job *cache_head, *cache_tail;
+static bool cache_writer_started;
+
+static void
+cache_job_free(struct cache_job *job)
+{
+   free(job->data);
+   free(job->code);
+   free(job);
+}
+
+/* A queued output for key, copied into output, or false. Under cache_lock. */
+static bool
+cache_pending(const struct ps5vk_shader_cache_key *key, PsbcShaderOutput *output)
+{
+   for (const struct cache_job *job = cache_head; job; job = job->next) {
+      if (memcmp(job->header.key, key->digest, sizeof(job->header.key)) != 0)
+         continue;
+      PsbcShaderOutput copy = {0};
+      copy.size = job->header.data_bytes;
+      copy.machine_code_size = job->header.code_bytes;
+      copy.data = malloc(copy.size ? copy.size : 1);
+      copy.machine_code = malloc(copy.machine_code_size);
+      if (!copy.data || !copy.machine_code) {
+         psbc_free_output(&copy);
+         return false;
+      }
+      if (copy.size)
+         memcpy(copy.data, job->data, copy.size);
+      memcpy(copy.machine_code, job->code, copy.machine_code_size);
+      copy.metadata = job->header.metadata;
+      *output = copy;
+      return true;
+   }
+   return false;
+}
+
 bool
 ps5vk_shader_cache_load(const struct ps5vk_shader_cache_key *key, PsbcShaderOutput *output)
 {
+   pthread_mutex_lock(&cache_lock);
+   const bool pending = cache_pending(key, output);
+   pthread_mutex_unlock(&cache_lock);
+   if (pending) {
+      printf("[ps5vk] shader cache hit\n");
+      return true;
+   }
    FILE *file = fopen(key->path, "rb");
    if (!file)
       return false;
@@ -192,35 +258,108 @@ ps5vk_shader_cache_load(const struct ps5vk_shader_cache_key *key, PsbcShaderOutp
    return true;
 }
 
+/* The file itself: a temporary name, then a rename, so a reader never sees a
+ * partial entry. No fsync: it cost about 0.6 ms a stage and bought only
+ * power-loss durability, and a file a power cut leaves torn fails the load's
+ * size, key or checksum test and is compiled again. */
+static void
+cache_write(const struct cache_job *job)
+{
+   char temporary[1100];
+   snprintf(temporary, sizeof(temporary), "%s.%ld.tmp", job->path, (long)getpid());
+   FILE *file = fopen(temporary, "wb");
+   if (!file) {
+      fprintf(stderr, "[ps5vk] shader cache file unavailable; compiled shader remains usable\n");
+      return;
+   }
+   bool written = fwrite(&job->header, sizeof(job->header), 1, file) == 1 &&
+                  (!job->header.data_bytes ||
+                   fwrite(job->data, 1, job->header.data_bytes, file) == job->header.data_bytes) &&
+                  fwrite(job->code, 1, job->header.code_bytes, file) == job->header.code_bytes;
+   written = fflush(file) == 0 && written;
+   written = fclose(file) == 0 && written;
+   if (written && rename(temporary, job->path) == 0)
+      printf("[ps5vk] shader cache stored\n");
+   else {
+      unlink(temporary);
+      fprintf(stderr, "[ps5vk] shader cache write failed; compiled shader remains usable\n");
+   }
+}
+
+static void *
+cache_writer(void *unused)
+{
+   (void)unused;
+   pthread_mutex_lock(&cache_lock);
+   for (;;) {
+      while (!cache_head)
+         pthread_cond_wait(&cache_queued, &cache_lock);
+      struct cache_job *const job = cache_head;
+      pthread_mutex_unlock(&cache_lock);
+      cache_write(job);
+      pthread_mutex_lock(&cache_lock);
+      cache_head = job->next;
+      if (!cache_head) {
+         cache_tail = NULL;
+         pthread_cond_broadcast(&cache_drained);
+      }
+      cache_job_free(job);
+   }
+   return NULL;
+}
+
 void
 ps5vk_shader_cache_store(const struct ps5vk_shader_cache_key *key, const PsbcShaderOutput *output)
 {
    if (!output->machine_code || !output->machine_code_size ||
        output->size > CACHE_MAX_BYTES || output->machine_code_size > CACHE_MAX_BYTES)
       return;
-   struct cache_header header = {0};
-   memcpy(header.key, key->digest, sizeof(header.key));
-   header.data_bytes = output->size;
-   header.code_bytes = output->machine_code_size;
-   header.metadata = output->metadata;
-   checksum(&header, output, header.checksum);
-   char temporary[1100];
-   snprintf(temporary, sizeof(temporary), "%s.%ld.tmp", key->path, (long)getpid());
-   FILE *file = fopen(temporary, "wb");
-   if (!file) {
-      fprintf(stderr, "[ps5vk] shader cache file unavailable; compiled shader remains usable\n");
+   struct cache_job *const job = calloc(1, sizeof(*job));
+   if (!job)
+      return;
+   snprintf(job->path, sizeof(job->path), "%s", key->path);
+   memcpy(job->header.key, key->digest, sizeof(job->header.key));
+   job->header.data_bytes = output->size;
+   job->header.code_bytes = output->machine_code_size;
+   job->header.metadata = output->metadata;
+   checksum(&job->header, output, job->header.checksum);
+   job->data = malloc(output->size ? output->size : 1);
+   job->code = malloc(output->machine_code_size);
+   if (!job->data || !job->code) {
+      cache_job_free(job);
       return;
    }
-   bool written = fwrite(&header, sizeof(header), 1, file) == 1 &&
-                  (!output->size || fwrite(output->data, 1, output->size, file) == output->size) &&
-                  fwrite(output->machine_code, 1, output->machine_code_size, file) == output->machine_code_size;
-   written = fflush(file) == 0 && written;
-   written = fsync(fileno(file)) == 0 && written;
-   written = fclose(file) == 0 && written;
-   if (written && rename(temporary, key->path) == 0)
-      printf("[ps5vk] shader cache stored\n");
-   else {
-      unlink(temporary);
-      fprintf(stderr, "[ps5vk] shader cache write failed; compiled shader remains usable\n");
+   if (output->size)
+      memcpy(job->data, output->data, output->size);
+   memcpy(job->code, output->machine_code, output->machine_code_size);
+   pthread_mutex_lock(&cache_lock);
+   if (!cache_writer_started) {
+      pthread_t thread;
+      cache_writer_started = pthread_create(&thread, NULL, cache_writer, NULL) == 0;
+      if (cache_writer_started)
+         pthread_detach(thread);
    }
+   if (!cache_writer_started) {
+      /* No thread: write it here, as before. */
+      pthread_mutex_unlock(&cache_lock);
+      cache_write(job);
+      cache_job_free(job);
+      return;
+   }
+   if (cache_tail)
+      cache_tail->next = job;
+   else
+      cache_head = job;
+   cache_tail = job;
+   pthread_cond_signal(&cache_queued);
+   pthread_mutex_unlock(&cache_lock);
+}
+
+void
+ps5vk_shader_cache_flush(void)
+{
+   pthread_mutex_lock(&cache_lock);
+   while (cache_head)
+      pthread_cond_wait(&cache_drained, &cache_lock);
+   pthread_mutex_unlock(&cache_lock);
 }
