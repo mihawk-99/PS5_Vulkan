@@ -153,11 +153,9 @@ struct restart_writes {
 };
 
 static struct restart_writes
-restart_writes(VkDevice device)
+restart_writes_in(const uint32_t *words, uint32_t dwords)
 {
    struct restart_writes found = {0};
-   uint32_t dwords = 0;
-   const uint32_t *const words = ps5vk_debug_last_submission(device, &dwords);
    bool drawn = false;
    for (uint32_t at = 0; words != NULL && at < dwords;) {
       const uint32_t header = words[at];
@@ -176,6 +174,14 @@ restart_writes(VkDevice device)
       at += 1u + count;
    }
    return found;
+}
+
+static struct restart_writes
+restart_writes(VkDevice device)
+{
+   uint32_t dwords = 0;
+   const uint32_t *const words = ps5vk_debug_last_submission(device, &dwords);
+   return restart_writes_in(words, dwords);
 }
 #endif
 
@@ -328,6 +334,72 @@ draw_frame(const struct frame *frame, const uint32_t *vertex, size_t vertex_byte
       ps5vk_triangle_finish(&triangle);
 }
 
+#if defined(PS5VK_TEST_DIRECT)
+/* R65: the restarted quad in two render passes with a copy between them, the
+ * second pass loading what the first drew. The copy splits the submission, and
+ * the GPU starts every submission with restart off, so the second pass's draw
+ * has to turn it on again: three changes in all (on, on again after the split,
+ * off at the end), each behind an SQ_NON_EVENT, the second in the step after the
+ * split and before its draw. */
+static void
+restart_across_split(const uint32_t *vertex, size_t vertex_bytes, const uint32_t *pixel,
+                     size_t pixel_bytes)
+{
+   struct steps steps = {0};
+   const struct ps5vk_triangle_report report = {&steps, record_step};
+   struct ps5vk_triangle_input input = {0};
+   input.get_instance_proc_addr = GET_PROC;
+   input.pipeline_count = 1;
+   input.shaders[0] = (struct ps5vk_triangle_shaders){vertex, vertex_bytes, pixel, pixel_bytes};
+   input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+   input.report = &report;
+   input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+   input.vertex_data = kVertices;
+   input.vertex_count = 4;
+   input.vertex_stride = TOPOLOGY_STRIDE;
+   input.index_data = kRestarted;
+   input.index_count = 9;
+   input.primitive_restart = true;
+   input.attribute_count = 2;
+   input.attributes[0] = (VkVertexInputAttributeDescription){0, 0, VK_FORMAT_R32G32_SFLOAT, 0};
+   input.attributes[1] =
+      (VkVertexInputAttributeDescription){1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8};
+   input.primitive_topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+   input.two_passes = true;
+   input.split_between_passes = true;
+   struct ps5vk_triangle triangle = {0};
+   enum ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+   if (status == PS5VK_TRIANGLE_OK)
+      status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+   check(status == PS5VK_TRIANGLE_OK && steps.failed == NULL,
+         "restart across a split: the frame records, submits and signals its fence");
+   if (status == PS5VK_TRIANGLE_OK) {
+      ps5vk_debug_stage parts[4] = {{0}};
+      const uint32_t count = ps5vk_debug_submission_steps(triangle.device, parts, 4);
+      struct restart_writes total = {0};
+      struct restart_writes after = {0};
+      for (uint32_t at = 0; at < count && at < 4; at++) {
+         const struct restart_writes found = restart_writes_in(
+            parts[at].address, (uint32_t)(parts[at].bytes / sizeof(uint32_t)));
+         total.count += found.count;
+         total.after_event += found.after_event;
+         if (at == 1)
+            after = found;
+      }
+      check(count >= 2, "restart across a split: the copy splits the submission into steps");
+      check(total.count == 3 && total.after_event == 3,
+            "restart across a split: three restart changes, each behind an SQ_NON_EVENT");
+      check(after.before_draw >= 1,
+            "restart across a split: the step after the split turns restart on before its draw");
+      if (total.count != 3 || total.after_event != 3 || after.before_draw < 1)
+         printf("  (%u steps, %u changes, %u behind the event, %u before the second step's draw)\n",
+                count, total.count, total.after_event, after.before_draw);
+   }
+   if (status != PS5VK_TRIANGLE_IN_FLIGHT)
+      ps5vk_triangle_finish(&triangle);
+}
+#endif
+
 #if defined(__linux__)
 /* R60: a pixel stage whose code is larger than the runner's fixed stage layout
  * held (32 KiB; the layout's limit was 20 KiB, and Dolphin's ubershaders were
@@ -437,6 +509,10 @@ main(void)
    };
    for (size_t at = 0; vertex && pixel && at < sizeof(kFrames) / sizeof(kFrames[0]); at++)
       draw_frame(&kFrames[at], vertex, vertex_bytes, pixel, pixel_bytes);
+#if defined(PS5VK_TEST_DIRECT)
+   if (vertex && pixel)
+      restart_across_split(vertex, vertex_bytes, pixel, pixel_bytes);
+#endif
 
 #if defined(__linux__)
    {

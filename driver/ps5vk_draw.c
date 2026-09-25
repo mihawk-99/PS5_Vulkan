@@ -1974,6 +1974,23 @@ ps5vk_sq_non_event(struct ps5vk_agc_command_buffer *command)
    return packet;
 }
 
+/* R65: a copy splits the submission where it falls (ps5vk_queue.c), and the
+ * GPU starts every submission with primitive restart off: restart strips drawn
+ * after a copy with no draw between them fetched their restart indices as
+ * vertices while the recording held restart on (Wind Waker's minimap;
+ * jobs/r65-restart-split). A split recorded since the enable was last written
+ * therefore leaves it off. */
+static void
+ps5vk_cmd_buffer_restart_after_splits(struct ps5vk_cmd_buffer *cmd_buffer)
+{
+   const uint32_t splits =
+      (uint32_t)util_dynarray_num_elements(&cmd_buffer->copies, struct ps5vk_memory_copy);
+   if (splits != cmd_buffer->primitive_restart_splits) {
+      cmd_buffer->primitive_restart = false;
+      cmd_buffer->primitive_restart_splits = splits;
+   }
+}
+
 /* Puts primitive restart back to off at the end of a command buffer that left
  * it on (ps5vk_EndCommandBuffer): the draws write the enable only when it
  * changes, and every command buffer has to end as it started, with it off, for
@@ -1981,6 +1998,7 @@ ps5vk_sq_non_event(struct ps5vk_agc_command_buffer *command)
 void
 ps5vk_cmd_buffer_end_primitive_restart(struct ps5vk_cmd_buffer *cmd_buffer)
 {
+   ps5vk_cmd_buffer_restart_after_splits(cmd_buffer);
    if (!cmd_buffer->primitive_restart)
       return;
    struct ps5vk_agc_register *const table =
@@ -2564,6 +2582,7 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
     * vertices (Wind Waker's scenery). With the event first, a 64-instance draw
     * of 4096 indices is untouched by the write that follows it
     * (jobs/r64-restart-strips). */
+   ps5vk_cmd_buffer_restart_after_splits(cmd_buffer);
    const bool restart = indexed != NULL && pipeline->primitive_restart;
    const bool restart_changes = restart != cmd_buffer->primitive_restart;
    if (restart_changes && encoded) {

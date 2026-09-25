@@ -1,0 +1,20 @@
+{"schema":2,"event":"run_start","pid":506}
+{"schema":2,"event":"value","probe":"r65_restart_split","field":"flipped","value":0}
+{"schema":2,"event":"value","probe":"r65_restart_split","field":"missing","value":0}
+{"schema":2,"event":"value","probe":"r65_restart_split","field":"stray","value":0}
+{"schema":2,"event":"value","probe":"r65_restart_split","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r65_restart_split","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r65_restart_split","status":"PASS","result":0,"detail":"restart strips in two passes, a copy between them"}
+{"schema":2,"event":"value","probe":"r65_restart_split","field":"flipped","value":0}
+{"schema":2,"event":"value","probe":"r65_restart_split","field":"missing","value":0}
+{"schema":2,"event":"value","probe":"r65_restart_split","field":"stray","value":0}
+{"schema":2,"event":"value","probe":"r65_restart_split","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r65_restart_split","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r65_restart_split","status":"PASS","result":0,"detail":"the strips joined without restart, a copy between the passes"}
+{"schema":2,"event":"value","probe":"r65_restart_split","field":"flipped","value":0}
+{"schema":2,"event":"value","probe":"r65_restart_split","field":"missing","value":0}
+{"schema":2,"event":"value","probe":"r65_restart_split","field":"stray","value":0}
+{"schema":2,"event":"value","probe":"r65_restart_split","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r65_restart_split","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r65_restart_split","status":"PASS","result":0,"detail":"restart strips, a copy, then a draw without restart that fetches vertex 0xffff"}
+{"schema":2,"event":"value","probe":"r65_restart_split","field":"passed_frames","value":3}

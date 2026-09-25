@@ -82,6 +82,7 @@ ps5vk_cmd_buffer_clear_state(struct ps5vk_cmd_buffer *cmd_buffer)
    cmd_buffer->table_bytes_used = 0;
    cmd_buffer->pipeline = NULL;
    cmd_buffer->primitive_restart = false;
+   cmd_buffer->primitive_restart_splits = 0;
    /* A set bound before the reset does not stay bound: the recording that
     * follows is a new command buffer's, and a stale set there would be one the
     * application never bound in it (ps5vk_descriptor_set.c). */

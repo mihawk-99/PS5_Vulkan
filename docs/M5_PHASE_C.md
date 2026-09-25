@@ -9171,3 +9171,34 @@ fixed; R58, R62 and R63 still replay word for word.
 Gates: tools/check-driver.sh PASS (vk_v0_topology_test asserts both restart
 changes sit behind an SQ_NON_EVENT); jobs/r58-restart, r63-skinned and
 r64-restart-strips check.py and replay.py PASS.
+
+## 2026-09-24 — R65: every submission starts with primitive restart off
+
+After R64, Wind Waker (from a save state on Outset Island) drew thin triangles
+from the top-left corner of the screen to the minimap, and the minimap's panel
+spilled to the left edge; desktop Dolphin playing the same FIFO log drew
+neither. Bisecting by object range isolated objects 310-319 (the minimap):
+every console screenshot of that range differed from desktop Dolphin, and with
+Dolphin drawing lists instead of restart strips every one matched. Skipping
+line and point draws, or using Dolphin's software vertex loader, changed
+nothing. Three driver A/B switches over the same range: a VS_PARTIAL_FLUSH
+instead of the SQ_NON_EVENT, or a direct SET_UCONFIG_REG write, stayed broken;
+writing the enable before every indexed draw fixed it. The GPU had lost the
+enable while the recording held it on.
+
+A copy runs on the CPU at a point where the queue splits the command buffer's
+submission, and the console starts every submission with
+VGT_MULTI_PRIM_IB_RESET_EN off. R65's probe draws R64's strips in two render
+passes of one command buffer with a buffer fill between them and a loading
+second pass: before the fix (PID 501) that frame failed, and the controls
+(a clearing second pass; no restart) passed. A split recorded since the enable
+was last written now leaves it off, so the first restart draw after a split
+writes it again. A third frame shows the GPU really is off after a split: a
+draw without restart fetches vertex 0xffff with no write before it. PS5 PID 506:
+three frames PASS, R58/R62/R63/R64 pass in the same run, and the capture replays
+word for word. In the game the corner triangles and the minimap spill are gone.
+
+The test harness gained split_between_passes (a fill between two passes, a
+loading second pass, one pipeline a pass). vk_v0_topology_test asserts the
+three restart changes of a split frame. R64's probe code moved its pixel check
+into r64_check, shared with R65.

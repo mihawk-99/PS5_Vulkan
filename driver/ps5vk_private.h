@@ -651,8 +651,11 @@ struct ps5vk_cmd_buffer {
    struct ps5vk_pipeline *pipeline;
    /* R64: the primitive-restart enable (VGT_MULTI_PRIM_IB_RESET_EN) the words
     * recorded so far leave the hardware with. Draws write it only when it
-    * changes; every command buffer starts and ends with it off (ps5vk_draw.c). */
+    * changes; every command buffer starts and ends with it off, and so does
+    * every submission a copy splits it into (R65: primitive_restart_splits is
+    * how many copies were recorded when it was last known; ps5vk_draw.c). */
    bool primitive_restart;
+   uint32_t primitive_restart_splits;
    /* The descriptor sets bound for the next draws, by set index
     * (vkCmdBindDescriptorSets; ps5vk_descriptor_set.c), and the dynamic offset
     * each was bound with (VkBindDescriptorSetsInfo.pDynamicOffsets, D1). */

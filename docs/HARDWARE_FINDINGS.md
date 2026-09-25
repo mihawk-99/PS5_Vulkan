@@ -3283,3 +3283,14 @@ indices and for quads, single triangles and six-vertex strips. An SQ_NON_EVENT
 at the cost of a stall. This matches Mesa's public note on GFX10 and GFX10.3
 (ac_gpu_info.c, has_prim_restart_sync_bug) and RADV's handling of it. Evidence:
 jobs/r64-restart-strips (A/B build, then PID 449 with the fix).
+
+## 2026-09-24 — every submission starts with primitive restart off (R65)
+
+A command stream the queue submits after a split (the driver's CPU copies split
+a command buffer's submission) starts with VGT_MULTI_PRIM_IB_RESET_EN off, even
+when the words before the split left it on: restart strips drawn first after a
+copy fetched their 0xffff indices as vertices (PID 501), and a draw without
+restart after the same split fetched vertex 0xffff correctly with no write
+before it. Whether the reset comes from the console's submission path or the
+GPU's own state handling is not known; the driver treats a split like the start
+of a command buffer. Evidence: jobs/r65-restart-split.

@@ -620,6 +620,11 @@ struct ps5vk_triangle_input {
     * with primitiveRestartEnable false, so a two-draw frame changes restart
     * between its draws. */
    bool primitive_restart_first_only;
+   /* R65: with two_passes, fill a scratch buffer between the passes -- a copy,
+    * which the driver runs on the CPU where it splits the submission -- and
+    * load the target in the second pass instead of clearing it, so no draw
+    * falls between the two passes' draws. */
+   bool split_between_passes;
 };
 
 
@@ -712,6 +717,10 @@ struct ps5vk_triangle {
    VkBuffer index_buffer;
    VkDeviceMemory index_memory;
    void *index_mapped;
+   /* R65: the scratch buffer a split between the passes fills. */
+   bool split_between_passes;
+   VkBuffer split_buffer;
+   VkDeviceMemory split_memory;
    /* Whether the frame's draws go through the indirect buffer below (Phase
     * C2): what the caller asked for at create time. */
    bool indirect;

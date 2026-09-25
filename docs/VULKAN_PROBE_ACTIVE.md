@@ -13,23 +13,23 @@ mechanism, proved on the console and replayed on the host. The rounds so far,
 each with its job under jobs/ (docs/M5_PHASE_C.md, 2026-09-24): R57 border
 colours, R58 primitive restart, R59 gl_FragCoord with inverted depth, R60
 stages over 20 KiB, R61 one-layer array views (a gate), R62 uniform buffers as
-byte ranges, R63 Dolphin's skinned record (a gate), and R64: primitive restart
-is command-buffer state and every change of it follows an SQ_NON_EVENT. R58's
-bare write after each restart draw landed in the middle of the draw, and long
-restart strips (all of Wind Waker's scenery) fetched their restart indices as
-vertices. After R64 a FIFO log of Link on the ship deck matches desktop
-Dolphin except for thin stray lines on the left of the frame, which change
-from frame to frame.
+byte ranges, R63 Dolphin's skinned record (a gate), R64 primitive restart as
+command-buffer state behind SQ_NON_EVENT, and R65: every submission starts
+with restart off, so a copy (which splits the submission) leaves it off. After
+R65, Wind Waker from a save state on Outset Island draws without the stray
+triangles and minimap spill it had.
 
 Next, in order:
-1. Bisect the stray lines with the FIFO log's object range (Dolphin's debug
-   mode "objects A B" in the port) and reduce them to a probe.
-2. Wind Waker from its save state: correct picture, then speed at 1x.
-3. The torture profiles (6x IR, ubershaders, 16x AF, EFB to RAM, MSAA) only
-   after that.
+1. R62's uniform and push-constant descriptors use OOB_SELECT 2, which Mesa's
+   register header names DISABLED (no bounds check), not RAW (3): a robustness
+   fault to reduce and fix as R66.
+2. The replays of jobs/r23-r29 differ from their goldens by the five
+   per-draw context registers the per-draw-state round added (90 records
+   against 85); re-capture them or restate the registers.
+3. Wind Waker: speed at 1x, long play, then the torture profiles.
 
 vkQuake at 120 FPS and PPSSPP (God of War, Yu-Gi-Oh!) stay the regression
-titles. The test runner on the console (PPSA99988) holds the R64 build with
+titles. The test runner on the console (PPSA99988) holds the R65 build with
 jobs/regression/queue.txt queued.
 
 ## Standing work

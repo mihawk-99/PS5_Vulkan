@@ -1,0 +1,9 @@
+hold 1
+capture
+m2-solid
+r65-restart-split
+r64-restart-strips
+r58-restart
+r63-skinned
+r62-uniform-index
+exit

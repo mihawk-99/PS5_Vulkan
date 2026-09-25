@@ -21892,6 +21892,77 @@ bool r64_close(std::uint32_t word, std::uint32_t expected) noexcept
             return false;
     return true;
 }
+
+// Every pixel of a frame of R64's grid against its strips: a strip's quads in its
+// colour, the half-quad an odd strip ends with in its colour or the clear colour,
+// everything else the clear colour. A failing frame logs its first wrong pixels
+// and a map of its cells ('.' right, 'm' a strip's own pixels wrong, 's' pixels
+// drawn where the cell should be clear, 'X' both). Returns the wrong pixels.
+unsigned r64_check(const void *target, const std::vector<R64Strip> &strips, JsonLog &log,
+                   const char *probe) noexcept
+{
+    const FramebufferView view{static_cast<const std::uint32_t *>(target), kTiledRgba8Layout};
+    // Which way up the viewport puts row 0 is not this probe's business: the
+    // first strip's first triangle says.
+    const R64Strip &first = strips.front();
+    const std::uint32_t probe_x = first.x0 + (first.end - first.x0) / 8;
+    const std::uint32_t probe_y = first.top + (first.bottom - first.top) / 4;
+    const bool flipped = !r64_close(view.word(probe_x, probe_y), first.word) &&
+                         r64_close(view.word(probe_x, kOutputHeight - 1 - probe_y), first.word);
+    const std::uint32_t cell_w = kOutputWidth / kR64Columns;
+    const std::uint32_t cell_h = kOutputHeight / kR64Rows;
+    std::array<char, kR64Columns * kR64Rows> cells;
+    cells.fill('.');
+    unsigned missing = 0, stray = 0, logged = 0;
+    for (std::uint32_t y = 0; y < kOutputHeight; ++y)
+        for (std::uint32_t x = 0; x < kOutputWidth; ++x)
+        {
+            const std::uint32_t layout_y = flipped ? kOutputHeight - 1 - y : y;
+            const unsigned cell = (layout_y / cell_h) * kR64Columns + x / cell_w;
+            const std::uint32_t word = view.word(x, y);
+            bool good = word == kR64Clear;
+            bool inside = false;
+            if (cell < strips.size())
+            {
+                const R64Strip &strip = strips[cell];
+                const bool rows = layout_y >= strip.top && layout_y < strip.bottom;
+                inside = rows && x >= strip.x0 && x < strip.full_end;
+                if (inside)
+                    good = r64_close(word, strip.word);
+                else if (rows && x >= strip.full_end && x < strip.end)
+                    good = good || r64_close(word, strip.word);
+            }
+            if (good)
+                continue;
+            (inside ? missing : stray)++;
+            if (logged < 6 && (x % 16 == 0))
+            {
+                ++logged;
+                log.number(probe, "wrong_x", x);
+                log.number(probe, "wrong_y", y);
+                log.hex(probe, "wrong_word", word);
+            }
+            const char mark = inside ? 'm' : 's';
+            if (cell < cells.size())
+                cells[cell] = cells[cell] == '.' || cells[cell] == mark ? mark : 'X';
+        }
+    const unsigned mismatches = missing + stray;
+    if (mismatches != 0)
+        for (unsigned row = 0; row < kR64Rows; ++row)
+        {
+            char line[kR64Columns + 1];
+            std::copy(cells.begin() + row * kR64Columns, cells.begin() + (row + 1) * kR64Columns,
+                      line);
+            line[kR64Columns] = '\0';
+            log.text(probe, "cells", line);
+        }
+    log.number(probe, "flipped", flipped ? 1u : 0u);
+    log.number(probe, "missing", missing);
+    log.number(probe, "stray", stray);
+    log.number(probe, "mismatches", mismatches);
+    log.number(probe, "pixels", kOutputWidth * kOutputHeight);
+    return mismatches;
+}
 } // namespace
 
 void run_vulkan_restart_strip_frames(const TestContext &test, TestOutcome &outcome) noexcept
@@ -22022,70 +22093,10 @@ void run_vulkan_restart_strip_frames(const TestContext &test, TestOutcome &outco
         }
         if (drew)
         {
-            const FramebufferView view{static_cast<const std::uint32_t *>(triangle.target),
-                                       kTiledRgba8Layout};
-            // Which way up the viewport puts row 0 is not this probe's business:
-            // the first strip's first triangle says.
-            const R64Strip &first = strips.front();
-            const std::uint32_t probe_x = first.x0 + (first.end - first.x0) / 8;
-            const std::uint32_t probe_y = first.top + (first.bottom - first.top) / 4;
-            const bool flipped =
-                !r64_close(view.word(probe_x, probe_y), first.word) &&
-                r64_close(view.word(probe_x, kOutputHeight - 1 - probe_y), first.word);
-            const std::uint32_t cell_w = kOutputWidth / kR64Columns;
-            const std::uint32_t cell_h = kOutputHeight / kR64Rows;
-            std::array<char, kR64Columns * kR64Rows> cells;
-            cells.fill('.');
-            unsigned missing = 0, stray = 0, logged = 0;
-            for (std::uint32_t y = 0; y < kOutputHeight; ++y)
-                for (std::uint32_t x = 0; x < kOutputWidth; ++x)
-                {
-                    const std::uint32_t layout_y = flipped ? kOutputHeight - 1 - y : y;
-                    const unsigned cell = (layout_y / cell_h) * kR64Columns + x / cell_w;
-                    const std::uint32_t word = view.word(x, y);
-                    bool good = word == kR64Clear;
-                    bool inside = false;
-                    if (cell < strips.size())
-                    {
-                        const R64Strip &strip = strips[cell];
-                        const bool rows = layout_y >= strip.top && layout_y < strip.bottom;
-                        inside = rows && x >= strip.x0 && x < strip.full_end;
-                        if (inside)
-                            good = r64_close(word, strip.word);
-                        else if (rows && x >= strip.full_end && x < strip.end)
-                            good = good || r64_close(word, strip.word);
-                    }
-                    if (good)
-                        continue;
-                    (inside ? missing : stray)++;
-                    if (logged < 6 && (x % 16 == 0))
-                    {
-                        ++logged;
-                        log.number("r64_restart_strips", "wrong_x", x);
-                        log.number("r64_restart_strips", "wrong_y", y);
-                        log.hex("r64_restart_strips", "wrong_word", word);
-                    }
-                    const char mark = inside ? 'm' : 's';
-                    if (cell < cells.size())
-                        cells[cell] = cells[cell] == '.' || cells[cell] == mark ? mark : 'X';
-                }
-            const unsigned mismatches = missing + stray;
-            if (mismatches != 0)
-                for (unsigned row = 0; row < kR64Rows; ++row)
-                {
-                    char line[kR64Columns + 1];
-                    std::copy(cells.begin() + row * kR64Columns,
-                              cells.begin() + (row + 1) * kR64Columns, line);
-                    line[kR64Columns] = '\0';
-                    log.text("r64_restart_strips", "cells", line);
-                }
+            const unsigned mismatches =
+                r64_check(triangle.target, strips, log, "r64_restart_strips");
             log.number("r64_restart_strips", "strips", static_cast<unsigned>(strips.size()));
             log.number("r64_restart_strips", "indices", static_cast<unsigned>(draw_indices.size()));
-            log.number("r64_restart_strips", "flipped", flipped ? 1u : 0u);
-            log.number("r64_restart_strips", "missing", missing);
-            log.number("r64_restart_strips", "stray", stray);
-            log.number("r64_restart_strips", "mismatches", mismatches);
-            log.number("r64_restart_strips", "pixels", kOutputWidth * kOutputHeight);
             log.event("r64_restart_strips", mismatches == 0 ? "PASS" : "FAIL",
                       mismatches == 0 ? 0 : -1, frame.name);
             passed += mismatches == 0;
@@ -22097,6 +22108,138 @@ void run_vulkan_restart_strip_frames(const TestContext &test, TestOutcome &outco
     outcome.command_built = passed != 0;
     outcome.passed = passed == std::size(kFrames);
     log.number("r64_restart_strips", "passed_frames", passed);
+}
+
+// R65: primitive restart across a submission split. The driver runs a copy on the
+// CPU where it splits a command buffer's submission, and R64 writes the restart
+// enable only when a draw needs the other value. Wind Waker's minimap drew
+// triangles to the corner of the screen when its restart strips followed such a
+// split with no draw between: restart was off on the GPU while the recording
+// held it on. Each frame draws R64's 2138-index strips in two render passes of
+// one command buffer, fills a buffer between them (the split) and loads what the
+// first pass drew in the second; every frame allocates the same buffers, so a PC
+// replay can pin them.
+void run_vulkan_restart_split_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8},
+    };
+    struct Frame
+    {
+        const char *name;
+        bool split;
+        bool restart;
+        // The second pass draws, through a pipeline without restart, quads whose
+        // records end at local index 0xffff, instead of the first pass's strips.
+        bool second;
+    };
+    static const Frame kFrames[] = {
+        {"restart strips in two passes, a copy between them", true, true, false},
+        {"the strips joined without restart, a copy between the passes", true, false, false},
+        {"restart strips, a copy, then a draw without restart that fetches vertex 0xffff", true,
+         true, true},
+    };
+    // Every frame's buffers are the same size, so the console places them alike:
+    // records for the full 16-bit index range and a poison tail.
+    constexpr std::size_t kRecords = 65536 + 64;
+    constexpr std::size_t kIndices = 4096;
+    unsigned passed = 0;
+    for (const Frame &frame : kFrames)
+    {
+        std::vector<R64Strip> strips;
+        std::vector<float> strip_records;
+        r64_strips(2138, 0, strips, strip_records);
+        const std::uint32_t vertex_count = static_cast<std::uint32_t>(strip_records.size() / 6);
+        std::vector<std::uint16_t> draw_indices;
+        r64_indices(strips, 0, strips.size(), 0, frame.restart, draw_indices);
+        const std::uint32_t first_draw_indices =
+            frame.second ? static_cast<std::uint32_t>(draw_indices.size()) : 0;
+        std::vector<float> second_records;
+        if (frame.second)
+        {
+            // The quads take the cells after the strips.
+            const std::size_t first_strips = strips.size();
+            r64_strips(200, 4, strips, second_records);
+            r64_indices(strips, first_strips, strips.size(),
+                        65536u - static_cast<unsigned>(second_records.size() / 6), false,
+                        draw_indices);
+        }
+        std::vector<float> records(kRecords * 6);
+        for (std::size_t record = 0; record < kRecords; ++record)
+        {
+            const float poison[6] = {record % 3 == 0 ? -1.5f : (record % 3 == 1 ? 1.5f : 0.0f),
+                                     record % 2 == 0 ? -1.5f : 1.5f,
+                                     1.0f,
+                                     0.0f,
+                                     1.0f,
+                                     1.0f};
+            std::copy(std::begin(poison), std::end(poison), records.begin() + record * 6);
+        }
+        std::copy(strip_records.begin(), strip_records.end(), records.begin());
+        std::copy(second_records.begin(), second_records.end(),
+                  records.begin() + 65536 * 6 - second_records.size());
+        std::vector<std::uint16_t> indices(kIndices, static_cast<std::uint16_t>(vertex_count));
+        std::copy(draw_indices.begin(), draw_indices.end(), indices.begin());
+
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], g_strip_shaders, log))
+            return;
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = frame.second ? 2 : 1;
+        input.shaders[0] = g_strip_shaders;
+        input.shaders[1] = g_strip_shaders;
+        input.primitive_restart_first_only = frame.second;
+        input.first_draw_indices = first_draw_indices;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = records.data();
+        input.vertex_count = static_cast<std::uint32_t>(kRecords);
+        input.vertex_stride = kVertexStride;
+        input.index_data = indices.data();
+        input.index_count = static_cast<std::uint32_t>(kIndices);
+        input.draw_index_count = static_cast<std::uint32_t>(draw_indices.size());
+        input.attribute_count = 2;
+        input.attributes[0] = attributes[0];
+        input.attributes[1] = attributes[1];
+        input.primitive_topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+        input.primitive_restart = frame.restart;
+        input.two_passes = true;
+        input.split_between_passes = frame.split;
+        ps5vk_triangle triangle{};
+        ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, frame.second ? PS5VK_TRIANGLE_ONE_COMMAND_BUFFER
+                                                                 : PS5VK_TRIANGLE_ONE_DRAW);
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            return;
+        }
+        const bool drew = status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes;
+        if (test.capture && drew)
+        {
+            log_driver_submission(triangle.device, frame.name, log);
+            log_driver_stages(triangle.device, log);
+        }
+        if (drew)
+        {
+            const unsigned mismatches =
+                r64_check(triangle.target, strips, log, "r65_restart_split");
+            log.event("r65_restart_split", mismatches == 0 ? "PASS" : "FAIL",
+                      mismatches == 0 ? 0 : -1, frame.name);
+            passed += mismatches == 0;
+        }
+        ps5vk_triangle_finish(&triangle);
+        if (status != PS5VK_TRIANGLE_OK)
+            break;
+    }
+    outcome.command_built = passed != 0;
+    outcome.passed = passed == std::size(kFrames);
+    log.number("r65_restart_split", "passed_frames", passed);
 }
 
 // R62: a uniform array indexed by a vertex attribute, the way Dolphin picks each
@@ -25925,6 +26068,7 @@ constexpr RunnerTest kRunnerTests[] = {
     {"r62-uniform-index", "r62-uniform-index", run_vulkan_uniform_index_frames},
     {"r63-skinned", "r63-skinned", run_vulkan_skinned_record_frames},
     {"r64-restart-strips", "m3-vertex", run_vulkan_restart_strip_frames},
+    {"r65-restart-split", "m3-vertex", run_vulkan_restart_split_frames},
     {"r18-padded-mips", "c7-mip", run_vulkan_padded_mip_frames},
     {"r18-mip-addresses", "c7-mip", run_vulkan_padded_mip_addresses},
     {"r18-small-mips", "c7-mip", run_vulkan_small_padded_mips},

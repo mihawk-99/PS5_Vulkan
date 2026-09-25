@@ -560,6 +560,11 @@ create_geometry(struct ps5vk_triangle *triangle, VkPhysicalDevice physical,
                               &triangle->index_memory, &triangle->index_mapped))) {
       return false;
    }
+   triangle->split_between_passes = input->split_between_passes;
+   if (input->split_between_passes &&
+       !create_buffer(triangle, physical, 256, VK_BUFFER_USAGE_TRANSFER_DST_BIT, "split", NULL,
+                      &triangle->split_buffer, &triangle->split_memory, NULL))
+      return false;
    return true;
 }
 
@@ -3637,8 +3642,13 @@ record(struct ps5vk_triangle *triangle, VkCommandBuffer command, VkRenderPass pa
       .clearValueCount = triangle->depth ? 2u : 1u,
       .pClearValues = triangle->depth ? clears : &clear,
    };
+   /* R65: a split frame with a second pipeline draws the first pass with the
+    * first pipeline alone and the second pass with the second alone, so the
+    * second pipeline's draw is the first thing after the split. */
+   const bool split_pipelines =
+      triangle->two_passes && triangle->split_between_passes && then != VK_NULL_HANDLE;
    CALL(triangle, CmdBeginRenderPass)(command, &pass_begin, VK_SUBPASS_CONTENTS_INLINE);
-   record_body(triangle, command, pipeline, then);
+   record_body(triangle, command, pipeline, split_pipelines ? VK_NULL_HANDLE : then);
    CALL(triangle, CmdEndRenderPass)(command);
    if (triangle->detached_pass != VK_NULL_HANDLE) {
       const VkRenderPassBeginInfo detached = {
@@ -3674,8 +3684,25 @@ record(struct ps5vk_triangle *triangle, VkCommandBuffer command, VkRenderPass pa
                                          triangle->images[0], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                                          &region);
       }
-      CALL(triangle, CmdBeginRenderPass)(command, &pass_begin, VK_SUBPASS_CONTENTS_INLINE);
-      record_body(triangle, command, pipeline, then);
+      if (triangle->split_between_passes) {
+         /* R65: a copy between the passes splits the submission, and the
+          * second pass loads what the first drew, so its draws are the first
+          * words after the split. */
+         CALL(triangle, CmdFillBuffer)(command, triangle->split_buffer, 0, 256, 0x5053564bu);
+         const VkRenderPassBeginInfo load_begin = {
+            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+            .renderPass = triangle->load_pass,
+            .framebuffer = framebuffer,
+            .renderArea = {{0, 0}, {PS5VK_TRIANGLE_WIDTH, PS5VK_TRIANGLE_HEIGHT}},
+         };
+         CALL(triangle, CmdBeginRenderPass)(command, &load_begin, VK_SUBPASS_CONTENTS_INLINE);
+      } else {
+         CALL(triangle, CmdBeginRenderPass)(command, &pass_begin, VK_SUBPASS_CONTENTS_INLINE);
+      }
+      if (split_pipelines)
+         record_body(triangle, command, then, VK_NULL_HANDLE);
+      else
+         record_body(triangle, command, pipeline, then);
       CALL(triangle, CmdEndRenderPass)(command);
    }
    if ((triangle->query_pool != VK_NULL_HANDLE || triangle->timestamp_pool != VK_NULL_HANDLE) &&
@@ -4292,6 +4319,8 @@ ps5vk_triangle_finish(struct ps5vk_triangle *triangle)
          CALL(triangle, UnmapMemory)(device, triangle->index_memory);
       CALL(triangle, DestroyBuffer)(device, triangle->index_buffer, NULL);
       CALL(triangle, FreeMemory)(device, triangle->index_memory, NULL);
+      CALL(triangle, DestroyBuffer)(device, triangle->split_buffer, NULL);
+      CALL(triangle, FreeMemory)(device, triangle->split_memory, NULL);
       /* Phase V0-query's copied result: zero handles when no frame asked for
        * the copy. */
       if (triangle->query_copy_mapped != NULL)
