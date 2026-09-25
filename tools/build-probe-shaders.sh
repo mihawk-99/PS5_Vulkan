@@ -65,7 +65,7 @@
 # bindings.txt layout the title needs when the shaders read resources,
 # SHA256SUMS and PROVENANCE.txt, after checking the compiler metadata.
 #
-# Run from the repository root:  bash tools/build-probe-shaders.sh m2|m3-uniform|v0-robust|m3-vertex|m3-texture|m4-depth|m4-blend|b7-corner|b8-corner|c1-clear|c3-quad|c7-mip|c7-mip-linear|c7-diag|c2-instance|c8-sampleid|v0-vertex-sint|v0-vertex-uint|v0-vertex-bytes-float|v0-vertex-bytes-uint|v0-vertex-bytes-sint|v0-array|v0-cube|v0-push|v0-texture-uint|v0-texture-sint|v0-target-uint|v0-target-sint
+# Run from the repository root:  bash tools/build-probe-shaders.sh m2|m3-uniform|v0-robust|m3-vertex|m3-texture|m4-depth|m4-blend|b7-corner|b8-corner|c1-clear|c3-quad|c7-mip|c7-mip-linear|c7-diag|c2-instance|c8-sampleid|v0-vertex-sint|v0-vertex-uint|v0-vertex-bytes-float|v0-vertex-bytes-uint|v0-vertex-bytes-sint|v0-array|v0-cube|v0-push|v0-texture-uint|v0-texture-sint|v0-target-uint|v0-target-sint|r71-dual-source
 set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -732,6 +732,20 @@ m4-blend)
     # SPI_SHADER_COL_FORMAT after the compiler packs the one written MRT.
     expected_col_format=4
     ;;
+r71-dual-source)
+    # R71: the m4-blend vertex stage and a pixel stage with a second colour
+    # source (location 0, index 1). The compiler exports it to MRT1 with MRT0's
+    # FP16 format, so the packed SPI_SHADER_COL_FORMAT holds two.
+    vertex_source=shaders/m4/depth_colour.vert
+    pixel_source=shaders/r71/dual_source.frag
+    output=probes/r71-dual-source
+    vertex_flags=(--address32-hi 2
+        --vertex-attribute 0:r32g32b32_float:0:0:28:4
+        --vertex-attribute 1:r32g32b32a32_float:0:12:28:4)
+    pixel_flags=(--address32-hi 2 --color-format 0x99999994)
+    pixel_compiler="$root/build/host/opengnm-psbc-probe"
+    expected_col_format=68
+    ;;
 b7-corner)
     vertex_source=shaders/b7/corner.vert
     pixel_source=shaders/m2/solid.frag
@@ -1199,7 +1213,7 @@ elif set_name == "m3-vertex":
     bindings = [("address32_hi", expected_hi),
                 *vertex_input("vertex attributes: location 0 r32g32_float offset 0, "
                               "location 1 r32g32b32a32_float offset 8, stride 24, binding 0")]
-elif set_name in ("m4-depth", "m4-blend"):
+elif set_name in ("m4-depth", "m4-blend", "r71-dual-source"):
     if pixel.get("descriptor_bindings"):
         fail("pixel stage unexpectedly declares descriptor bindings")
     bindings = [("address32_hi", expected_hi),

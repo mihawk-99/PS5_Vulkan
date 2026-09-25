@@ -54,6 +54,15 @@ static const struct vk_features ps5vk_features = {
     * ANISO_THRESHOLD and ANISO_BIAS and the anisotropic XY filters, as RADV
     * encodes them (ps5vk_image.c, ps5vk_CreateSampler). */
    .samplerAnisotropy = true,
+   /* R71: dual-source blending. A pixel shader that writes a second colour
+    * (location 0, index 1) exports it to MRT1 with MRT0's format, and the
+    * compiler's SPI_SHADER_COL_FORMAT and CB_SHADER_MASK carry both
+    * (psbc_compile.c, RADV's mrt0_is_dual_src); the SRC1 blend factors read it
+    * (ps5vk_pipeline.c). Dolphin needs it for the destination-alpha and
+    * blending modes its fallback cannot reproduce: without it Resident Evil 4's
+    * haze covered the whole frame, on the console and in desktop Dolphin with
+    * the feature switched off alike. */
+   .dualSrcBlend = true,
 };
 
 /* Presentation to VideoOut (ps5vk_wsi.c, Phase C1). */
@@ -115,7 +124,7 @@ ps5vk_get_properties(struct vk_properties *p)
       /* No tessellation or geometry shaders: all their limits are 0. */
       .maxFragmentInputComponents = 64,
       .maxFragmentOutputAttachments = 4,
-      .maxFragmentDualSrcAttachments = 0, /* no dualSrcBlend */
+      .maxFragmentDualSrcAttachments = 1, /* dualSrcBlend: MRT0's second source (R71) */
       .maxFragmentCombinedOutputResources = 4,
       .maxComputeSharedMemorySize = 16384,
       .maxComputeWorkGroupCount = {65535, 65535, 65535},

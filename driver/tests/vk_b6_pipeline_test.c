@@ -43,24 +43,34 @@ struct pipeline_description {
    /* Which stages the pipeline has: both (0), the vertex stage alone (1) or the
     * fragment stage alone (2). */
    unsigned stages;
+   /* R71: blend with the second source's factors (SRC1_COLOR and
+    * ONE_MINUS_SRC1_COLOR, SRC1_ALPHA and ONE_MINUS_SRC1_ALPHA). */
+   bool dual_source;
 };
 
 static const struct pipeline_description kProbeSets[] = {
-   {"m2", 0, {{0}}, 0, NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0},
-   {"m3", 0, {{0}}, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0},
+   {"m2", 0, {{0}}, 0, NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0, false},
+   {"m3", 0, {{0}}, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0, false},
    {"m3-vertex", 2,
     {{0, 0, VK_FORMAT_R32G32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8}}, 24,
-    NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0},
+    NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0, false},
    {"m3-texture", 2, {{0, 0, VK_FORMAT_R32G32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32_SFLOAT, 8}}, 16,
-    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0},
+    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0, false},
    {"m4-depth", 2,
     {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}}, 28,
-    NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0},
+    NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0, false},
    {"m4-blend", 2,
     {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}}, 28,
-    NO_DESCRIPTOR, true, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0},
+    NO_DESCRIPTOR, true, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0, false},
    /* Phase B7's orientation probe: the M2 set's options, a half-target triangle. */
-   {"b7-corner", 0, {{0}}, 0, NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0},
+   {"b7-corner", 0, {{0}}, 0, NO_DESCRIPTOR, false, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0, false},
+   /* R71: a second colour source, blended with the SRC1 factors. The probe
+    * build compiled its pixel stage with MRT0 FP16 and checked the packed
+    * SPI_SHADER_COL_FORMAT 0x44 -- the second source exported to MRT1 in
+    * MRT0's format -- so an equal package is the driver's dual-source path. */
+   {"r71-dual-source", 2,
+    {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12}}, 28,
+    NO_DESCRIPTOR, true, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, NULL, 0.0f, false, 0, true},
 };
 
 static VkShaderModule
@@ -186,11 +196,15 @@ create_pipeline(const struct pipeline_description *description, VkShaderModule v
       };
       const VkPipelineColorBlendAttachmentState blend_attachment = {
          .blendEnable = description->blend,
-         .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
-         .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+         .srcColorBlendFactor = description->dual_source ? VK_BLEND_FACTOR_SRC1_COLOR
+                                                         : VK_BLEND_FACTOR_SRC_ALPHA,
+         .dstColorBlendFactor = description->dual_source ? VK_BLEND_FACTOR_ONE_MINUS_SRC1_COLOR
+                                                         : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
          .colorBlendOp = VK_BLEND_OP_ADD,
-         .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-         .dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+         .srcAlphaBlendFactor = description->dual_source ? VK_BLEND_FACTOR_SRC1_ALPHA
+                                                         : VK_BLEND_FACTOR_ONE,
+         .dstAlphaBlendFactor = description->dual_source ? VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA
+                                                         : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
          .alphaBlendOp = VK_BLEND_OP_ADD,
          .colorWriteMask = 0xf,
       };

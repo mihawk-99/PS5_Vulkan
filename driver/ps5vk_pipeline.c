@@ -349,9 +349,9 @@ ps5vk_vertex_input_options(struct ps5vk_device *device,
  * register headers number them for CB_BLEND0_CONTROL (V_028780_BLEND_* and
  * V_028780_COMB_*). VkBlendFactor's numbering is not AMD's: Vulkan's 4 and 5 are
  * the destination-colour factors where AMD's are the source-alpha ones, so the
- * mapping is a table rather than a cast. The constant and SRC1 factors would
- * need the blend-constant registers or a second colour source, which this
- * driver programs neither of: they are refused by name. */
+ * mapping is a table rather than a cast. The constant factors read the
+ * blend-constant registers and the SRC1 factors the pixel shader's second
+ * colour, which the compiler exports to MRT1 (R71). */
 static bool
 ps5vk_blend_factor(VkBlendFactor factor, uint32_t *value)
 {
@@ -404,10 +404,21 @@ ps5vk_blend_factor(VkBlendFactor factor, uint32_t *value)
    case VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA:
       *value = 20; /* V_028780_BLEND_ONE_MINUS_CONSTANT_ALPHA */
       return true;
+   /* R71: the second source's factors, which Vulkan and AMD number alike
+    * (V_028780_BLEND_SRC1_COLOR 15 to BLEND_INV_SRC1_ALPHA 18, gfx103). */
+   case VK_BLEND_FACTOR_SRC1_COLOR:
+      *value = 15;
+      return true;
+   case VK_BLEND_FACTOR_ONE_MINUS_SRC1_COLOR:
+      *value = 16;
+      return true;
+   case VK_BLEND_FACTOR_SRC1_ALPHA:
+      *value = 17;
+      return true;
+   case VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA:
+      *value = 18;
+      return true;
    default:
-      /* The SRC1 factors (15 to 18) are the ones left: Vulkan requires
-       * dualSrcBlend for them, this device reports maxFragmentDualSrcAttachments
-       * 0, and a valid application cannot ask for them. */
       return false;
    }
 }
@@ -1611,9 +1622,7 @@ ps5vk_draw_refusal(const VkGraphicsPipelineCreateInfo *info,
    for (uint32_t index = 0; blend && index < blend->attachmentCount; index++) {
       uint32_t word = 0;
       if (!ps5vk_blend_control(&blend->pAttachments[index], &word))
-         return "drawing with a blend factor this driver cannot program: the second-source "
-                "factors need dual-source blending, which this device does not advertise "
-                "(maxFragmentDualSrcAttachments 0)";
+         return "drawing with a blend factor this driver cannot program";
       /* Vulkan: blending is not supported for an integer attachment, and the CB
        * bypasses it for one (Mesa's ac_build_cb_state). A pipeline that asks for
        * both is refused rather than drawn unblended. */

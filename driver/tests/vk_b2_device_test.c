@@ -78,8 +78,10 @@ check_properties(VkInstance instance, VkPhysicalDevice physical)
             l->maxDescriptorSetStorageImages == 12,
          "per-set descriptors for 3 shader stages (footnote 8)");
    check(l->maxTessellationGenerationLevel == 0 && l->maxGeometryOutputVertices == 0 &&
-            l->maxFragmentDualSrcAttachments == 0 && l->maxClipDistances == 0,
+            l->maxClipDistances == 0,
          "limits of unsupported features are 0");
+   check(l->maxFragmentDualSrcAttachments == 1,
+         "one dual-source attachment, as dualSrcBlend asks (R71)");
    check(l->maxViewports == 1 && l->maxSamplerAnisotropy == 16.0f &&
             l->maxDrawIndexedIndexValue == 0xffffff && l->maxDrawIndirectCount == 1,
          "single viewport, 16x anisotropy, 24-bit indices, single indirect draw");
@@ -109,8 +111,11 @@ check_properties(VkInstance instance, VkPhysicalDevice physical)
    bool only_robust = true;
    for (size_t i = 0; i < sizeof(features) / sizeof(VkBool32); i++)
       only_robust = only_robust && (flags[i] == VK_FALSE || &flags[i] == &features.robustBufferAccess ||
-                                    &flags[i] == &features.samplerAnisotropy);
+                                    &flags[i] == &features.samplerAnisotropy ||
+                                    &flags[i] == &features.dualSrcBlend);
    check(features.samplerAnisotropy == VK_TRUE, "samplerAnisotropy is on (PPSSPP's 16x filtering)");
+   check(features.dualSrcBlend == VK_TRUE,
+         "dualSrcBlend is on (R71: Dolphin's destination alpha, Resident Evil 4's haze)");
    check(only_robust, "every other Vulkan 1.0 feature is off");
 
    uint32_t families = 0;

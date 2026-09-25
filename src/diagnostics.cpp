@@ -23473,7 +23473,8 @@ void run_vulkan_transfer16_frames(const TestContext &test, TestOutcome &outcome)
 // channels in another order is off by far more than one.
 constexpr std::uint32_t kConstantBlendWord = rgba_bytes_word(0x6c, 0x58, 0x88);
 
-bool check_constant_blend_frame(void *target, JsonLog &log) noexcept
+bool check_constant_blend_frame(void *target, JsonLog &log,
+                                const char *probe = "agc_v0_blend_constant") noexcept
 {
     flush_gpu_data(target, kFramebufferBytes);
     const auto *const words = static_cast<const std::uint32_t *>(target);
@@ -23494,14 +23495,14 @@ bool check_constant_blend_frame(void *target, JsonLog &log) noexcept
             wrong += error > 1u ? 1u : 0u;
         }
     const std::size_t pixels = (std::size_t)kOutputWidth * kOutputHeight;
-    log.hex("agc_v0_blend_constant", "expected_word", kConstantBlendWord);
-    log.hex("agc_v0_blend_constant", "first_word", first_word);
-    log.number("agc_v0_blend_constant", "pixels", static_cast<long long>(pixels));
-    log.number("agc_v0_blend_constant", "within_one", static_cast<long long>(within));
-    log.number("agc_v0_blend_constant", "wrong", static_cast<long long>(wrong));
-    log.number("agc_v0_blend_constant", "max_channel_error", static_cast<long long>(max_error));
+    log.hex(probe, "expected_word", kConstantBlendWord);
+    log.hex(probe, "first_word", first_word);
+    log.number(probe, "pixels", static_cast<long long>(pixels));
+    log.number(probe, "within_one", static_cast<long long>(within));
+    log.number(probe, "wrong", static_cast<long long>(wrong));
+    log.number(probe, "max_channel_error", static_cast<long long>(max_error));
     const bool passed = pixels != 0 && within == pixels;
-    log.event("agc_v0_blend_constant", passed ? "PASS" : "FAIL", passed ? 0 : -1,
+    log.event(probe, passed ? "PASS" : "FAIL", passed ? 0 : -1,
               "every pixel of the target is the blend the four constants name");
     return passed;
 }
@@ -23595,6 +23596,82 @@ void run_vulkan_constant_blend_frames(const TestContext &test, TestOutcome &outc
     log.event("agc_v0_blend_constant", passed ? "PASS" : "FAIL", passed ? 0 : -1,
               "a frame blended with the constant colour and alpha factors holds the blend the "
               "constants name");
+}
+
+// R71: dual-source blending. The constant-blend frame again, with the second
+// colour source as the factor: the r71-dual-source pixel stage writes the
+// vertex colour as its first source and {0.25, 0.5, 0.75, 1.0} as its second
+// (location 0, index 1), and the pipeline blends with SRC1_COLOR and
+// ONE_MINUS_SRC1_COLOR on the colour and SRC1_ALPHA and ONE_MINUS_SRC1_ALPHA on
+// the alpha -- the field values 15 to 18 (driver/ps5vk_pipeline.c). The frame
+// is the constant-blend probe's word for word, 0xff88586c, if the compiler
+// exported the second source to MRT1 and the blend read it there; a second
+// source that never arrives reads zero and blends to the destination.
+void run_vulkan_dual_source_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 12},
+    };
+    const float source[4] = {0xf0 / 255.0f, 0x30 / 255.0f, 0x60 / 255.0f, 1.0f};
+    float records[7 * 4] = {};
+    std::uint16_t indices[6] = {};
+    put_target_rect(records, indices, source);
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    input.clear_colour[0] = 0x40 / 255.0f;
+    input.clear_colour[1] = 0x80 / 255.0f;
+    input.clear_colour[2] = 0xff / 255.0f;
+    input.clear_colour[3] = 1.0f;
+    input.blend = true;
+    input.blend_src_colour = VK_BLEND_FACTOR_SRC1_COLOR;
+    input.blend_dst_colour = VK_BLEND_FACTOR_ONE_MINUS_SRC1_COLOR;
+    input.blend_op_colour = VK_BLEND_OP_ADD;
+    input.blend_src_alpha = VK_BLEND_FACTOR_SRC1_ALPHA;
+    input.blend_dst_alpha = VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA;
+    input.blend_op_alpha = VK_BLEND_OP_ADD;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    input.vertex_data = records;
+    input.vertex_count = 4;
+    input.vertex_stride = 28;
+    input.index_data = indices;
+    input.index_count = 6;
+    input.attribute_count = 2;
+    input.attributes[0] = attributes[0];
+    input.attributes[1] = attributes[1];
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    ps5vk_triangle triangle{};
+    ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+    if (status == PS5VK_TRIANGLE_OK)
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+    if (test.capture && status == PS5VK_TRIANGLE_OK)
+    {
+        log_driver_submission(triangle.device, "dual-source blend", log);
+        log_driver_stages(triangle.device, log);
+    }
+    outcome.command_built = status != PS5VK_TRIANGLE_FAILED;
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        outcome.stage_in_use = true;
+        log.event("r71_dual_source", "FAIL", -1,
+                  "the submission did not complete; its objects stay allocated");
+        return;
+    }
+    bool passed = false;
+    if (status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes)
+        passed =
+            check_constant_blend_frame(const_cast<void *>(triangle.target), log, "r71_dual_source");
+    ps5vk_triangle_finish(&triangle);
+    outcome.passed = passed;
+    log.event("r71_dual_source", passed ? "PASS" : "FAIL", passed ? 0 : -1,
+              "a frame blended with the second source's colour and alpha factors holds the "
+              "constant-blend frame's word");
 }
 
 // Item 3: the four-sample depth copy. Two four-sample D32 images whose extent is
@@ -26025,6 +26102,7 @@ constexpr RunnerTest kRunnerTests[] = {
     // frame each (run_vulkan_blit_destination_formats).
     {"v0-blit-dst", "v0-vertex-bytes-float", run_vulkan_blit_destination_formats},
     {"v0-blend-constant", "m4-blend", run_vulkan_constant_blend_frames},
+    {"r71-dual-source", "r71-dual-source", run_vulkan_dual_source_frames},
     // Phase C3's transformed quad: the c3-quad set's vertex shader reads its
     // position from a vertex buffer and its transform from the uniform buffer,
     // and each frame is read back in the quadrant its transform chose.

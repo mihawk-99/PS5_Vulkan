@@ -1,0 +1,11 @@
+# R71: dual-source blending. The dual-source probe, the constant-blend probe
+# it reproduces, and the blend and render-to-texture probes beside them.
+hold 1
+capture
+m2-solid
+r71-dual-source
+v0-blend-constant
+m4-blend
+c4-rtt
+m2-solid
+exit
