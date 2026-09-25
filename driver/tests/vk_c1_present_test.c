@@ -92,7 +92,7 @@ check_refusals(struct ps5vk_triangle *triangle)
        {0, 0}, VK_PRESENT_MODE_FIFO_KHR, 0},
       {"imageExtent", 0, {1280, 720}, VK_PRESENT_MODE_FIFO_KHR, 0},
       {"presentMode", 0, {0, 0}, VK_PRESENT_MODE_MAILBOX_KHR, 0},
-      {"minImageCount", 0, {0, 0}, VK_PRESENT_MODE_FIFO_KHR, 4},
+      {"minImageCount", 0, {0, 0}, VK_PRESENT_MODE_FIFO_KHR, 6},
    };
    for (size_t at = 0; at < sizeof(kCases) / sizeof(kCases[0]); at++) {
       VkSwapchainCreateInfoKHR info = triangle->swapchain_info;
@@ -211,7 +211,44 @@ check_replacement(struct ps5vk_triangle *triangle)
    result = VK_FUNCTION(triangle->instance, GetSwapchainImagesKHR)(triangle->device, replacement,
                                                                    &count, NULL);
    check(result == VK_SUCCESS && count == 3, "the replacement has three images");
+
+   /* R74: a swapchain has the images its minImageCount asks for, up to five,
+    * and its acquires take turns among all of them. */
+   info.oldSwapchain = replacement;
+   info.minImageCount = 5;
+   VkSwapchainKHR five = VK_NULL_HANDLE;
+   result = VK_FUNCTION(triangle->instance, CreateSwapchainKHR)(triangle->device, &info, NULL,
+                                                                &five);
+   count = 0;
+   if (result == VK_SUCCESS)
+      result = VK_FUNCTION(triangle->instance, GetSwapchainImagesKHR)(triangle->device, five,
+                                                                      &count, NULL);
+   check(result == VK_SUCCESS && count == 5,
+         "a replacement asking for five images (the surface's maxImageCount) has five");
+   bool seen[5] = {false};
+   for (unsigned frame = 0; result == VK_SUCCESS && frame < 5; frame++) {
+      uint32_t taken = UINT32_MAX;
+      result = VK_FUNCTION(triangle->instance, AcquireNextImageKHR)(
+         triangle->device, five, UINT64_MAX, VK_NULL_HANDLE, VK_NULL_HANDLE, &taken);
+      if (result != VK_SUCCESS || taken >= 5)
+         break;
+      seen[taken] = true;
+      const VkPresentInfoKHR present = {
+         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+         .swapchainCount = 1,
+         .pSwapchains = &five,
+         .pImageIndices = &taken,
+      };
+      result = VK_FUNCTION(triangle->instance, QueuePresentKHR)(triangle->queue, &present);
+   }
+   check(result == VK_SUCCESS && seen[0] && seen[1] && seen[2] && seen[3] && seen[4],
+         "five acquires and presents on it take each of its five images once");
+   if (result != VK_SUCCESS || !(seen[0] && seen[1] && seen[2] && seen[3] && seen[4]))
+      printf("  (VkResult %d, images seen %d%d%d%d%d, message \"%s\")\n", result, seen[0],
+             seen[1], seen[2], seen[3], seen[4], g_last_message);
    VK_FUNCTION(triangle->instance, DestroySwapchainKHR)(triangle->device, replacement, NULL);
+   if (five != VK_NULL_HANDLE)
+      VK_FUNCTION(triangle->instance, DestroySwapchainKHR)(triangle->device, five, NULL);
 }
 
 #if defined(PS5VK_TEST_DIRECT)

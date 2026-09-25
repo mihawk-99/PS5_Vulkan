@@ -1592,8 +1592,11 @@ struct ps5vk_pipeline {
    struct ps5vk_pipeline *next_stage;
 };
 
-/* A swapchain's images: VideoOut's two registered framebuffers. */
-#define PS5VK_SWAPCHAIN_IMAGES 3
+/* VideoOut's registered framebuffers, the most images a swapchain has (R74). */
+#define PS5VK_SWAPCHAIN_IMAGES 5
+/* The images of a swapchain that asks for fewer: three, which make a queue
+ * (ps5vk_wsi.c). */
+#define PS5VK_SWAPCHAIN_DEFAULT_IMAGES 3
 /* The runner's flip wait: up to 200 vblanks. */
 #define PS5VK_FLIP_WAITS 200
 /* sceVideoOutGetFlipStatus fills 16 64-bit words; the fourth is the marker of
@@ -1642,6 +1645,8 @@ struct ps5vk_swapchain {
    /* NULL once a newer swapchain has taken VideoOut over. */
    struct ps5vk_video_out *video;
    struct ps5vk_image *images[PS5VK_SWAPCHAIN_IMAGES];
+   /* How many of VideoOut's framebuffers are its images: the first ones. */
+   uint32_t image_count;
    /* The image the application holds, or UINT32_MAX. */
    uint32_t acquired;
    bool retired;

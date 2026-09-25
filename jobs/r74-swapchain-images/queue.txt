@@ -1,0 +1,10 @@
+# R74: a swapchain has the images it asks for, up to five. C1 presents a
+# five-image replacement after its four frames; the capture is golden/c1-triangle.
+# Upload: copy this file under the name queue.txt.
+capture
+hold 60
+c1-flip
+b7-triangle
+c1-triangle
+m2-solid
+exit

@@ -3326,3 +3326,14 @@ only the value the release wrote.
 A pixel shader's second colour (location 0, index 1), exported to MRT1 with
 MRT0's FP16 format, is what CB_BLEND0_CONTROL's SRC1 factors (15-18) read:
 0xff88586c in all 8294400 pixels of the probe (PID 630).
+
+## 2026-09-25 — five VideoOut framebuffers, and the flip helper's buffer field (R74)
+
+sceVideoOutRegisterBuffers2 takes five 3840x2160 framebuffers of one 160 MiB
+direct-memory allocation, and flips to buffers 3 and 4 show as those to 0-2 do,
+queued three deep behind the one on screen (Wind Waker under RetroArch at
+119.88 Hz, 1,200 presents per 10 s). sceAgcDcbSetFlip places the buffer in two
+words as an added multiple of eight, not an or-ed index: 0xc7010101 + 8 * buffer
+in its first packet and 0x800040a0 + 8 * buffer in its RELEASE_MEM. The two
+spellings agree for buffers 0-3; buffer 4 is 0xc7010121 and 0x800040c0 (C1, PID
+702), where an or into 0x800040a0 would leave 0x800040a0.

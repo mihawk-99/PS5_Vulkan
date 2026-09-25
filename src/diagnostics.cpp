@@ -19693,6 +19693,77 @@ constexpr std::uint32_t kRefreshMicroseconds = 16667;
 bool flip_probe_packet(const TestContext &test, std::uint32_t video, const char *where,
                        JsonLog &log) noexcept;
 
+// R74: a swapchain of five images replaces the triangle's, and five acquires and
+// presents take each of its images once: VideoOut's two framebuffers past the
+// first three flip as those do. The host test (driver/tests/vk_c1_present_test.c,
+// check_replacement) presents the same five after its four frames, so these
+// flips are its golden. Each is held as the frames are, so the flip before an
+// acquire has been shown and the order is the one the host's stand-in, which
+// shows every flip at once, takes.
+bool present_five_images(const TestContext &test, ps5vk_triangle &triangle, JsonLog &log,
+                         VkSwapchainKHR &five) noexcept
+{
+    const auto proc = [&triangle](const char *name)
+    { return triangle.get_instance_proc_addr(triangle.instance, name); };
+    const auto create = (PFN_vkCreateSwapchainKHR)proc("vkCreateSwapchainKHR");
+    const auto destroy = (PFN_vkDestroySwapchainKHR)proc("vkDestroySwapchainKHR");
+    const auto images = (PFN_vkGetSwapchainImagesKHR)proc("vkGetSwapchainImagesKHR");
+    const auto acquire = (PFN_vkAcquireNextImageKHR)proc("vkAcquireNextImageKHR");
+    const auto present = (PFN_vkQueuePresentKHR)proc("vkQueuePresentKHR");
+    if (!create || !destroy || !images || !acquire || !present)
+    {
+        log.event("agc_c1_five_images", "FAIL", -1, "the driver exports no swapchain entry points");
+        return false;
+    }
+    VkSwapchainCreateInfoKHR info = triangle.swapchain_info;
+    info.oldSwapchain = triangle.swapchain;
+    info.minImageCount = 5;
+    VkResult result = create(triangle.device, &info, nullptr, &five);
+    std::uint32_t count = 0;
+    if (result == VK_SUCCESS)
+        result = images(triangle.device, five, &count, nullptr);
+    VkImage handles[5]{};
+    if (result == VK_SUCCESS && count == 5)
+        result = images(triangle.device, five, &count, handles);
+    log.number("agc_c1_five_images", "count", count);
+    bool seen[5]{};
+    for (unsigned frame = 0; result == VK_SUCCESS && count == 5 && frame < 5; ++frame)
+    {
+        std::uint32_t taken = UINT32_MAX;
+        result = acquire(triangle.device, five, UINT64_MAX, VK_NULL_HANDLE, VK_NULL_HANDLE, &taken);
+        if (result != VK_SUCCESS || taken >= 5)
+            break;
+        seen[taken] = true;
+        log.number("agc_c1_five_images", "image_index", taken);
+        // The storage of each image, as the frames log theirs: the region the
+        // replay pins is the allocation the logged images span (tools/ps5vk_log.py).
+        std::size_t bytes = 0;
+        void *const storage = ps5vk_debug_image_storage(handles[taken], &bytes);
+        log.hex("agc_gpu_pointer_swapchain_image", "begin",
+                reinterpret_cast<std::uintptr_t>(storage));
+        log.number("agc_gpu_pointer_swapchain_image", "bytes", static_cast<long long>(bytes));
+        const VkPresentInfoKHR present_info{
+            VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, nullptr, 0, nullptr, 1, &five, &taken, nullptr};
+        result = present(triangle.queue, &present_info);
+        if (test.capture && result == VK_SUCCESS)
+        {
+            char label[64]{};
+            std::snprintf(label, sizeof(label), "five-image flip %u", frame);
+            log_driver_submission(triangle.device, label, log);
+        }
+        for (unsigned refresh = 0; refresh < test.hold_vblanks; ++refresh)
+            sceKernelUsleep(kRefreshMicroseconds);
+    }
+    const bool passed =
+        result == VK_SUCCESS && count == 5 && seen[0] && seen[1] && seen[2] && seen[3] && seen[4];
+    log.number("agc_c1_five_images", "result", result);
+    log.event("agc_c1_five_images", passed ? "PASS" : "FAIL", passed ? 0 : -1,
+              "a five-image swapchain replacing the triangle's; five acquires and presents take "
+              "each of its images once");
+    // The caller destroys it once the flip probe has used the VideoOut it holds.
+    return passed;
+}
+
 void run_vulkan_present_frames_impl(const TestContext &test, TestOutcome &outcome,
                                     bool readback) noexcept
 {
@@ -19810,12 +19881,26 @@ void run_vulkan_present_frames_impl(const TestContext &test, TestOutcome &outcom
     // VideoOut at all, made the helper write nothing (docs/M5_PHASE_C.md, run
     // pid 115). The probe reports on its own line: C1's verdict stays about the
     // frames, and the probe's about what the flip helper encodes.
+    // The display readback variant keeps its own frames only. The five-image
+    // flips come before the flip probe: the probe's helper calls count toward
+    // the process's flips, which the host test, with no probe, does not make.
+    VkSwapchainKHR five = VK_NULL_HANDLE;
+    const bool five_passed =
+        readback || (status == PS5VK_TRIANGLE_OK && present_five_images(test, triangle, log, five));
     if (status == PS5VK_TRIANGLE_OK)
         flip_probe_packet(test,
                           static_cast<std::uint32_t>(ps5vk_debug_video_handle(triangle.device)),
                           "c1-triangle, the driver's own VideoOut open", log);
+    if (five != VK_NULL_HANDLE)
+    {
+        const auto destroy = (PFN_vkDestroySwapchainKHR)triangle.get_instance_proc_addr(
+            triangle.instance, "vkDestroySwapchainKHR");
+        if (destroy)
+            destroy(triangle.device, five, nullptr);
+    }
     ps5vk_triangle_finish(&triangle);
-    outcome.passed = status == PS5VK_TRIANGLE_OK && passed_frames == kPresentFrameCount;
+    outcome.passed =
+        status == PS5VK_TRIANGLE_OK && passed_frames == kPresentFrameCount && five_passed;
     char detail[96]{};
     std::snprintf(detail, sizeof(detail),
                   "%u of %u frames drawn exactly through the swapchain and presented",

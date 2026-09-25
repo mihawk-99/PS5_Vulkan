@@ -9379,3 +9379,42 @@ gate's packets are unchanged. Title 5253301f, same state and pad script: no
 sample under the default table, frame periods over 40 ms 32 → 14, full speed.
 The remaining hitches are 40-51 ms periods with no driver object creation in
 them; they are the next item.
+
+## 2026-09-25 — R74: a swapchain has the images it asks for, up to five
+
+A swapchain had three images whatever it asked for. Two queued flips are 33 ms
+of frames at 60 Hz but 16.7 ms at 120 Hz, and RetroArch emulates a swap interval
+of 2 by presenting each frame twice, which fills both: the second present of
+every frame waited for a vblank on the thread that runs the core. Dolphin's
+libretro core frame-steps its emulation, and the thread that waits is also its
+GPU thread, so the emulation stopped for the wait. A one-shot timeline of Wind
+Waker under ubershaders (Profile 2) showed the pattern: a new frame's run took
+7 ms and presented without waiting, the repeated field's run took 25-28 ms of
+which 13-14 ms was the second present's wait, and the pair crossed 33.4 ms often
+enough to run at 88-96% with the GPU busy 0.7 ms a present. With five images
+(a temporary build and `video_max_swapchain_images = 5`) the same run was 100%
+in every window.
+
+A swapchain now gets its minImageCount, three at least and five at most
+(maxImageCount 5); VideoOut registers five framebuffers and a swapchain takes the
+first ones, and acquire looks only at the swapchain's own. RetroArch asks for
+(images - 1) * interval + 1 when it emulates an interval (its patch 0091), so the
+frames of lookahead it asks for hold at 120 Hz as at 60 Hz, and the latency is
+the one three images give at 60 Hz. The host AGC model's flip helper now takes
+buffers 3 and 4; the console wrote them as an added multiple of eight, which the
+model's or had got wrong for buffer 4 (docs/HARDWARE_FINDINGS.md). The runner's
+C1 test presents a five-image replacement after its four frames, and its host
+twin does the same: golden/c1-triangle was re-captured (PID 702; its first
+capture, PID 699, pinned only the three images the frames name, and the flip
+probe ran before the five flips, so the process's flip count differed from the
+host's). golden/c4-rtt was re-captured (PID 700): its R70 barrier names the
+fence below the marker, which moved down by the two new flip slots.
+
+The queue's profile also counts what it runs on the CPU at split points, by
+kind (`cpu_copies=upload:N/KiB,readback:...`): Wind Waker reads back 40-90
+images a second (EFB copies encoded to RAM, and the EFB peeks its game settings
+enable), each a wait for the GPU.
+
+Console: C1 PASS with the five-image replacement (PIDs 699, 701, 702), C4 PASS
+(PID 700); title 5beca7cc: RetroArch got five images and Wind Waker under
+Profile 2 ran at 100% in every steady window (was 88-99%). jobs/r74-swapchain-images.

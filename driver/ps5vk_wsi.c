@@ -25,9 +25,19 @@
  * for each flip to be shown instead left an application that presents every
  * frame twice at 120 Hz (RetroArch's swap interval of 2) one vblank, 8.3 ms,
  * for its whole frame (2026-09-24). An application holds one image at a time:
- * minImageCount is 2 of the 3, so an application holding an image may not wait
- * on another (VUID-vkAcquireNextImageKHR-swapchain-01802); such an acquire
- * returns VK_NOT_READY or VK_TIMEOUT.
+ * minImageCount is 2, so an application holding an image may not wait on
+ * another (VUID-vkAcquireNextImageKHR-swapchain-01802); such an acquire returns
+ * VK_NOT_READY or VK_TIMEOUT.
+ *
+ * R74: a swapchain has as many images as its minImageCount asks, three at
+ * least and five at most; VideoOut registers five framebuffers and a swapchain
+ * takes the first ones. Two queued flips are 33 ms of frames at 60 Hz but
+ * 16.7 ms at 120 Hz, and a frame presented twice (a swap interval of 2) fills
+ * both: RetroArch's second present of each frame then waited for a vblank on
+ * the thread that runs the core, and Dolphin's frame-stepped emulation, which
+ * cannot go on while that thread waits, lost 4-12% of Wind Waker's speed
+ * under ubershaders. Five images at 120 Hz hold the two frames three hold at
+ * 60 Hz.
  *
  * A swapchain created with oldSwapchain takes VideoOut over; the old one is
  * retired, and acquiring or presenting its images returns
@@ -343,7 +353,7 @@ ps5vk_GetPhysicalDeviceSurfaceCapabilitiesKHR(VkPhysicalDevice physicalDevice,
    (void)physicalDevice;
    (void)surface;
    *pCapabilities = (VkSurfaceCapabilitiesKHR){
-      .minImageCount = PS5VK_SWAPCHAIN_IMAGES - 1,
+      .minImageCount = PS5VK_SWAPCHAIN_DEFAULT_IMAGES - 1,
       .maxImageCount = PS5VK_SWAPCHAIN_IMAGES,
       .currentExtent = ps5vk_display_extent,
       .minImageExtent = ps5vk_display_extent,
@@ -667,7 +677,8 @@ ps5vk_swapchain_create_images(struct ps5vk_device *device, struct ps5vk_swapchai
       .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
       .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
    };
-   for (uint32_t index = 0; index < PS5VK_SWAPCHAIN_IMAGES; index++) {
+   swapchain->image_count = MAX2(info->minImageCount, PS5VK_SWAPCHAIN_DEFAULT_IMAGES);
+   for (uint32_t index = 0; index < swapchain->image_count; index++) {
       struct ps5vk_image *const image =
          vk_image_create(&device->vk, &image_info, NULL, sizeof(*image));
       if (!image)
@@ -820,23 +831,25 @@ ps5vk_GetSwapchainImagesKHR(VkDevice _device, VkSwapchainKHR _swapchain,
    (void)_device;
    VK_FROM_HANDLE(ps5vk_swapchain, swapchain, _swapchain);
    VK_OUTARRAY_MAKE_TYPED(VkImage, out, pSwapchainImages, pSwapchainImageCount);
-   for (uint32_t index = 0; index < PS5VK_SWAPCHAIN_IMAGES; index++) {
+   for (uint32_t index = 0; index < swapchain->image_count; index++) {
       vk_outarray_append_typed(VkImage, &out, image)
          *image = ps5vk_image_to_handle(swapchain->images[index]);
    }
    return vk_outarray_status(&out);
 }
 
-/* A buffer the application may render into: neither on screen nor queued for a
- * flip. VideoOut's flip status names the latest flip shown; a buffer whose last
- * flip is past it is queued, the one whose flip it is stays on screen until a
- * later one shows, and before any flip of this output the buffer a retained
- * output left on screen (shown) stays there. Among the free ones the one
- * flipped longest ago is taken, so the buffers take turns. With none free the
- * wait is a vblank at a time, as the flip confirmation's is; a zero timeout
- * returns VK_NOT_READY instead. */
+/* A buffer the application may render into: one of the swapchain's first
+ * count, neither on screen nor queued for a flip. VideoOut's flip status names
+ * the latest flip shown; a buffer whose last flip is past it is queued, the one
+ * whose flip it is stays on screen until a later one shows, and before any flip
+ * of this output the buffer a retained output left on screen (shown) stays
+ * there -- which may be one past a smaller swapchain's count. Among the free
+ * ones the one flipped longest ago is taken, so the buffers take turns. With
+ * none free the wait is a vblank at a time, as the flip confirmation's is; a
+ * zero timeout returns VK_NOT_READY instead. */
 static VkResult
-ps5vk_swapchain_free_image(struct ps5vk_video_out *video, uint64_t timeout, uint32_t *free_index)
+ps5vk_swapchain_free_image(struct ps5vk_video_out *video, uint32_t count, uint64_t timeout,
+                           uint32_t *free_index)
 {
    for (unsigned wait = 0; wait < PS5VK_FLIP_WAITS; wait++) {
       uint64_t status[PS5VK_FLIP_STATUS_WORDS] = {0};
@@ -852,7 +865,7 @@ ps5vk_swapchain_free_image(struct ps5vk_video_out *video, uint64_t timeout, uint
               video->image_marker[index] > video->image_marker[on_screen]))
             on_screen = index;
       uint32_t best = UINT32_MAX;
-      for (uint32_t index = 0; index < PS5VK_SWAPCHAIN_IMAGES; index++) {
+      for (uint32_t index = 0; index < count; index++) {
          if (index == on_screen || video->image_marker[index] > shown_marker)
             continue;
          if (best == UINT32_MAX || video->image_marker[index] < video->image_marker[best])
@@ -881,7 +894,8 @@ ps5vk_swapchain_acquire(struct ps5vk_device *device, struct ps5vk_swapchain *swa
    if (swapchain->acquired != UINT32_MAX)
       return timeout == 0 ? VK_NOT_READY : VK_TIMEOUT;
    uint32_t index = UINT32_MAX;
-   const VkResult waited = ps5vk_swapchain_free_image(swapchain->video, timeout, &index);
+   const VkResult waited =
+      ps5vk_swapchain_free_image(swapchain->video, swapchain->image_count, timeout, &index);
    if (waited != VK_SUCCESS)
       return waited;
    /* The image is ready at once: the fence and semaphore signal now. */

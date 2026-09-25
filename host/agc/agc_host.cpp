@@ -207,24 +207,28 @@ std::uint32_t *sceAgcCbReleaseMem(void *buffer, std::uint8_t event, std::int16_t
 // driver's flips hold the frame's own tail because a frame and its flip are
 // written at the same address (run pid 113). Zeroing them here would be a
 // buffer the console does not have. The VideoOut handle is not encoded. Only
-// mode 1, buffers 0-2 and the first 255 flips of a process are captured.
+// mode 1, buffers 0-4 and the first 255 flips of a process are captured.
 std::uint32_t *sceAgcDcbSetFlip(void *buffer, std::uint32_t video, int buffer_index,
                                 std::uint32_t mode, std::int64_t marker)
 {
     (void)video;
     // Buffer 2 since the driver's swapchain has three images (2026-09-24,
     // golden/c1-triangle): its words follow buffers 0 and 1's, the index at bit 3.
-    if (mode != 1 || buffer_index < 0 || buffer_index > 2 || g_flips >= 0xff)
-        return refuse("sceAgcDcbSetFlip: only mode 1, buffers 0-2 and flips 1-255 are captured");
+    // Buffers 3 and 4 since a swapchain may have five (R74, golden/c1-triangle
+    // re-captured with them).
+    if (mode != 1 || buffer_index < 0 || buffer_index > 4 || g_flips >= 0xff)
+        return refuse("sceAgcDcbSetFlip: only mode 1, buffers 0-4 and flips 1-255 are captured");
     std::uint32_t *const start = reserve(buffer, kFlipPacketWords);
     if (start == nullptr)
         return refuse("command buffer full or invalid");
+    // The buffer's eight bytes are added, not or-ed: the console's buffer 4 is
+    // 0x800040c0, where an or into 0x800040a0 leaves 0x800040a0 (run pid 699).
     const auto slot = static_cast<std::uint32_t>(buffer_index);
     const auto value = static_cast<std::uint64_t>(marker);
     const std::uint32_t head[] = {
-        pkt3(0x79, 2) | 0x04u, 0x00000342u, 0xc7010101u | (slot << 3), 0,
+        pkt3(0x79, 2) | 0x04u, 0x00000342u, 0xc7010101u + (slot << 3), 0,
         pkt3(0x37, 4) | 0x04u, 0x06010000u, 0x0000c343u, 0, low_word(value), high_word(value),
-        pkt3(0x49, 6), 0x06200504u, 0x42010000u, 0x800040a0u | (slot << 3), 0x0000000cu,
+        pkt3(0x49, 6), 0x06200504u, 0x42010000u, 0x800040a0u + (slot << 3), 0x0000000cu,
         0x00000001u, 0, 0x08000100u | (g_flips + 1),
         pkt3(0x10, kFlipPacketWords - 20)};
     std::copy(std::begin(head), std::end(head), start);
