@@ -1283,7 +1283,7 @@ ps5vk_BindImageMemory2(VkDevice _device, uint32_t bindInfoCount,
 
       image->memory = memory;
       image->address = (uint64_t)(uintptr_t)memory->direct.address + offset;
-      assert(ps5vk_address_range_valid(image->address, image->size));
+      assert(ps5vk_gpu_range_valid(image->address, image->size));
    }
    return VK_SUCCESS;
 }

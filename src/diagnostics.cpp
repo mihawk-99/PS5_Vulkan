@@ -213,6 +213,7 @@ extern "C"
                                           std::size_t);
     std::int32_t sceKernelMunmap(void *, std::size_t);
     std::int32_t sceKernelReleaseDirectMemory(std::int64_t, std::size_t);
+    std::int32_t sceKernelQueryMemoryProtection(void *, void **, void **, std::uint32_t *);
     int sceKernelDebugOutText(int, const char *);
 #if defined(AGC_LINKED_CANARY) || defined(AGC_DRIVER_CANARY)
     std::int32_t sceAgcDriverSubmitDcb(void *);
@@ -26804,6 +26805,162 @@ void run_vulkan_device_report(const TestContext &test, TestOutcome &outcome) noe
               "memory, and the instance and device extension lists");
 }
 
+#ifdef AGC_VULKAN_DRIVER
+// R86: GPU-visible memory outside the 4 GiB address window. Shaders reach the
+// driver's register tables, push constants and code through 32-bit pointers
+// with high word 2, so those must stay in the window; VkDeviceMemory is reached
+// only through descriptors, target registers and packets that carry 48-bit
+// addresses, so whether it can lie elsewhere is a question about the console,
+// not the driver. r86-wide-map asks the kernel first and submits nothing: for
+// each hint, 64 KiB of type-12 direct memory mapped for CPU and GPU read and
+// write (the driver's 0x33) -- where the kernel put it, the protection it
+// records there, and whether the CPU reads back what it wrote. A mapping with
+// no address is the control: the kernel puts it in the window, where the GPU
+// is known to use it.
+constexpr std::uint64_t kWideMemoryBase = 0x1000000000ull;
+bool g_wide_memory_recorded_alike = false;
+
+void run_wide_map_probe(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    constexpr std::size_t kBytes = 0x10000;
+    // The control first, then the view area above the window, the probe's
+    // placement base, one further up, and below the window.
+    const std::uint64_t hints[] = {0, 0x408000000ull, kWideMemoryBase, 0x8000000000ull,
+                                   0x100000000ull};
+    std::uint32_t control_protection = 0;
+    bool control_ok = false;
+    bool base_alike = false;
+    for (std::size_t index = 0; index < sizeof(hints) / sizeof(hints[0]); ++index)
+    {
+        const std::uint64_t hint = hints[index];
+        std::int64_t start = -1;
+        const std::int32_t allocated = sceKernelAllocateDirectMemory(
+            0, sceKernelGetDirectMemorySize(), kBytes, kBytes, kDirectMemoryType, &start);
+        void *address = reinterpret_cast<void *>(static_cast<std::uintptr_t>(hint));
+        const std::int32_t mapped =
+            allocated == 0
+                ? sceKernelMapDirectMemory(&address, kBytes, kMapProtection, 0, start, kBytes)
+                : -1;
+        std::int32_t queried = -1;
+        std::uint32_t protection = 0;
+        bool cpu = false;
+        const auto placed = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(address));
+        if (mapped == 0)
+        {
+            void *low = nullptr;
+            void *high = nullptr;
+            queried = sceKernelQueryMemoryProtection(address, &low, &high, &protection);
+            auto *const word = static_cast<volatile std::uint32_t *>(address);
+            const std::uint32_t value = 0x52860000u | static_cast<std::uint32_t>(index);
+            word[0] = value;
+            word[kBytes / 4 - 1] = ~value;
+            cpu = word[0] == value && word[kBytes / 4 - 1] == ~value;
+            sceKernelMunmap(address, kBytes);
+        }
+        if (allocated == 0)
+            sceKernelReleaseDirectMemory(start, kBytes);
+        const bool in_window = mapped == 0 && placed >> 32 == 2;
+        const bool at_hint = mapped == 0 && hint != 0 && placed == hint;
+        if (hint == 0)
+        {
+            control_ok = mapped == 0 && in_window && queried == 0 && cpu;
+            control_protection = protection;
+        }
+        const bool alike =
+            control_ok && mapped == 0 && queried == 0 && cpu && protection == control_protection;
+        if (hint == kWideMemoryBase)
+            base_alike = alike && at_hint && !in_window;
+        char detail[224]{};
+        std::snprintf(detail, sizeof(detail),
+                      "hint 0x%llx: allocate 0x%08x map 0x%08x at 0x%llx (window %d, at hint %d), "
+                      "query 0x%08x protection 0x%x, cpu %d",
+                      static_cast<unsigned long long>(hint), static_cast<unsigned>(allocated),
+                      static_cast<unsigned>(mapped), static_cast<unsigned long long>(placed),
+                      in_window ? 1 : 0, at_hint ? 1 : 0, static_cast<unsigned>(queried),
+                      protection, cpu ? 1 : 0);
+        log.event("r86_wide_map",
+                  hint == 0 ? (control_ok ? "PASS" : "FAIL")
+                  : alike   ? "PASS"
+                            : "FAIL",
+                  mapped, detail);
+    }
+    g_wide_memory_recorded_alike = base_alike;
+    log.hex("r86_wide_map", "control_protection", control_protection);
+    log.event("r86_wide_map", base_alike ? "PASS" : "FAIL", base_alike ? 0 : -1,
+              base_alike ? "the kernel maps GPU-visible memory at 0x10_0000_0000 and records it "
+                           "exactly as it records a window mapping"
+                         : "the kernel did not map GPU-visible memory at 0x10_0000_0000 as it maps "
+                           "one in the window; the GPU cases will not run");
+    outcome.command_built = true;
+    outcome.passed = base_alike;
+}
+
+// R86's GPU half: an existing Vulkan test run with every VkDeviceMemory mapping
+// placed from 0x10_0000_0000 up (ps5vk_debug_device_memory_base). The test's own
+// checks decide its result, and it counts only if its memory really lay outside
+// the window. It runs only after r86-wide-map found the kernel recording such a
+// mapping as it records a window one: a mapping the GPU cannot reach faults the
+// GPU, which freezes the screen and ends the title (B8, docs/M5_PHASE_B.md).
+using RunnerFunction = void (*)(const TestContext &, TestOutcome &) noexcept;
+
+void run_wide(const TestContext &test, TestOutcome &outcome, RunnerFunction inner,
+              const char *name) noexcept
+{
+    JsonLog &log = test.log;
+    if (!g_wide_memory_recorded_alike)
+    {
+        log.event("r86_wide", "SKIPPED", -1,
+                  "r86-wide-map has not found GPU-visible memory outside the window mapped as in "
+                  "it; queue it first");
+        outcome.command_built = false;
+        outcome.passed = false;
+        return;
+    }
+    ps5vk_debug_device_memory_base(kWideMemoryBase);
+    inner(test, outcome);
+    const std::uint64_t outside = ps5vk_debug_device_memory_base(0);
+    log.number("r86_wide", "outside_mappings", static_cast<long long>(outside));
+    const bool passed = outcome.passed && outside > 0;
+    char detail[192]{};
+    std::snprintf(detail, sizeof(detail),
+                  "%s %s with %llu VkDeviceMemory mappings outside the address window", name,
+                  outcome.passed ? "passed" : "failed", static_cast<unsigned long long>(outside));
+    log.event("r86_wide", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
+    outcome.passed = passed;
+}
+
+void run_wide_compute(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_wide(test, outcome, run_vulkan_compute_dispatch, "d2-compute");
+}
+
+void run_wide_compute_images(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_wide(test, outcome, run_vulkan_compute_images, "d2-compute-images");
+}
+
+void run_wide_indexed(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_wide(test, outcome, run_vulkan_indexed_frame, "c2-indexed");
+}
+
+void run_wide_texture(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_wide(test, outcome, run_vulkan_texture_frames, "c4-texture");
+}
+
+void run_wide_rtt(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_wide(test, outcome, run_vulkan_rtt_frames, "c4-rtt");
+}
+
+void run_wide_depth(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_wide(test, outcome, run_vulkan_depth_frames, "c5-depth");
+}
+#endif
+
 constexpr RunnerTest kRunnerTests[] = {
     // Phase C1b: what the console's flip helper writes, into a buffer of its
     // own. No submission, so it carries no GPU risk.
@@ -27178,6 +27335,15 @@ constexpr RunnerTest kRunnerTests[] = {
     {"r81-mirror-clamp", "c7-mip", run_vulkan_mirror_clamp_frames},
     {"r83-depth-stencil", "r83-quadrant", run_vulkan_depth_stencil_aspect_frames},
     {"r84-multiview", "r84-multiview", run_vulkan_multiview_frames},
+    // R86: GPU-visible memory outside the address window (run_wide_map_probe);
+    // r86-wide-map has to run first in the queue.
+    {"r86-wide-map", "m2", run_wide_map_probe},
+    {"r86-wide-compute", "m2", run_wide_compute},
+    {"r86-wide-compute-images", "m2", run_wide_compute_images},
+    {"r86-wide-indexed", "m3-vertex", run_wide_indexed},
+    {"r86-wide-texture", "m3-texture", run_wide_texture},
+    {"r86-wide-rtt", "m3-texture", run_wide_rtt},
+    {"r86-wide-depth", "m4-depth", run_wide_depth},
     {"r57-border", "c7-mip", run_vulkan_border_frames},
     {"r58-restart", "m3-vertex", run_vulkan_restart_frames},
     {"r59-fragcoord", "r59-fragcoord", run_vulkan_frag_coord_frames},

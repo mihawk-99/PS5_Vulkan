@@ -9693,3 +9693,24 @@ frame is word for word its static line frame (jobs/r85-line-width).
 The next refusal LRPS2 met is a non-indexed draw with a first vertex ("a first
 vertex on a non-indexed draw, or a first instance, needs a runner probe"),
 which is the next driver round.
+
+## 2026-09-25 — R86: GPU-visible memory outside the address window
+
+The 4 GiB window (high word 2) comes from the compiler's 32-bit-pointer ABI,
+and binds only what shaders reach through such a pointer: register tables,
+push constants, the vertex-buffer table and code. VkDeviceMemory reaches the
+GPU through descriptors, target registers and packets with 48-bit addresses,
+yet the driver kept it in the window too and capped the heap at 4 GiB. The
+probe asked the console whether it has to. The kernel maps GPU-visible memory
+(0x33) at 0x1_0000_0000, 0x4_0800_0000, 0x10_0000_0000 and 0x80_0000_0000, at
+the hint itself, recorded as the window control is. With every VkDeviceMemory
+mapping placed from 0x10_0000_0000 up (a test-only switch,
+`ps5vk_debug_device_memory_base`), storage buffers, indirect counts, storage
+images, vertex and index buffers, a sampled texture, render to texture and a
+depth attachment all read back exactly. PS5 PID 194, 8 of 8, no GPU fault
+(jobs/r86-wide-memory). Buffers and images now assert a GPU-reachable range
+rather than the window.
+
+What it opens is a heap beyond 4 GiB. The next step is VkDeviceMemory placed
+outside the window by default, with the heap and allocation limits raised.
+That is a round of its own.

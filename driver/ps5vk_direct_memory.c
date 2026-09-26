@@ -64,6 +64,22 @@ ps5vk_direct_memory_kinds(char *out, size_t size)
    return out;
 }
 
+/* R86, test-only (ps5vk_debug_device_memory_base): where VkDeviceMemory is
+ * placed instead of the address window, or 0 for the window. Each mapping asks
+ * for the next address after the last one's, and how many landed outside the
+ * window since the base was set is counted for the probe to assert. */
+static uint64_t ps5vk_device_memory_base;
+static uint64_t ps5vk_device_memory_next;
+static uint64_t ps5vk_device_memory_outside;
+
+uint64_t
+ps5vk_debug_device_memory_base(uint64_t base)
+{
+   p_atomic_set(&ps5vk_device_memory_next, 0);
+   p_atomic_set(&ps5vk_device_memory_base, base);
+   return p_atomic_xchg(&ps5vk_device_memory_outside, 0);
+}
+
 int32_t
 ps5vk_direct_mapping_create(struct ps5vk_direct_mapping *mapping, size_t bytes, size_t alignment,
                             enum ps5vk_direct_kind kind)
@@ -85,11 +101,20 @@ ps5vk_direct_mapping_create(struct ps5vk_direct_mapping *mapping, size_t bytes, 
    p_atomic_add(&ps5vk_direct_kind_bytes[kind], (uint64_t)bytes);
 
    void *address = NULL;
+   const uint64_t base = kind == PS5VK_DIRECT_MEMORY ? p_atomic_read(&ps5vk_device_memory_base) : 0;
+   if (base != 0) {
+      const uint64_t step = align64(bytes, UINT64_C(0x200000));
+      address = (void *)(uintptr_t)(base + p_atomic_add_return(&ps5vk_device_memory_next, step) - step);
+   }
    result = sceKernelMapDirectMemory(&address, bytes, PS5VK_MAP_PROTECTION, 0, start, alignment);
    if (result == 0 && address) {
       mapping->address = address;
       if (ps5vk_address_range_valid((uint64_t)(uintptr_t)address, bytes))
          return 0;
+      if (base != 0 && ps5vk_gpu_range_valid((uint64_t)(uintptr_t)address, bytes)) {
+         p_atomic_inc(&ps5vk_device_memory_outside);
+         return 0;
+      }
    }
    if (result == 0)
       result = PS5VK_DIRECT_OUTSIDE_WINDOW;

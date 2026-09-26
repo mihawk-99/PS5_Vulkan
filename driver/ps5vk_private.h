@@ -106,6 +106,22 @@ ps5vk_address_range_valid(uint64_t address, uint64_t bytes)
           bytes <= PS5VK_ADDRESS_WINDOW_BYTES - (address & UINT32_MAX);
 }
 
+/* The GPU's reach for memory it is handed as a full address -- descriptors,
+ * target registers and packets carry 48 bits -- and the user half of the
+ * CPU's address space both end below this. */
+#define PS5VK_GPU_ADDRESS_LIMIT (UINT64_C(1) << 47)
+
+/* Whether [address, address + bytes) is a range the GPU can be handed as a full
+ * address. VkDeviceMemory is reached only that way, so buffers and images
+ * bound to it need not lie in the window (R86); what shaders reach through
+ * 32-bit pointers -- register tables, push constants, code -- still must. */
+static inline bool
+ps5vk_gpu_range_valid(uint64_t address, uint64_t bytes)
+{
+   return bytes != 0 && address != 0 && address < PS5VK_GPU_ADDRESS_LIMIT &&
+          bytes <= PS5VK_GPU_ADDRESS_LIMIT - address;
+}
+
 /* A GPU-visible direct-memory allocation, mapped for the CPU and the GPU at
  * one address inside the address window (ps5vk_direct_memory.c). */
 /* What a direct mapping is for; the profile counts live mappings by kind, so a

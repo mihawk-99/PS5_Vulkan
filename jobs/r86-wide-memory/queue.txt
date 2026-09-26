@@ -1,0 +1,23 @@
+# Upload: python3 tools/ps5_console.py battery PPSA99988 jobs/r86-wide-memory/queue.txt
+# R86, GPU-visible memory outside the 4 GiB address window (docs/M5_PHASE_C.md).
+# r86-wide-map asks the kernel first and submits nothing: GPU-visible memory
+# mapped at hints outside the window, against a window mapping as the control.
+# Only when the kernel records the mapping at 0x10_0000_0000 as it records the
+# window one do the r86-wide-* cases run: existing Vulkan tests with every
+# VkDeviceMemory mapping placed from 0x10_0000_0000 up -- a storage buffer and
+# indirect counts, storage images, vertex and index buffers, a sampled texture,
+# render to texture and a depth attachment. d2-compute last is the control that
+# the placement is back in the window.
+#
+# Risk: a mapping the GPU cannot reach faults the GPU, which froze the screen
+# and ended the title in B8 (docs/M5_PHASE_B.md); the console recovered.
+hold 1
+r86-wide-map
+r86-wide-compute
+r86-wide-compute-images
+r86-wide-indexed
+r86-wide-texture
+r86-wide-rtt
+r86-wide-depth
+d2-compute
+exit

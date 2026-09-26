@@ -101,7 +101,7 @@ ps5vk_BindBufferMemory2(VkDevice _device, uint32_t bindInfoCount,
 
       buffer->memory = memory;
       buffer->vk.device_address = (uint64_t)(uintptr_t)memory->direct.address + offset;
-      assert(ps5vk_address_range_valid(buffer->vk.device_address, buffer->vk.size));
+      assert(ps5vk_gpu_range_valid(buffer->vk.device_address, buffer->vk.size));
    }
    return VK_SUCCESS;
 }

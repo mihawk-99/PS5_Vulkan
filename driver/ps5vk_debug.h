@@ -178,6 +178,14 @@ ps5vk_debug_last_present_ns(void);
 void
 ps5vk_display_retain(bool retain);
 
+/* R86 probe: places every later VkDeviceMemory mapping at base and upward, in
+ * 2 MiB steps, instead of in the address window; 0 puts it in the window
+ * again. Returns how many VkDeviceMemory mappings were placed outside the
+ * window since the previous call, so a probe can assert its resources really
+ * lay there. Register tables, code, queries and the queue stay in the window. */
+uint64_t
+ps5vk_debug_device_memory_base(uint64_t base);
+
 #ifdef __cplusplus
 }
 #endif
