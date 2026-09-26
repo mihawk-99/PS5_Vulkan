@@ -253,6 +253,10 @@ extern "C"
     int sceVideoOutGetFlipStatus(std::int32_t, void *);
     int sceVideoOutWaitVblank(std::int32_t);
     int sceVideoOutIsFlipPending(std::int32_t);
+    int sceVideoOutIsOutputSupported(std::int32_t, std::uint32_t, const void *, const void *,
+                                     const void *);
+    int sceVideoOutConfigureOutput(std::int32_t, std::uint32_t, const void *, const void *,
+                                   const void *);
     int sceSystemServiceHideSplashScreen(void);
 #endif
 #ifdef AGC_TEST_RUNNER
@@ -16495,6 +16499,97 @@ void run_vulkan_tile_map_frames(const TestContext &test, TestOutcome &outcome) n
                   std::size(frames));
     log.event("r91_tile_maps", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1, detail);
 }
+
+// R92: the VideoOut output modes this console and its display take, for content
+// whose rate 119.88 Hz does not divide (a PAL game's 50 fps). The driver uses two
+// mode selectors, 15 (119.88 Hz) and 1 (the default back). This case asks
+// sceVideoOutIsOutputSupported about every selector from 0 to 63, which changes
+// nothing, and logs each answer. Every supported selector is then configured
+// the way the driver configures 15 -- first, on a fresh handle, where the
+// console takes it (PID 260 refused 15 on a handle that had waited on vblanks)
+// -- its vblank period measured over 120 vblanks, the default restored and the
+// handle closed. Nothing is registered or flipped, which leaves the output as
+// the system had it. Selectors 1 and 15 are the method's own check: 16.68 ms
+// and 8.34 ms.
+void run_output_modes(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    constexpr std::uint32_t kRestore = 1;
+    constexpr std::uint32_t kHighFrameRate = 15;
+    constexpr unsigned kVblanks = 120;
+    // The mean vblank period over kVblanks, in microseconds; 0 when a wait
+    // returned an error.
+    const auto period_us = [&](int video) -> double
+    {
+        (void)sceVideoOutWaitVblank(video);
+        timespec before{};
+        timespec after{};
+        clock_gettime(CLOCK_MONOTONIC, &before);
+        for (unsigned at = 0; at < kVblanks; ++at)
+            if (sceVideoOutWaitVblank(video) != 0)
+                return 0.0;
+        clock_gettime(CLOCK_MONOTONIC, &after);
+        const double elapsed =
+            (after.tv_sec - before.tv_sec) * 1e6 + (after.tv_nsec - before.tv_nsec) / 1e3;
+        return elapsed / kVblanks;
+    };
+    const int video = sceVideoOutOpen(0xff, 0, 0, nullptr);
+    if (video < 0)
+    {
+        log.hex("r92_output_modes", "open", static_cast<std::uint32_t>(video));
+        log.event("r92_output_modes", "FAIL", -1, "sceVideoOutOpen refused the handle");
+        return;
+    }
+    std::uint32_t supported[64]{};
+    unsigned supported_count = 0;
+    for (std::uint32_t mode = 0; mode < 64; ++mode)
+    {
+        const int answer = sceVideoOutIsOutputSupported(video, mode, nullptr, nullptr, nullptr);
+        char field[32]{};
+        std::snprintf(field, sizeof(field), "supported_%u", mode);
+        log.number("r92_output_modes", field, answer);
+        if (answer > 0)
+            supported[supported_count++] = mode;
+    }
+    const double base = period_us(video);
+    log.number("r92_output_modes", "default_period_ns", (long long)(base * 1000.0));
+    sceVideoOutClose(video);
+    double high_frame_rate = 0.0;
+    double restored = 0.0;
+    for (unsigned at = 0; at < supported_count; ++at)
+    {
+        const std::uint32_t mode = supported[at];
+        const int fresh = sceVideoOutOpen(0xff, 0, 0, nullptr);
+        if (fresh < 0)
+            break;
+        const int configured = sceVideoOutConfigureOutput(fresh, mode, nullptr, nullptr, nullptr);
+        const double period = configured == 0 ? period_us(fresh) : 0.0;
+        const int back = sceVideoOutConfigureOutput(fresh, kRestore, nullptr, nullptr, nullptr);
+        const double after = back == 0 ? period_us(fresh) : 0.0;
+        sceVideoOutClose(fresh);
+        if (mode == kHighFrameRate)
+            high_frame_rate = period;
+        restored = after;
+        char detail[160]{};
+        std::snprintf(detail, sizeof(detail),
+                      "mode %u: configure 0x%08x, vblank %.1f us (%.3f Hz); restore 0x%08x, "
+                      "vblank %.1f us",
+                      mode, static_cast<std::uint32_t>(configured), period,
+                      period > 0.0 ? 1e6 / period : 0.0, static_cast<std::uint32_t>(back), after);
+        log.event("r92_output_mode", configured == 0 ? "INFO" : "WARN", configured, detail);
+    }
+    // The method holds when the default is 59.94 Hz, 15 halves it, and the
+    // default comes back after every mode.
+    const bool method = base > 16600.0 && base < 16770.0 && high_frame_rate > 8300.0 &&
+                        high_frame_rate < 8385.0 && restored > 16600.0 && restored < 16770.0;
+    char detail[160]{};
+    std::snprintf(detail, sizeof(detail),
+                  "%u of 64 selectors supported; default %.1f us, 15 %.1f us, restored %.1f us",
+                  supported_count, base, high_frame_rate, restored);
+    log.event("r92_output_modes", method ? "PASS" : "FAIL", method ? 0 : -1, detail);
+    outcome.command_built = true;
+    outcome.passed = method;
+}
 // Phase C5's image clear: vkCmdClearDepthStencilImage, the last of 1.0's three
 // clear commands. The depth image is cleared to 0.5 by the command itself (the
 // pass loads rather than clears, so only the command writes before the draws)
@@ -29137,6 +29232,9 @@ constexpr RunnerTest kRunnerTests[] = {
     // R91: each colour element size's tiled map read off the GPU's own storage
     // and held against the driver's (run_vulkan_tile_map_frames).
     {"r91-tile-maps", "r91-position", run_vulkan_tile_map_frames},
+    // R92: the output modes VideoOut takes, each one's vblank period measured
+    // and the default restored (run_output_modes).
+    {"r92-output-modes", "m2", run_output_modes},
 #endif
     // R10: the two-subpass render pass whose second subpass reads the first's
     // colour attachment as an input attachment and writes it out. The port's UI

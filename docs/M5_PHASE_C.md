@@ -9798,3 +9798,16 @@ copy's sixteen-byte runs, where the map keeps only eight bytes contiguous (bit
 half of each run from the row two below. It runs eight bytes now. PS5 PID 238,
 4 of 4 (jobs/r91-tile-maps): every element size's map exact, and R90's clears
 exact in all ten formats, the one- and eight-byte ones included.
+
+## 2026-09-26 — R92: the output modes VideoOut takes
+
+A PAL game's 50 fps alternates two and three refreshes on 119.88 Hz, so
+r92-output-modes asks VideoOut about every output mode selector from 0 to 63
+and times each supported one's vblank period. Only 1 (59.940 Hz, 16,683 us)
+and 15 are supported; the others are refused, 4, 7, 8, 12-14 and 16-19 with
+0x80290016 and the rest with 0x8029001E, whether or not the title declares
+high-frame-rate output. 15 is 119.881 Hz (8,341.6 us) only for a title whose
+attribute3 declares 0x80040 (PID 262, with sce_sys/param-runner-hfr.json); the
+plain runner is refused it (PIDs 260 and 261). No 50 or 100 Hz output is
+reachable this way, and PAL games stay paced on 119.88 Hz
+(jobs/r92-output-modes).

@@ -3372,3 +3372,14 @@ level (or the exact half-level blend) each names, the chain's first level at
 -8 and -16 and its last at +8 and +16, over all 8,294,400 pixels of each frame.
 Word 2's 14-bit signed 6.8 field carries +/-16 without wrapping. Evidence:
 jobs/r79-lod-bias-range.
+
+## 2026-09-26 — VideoOut's output mode selectors (R92)
+
+`sceVideoOutIsOutputSupported` answers 1 for output mode selectors 1 and 15 and
+for no other selector from 0 to 63 on my console and display. Selectors 4, 7,
+8, 12-14 and 16-19 answer 0x80290016, the code `sceVideoOutConfigureOutput`
+returns for 15 in a title whose param.json does not declare high-frame-rate
+output (attribute3 0x80040); the others answer 0x8029001E. The answers do not
+change with the declaration. Configured first on a fresh handle, 1 measures
+16,683.3 us a vblank (59.940 Hz) and 15 8,341.6 us (119.881 Hz), and 1 brings
+16,683 us back (PIDs 260-262, jobs/r92-output-modes).

@@ -1,0 +1,11 @@
+# Upload: python3 tools/ps5_console.py battery PPSA99988 jobs/r92-output-modes/queue.txt
+# R92 (docs/M5_PHASE_C.md): which VideoOut output modes this console and its
+# display take. r92-output-modes asks about every mode selector from 0 to 63,
+# configures each supported one on a fresh handle, measures its vblank period
+# and restores the default; 1 and 15 check the method. Deploy the runner with
+# PARAM_PATH=sce_sys/param-runner-hfr.json for this queue: 15 needs the title to
+# declare high-frame-rate output (attribute3 0x80040), and every other case
+# runs with the plain runner's metadata.
+hold 1
+r92-output-modes
+exit
