@@ -1,0 +1,36 @@
+# Upload: python3 tools/ps5_console.py battery PPSA99988 jobs/r90-gpu-image-clears/regression/queue.txt
+# R90's step end changes every submission, so R88's battery of existing cases
+# runs again on it (without R88's 12 GiB allocation): draws, uploads, textures,
+# render to texture, depth and stencil, MSAA, compute, formats, targets,
+# subpasses, multiview, queries and events.
+hold 1
+device-report
+b7-triangle
+c2-indexed
+c2-staging
+c2-instancing
+c3-uniform
+d1-dynamic-ubo
+c4-texture
+c4-rtt
+c5-depth
+v0-stencil
+r83-depth-stencil
+c8-msaa
+c8-resolve
+d2-compute
+d2-compute-images
+r17-descriptor-array
+v0-formats-sampled
+v0-formats-storage-image
+v0-formats-texel-buffer
+v0-targets
+v0-subpass
+r84-multiview
+r84-subgroup
+c7-mip-upload
+c7-blit-depth
+r62-uniform-index
+v0-query-full
+b5-events
+exit

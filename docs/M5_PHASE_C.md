@@ -9755,3 +9755,29 @@ value when there is no first vertex, so every golden stands. PS5 PID 219, 6 of
 6 (jobs/r89-first-vertex-instance): each quad from vertex 0 and from vertex 6
 exactly, the boxes of exactly the instances firstInstance 1 and 2 start at, and
 the base-vertex, instancing, indexed and triangle controls.
+
+## 2026-09-26 — R90: image clears on the GPU, and a step end that flushes every cache
+
+LRPS2 clears its render targets and its D32_SFLOAT_S8_UINT depth with
+vkCmdClearColorImage and vkCmdClearDepthStencilImage every frame, and each was
+the CPU's work at a split point that drained the GPU. An attachment of one level
+and one layer, cleared whole, is now vk_meta's clear draw, with the
+application's state saved around it; a clear naming stencil without depth keeps
+the CPU path, since vk_meta renders it with a stencil attachment alone. God of
+War II's demo at 6x with MTVU went from 70-78% to 98-99% in every window.
+
+The new case, r90-image-clears, reads every texel of 636x358 attachments back at
+the split point after each clear, and its first run (PID 230) found a step-end
+bug older than the round: a step ended with the colour caches' flush (event 45)
+and a bottom-of-pipe marker (event 40), and no depth cache was ever flushed, so
+the second D32_SFLOAT clear read 46,269 texels of the first. A step now ends in
+one RELEASE_MEM of CACHE_FLUSH_AND_INV_TS_EVENT (event 20) with the same cache
+actions, as RADV's fences do; the host model completes that marker too, and the
+golden comparison takes either event in it. With that (PID 231) every depth and
+stencil check is exact. The one- and eight-byte colour formats missed the same
+texels in both runs (664 at (604,64) for R16G16B16A16, 632 from (8,356) for R8),
+which is a map, not a cache: their CPU maps are AddrLib's rows and no console
+run has measured them. That is R91, and the case leaves those formats out until
+then. PS5 PID 233, 6 of 6 (jobs/r90-gpu-image-clears): 24 of 24 clears exact,
+c7-clear's tiled attachment cleared on the GPU; PID 235, 29 of 29: R88's
+existing cases on the new step end.

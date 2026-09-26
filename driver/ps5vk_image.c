@@ -3058,6 +3058,9 @@ ps5vk_CmdClearColorImage(VkCommandBuffer commandBuffer, VkImage _image, VkImageL
                               vk_format_has_depth(image->vk.format) ? "depth or stencil" : "non-2D");
       return;
    }
+   /* R90: a rendered image is cleared on the GPU, with no split point. */
+   if (ps5vk_meta_clear_colour(cmd_buffer, image, imageLayout, pColor, rangeCount, pRanges))
+      return;
    uint8_t texel[16] = {0};
    uint32_t texel_bytes = 0;
    if (!ps5vk_format_encode_clear(image->vk.format, pColor, texel, &texel_bytes)) {
@@ -3140,6 +3143,9 @@ ps5vk_CmdClearDepthStencilImage(VkCommandBuffer commandBuffer, VkImage _image,
                                             : "an image whose format is not a depth one");
       return;
    }
+   /* R90: a depth image the device renders into is cleared on the GPU. */
+   if (ps5vk_meta_clear_depth(cmd_buffer, image, imageLayout, pDepthStencil, rangeCount, pRanges))
+      return;
    /* The depth plane's texel is the depth-only format's: a combined
     * D32_SFLOAT_S8_UINT image's depth plane is D32_SFLOAT's surface (R83,
     * ps5vk_image_plane), and its stencil plane's texel is the clear's byte. */

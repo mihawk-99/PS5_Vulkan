@@ -632,7 +632,10 @@ void complete_markers(const std::uint32_t *words, std::uint32_t count, unsigned 
             return;
         const std::uint32_t opcode = (header >> 8) & 0xff;
         const std::uint32_t *const body = words + at + 1;
-        if (opcode == 0x49 && payload == 7 && body[0] == 0x0030c528u && body[1] == 0x20000000u &&
+        // The runner's completion marker (event 40) and the driver's (event 20,
+        // R90): both write their value once the stream has run.
+        if (opcode == 0x49 && payload == 7 &&
+            (body[0] == 0x0030c528u || body[0] == 0x0030c514u) && body[1] == 0x20000000u &&
             body[3] == 2u)
         {
             const std::uintptr_t address = (std::uintptr_t{2} << 32) | body[2];

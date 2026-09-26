@@ -78,11 +78,13 @@
 
 /* ps5-opengl's colour-buffer barrier (event 45, control 12) and completion
  * marker (event 40, control 0x30c), as the test runner encodes them; each
- * packet is 8 words (golden/b4). */
+ * packet is 8 words (golden/b4). The driver's completion is the same packet
+ * with event 20, CACHE_FLUSH_AND_INV_TS_EVENT (R90, ps5vk_queue_run_step). */
 #define PS5VK_BARRIER_EVENT 45
 #define PS5VK_BARRIER_CONTROL 12
-#define PS5VK_COMPLETION_EVENT 40
+#define PS5VK_COMPLETION_EVENT 20
 #define PS5VK_COMPLETION_CONTROL 0x30c
+#define PS5VK_COMPLETION_WORDS 8
 #define PS5VK_STREAM_END_WORDS 16
 /* The profile's stamp slots (struct ps5vk_queue, stamps). */
 #define PS5VK_STAMP_START 0
@@ -1401,12 +1403,32 @@ ps5vk_queue_run_step(struct ps5vk_queue *queue, const struct vk_queue_submit *su
    const uint32_t *const barrier =
       sceAgcCbReleaseMem(&command, PS5VK_BARRIER_EVENT, PS5VK_BARRIER_CONTROL, 1, 0, NULL, 0, 0,
                          0, 1, 0, 0);
-   const uint32_t *const completion =
-      sceAgcCbReleaseMem(&command, PS5VK_COMPLETION_EVENT, PS5VK_COMPLETION_CONTROL, 0, 0, marker,
-                         1, value, 0, 0, 0, 0);
+   /* R90: the completion is one RELEASE_MEM of CACHE_FLUSH_AND_INV_TS_EVENT
+    * (event 20, index 5): the colour and depth caches are flushed, L2 is
+    * written back and invalidated (cache actions 0x30c), and only then is the
+    * marker written -- one packet, as RADV's fences are. The runner's helper
+    * packet is event 40, bottom of pipe, with the same actions: it flushed no
+    * depth cache, and its L2 writeback did not wait for the colour flush the
+    * barrier before it started, so a CPU copy at a split point read stale
+    * texels of what the step had just rendered (r90-image-clears, PID 230:
+    * the tail of 8-byte and one-byte colour clears, a fifth of a depth clear).
+    * The words are the helper's with the event changed, in the encoding R70's
+    * GPU barrier uses (ps5vk_gpu_barrier_words). */
+   uint32_t *const completion = command.up;
+   if (barrier != NULL && command.up + PS5VK_COMPLETION_WORDS <= command.top) {
+      const uint64_t marker_address = (uint64_t)(uintptr_t)marker;
+      const uint32_t packet[PS5VK_COMPLETION_WORDS] = {
+         UINT32_C(0xc0064900), /* PKT3 RELEASE_MEM, 7 body words */
+         ((uint32_t)PS5VK_COMPLETION_CONTROL << 12) | (5u << 8) | PS5VK_COMPLETION_EVENT,
+         UINT32_C(0x20000000), (uint32_t)marker_address, (uint32_t)(marker_address >> 32), value,
+         0, 0,
+      };
+      memcpy(completion, packet, sizeof(packet));
+      command.up += PS5VK_COMPLETION_WORDS;
+   }
    /* Mesa's immediate submission does not mark the queue lost when
     * driver_submit fails, so every failure after this point does. */
-   if (!barrier || !completion || command.up > command.top)
+   if (!barrier || command.up == completion || command.up > command.top)
       return vk_queue_set_lost(&queue->vk, "the AGC helpers did not write the completion packets");
    const uint32_t word_count = (uint32_t)(command.up - command.bottom);
    /* The words stay in the stream until the next submission replaces them, and

@@ -1,0 +1,41 @@
+{"schema":2,"event":"run_start","pid":233}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R8G8B8A8_UNORM clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R8G8B8A8_UNORM clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"B8G8R8A8_UNORM clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"B8G8R8A8_UNORM clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R32G32B32A32_SFLOAT clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R32G32B32A32_SFLOAT clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R32_SFLOAT clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R32_SFLOAT clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R32_UINT clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R32_UINT clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R16_UINT clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R16_UINT clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R8G8_UNORM clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R8G8_UNORM clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"D32_SFLOAT clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"D32_SFLOAT clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"D32_SFLOAT_S8_UINT pattern, depth plane: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"D32_SFLOAT_S8_UINT pattern, stencil plane: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"depth-only clear, depth 0.75: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"depth-only clear, stencil kept: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"stencil-only clear, depth kept: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"stencil-only clear, stencil 0x33: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"clear of both, depth 0.25: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"clear of both, stencil 0x7e: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clears","status":"PASS","result":0,"detail":"24 of 24 GPU image clear checks passed"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"r90-image-clears"}
+{"schema":2,"event":"probe","probe":"c7_clear_check","status":"PASS","result":0,"detail":"linear_clear: a linear R8G8B8A8_UNORM level clears to its encoded texel everywhere"}
+{"schema":2,"event":"probe","probe":"c7_clear_check","status":"PASS","result":0,"detail":"tiled_clear: a tiled attachment clears on the GPU"}
+{"schema":2,"event":"probe","probe":"c7_clear_check","status":"PASS","result":0,"detail":"level_of_two: level 1 of a two-level image clears and reads back on its own"}
+{"schema":2,"event":"probe","probe":"c7_clear_check","status":"PASS","result":0,"detail":"readback_region: a region readback holds that region's texels"}
+{"schema":2,"event":"probe","probe":"c7_clear_check","status":"PASS","result":0,"detail":"readback_region_bounds: and writes nothing outside it"}
+{"schema":2,"event":"probe","probe":"c7_clear_check","status":"PASS","result":0,"detail":"padded_rows: bufferRowLength puts each readback row at its own pitch"}
+{"schema":2,"event":"probe","probe":"c7_clear_check","status":"PASS","result":0,"detail":"padded_gap: and leaves the gap between rows as it was"}
+{"schema":2,"event":"probe","probe":"c7_clear","status":"PASS","result":0,"detail":"7 of 7 image clear checks passed"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c7-clear"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c5-depth-clear"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"v0-stencil-clear"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"v0-colour-clear"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c1-clear"}
+{"schema":2,"event":"probe","probe":"runner_summary","status":"PASS","result":0,"detail":"6 of 6 queued tests passed"}

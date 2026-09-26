@@ -20,13 +20,15 @@
  *   - an upload of each aspect lands in its own plane, every texel where the
  *     plane's map puts it (read straight from the mapped image memory), and a
  *     readback of each aspect returns exactly what was uploaded;
- *   - vkCmdClearDepthStencilImage clears each aspect it names and leaves the
- *     other plane alone;
  *   - vkCmdCopyImage copies one aspect into the same aspect of another image,
  *     and a copy between different aspects is refused.
  *
  * The console's r83-depth-stencil case is the other half: the depth block
  * writes both planes, and the texture unit and the readback read them back.
+ * vkCmdClearDepthStencilImage is the console's too: since R90 a depth or stencil
+ * attachment -- and every image of this format is one -- is cleared by vk_meta's
+ * clear draw, which nothing renders on the PC. r90-image-clears clears both
+ * aspects, the depth alone and the stencil alone, and reads both planes back.
  */
 
 #include <string.h>
@@ -201,7 +203,6 @@ struct transfer {
    VkBuffer buffer;
    VkImageAspectFlags aspect;
    VkImageAspectFlags other_aspect;
-   VkClearDepthStencilValue clear;
 };
 
 static void
@@ -227,16 +228,6 @@ calls_readback(VkCommandBuffer command, void *context)
    VK_FUNCTION(g_instance, CmdCopyImageToBuffer)(command, t->image,
                                                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, t->buffer, 1,
                                                  &copy);
-}
-
-static void
-calls_clear(VkCommandBuffer command, void *context)
-{
-   const struct transfer *const t = context;
-   const VkImageSubresourceRange range = {t->aspect, 0, 1, 0, 1};
-   VK_FUNCTION(g_instance, CmdClearDepthStencilImage)(command, t->image,
-                                                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                                      &t->clear, 1, &range);
 }
 
 static void
@@ -344,23 +335,6 @@ main(void)
             "the depth aspect reads back as the floats it was uploaded with");
       check(memcmp(stencil_mapped, g_stencils, sizeof(g_stencils)) == 0,
             "the stencil aspect reads back as the bytes it was uploaded with");
-
-      /* Clears: both aspects, then depth alone. */
-      struct transfer both = {.image = image,
-                              .aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
-                              .clear = {0.25f, 0x7eu}};
-      check(run(pool, fence, calls_clear, &both) == VK_SUCCESS,
-            "a clear of both aspects records and runs");
-      check(depth_plane_matches(image_mapped, NULL, 0.25f) == TEXELS &&
-               stencil_plane_matches(image_mapped, NULL, 0x7e) == TEXELS,
-            "the clear writes 0.25 into every depth texel and 0x7e into every stencil one");
-      struct transfer depth_only = {.image = image, .aspect = VK_IMAGE_ASPECT_DEPTH_BIT,
-                                    .clear = {0.75f, 0x11u}};
-      check(run(pool, fence, calls_clear, &depth_only) == VK_SUCCESS,
-            "a clear of the depth aspect alone records and runs");
-      check(depth_plane_matches(image_mapped, NULL, 0.75f) == TEXELS &&
-               stencil_plane_matches(image_mapped, NULL, 0x7e) == TEXELS,
-            "a depth clear leaves the stencil plane as it was");
 
       /* Copies: the uploaded patterns again, then each aspect into the other
        * image's same aspect. */

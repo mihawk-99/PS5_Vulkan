@@ -777,6 +777,11 @@ RELEASE_MEM = 0x49
 # sceAgcCbSetShRegisterRangeDirect encodes the user data a draw programs.
 SET_SH_REG = 0x76
 COMPLETION_MARKER = 0x0030C528
+# R90: the driver's completion marker is the same RELEASE_MEM with event 20,
+# CACHE_FLUSH_AND_INV_TS_EVENT, where the runner's helper writes event 40
+# (ps5vk_queue.c, ps5vk_queue_run_step); a frame captured before R90 holds the
+# helper's. Either stands for the other, and every other word is compared.
+COMPLETION_MARKERS = (COMPLETION_MARKER, 0x0030C514)
 
 
 def stream_packets(words):
@@ -985,11 +990,12 @@ def compare_stream(console, submission, expected, extra_sh_registers=(), index_s
                             f"{offset:#05x} = {value:#010x} (console {console_record[0]:#05x} = "
                             f"{console_record[1]:#010x})")
                 tables += 1
-            elif opcode == RELEASE_MEM and len(recorded) > 1 and recorded[1] == COMPLETION_MARKER:
-                # The marker's address low word and value belong to the submission.
-                if len(built) != len(recorded) or \
-                        [word for index, word in enumerate(built) if index not in (3, 5)] != \
-                        [word for index, word in enumerate(recorded) if index not in (3, 5)]:
+            elif opcode == RELEASE_MEM and len(recorded) > 1 and recorded[1] in COMPLETION_MARKERS:
+                # The marker's address low word and value belong to the submission,
+                # and its event is the runner's or the driver's.
+                if len(built) != len(recorded) or built[1] not in COMPLETION_MARKERS or \
+                        [word for index, word in enumerate(built) if index not in (1, 3, 5)] != \
+                        [word for index, word in enumerate(recorded) if index not in (1, 3, 5)]:
                     problems.append(f"{where}: completion marker {hex_words(built)} "
                                     f"(console {hex_words(recorded)})")
             elif built != recorded:

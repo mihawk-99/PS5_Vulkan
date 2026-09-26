@@ -1,0 +1,17 @@
+# Upload: python3 tools/ps5_console.py battery PPSA99988 jobs/r90-gpu-image-clears/queue.txt
+# R90 (docs/M5_PHASE_C.md): vkCmdClearColorImage and vkCmdClearDepthStencilImage
+# on the GPU for attachments, and every submission step ending in one
+# CACHE_FLUSH_AND_INV_TS_EVENT release. r90-image-clears clears seven colour
+# formats and D32_SFLOAT twice each, and D32_SFLOAT_S8_UINT's planes one aspect
+# at a time and together, reading every texel back at a split point. c7-clear's
+# tiled attachment and c5-depth-clear's depth image are cleared on the GPU too;
+# the other clears are controls. regression/queue.txt is the rest of the battery.
+hold 1
+capture
+r90-image-clears
+c7-clear
+c5-depth-clear
+v0-stencil-clear
+v0-colour-clear
+c1-clear
+exit

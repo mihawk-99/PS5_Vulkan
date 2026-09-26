@@ -15514,10 +15514,17 @@ void run_vulkan_image_clear(const TestContext &test, TestOutcome &outcome) noexc
     tiled_colour.float32[3] = 1.0f;
     const bool tiled_submitted =
         ready && clear_and_read_back(tiled, 0, tiled_colour, 0, 0, kWidth, kHeight, 0);
-    report_check("tiled_clear",
-                 tiled_submitted &&
-                     whole_level_is(tiled, tiled_grey, kWidth * kHeight * kTexelBytes),
-                 "a tiled attachment clears through its own tile map");
+    // R90: an attachment is cleared by vk_meta's clear draw, and nothing renders
+    // on the PC, so there the check is that the clear records and submits; the
+    // console's run reads every texel (and r90-image-clears more formats).
+#ifdef PS5VK_HOST_BUILD
+    (void)tiled_grey;
+    const bool tiled_texels = tiled_submitted;
+#else
+    const bool tiled_texels =
+        tiled_submitted && whole_level_is(tiled, tiled_grey, kWidth * kHeight * kTexelBytes);
+#endif
+    report_check("tiled_clear", tiled_texels, "a tiled attachment clears on the GPU");
 
     // Level 1 of a two-level image: the clear and the readback both have to name
     // that level's own layout.
@@ -15603,6 +15610,526 @@ void run_vulkan_image_clear(const TestContext &test, TestOutcome &outcome) noexc
     std::snprintf(detail, sizeof(detail), "%u of %u image clear checks passed", passed_checks,
                   checks);
     log.event("c7_clear", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1, detail);
+}
+
+// R90: vkCmdClearColorImage and vkCmdClearDepthStencilImage on the GPU. An image
+// the device renders into -- a colour or depth attachment of one level and one
+// layer -- is cleared by vk_meta's clear draw instead of by the CPU at a
+// submission split point (driver/ps5vk_draw.c, ps5vk_meta_clear_colour and
+// ps5vk_meta_clear_depth). Each colour format is cleared to two values in turn
+// and read back whole after each: every texel has to hold the value's encoding,
+// so a clear that did not run, or one that missed the edge of an extent that is
+// no tile multiple, shows. D32_SFLOAT is cleared the same way. D32_SFLOAT_S8_UINT,
+// LRPS2's depth format, has both planes uploaded with a pattern first, then a
+// depth-only clear (LRPS2's own), a stencil-only one (the CPU's still: the
+// driver renders stencil only beside its own depth) and, over the pattern
+// again, a clear of both, each read back aspect by aspect: the aspect a clear
+// names holds the value everywhere and the other keeps what it held. Every
+// readback is a CPU copy at a split point right after the GPU's clear, so the
+// case also proves the step end leaves nothing in the GPU's caches.
+void run_vulkan_gpu_image_clears(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    constexpr std::uint32_t kWidth = 636;
+    constexpr std::uint32_t kHeight = 358;
+    constexpr std::size_t kTexels = std::size_t{kWidth} * kHeight;
+    // Readbacks land in the first five texel-sized bytes per texel (a colour
+    // readback in up to sixteen); the depth-stencil pattern is uploaded from the
+    // back half, which no readback reaches.
+    constexpr std::size_t kBufferBytes = kTexels * 24;
+    constexpr std::size_t kDepthAt = 0;
+    constexpr std::size_t kStencilAt = kTexels * 4;
+    constexpr std::size_t kUploadDepthAt = kTexels * 16;
+    constexpr std::size_t kUploadStencilAt = kTexels * 20;
+    constexpr std::uint8_t kSentinel = 0xa5;
+
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    ps5vk_triangle_input input{
+        vk_icdGetInstanceProcAddr,       1,       {},
+        VK_ATTACHMENT_LOAD_OP_DONT_CARE, &report, PS5VK_TRIANGLE_OUTPUT_IMAGE};
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    ps5vk_triangle triangle{};
+    const ps5vk_triangle_status created = ps5vk_triangle_create(&triangle, &input);
+    if (created != PS5VK_TRIANGLE_OK)
+    {
+        log.event("r90_clears", "FAIL", -1, "no device for the clear cases");
+        if (created != PS5VK_TRIANGLE_IN_FLIGHT)
+            ps5vk_triangle_finish(&triangle);
+        return;
+    }
+
+    const auto get = triangle.get_instance_proc_addr;
+    const auto create_image = (PFN_vkCreateImage)get(triangle.instance, "vkCreateImage");
+    const auto destroy_image = (PFN_vkDestroyImage)get(triangle.instance, "vkDestroyImage");
+    const auto image_requirements =
+        (PFN_vkGetImageMemoryRequirements)get(triangle.instance, "vkGetImageMemoryRequirements");
+    const auto create_buffer = (PFN_vkCreateBuffer)get(triangle.instance, "vkCreateBuffer");
+    const auto destroy_buffer = (PFN_vkDestroyBuffer)get(triangle.instance, "vkDestroyBuffer");
+    const auto buffer_requirements =
+        (PFN_vkGetBufferMemoryRequirements)get(triangle.instance, "vkGetBufferMemoryRequirements");
+    const auto allocate_memory = (PFN_vkAllocateMemory)get(triangle.instance, "vkAllocateMemory");
+    const auto free_memory = (PFN_vkFreeMemory)get(triangle.instance, "vkFreeMemory");
+    const auto bind_image = (PFN_vkBindImageMemory)get(triangle.instance, "vkBindImageMemory");
+    const auto bind_buffer = (PFN_vkBindBufferMemory)get(triangle.instance, "vkBindBufferMemory");
+    const auto map_memory = (PFN_vkMapMemory)get(triangle.instance, "vkMapMemory");
+    const auto unmap_memory = (PFN_vkUnmapMemory)get(triangle.instance, "vkUnmapMemory");
+    const auto allocate_buffers =
+        (PFN_vkAllocateCommandBuffers)get(triangle.instance, "vkAllocateCommandBuffers");
+    const auto free_buffers =
+        (PFN_vkFreeCommandBuffers)get(triangle.instance, "vkFreeCommandBuffers");
+    const auto begin = (PFN_vkBeginCommandBuffer)get(triangle.instance, "vkBeginCommandBuffer");
+    const auto end = (PFN_vkEndCommandBuffer)get(triangle.instance, "vkEndCommandBuffer");
+    const auto clear_colour =
+        (PFN_vkCmdClearColorImage)get(triangle.instance, "vkCmdClearColorImage");
+    const auto clear_depth =
+        (PFN_vkCmdClearDepthStencilImage)get(triangle.instance, "vkCmdClearDepthStencilImage");
+    const auto readback =
+        (PFN_vkCmdCopyImageToBuffer)get(triangle.instance, "vkCmdCopyImageToBuffer");
+    const auto upload =
+        (PFN_vkCmdCopyBufferToImage)get(triangle.instance, "vkCmdCopyBufferToImage");
+    const auto pipeline_barrier =
+        (PFN_vkCmdPipelineBarrier)get(triangle.instance, "vkCmdPipelineBarrier");
+    const auto queue_submit = (PFN_vkQueueSubmit)get(triangle.instance, "vkQueueSubmit");
+    const auto create_fence = (PFN_vkCreateFence)get(triangle.instance, "vkCreateFence");
+    const auto destroy_fence = (PFN_vkDestroyFence)get(triangle.instance, "vkDestroyFence");
+    const auto wait_fences = (PFN_vkWaitForFences)get(triangle.instance, "vkWaitForFences");
+    const auto reset_fences = (PFN_vkResetFences)get(triangle.instance, "vkResetFences");
+    if (create_image == nullptr || destroy_image == nullptr || image_requirements == nullptr ||
+        create_buffer == nullptr || destroy_buffer == nullptr || buffer_requirements == nullptr ||
+        allocate_memory == nullptr || free_memory == nullptr || bind_image == nullptr ||
+        bind_buffer == nullptr || map_memory == nullptr || unmap_memory == nullptr ||
+        allocate_buffers == nullptr || free_buffers == nullptr || begin == nullptr ||
+        end == nullptr || clear_colour == nullptr || clear_depth == nullptr ||
+        readback == nullptr || upload == nullptr || pipeline_barrier == nullptr ||
+        queue_submit == nullptr || create_fence == nullptr || destroy_fence == nullptr ||
+        wait_fences == nullptr || reset_fences == nullptr)
+    {
+        log.event("r90_clears", "FAIL", -1, "the driver exports no image clear entry point");
+        ps5vk_triangle_finish(&triangle);
+        return;
+    }
+
+    const VkCommandBufferAllocateInfo allocate{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                                               nullptr, triangle.pool,
+                                               VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1};
+    VkCommandBuffer command = VK_NULL_HANDLE;
+    const VkFenceCreateInfo fence_info{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, 0};
+    VkFence fence = VK_NULL_HANDLE;
+    const VkBufferCreateInfo buffer_info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                         nullptr,
+                                         0,
+                                         kBufferBytes,
+                                         VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                         VK_SHARING_MODE_EXCLUSIVE,
+                                         0,
+                                         nullptr};
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory buffer_memory = VK_NULL_HANDLE;
+    void *mapped = nullptr;
+    bool ready = allocate_buffers(triangle.device, &allocate, &command) == VK_SUCCESS &&
+                 create_fence(triangle.device, &fence_info, nullptr, &fence) == VK_SUCCESS &&
+                 create_buffer(triangle.device, &buffer_info, nullptr, &buffer) == VK_SUCCESS;
+    if (ready)
+    {
+        VkMemoryRequirements need{};
+        buffer_requirements(triangle.device, buffer, &need);
+        const VkMemoryAllocateInfo memory_info{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr,
+                                               need.size, kHostMemoryType};
+        ready =
+            allocate_memory(triangle.device, &memory_info, nullptr, &buffer_memory) == VK_SUCCESS &&
+            bind_buffer(triangle.device, buffer, buffer_memory, 0) == VK_SUCCESS &&
+            map_memory(triangle.device, buffer_memory, 0, VK_WHOLE_SIZE, 0, &mapped) ==
+                VK_SUCCESS &&
+            mapped != nullptr;
+    }
+    const auto release_shared = [&]()
+    {
+        if (mapped != nullptr)
+            unmap_memory(triangle.device, buffer_memory);
+        if (buffer_memory != VK_NULL_HANDLE)
+            free_memory(triangle.device, buffer_memory, nullptr);
+        if (buffer != VK_NULL_HANDLE)
+            destroy_buffer(triangle.device, buffer, nullptr);
+        if (fence != VK_NULL_HANDLE)
+            destroy_fence(triangle.device, fence, nullptr);
+        if (command != VK_NULL_HANDLE)
+            free_buffers(triangle.device, triangle.pool, 1, &command);
+        ps5vk_triangle_finish(&triangle);
+    };
+    if (!ready)
+    {
+        log.event("r90_clears", "FAIL", -1, "no command buffer, fence or readback buffer");
+        release_shared();
+        return;
+    }
+    auto *const bytes = static_cast<std::uint8_t *>(mapped);
+
+    struct Image
+    {
+        VkImage image{VK_NULL_HANDLE};
+        VkDeviceMemory memory{VK_NULL_HANDLE};
+    };
+    const auto make_image = [&](Image &made, VkFormat format, VkImageUsageFlags usage)
+    {
+        const VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                                     nullptr,
+                                     0,
+                                     VK_IMAGE_TYPE_2D,
+                                     format,
+                                     {kWidth, kHeight, 1},
+                                     1,
+                                     1,
+                                     VK_SAMPLE_COUNT_1_BIT,
+                                     VK_IMAGE_TILING_OPTIMAL,
+                                     usage,
+                                     VK_SHARING_MODE_EXCLUSIVE,
+                                     0,
+                                     nullptr,
+                                     VK_IMAGE_LAYOUT_UNDEFINED};
+        if (create_image(triangle.device, &info, nullptr, &made.image) != VK_SUCCESS)
+            return false;
+        VkMemoryRequirements need{};
+        image_requirements(triangle.device, made.image, &need);
+        const VkMemoryAllocateInfo memory_info{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr,
+                                               need.size, 0};
+        return allocate_memory(triangle.device, &memory_info, nullptr, &made.memory) ==
+                   VK_SUCCESS &&
+               bind_image(triangle.device, made.image, made.memory, 0) == VK_SUCCESS;
+    };
+    const auto drop_image = [&](Image &made)
+    {
+        if (made.memory != VK_NULL_HANDLE)
+            free_memory(triangle.device, made.memory, nullptr);
+        if (made.image != VK_NULL_HANDLE)
+            destroy_image(triangle.device, made.image, nullptr);
+        made = Image{};
+    };
+    // Records what `calls` puts in the command buffer, submits it and waits.
+    const auto run = [&](const auto &calls)
+    {
+        const VkCommandBufferBeginInfo info{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr,
+                                            VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, nullptr};
+        if (begin(command, &info) != VK_SUCCESS)
+            return false;
+        calls();
+        if (end(command) != VK_SUCCESS)
+            return false;
+        const VkSubmitInfo submit{
+            VK_STRUCTURE_TYPE_SUBMIT_INFO, nullptr, 0, nullptr, nullptr, 1, &command, 0, nullptr};
+        return queue_submit(triangle.queue, 1, &submit, fence) == VK_SUCCESS &&
+               wait_fences(triangle.device, 1, &fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS &&
+               reset_fences(triangle.device, 1, &fence) == VK_SUCCESS;
+    };
+    // A transfer's writes made available to the next transfer, or to the host.
+    const auto barrier = [&](VkAccessFlags access, VkPipelineStageFlags stage)
+    {
+        const VkMemoryBarrier memory_barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
+                                             VK_ACCESS_TRANSFER_WRITE_BIT, access};
+        pipeline_barrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, stage, 0, 1, &memory_barrier, 0,
+                         nullptr, 0, nullptr);
+    };
+    const auto read_aspect = [&](VkImage image, VkImageAspectFlags aspect, std::size_t at)
+    {
+        const VkBufferImageCopy copy{at, 0, 0, {aspect, 0, 0, 1}, {0, 0, 0}, {kWidth, kHeight, 1}};
+        readback(command, image, VK_IMAGE_LAYOUT_GENERAL, buffer, 1, &copy);
+    };
+
+    unsigned checks = 0;
+    unsigned passed_checks = 0;
+    // Every texel of the readback at `at` has to equal `expected`: one texel for
+    // all of them, or with `per_texel` a whole plane of them.
+    const auto check = [&](const char *name, bool submitted, std::size_t at,
+                           std::size_t texel_bytes, const std::uint8_t *expected, bool per_texel)
+    {
+        std::size_t wrong = 0;
+        std::size_t first = kTexels;
+        for (std::size_t texel = 0; submitted && texel < kTexels; ++texel)
+            if (std::memcmp(bytes + at + texel * texel_bytes,
+                            expected + (per_texel ? texel * texel_bytes : 0), texel_bytes) != 0)
+            {
+                first = wrong == 0 ? texel : first;
+                ++wrong;
+            }
+        const bool ok = submitted && wrong == 0;
+        ++checks;
+        passed_checks += ok ? 1u : 0u;
+        char detail[224]{};
+        if (!submitted)
+            std::snprintf(detail, sizeof(detail), "%s: not recorded or not submitted", name);
+        else if (ok)
+            std::snprintf(detail, sizeof(detail), "%s: %zu of %zu texels", name, kTexels, kTexels);
+        else
+        {
+            const std::uint8_t *const got = bytes + at + first * texel_bytes;
+            const std::uint8_t *const want = expected + (per_texel ? first * texel_bytes : 0);
+            std::snprintf(detail, sizeof(detail),
+                          "%s: %zu of %zu texels differ, first (%zu,%zu) %02x%02x%02x%02x not "
+                          "%02x%02x%02x%02x",
+                          name, wrong, kTexels, first % kWidth, first / kWidth, got[0],
+                          texel_bytes > 1 ? got[1] : 0, texel_bytes > 2 ? got[2] : 0,
+                          texel_bytes > 3 ? got[3] : 0, want[0], texel_bytes > 1 ? want[1] : 0,
+                          texel_bytes > 2 ? want[2] : 0, texel_bytes > 3 ? want[3] : 0);
+        }
+        log.event("r90_clear_check", ok ? "PASS" : "FAIL", ok ? 0 : -1, detail);
+    };
+
+    // The colour formats LRPS2's hardware renderer clears whose tiled maps the
+    // console has measured, and the swapchain's blue-first order and two float
+    // layouts beside them. Each value's texel bytes are written out,
+    // little-endian. The one- and eight-byte elements (R8_UNORM,
+    // R16G16B16A16_UNORM and _SFLOAT) are R91's: this case's first runs (PIDs
+    // 230 and 231) found the CPU's maps for them off the hardware's in the
+    // partial tiles at the image's edge, so a readback cannot check them yet.
+    const auto floats = [](float r, float g, float b, float a)
+    {
+        VkClearColorValue value{};
+        value.float32[0] = r;
+        value.float32[1] = g;
+        value.float32[2] = b;
+        value.float32[3] = a;
+        return value;
+    };
+    const auto uints = [](std::uint32_t r)
+    {
+        VkClearColorValue value{};
+        value.uint32[0] = r;
+        return value;
+    };
+    struct ColourCase
+    {
+        VkFormat format;
+        const char *name;
+        std::size_t texel_bytes;
+        VkClearColorValue first;
+        std::uint8_t first_bytes[16];
+        VkClearColorValue second;
+        std::uint8_t second_bytes[16];
+    };
+    const ColourCase colour_cases[] = {
+        {VK_FORMAT_R8G8B8A8_UNORM,
+         "R8G8B8A8_UNORM",
+         4,
+         floats(16.0f / 255.0f, 32.0f / 255.0f, 48.0f / 255.0f, 1.0f),
+         {0x10, 0x20, 0x30, 0xff},
+         floats(1.0f, 0.0f, 128.0f / 255.0f, 64.0f / 255.0f),
+         {0xff, 0x00, 0x80, 0x40}},
+        {VK_FORMAT_B8G8R8A8_UNORM,
+         "B8G8R8A8_UNORM",
+         4,
+         floats(16.0f / 255.0f, 32.0f / 255.0f, 48.0f / 255.0f, 1.0f),
+         {0x30, 0x20, 0x10, 0xff},
+         floats(1.0f, 0.0f, 128.0f / 255.0f, 64.0f / 255.0f),
+         {0x80, 0x00, 0xff, 0x40}},
+        {VK_FORMAT_R32G32B32A32_SFLOAT,
+         "R32G32B32A32_SFLOAT",
+         16,
+         floats(1.5f, -3.25f, 1024.0f, 0.125f),
+         {0x00, 0x00, 0xc0, 0x3f, 0x00, 0x00, 0x50, 0xc0, 0x00, 0x00, 0x80, 0x44, 0x00, 0x00, 0x00,
+          0x3e},
+         floats(0.0f, 1.0f, -1.0f, 2.0f),
+         {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x80, 0xbf, 0x00, 0x00, 0x00,
+          0x40}},
+        {VK_FORMAT_R32_SFLOAT,
+         "R32_SFLOAT",
+         4,
+         floats(0.75f, 0.0f, 0.0f, 0.0f),
+         {0x00, 0x00, 0x40, 0x3f},
+         floats(-1.5f, 0.0f, 0.0f, 0.0f),
+         {0x00, 0x00, 0xc0, 0xbf}},
+        {VK_FORMAT_R32_UINT,
+         "R32_UINT",
+         4,
+         uints(0xdeadbeefu),
+         {0xef, 0xbe, 0xad, 0xde},
+         uints(0x01234567u),
+         {0x67, 0x45, 0x23, 0x01}},
+        {VK_FORMAT_R16_UINT,
+         "R16_UINT",
+         2,
+         uints(0xbeefu),
+         {0xef, 0xbe},
+         uints(0x1234u),
+         {0x34, 0x12}},
+        {VK_FORMAT_R8G8_UNORM,
+         "R8G8_UNORM",
+         2,
+         floats(17.0f / 255.0f, 238.0f / 255.0f, 0, 0),
+         {0x11, 0xee},
+         floats(0.0f, 1.0f, 0.0f, 0.0f),
+         {0x00, 0xff}},
+    };
+    const VkImageSubresourceRange colour_range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    for (const ColourCase &colour : colour_cases)
+    {
+        Image image{};
+        const bool made =
+            make_image(image, colour.format,
+                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                           VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+        for (unsigned pass = 0; pass < 2; ++pass)
+        {
+            const VkClearColorValue &value = pass == 0 ? colour.first : colour.second;
+            std::memset(bytes, kSentinel, kTexels * colour.texel_bytes);
+            const bool submitted =
+                made &&
+                run(
+                    [&]()
+                    {
+                        clear_colour(command, image.image, VK_IMAGE_LAYOUT_GENERAL, &value, 1,
+                                     &colour_range);
+                        barrier(VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+                        read_aspect(image.image, VK_IMAGE_ASPECT_COLOR_BIT, 0);
+                        barrier(VK_ACCESS_HOST_READ_BIT, VK_PIPELINE_STAGE_HOST_BIT);
+                    });
+            char name[64]{};
+            std::snprintf(name, sizeof(name), "%s clear %u", colour.name, pass + 1);
+            check(name, submitted, 0, colour.texel_bytes,
+                  pass == 0 ? colour.first_bytes : colour.second_bytes, false);
+        }
+        drop_image(image);
+    }
+
+    const VkImageUsageFlags depth_usage =
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    const auto depth_bytes = [](float depth)
+    {
+        std::array<std::uint8_t, 4> out{};
+        std::memcpy(out.data(), &depth, sizeof(depth));
+        return out;
+    };
+    const auto clear_aspects =
+        [&](VkImage image, VkImageAspectFlags aspects, float depth, std::uint32_t stencil)
+    {
+        const VkClearDepthStencilValue value{depth, stencil};
+        const VkImageSubresourceRange range{aspects, 0, 1, 0, 1};
+        clear_depth(command, image, VK_IMAGE_LAYOUT_GENERAL, &value, 1, &range);
+    };
+
+    // D32_SFLOAT, cleared twice.
+    {
+        Image image{};
+        const bool made = make_image(image, VK_FORMAT_D32_SFLOAT, depth_usage);
+        const float values[2] = {0.25f, 0.75f};
+        for (unsigned pass = 0; pass < 2; ++pass)
+        {
+            std::memset(bytes, kSentinel, kTexels * 4);
+            const bool submitted =
+                made &&
+                run(
+                    [&]()
+                    {
+                        clear_aspects(image.image, VK_IMAGE_ASPECT_DEPTH_BIT, values[pass], 0);
+                        barrier(VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+                        read_aspect(image.image, VK_IMAGE_ASPECT_DEPTH_BIT, kDepthAt);
+                        barrier(VK_ACCESS_HOST_READ_BIT, VK_PIPELINE_STAGE_HOST_BIT);
+                    });
+            char name[64]{};
+            std::snprintf(name, sizeof(name), "D32_SFLOAT clear %u", pass + 1);
+            check(name, submitted, kDepthAt, 4, depth_bytes(values[pass]).data(), false);
+        }
+        drop_image(image);
+    }
+
+    // D32_SFLOAT_S8_UINT: a pattern in each plane, then each kind of clear.
+    {
+        Image image{};
+        const bool made = make_image(image, VK_FORMAT_D32_SFLOAT_S8_UINT, depth_usage);
+        for (std::size_t texel = 0; texel < kTexels; ++texel)
+        {
+            const float depth = static_cast<float>(texel % 4096u) / 4096.0f;
+            std::memcpy(bytes + kUploadDepthAt + texel * 4, &depth, sizeof(depth));
+            bytes[kUploadStencilAt + texel] = static_cast<std::uint8_t>(texel * 7u + (texel >> 8));
+        }
+        const auto put_pattern = [&]()
+        {
+            const VkBufferImageCopy depth_copy{
+                kUploadDepthAt,      0, 0, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1}, {0, 0, 0},
+                {kWidth, kHeight, 1}};
+            const VkBufferImageCopy stencil_copy{
+                kUploadStencilAt,    0, 0, {VK_IMAGE_ASPECT_STENCIL_BIT, 0, 0, 1}, {0, 0, 0},
+                {kWidth, kHeight, 1}};
+            upload(command, buffer, image.image, VK_IMAGE_LAYOUT_GENERAL, 1, &depth_copy);
+            upload(command, buffer, image.image, VK_IMAGE_LAYOUT_GENERAL, 1, &stencil_copy);
+        };
+        const auto read_planes = [&]()
+        {
+            barrier(VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+            read_aspect(image.image, VK_IMAGE_ASPECT_DEPTH_BIT, kDepthAt);
+            read_aspect(image.image, VK_IMAGE_ASPECT_STENCIL_BIT, kStencilAt);
+            barrier(VK_ACCESS_HOST_READ_BIT, VK_PIPELINE_STAGE_HOST_BIT);
+        };
+        const std::uint8_t *const depth_pattern = bytes + kUploadDepthAt;
+        const std::uint8_t *const stencil_pattern = bytes + kUploadStencilAt;
+
+        std::memset(bytes, kSentinel, kStencilAt + kTexels);
+        bool submitted = made && run(
+                                     [&]()
+                                     {
+                                         put_pattern();
+                                         read_planes();
+                                     });
+        check("D32_SFLOAT_S8_UINT pattern, depth plane", submitted, kDepthAt, 4, depth_pattern,
+              true);
+        check("D32_SFLOAT_S8_UINT pattern, stencil plane", submitted, kStencilAt, 1,
+              stencil_pattern, true);
+
+        std::memset(bytes, kSentinel, kStencilAt + kTexels);
+        submitted =
+            made && run(
+                        [&]()
+                        {
+                            clear_aspects(image.image, VK_IMAGE_ASPECT_DEPTH_BIT, 0.75f, 0x7e);
+                            read_planes();
+                        });
+        check("depth-only clear, depth 0.75", submitted, kDepthAt, 4, depth_bytes(0.75f).data(),
+              false);
+        check("depth-only clear, stencil kept", submitted, kStencilAt, 1, stencil_pattern, true);
+
+        std::memset(bytes, kSentinel, kStencilAt + kTexels);
+        submitted =
+            made && run(
+                        [&]()
+                        {
+                            clear_aspects(image.image, VK_IMAGE_ASPECT_STENCIL_BIT, 0.25f, 0x33);
+                            read_planes();
+                        });
+        const std::uint8_t stencil_33 = 0x33;
+        check("stencil-only clear, depth kept", submitted, kDepthAt, 4, depth_bytes(0.75f).data(),
+              false);
+        check("stencil-only clear, stencil 0x33", submitted, kStencilAt, 1, &stencil_33, false);
+
+        std::memset(bytes, kSentinel, kStencilAt + kTexels);
+        submitted =
+            made && run(
+                        [&]()
+                        {
+                            put_pattern();
+                            barrier(VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+                            clear_aspects(image.image,
+                                          VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
+                                          0.25f, 0x7e);
+                            read_planes();
+                        });
+        const std::uint8_t stencil_7e = 0x7e;
+        check("clear of both, depth 0.25", submitted, kDepthAt, 4, depth_bytes(0.25f).data(),
+              false);
+        check("clear of both, stencil 0x7e", submitted, kStencilAt, 1, &stencil_7e, false);
+        drop_image(image);
+    }
+
+    release_shared();
+    const unsigned expected_checks = static_cast<unsigned>(std::size(colour_cases)) * 2u + 2u + 8u;
+    log.number("r90_clears", "checks", checks);
+    log.number("r90_clears", "checks_passed", passed_checks);
+    outcome.command_built = true;
+    outcome.passed = checks == expected_checks && passed_checks == checks;
+    char detail[128]{};
+    std::snprintf(detail, sizeof(detail), "%u of %u GPU image clear checks passed", passed_checks,
+                  expected_checks);
+    log.event("r90_clears", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1, detail);
 }
 // Phase C5's image clear: vkCmdClearDepthStencilImage, the last of 1.0's three
 // clear commands. The depth image is cleared to 0.5 by the command itself (the
@@ -28240,6 +28767,9 @@ constexpr RunnerTest kRunnerTests[] = {
 // the CPU and compare the bytes (run_vulkan_image_clear, driver/ps5vk_image.c).
 #ifdef AGC_VULKAN_DRIVER
     {"c7-clear", "m2", run_vulkan_image_clear},
+    // R90: attachments cleared on the GPU, every texel of each format and both
+    // planes of D32_SFLOAT_S8_UINT read back (run_vulkan_gpu_image_clears).
+    {"r90-image-clears", "m2", run_vulkan_gpu_image_clears},
 #endif
     // R10: the two-subpass render pass whose second subpass reads the first's
     // colour attachment as an input attachment and writes it out. The port's UI

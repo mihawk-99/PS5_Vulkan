@@ -3256,6 +3256,81 @@ ps5vk_meta_blit(struct ps5vk_cmd_buffer *cmd_buffer, const VkBlitImageInfo2 *inf
    return true;
 }
 
+/* R90: whether an image clear can run as vk_meta's clear draw: a one-sample,
+ * one-level, one-layer image the device renders into, cleared whole. Anything
+ * else keeps the CPU path (ps5vk_image.c). */
+static bool
+ps5vk_meta_clear_eligible(const struct ps5vk_image *image, uint32_t range_count,
+                          const VkImageSubresourceRange *ranges)
+{
+   if (image->vk.image_type != VK_IMAGE_TYPE_2D || image->vk.samples != VK_SAMPLE_COUNT_1_BIT ||
+       image->vk.mip_levels != 1 || image->vk.array_layers != 1 ||
+       (ps5vk_ab_flags & PS5VK_AB_CPU_TRANSFERS))
+      return false;
+   for (uint32_t r = 0; r < range_count; r++)
+      if (ranges[r].baseMipLevel != 0 || vk_image_subresource_level_count(&image->vk, &ranges[r]) != 1 ||
+          ranges[r].baseArrayLayer != 0 ||
+          vk_image_subresource_layer_count(&image->vk, &ranges[r]) != 1)
+         return false;
+   return true;
+}
+
+/* R90: vkCmdClearColorImage on the GPU. The CPU path wrote every texel at a
+ * submission split point, so the queue waited for the GPU to finish all the
+ * work before it, then for the CPU to write a render target's texels -- a
+ * whole-pipeline stall each time, which LRPS2 pays several times a frame. The
+ * clear is now a draw over the image's own rendering, the application's bound
+ * state kept around it as for the blits. False leaves the CPU path. */
+bool
+ps5vk_meta_clear_colour(struct ps5vk_cmd_buffer *cmd_buffer, struct ps5vk_image *image,
+                        VkImageLayout layout, const VkClearColorValue *colour,
+                        uint32_t range_count, const VkImageSubresourceRange *ranges)
+{
+   if (!ps5vk_meta_clear_eligible(image, range_count, ranges) ||
+       image->storage != PS5VK_IMAGE_STORAGE_TILES ||
+       (image->vk.usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) == 0 ||
+       ps5vk_find_colour_format(image->vk.format) == NULL)
+      return false;
+   struct ps5vk_device *const device =
+      container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk);
+   struct ps5vk_meta_saved_state saved;
+   ps5vk_meta_save(cmd_buffer, &saved);
+   vk_meta_clear_color_image(&cmd_buffer->vk, &device->meta, &image->vk, layout, image->vk.format,
+                             colour, range_count, ranges);
+   ps5vk_meta_restore(cmd_buffer, &saved);
+   return true;
+}
+
+/* R90: vkCmdClearDepthStencilImage on the GPU, for a depth image the device
+ * renders into, as the colour clear above. vk_meta binds only the aspects the
+ * ranges name, so a depth-only clear of D32_SFLOAT_S8_UINT -- LRPS2's -- leaves
+ * the stencil plane as it was (r90-image-clears checks both planes). A range
+ * without the depth aspect keeps the CPU path: vk_meta renders a stencil-only
+ * clear with a stencil attachment and no depth one, which this driver's
+ * rendering refuses (it takes a stencil attachment only as the depth
+ * attachment's own image). */
+bool
+ps5vk_meta_clear_depth(struct ps5vk_cmd_buffer *cmd_buffer, struct ps5vk_image *image,
+                       VkImageLayout layout, const VkClearDepthStencilValue *value,
+                       uint32_t range_count, const VkImageSubresourceRange *ranges)
+{
+   if (!ps5vk_meta_clear_eligible(image, range_count, ranges) ||
+       !vk_format_has_depth(image->vk.format) ||
+       (image->vk.usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) == 0)
+      return false;
+   for (uint32_t r = 0; r < range_count; r++)
+      if ((ranges[r].aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) == 0)
+         return false;
+   struct ps5vk_device *const device =
+      container_of(cmd_buffer->vk.base.device, struct ps5vk_device, vk);
+   struct ps5vk_meta_saved_state saved;
+   ps5vk_meta_save(cmd_buffer, &saved);
+   vk_meta_clear_depth_stencil_image(&cmd_buffer->vk, &device->meta, &image->vk, layout, value,
+                                     range_count, ranges);
+   ps5vk_meta_restore(cmd_buffer, &saved);
+   return true;
+}
+
 /* vkCmdCopyImage between two eligible images of one format, as a nearest blit
  * of the same rectangle: texel for texel the same bytes. */
 bool

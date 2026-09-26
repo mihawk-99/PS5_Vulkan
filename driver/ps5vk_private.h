@@ -2031,6 +2031,15 @@ bool
 ps5vk_meta_copy(struct ps5vk_cmd_buffer *cmd_buffer, const VkCopyImageInfo2 *info);
 bool
 ps5vk_meta_resolve(struct ps5vk_cmd_buffer *cmd_buffer, const VkResolveImageInfo2 *info);
+/* R90: image clears on the GPU (ps5vk_draw.c); false leaves the CPU path. */
+bool
+ps5vk_meta_clear_colour(struct ps5vk_cmd_buffer *cmd_buffer, struct ps5vk_image *image,
+                        VkImageLayout layout, const VkClearColorValue *colour,
+                        uint32_t range_count, const VkImageSubresourceRange *ranges);
+bool
+ps5vk_meta_clear_depth(struct ps5vk_cmd_buffer *cmd_buffer, struct ps5vk_image *image,
+                       VkImageLayout layout, const VkClearDepthStencilValue *value,
+                       uint32_t range_count, const VkImageSubresourceRange *ranges);
 /* R77: an image stored in rows that the colour block can render into. */
 bool
 ps5vk_linear_target(const struct ps5vk_image *image);
