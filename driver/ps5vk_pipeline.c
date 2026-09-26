@@ -1574,9 +1574,14 @@ ps5vk_draw_refusal(const VkGraphicsPipelineCreateInfo *info,
           state != VK_DYNAMIC_STATE_STENCIL_WRITE_MASK &&
           state != VK_DYNAMIC_STATE_STENCIL_REFERENCE &&
           state != VK_DYNAMIC_STATE_DEPTH_BIAS &&
-          state != VK_DYNAMIC_STATE_BLEND_CONSTANTS)
+          state != VK_DYNAMIC_STATE_BLEND_CONSTANTS &&
+          /* R85: the line width, which without wideLines Valid Usage holds at
+           * 1.0 -- the width every line draw programs; any other value is
+           * refused by name at the draw (ps5vk_draw.c). LRPS2 declares it. */
+          state != VK_DYNAMIC_STATE_LINE_WIDTH)
          return "drawing with dynamic state other than the viewport, scissor, depth and stencil "
-                "state, the depth bias and the blend constants is not supported yet";
+                "state, the depth bias, the blend constants and the line width is not supported "
+                "yet";
    }
    /* The depth bias's clamp, refused in the static form here and in the dynamic
     * form at the draw (ps5vk_draw.c): Vulkan clamps the bias to

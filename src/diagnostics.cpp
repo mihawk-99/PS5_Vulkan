@@ -18626,7 +18626,7 @@ void run_vulkan_strip_frames(const TestContext &test, TestOutcome &outcome) noex
 // and the columns beside the vertical one -- must be exact, and every lit pixel
 // must hold the segments' one colour. The frame's own counts and end pixels are
 // logged, so the first console run is also the golden a later one is held to.
-constexpr unsigned kLineFrames = 4;
+constexpr unsigned kLineFrames = 5;
 constexpr std::uint32_t kLineRow = kOutputHeight / 4;
 constexpr std::uint32_t kLineLeft = kOutputWidth / 4;
 constexpr std::uint32_t kLineRight = kOutputWidth / 4 * 3;
@@ -18760,12 +18760,15 @@ void run_vulkan_line_frames(const TestContext &test, TestOutcome &outcome) noexc
         const char *name;
         bool lines;
         VkCullModeFlags cull;
+        // R85: the width the draw sets with vkCmdSetLineWidth; 0 is static.
+        float dynamic_line_width;
     };
     static constexpr Frame kFrames[kLineFrames] = {
-        {"lines, no culling", true, VK_CULL_MODE_NONE},
-        {"rectangles, no culling", false, VK_CULL_MODE_NONE},
-        {"lines, both faces culled", true, VK_CULL_MODE_FRONT_AND_BACK},
-        {"rectangles, both faces culled", false, VK_CULL_MODE_FRONT_AND_BACK},
+        {"lines, no culling", true, VK_CULL_MODE_NONE, 0.0f},
+        {"rectangles, no culling", false, VK_CULL_MODE_NONE, 0.0f},
+        {"lines, both faces culled", true, VK_CULL_MODE_FRONT_AND_BACK, 0.0f},
+        {"rectangles, both faces culled", false, VK_CULL_MODE_FRONT_AND_BACK, 0.0f},
+        {"lines, width 1.0 set by the draw", true, VK_CULL_MODE_NONE, 1.0f},
     };
     const std::uint32_t clear_word = 0xffff8040u;
     FrameSummary summaries[kLineFrames]{};
@@ -18798,6 +18801,7 @@ void run_vulkan_line_frames(const TestContext &test, TestOutcome &outcome) noexc
         input.primitive_topology =
             frame.lines ? VK_PRIMITIVE_TOPOLOGY_LINE_LIST : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         input.rasterization_cull_mode = frame.cull;
+        input.dynamic_line_width = frame.dynamic_line_width;
         ps5vk_triangle triangle{};
         ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
         if (status == PS5VK_TRIANGLE_OK)
@@ -18859,6 +18863,10 @@ void run_vulkan_line_frames(const TestContext &test, TestOutcome &outcome) noexc
     const bool unculled =
         summaries[2].hash == summaries[0].hash && summaries[2].drawn == summaries[0].drawn;
     const bool culled = summaries[3].drawn == 0;
+    // Frame 4 (R85): the pipeline declares the line width dynamic and the draw
+    // sets 1.0, the only width without wideLines: frame 0's words exactly.
+    const bool dynamic_width =
+        summaries[4].hash == summaries[0].hash && summaries[4].drawn == summaries[0].drawn;
     log.event("agc_lines_reference", reference ? "PASS" : "FAIL", reference ? 0 : -1,
               "the triangle pairs cover exactly the rectangles' pixels, in one colour");
     log.event("agc_lines_equivalent", equivalent ? "PASS" : "FAIL", equivalent ? 0 : -1,
@@ -18870,8 +18878,10 @@ void run_vulkan_line_frames(const TestContext &test, TestOutcome &outcome) noexc
               "with both faces culled the lines draw the same frame word for word");
     log.event("agc_lines_culled", culled ? "PASS" : "FAIL", culled ? 0 : -1,
               "with both faces culled the triangle pairs draw nothing");
+    log.event("agc_lines_dynamic_width", dynamic_width ? "PASS" : "FAIL", dynamic_width ? 0 : -1,
+              "with the width set by the draw the lines draw the static frame word for word");
     outcome.command_built = true;
-    outcome.passed = equivalent && unculled && culled;
+    outcome.passed = equivalent && unculled && culled && dynamic_width;
     log.event("agc_lines", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1,
               outcome.passed ? "a line list draws the rectangles' pixels and is not culled"
                              : "a line frame is not what its rectangles or its culled twin draw");

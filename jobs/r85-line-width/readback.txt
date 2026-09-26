@@ -1,0 +1,75 @@
+{"schema":2,"event":"run_start","pid":181}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"m2-solid"}
+{"schema":2,"event":"probe","probe":"agc_lines","status":"INFO","result":0,"detail":"lines, no culling"}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"drawn","value":2460}
+{"schema":2,"event":"hex","probe":"agc_lines_frame","field":"first_drawn_word","value":"0xff40ff80"}
+{"schema":2,"event":"hex","probe":"agc_lines_frame","field":"frame_fnv1a64","value":"0x26a0b88a37ab1b25"}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"inside","value":2}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"missing_end","value":3}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"missing_other","value":2455}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"extra_end","value":1}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"extra_other","value":2457}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"off_colour","value":0}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"row_first_lit_x","value":1920}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"row_last_lit_x","value":1920}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"column_first_lit_y","value":1079}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"column_last_lit_y","value":1619}
+{"schema":2,"event":"probe","probe":"agc_lines","status":"INFO","result":0,"detail":"rectangles, no culling"}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"drawn","value":2460}
+{"schema":2,"event":"hex","probe":"agc_lines_frame","field":"first_drawn_word","value":"0xff40ff80"}
+{"schema":2,"event":"hex","probe":"agc_lines_frame","field":"frame_fnv1a64","value":"0x26a0b88a37ab1b25"}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"inside","value":2}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"missing_end","value":3}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"missing_other","value":2455}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"extra_end","value":1}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"extra_other","value":2457}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"off_colour","value":0}
+{"schema":2,"event":"probe","probe":"agc_lines","status":"INFO","result":0,"detail":"lines, both faces culled"}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"drawn","value":2460}
+{"schema":2,"event":"hex","probe":"agc_lines_frame","field":"first_drawn_word","value":"0xff40ff80"}
+{"schema":2,"event":"hex","probe":"agc_lines_frame","field":"frame_fnv1a64","value":"0x26a0b88a37ab1b25"}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"inside","value":2}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"missing_end","value":3}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"missing_other","value":2455}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"extra_end","value":1}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"extra_other","value":2457}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"off_colour","value":0}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"row_first_lit_x","value":1920}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"row_last_lit_x","value":1920}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"column_first_lit_y","value":1079}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"column_last_lit_y","value":1619}
+{"schema":2,"event":"probe","probe":"agc_lines","status":"INFO","result":0,"detail":"rectangles, both faces culled"}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"drawn","value":0}
+{"schema":2,"event":"hex","probe":"agc_lines_frame","field":"first_drawn_word","value":"0x0"}
+{"schema":2,"event":"hex","probe":"agc_lines_frame","field":"frame_fnv1a64","value":"0xf5178457ead86325"}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"inside","value":0}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"missing_end","value":4}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"missing_other","value":2456}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"extra_end","value":0}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"extra_other","value":0}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"off_colour","value":0}
+{"schema":2,"event":"probe","probe":"agc_lines","status":"INFO","result":0,"detail":"lines, width 1.0 set by the draw"}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"drawn","value":2460}
+{"schema":2,"event":"hex","probe":"agc_lines_frame","field":"first_drawn_word","value":"0xff40ff80"}
+{"schema":2,"event":"hex","probe":"agc_lines_frame","field":"frame_fnv1a64","value":"0x26a0b88a37ab1b25"}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"inside","value":2}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"missing_end","value":3}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"missing_other","value":2455}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"extra_end","value":1}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"extra_other","value":2457}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"off_colour","value":0}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"row_first_lit_x","value":1920}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"row_last_lit_x","value":1920}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"column_first_lit_y","value":1079}
+{"schema":2,"event":"value","probe":"agc_lines_frame","field":"column_last_lit_y","value":1619}
+{"schema":2,"event":"value","probe":"agc_lines","field":"rectangle_pixels","value":2460}
+{"schema":2,"event":"probe","probe":"agc_lines_reference","status":"FAIL","result":-1,"detail":"the triangle pairs cover exactly the rectangles' pixels, in one colour"}
+{"schema":2,"event":"probe","probe":"agc_lines_equivalent","status":"FAIL","result":-1,"detail":"the lines differ from the rectangles away from their ends"}
+{"schema":2,"event":"probe","probe":"agc_lines_unculled","status":"PASS","result":0,"detail":"with both faces culled the lines draw the same frame word for word"}
+{"schema":2,"event":"probe","probe":"agc_lines_culled","status":"PASS","result":0,"detail":"with both faces culled the triangle pairs draw nothing"}
+{"schema":2,"event":"probe","probe":"agc_lines_dynamic_width","status":"PASS","result":0,"detail":"with the width set by the draw the lines draw the static frame word for word"}
+{"schema":2,"event":"probe","probe":"agc_lines","status":"FAIL","result":-1,"detail":"a line frame is not what its rectangles or its culled twin draw"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"FAIL","result":-1,"detail":"v0-lines"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"v0-strip"}
+{"schema":2,"event":"value","probe":"runner_summary","field":"ran","value":3}
+{"schema":2,"event":"probe","probe":"runner_summary","status":"FAIL","result":-1,"detail":"2 of 3 queued tests passed"}

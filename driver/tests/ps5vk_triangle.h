@@ -652,6 +652,10 @@ struct ps5vk_triangle_input {
     * needs: a layer past the highest view, which no draw may write, for a probe
     * to watch. Zero is the mask's own count. */
    uint32_t multiview_layers;
+   /* R85: the line width the frame's draws set with vkCmdSetLineWidth, the
+    * pipeline declaring VK_DYNAMIC_STATE_LINE_WIDTH. Zero is a static width,
+    * every frame before R85. */
+   float dynamic_line_width;
 };
 
 
@@ -1026,6 +1030,8 @@ struct ps5vk_triangle {
    /* R84: the multiview frame's view mask, and its target's layer count. */
    uint32_t multiview_mask;
    uint32_t target_layers;
+   /* R85: input->dynamic_line_width. */
+   float dynamic_line_width;
    /* R83: the aspect a detached pass samples, the view that names it, and the
     * buffer ps5vk_triangle_read_depth_aspect copies an aspect into. */
    VkImageAspectFlags depth_sampled_aspect;

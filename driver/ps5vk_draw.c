@@ -2400,6 +2400,18 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
                               dynamic->vp.viewport_count, dynamic->vp.scissor_count);
       return;
    }
+   /* R85: a line list's width, set by vkCmdSetLineWidth when the pipeline
+    * declares it dynamic, otherwise the pipeline's own (refused there unless
+    * 1.0). Without wideLines Valid Usage requires 1.0, the width
+    * PA_SU_LINE_CNTL is programmed with; another is refused by name rather
+    * than drawn at 1.0. A triangle ignores the width. */
+   if (pipeline->line_rasterizer && dynamic->rs.line.width != 1.0f) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                              "a line width of %g needs wideLines, which this device does not "
+                              "advertise (lineWidthRange is 1.0 to 1.0)",
+                              (double)dynamic->rs.line.width);
+      return;
+   }
    /* R1's depth bias through R8's dynamic state: the pipeline's three factors
     * reach the command buffer through vkCmdBindPipeline unless it declares
     * VK_DYNAMIC_STATE_DEPTH_BIAS, where vkCmdSetDepthBias is the only source

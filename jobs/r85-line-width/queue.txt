@@ -1,0 +1,6 @@
+hold 1
+capture
+m2-solid
+v0-lines
+v0-strip
+exit

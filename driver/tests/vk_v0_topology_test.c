@@ -199,6 +199,9 @@ struct frame {
    VkCullModeFlags cull;
    /* R58: the pipeline's primitiveRestartEnable, for an indexed strip. */
    bool restart;
+   /* R85: the width the draw sets with vkCmdSetLineWidth, the pipeline
+    * declaring it dynamic; zero is the pipeline's static width. */
+   float dynamic_line_width;
 };
 
 /* R58: one quad, restarted: the strip's four vertices, the all-ones index, and
@@ -230,6 +233,7 @@ draw_frame(const struct frame *frame, const uint32_t *vertex, size_t vertex_byte
       (VkVertexInputAttributeDescription){1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8};
    input.primitive_topology = frame->topology;
    input.rasterization_cull_mode = frame->cull;
+   input.dynamic_line_width = frame->dynamic_line_width;
    struct ps5vk_triangle triangle = {0};
    enum ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
    if (status == PS5VK_TRIANGLE_OK)
@@ -533,9 +537,45 @@ main(void)
        VK_CULL_MODE_FRONT_AND_BACK},
       {"quad, indexed strip with primitive restart", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, 4,
        kRestarted, 6, 9, VK_CULL_MODE_NONE, true},
+      /* R85: the width set by the draw, which without wideLines is 1.0. */
+      {"two lines, dynamic width 1.0", VK_PRIMITIVE_TOPOLOGY_LINE_LIST, 4, NULL, 2, 4,
+       VK_CULL_MODE_NONE, false, 1.0f},
    };
    for (size_t at = 0; vertex && pixel && at < sizeof(kFrames) / sizeof(kFrames[0]); at++)
       draw_frame(&kFrames[at], vertex, vertex_bytes, pixel, pixel_bytes);
+   /* R85: a dynamic width other than 1.0 needs wideLines, which the device
+    * does not advertise: the draw is refused by name, not drawn at 1.0. */
+   if (vertex && pixel) {
+      struct steps steps = {0};
+      const struct ps5vk_triangle_report report = {&steps, record_step};
+      struct ps5vk_triangle_input input = {0};
+      input.get_instance_proc_addr = GET_PROC;
+      input.pipeline_count = 1;
+      input.shaders[0] = (struct ps5vk_triangle_shaders){vertex, vertex_bytes, pixel, pixel_bytes};
+      input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+      input.report = &report;
+      input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+      input.vertex_data = kVertices;
+      input.vertex_count = 4;
+      input.vertex_stride = TOPOLOGY_STRIDE;
+      input.attribute_count = 2;
+      input.attributes[0] = (VkVertexInputAttributeDescription){0, 0, VK_FORMAT_R32G32_SFLOAT, 0};
+      input.attributes[1] =
+         (VkVertexInputAttributeDescription){1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8};
+      input.primitive_topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+      input.dynamic_line_width = 2.0f;
+      struct ps5vk_triangle triangle = {0};
+      enum ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+      if (status == PS5VK_TRIANGLE_OK)
+         status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+      check(status != PS5VK_TRIANGLE_OK && steps.detail != NULL &&
+               strstr(steps.detail, "a line width of 2 needs wideLines") != NULL,
+            "two lines, dynamic width 2.0: the draw is refused by name");
+      if (steps.detail != NULL)
+         printf("  (%s: %s)\n", steps.failed, steps.detail);
+      if (status != PS5VK_TRIANGLE_IN_FLIGHT)
+         ps5vk_triangle_finish(&triangle);
+   }
 #if defined(PS5VK_TEST_DIRECT)
    if (vertex && pixel) {
       restart_across_split(vertex, vertex_bytes, pixel, pixel_bytes, false);

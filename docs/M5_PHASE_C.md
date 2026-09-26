@@ -9678,3 +9678,18 @@ counts of R75-R78 and are not drawn by a probe.
 What remains for LRPS2 on the driver side is its speed (R85 onward in
 docs/LRPS2_GAPS.md): CPU copies that split submissions, and per-draw cache
 flushes.
+
+## 2026-09-25 — R85: the line width as dynamic state
+
+LRPS2's hardware renderer came up on the 1.1 device (its first frames on the
+console) and every draw failed to record: its pipelines declare
+VK_DYNAMIC_STATE_LINE_WIDTH, outside the driver's list. Without wideLines a
+line width can only be 1.0 (Valid Usage), which the driver already programs,
+so the state is accepted; another width on a line pipeline is refused at the
+draw by name. Host: the topology test's dynamic 1.0 frame records the static
+frame's line words and 2.0 is refused. PS5 PID 181: v0-lines' dynamic-width
+frame is word for word its static line frame (jobs/r85-line-width).
+
+The next refusal LRPS2 met is a non-indexed draw with a first vertex ("a first
+vertex on a non-indexed draw, or a first instance, needs a runner probe"),
+which is the next driver round.

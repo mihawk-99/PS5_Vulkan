@@ -2939,19 +2939,25 @@ create_pipeline(struct ps5vk_triangle *triangle, uint32_t index,
    };
    /* R8: a frame whose draws set the depth bias themselves declares it dynamic,
     * so the pipeline's rasterization state does not bake it (Vulkan ignores the
-    * three factors then, Valid Usage). No other frame declares any dynamic
-    * state, which is what every pipeline before this did. */
-   const VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_DEPTH_BIAS};
+    * three factors then, Valid Usage). R85: a frame whose draws set the line
+    * width declares that. No other frame declares any dynamic state, which is
+    * what every pipeline before these did. */
+   VkDynamicState dynamic_states[2];
+   uint32_t dynamic_state_count = 0;
+   if (input->dynamic_depth_bias)
+      dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_DEPTH_BIAS;
+   if (input->dynamic_line_width != 0.0f)
+      dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_LINE_WIDTH;
    const VkPipelineDynamicStateCreateInfo dynamic_state = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-      .dynamicStateCount = 1,
+      .dynamicStateCount = dynamic_state_count,
       .pDynamicStates = dynamic_states,
    };
    const VkGraphicsPipelineCreateInfo pipeline_info = {
       .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
       .stageCount = shaders->pixel_spirv ? 2 : 1,
       .pStages = stages,
-      .pDynamicState = input->dynamic_depth_bias ? &dynamic_state : NULL,
+      .pDynamicState = dynamic_state_count != 0 ? &dynamic_state : NULL,
       .pVertexInputState = input->attribute_count != 0 ? &geometry_input : &vertex_input,
       .pInputAssemblyState = &assembly,
       .pViewportState = &viewport_state,
@@ -3172,6 +3178,7 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
    triangle->resolve_output = input->resolve_output;
    triangle->resolve_destination_transfer_only = input->resolve_destination_transfer_only;
    triangle->dynamic_depth_bias = input->dynamic_depth_bias;
+   triangle->dynamic_line_width = input->dynamic_line_width;
    memcpy(triangle->depth_bias_first, input->depth_bias_first, sizeof(triangle->depth_bias_first));
    memcpy(triangle->depth_bias_second, input->depth_bias_second, sizeof(triangle->depth_bias_second));
    triangle->push_constant_bytes = input->push_constant_bytes;
@@ -3554,6 +3561,8 @@ draw(struct ps5vk_triangle *triangle, VkCommandBuffer command)
        * then the slope factor (vulkan_core.h). */
       CALL(triangle, CmdSetDepthBias)(command, bias[0], bias[1], bias[2]);
    }
+   if (triangle->dynamic_line_width != 0.0f)
+      CALL(triangle, CmdSetLineWidth)(command, triangle->dynamic_line_width);
    if (triangle->push_constant_bytes != 0) {
       const void *const bytes =
          first_draw ? triangle->push_constant_first : triangle->push_constant_second;
