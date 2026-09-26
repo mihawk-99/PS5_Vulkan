@@ -27646,6 +27646,155 @@ void run_gpu_default_memory(const TestContext &test, TestOutcome &outcome) noexc
 }
 #endif
 
+#ifdef AGC_VULKAN_DRIVER
+// R89: a non-indexed draw's first vertex. vkCmdDraw's firstVertex reaches the
+// vertex stage's base-vertex user data, as an indexed draw's vertexOffset does
+// (c2-base-vertex): the shader adds it to the vertex ID for gl_VertexIndex and
+// the vertex fetch alike. The buffer holds both of c2-base-vertex's quads as
+// triangle lists, one after the other, and two frames draw six vertices from
+// vertex 0 and from vertex 6: each must read back its own quad's colour, green
+// and blue gradients included.
+void run_vulkan_first_vertex_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8},
+    };
+    const auto quads = base_vertex_vertices();
+    std::array<float, kIndexCount * 6 * 2> vertices{};
+    for (std::uint32_t quad = 0; quad < 2; ++quad)
+        for (std::uint32_t i = 0; i < kIndexCount; ++i)
+            std::memcpy(&vertices[(quad * kIndexCount + i) * 6],
+                        &quads[(quad * kSquareVertexCount + kIndices[i]) * 6], 6 * sizeof(float));
+    const std::uint32_t reds[2] = {kSquareRed, kBaseVertexRed};
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    input.vertex_data = vertices.data();
+    input.vertex_count = kIndexCount * 2;
+    input.vertex_stride = kVertexStride;
+    input.attribute_count = 2;
+    input.attributes[0] = attributes[0];
+    input.attributes[1] = attributes[1];
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    unsigned frames = 0;
+    ps5vk_triangle triangle{};
+    ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+    for (std::uint32_t frame = 0; frame < 2 && status == PS5VK_TRIANGLE_OK; ++frame)
+    {
+        ps5vk_triangle_set_first_vertex(&triangle, frame * kIndexCount, kIndexCount);
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (status == PS5VK_TRIANGLE_OK && test.capture)
+            log_driver_submission(triangle.device, frame == 0 ? "first vertex 0" : "first vertex 6",
+                                  log);
+        if (status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes &&
+            check_vertex_frame(const_cast<void *>(triangle.target), kRgba8ImagePacking, log,
+                               reds[frame]))
+            ++frames;
+    }
+    if (status == PS5VK_TRIANGLE_OK && test.capture)
+        log_driver_stages(triangle.device, log);
+    if (status != PS5VK_TRIANGLE_IN_FLIGHT)
+        ps5vk_triangle_finish(&triangle);
+    outcome.command_built = status != PS5VK_TRIANGLE_FAILED;
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        outcome.stage_in_use = true;
+        log.event("r89_first_vertex", "FAIL", -1,
+                  "a submission did not complete; its objects stay allocated");
+        return;
+    }
+    outcome.passed = frames == 2;
+    log.event("r89_first_vertex", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1,
+              "vkCmdDraw from vertex 0 and from vertex 6 each drew its own quad");
+}
+
+// R89: a first instance. c2-instancing's shader places and colours each
+// instance's box from gl_InstanceIndex, which the start-instance user data
+// offsets. Instances 1 and 2 (firstInstance 1, two instances) must draw the
+// middle and right boxes and leave the left one at the clear; instance 2 alone
+// (firstInstance 2) only the right box. Both draws are indexed, so
+// vkCmdDrawIndexed's firstInstance is what reaches the driver.
+void run_vulkan_first_instance_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const VkVertexInputAttributeDescription attributes[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+        {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 8},
+    };
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    input.vertex_data = kVertices;
+    input.vertex_count = kSquareVertexCount;
+    input.vertex_stride = kVertexStride;
+    input.index_data = kIndices;
+    input.index_count = kIndexCount;
+    input.attribute_count = 2;
+    input.attributes[0] = attributes[0];
+    input.attributes[1] = attributes[1];
+    input.explicit_viewport = true;
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    ps5vk_triangle triangle{};
+    ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+    unsigned frames = 0;
+    const std::uint32_t firsts[2] = {1, 2};
+    const std::uint32_t counts[2] = {2, 1};
+    for (std::uint32_t frame = 0; frame < 2 && status == PS5VK_TRIANGLE_OK; ++frame)
+    {
+        ps5vk_triangle_set_first_instance(&triangle, firsts[frame]);
+        ps5vk_triangle_set_instance_count(&triangle, counts[frame]);
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (status == PS5VK_TRIANGLE_OK && test.capture)
+            log_driver_submission(triangle.device,
+                                  frame == 0 ? "first instance 1" : "first instance 2", log);
+        if (status != PS5VK_TRIANGLE_OK || triangle.target_bytes < kFramebufferBytes)
+            continue;
+        log_instance_frame(triangle.target, log);
+        unsigned squares = 0;
+        for (std::uint32_t index = 0; index < 3; ++index)
+        {
+            const bool drawn = index >= firsts[frame] && index < firsts[frame] + counts[frame];
+            char label[128]{};
+            std::snprintf(label, sizeof(label),
+                          drawn ? "first instance %u: instance %u drew its own box"
+                                : "first instance %u: nothing in instance %u's box",
+                          firsts[frame], index);
+            if (check_instance_square(triangle.target, index,
+                                      drawn ? kInstanceColours[index] : kInstanceClear, label, log))
+                ++squares;
+        }
+        frames += squares == 3 ? 1u : 0u;
+    }
+    if (status == PS5VK_TRIANGLE_OK && test.capture)
+        log_driver_stages(triangle.device, log);
+    if (status != PS5VK_TRIANGLE_IN_FLIGHT)
+        ps5vk_triangle_finish(&triangle);
+    outcome.command_built = status != PS5VK_TRIANGLE_FAILED;
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        outcome.stage_in_use = true;
+        log.event("r89_first_instance", "FAIL", -1,
+                  "a submission did not complete; its objects stay allocated");
+        return;
+    }
+    outcome.passed = frames == 2;
+    log.event("r89_first_instance", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1,
+              "firstInstance 1 and 2 drew exactly the boxes of the instances they start at");
+}
+#endif
+
 constexpr RunnerTest kRunnerTests[] = {
     // Phase C1b: what the console's flip helper writes, into a buffer of its
     // own. No submission, so it carries no GPU risk.
@@ -28034,6 +28183,9 @@ constexpr RunnerTest kRunnerTests[] = {
     {"r87-ceiling", "m2", run_gpu_ceiling},
     // R88: the whole pool through the default placement, heap and budget.
     {"r88-memory", "m2", run_gpu_default_memory},
+    // R89: a non-indexed draw's first vertex, and a first instance.
+    {"r89-first-vertex", "m3-vertex", run_vulkan_first_vertex_frames},
+    {"r89-first-instance", "c2-instance", run_vulkan_first_instance_frames},
     {"r57-border", "c7-mip", run_vulkan_border_frames},
     {"r58-restart", "m3-vertex", run_vulkan_restart_frames},
     {"r59-fragcoord", "r59-fragcoord", run_vulkan_frag_coord_frames},

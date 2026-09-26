@@ -9742,3 +9742,16 @@ allocated through the default placement, 11.625 GiB of it written, inverted
 and compared by the GPU without a difference, the budget following the usage
 exactly, and 28 existing cases passing with their memory in the region.
 Applications now see 12 GiB where they saw 4.
+
+## 2026-09-26 — R89: a non-indexed draw's first vertex, and a first instance
+
+LRPS2's hardware renderer met the refusal of both. A non-indexed draw's
+firstVertex goes into the base-vertex user data, as an indexed draw's
+vertexOffset does, and firstInstance into the start-instance word the compiler
+places beside it. The probe's first run (PID 218) drew nothing from vertex 6: a
+non-indexed draw's vertex-buffer record held its vertex count, so the fetch past
+it read zeros. It now holds the first vertex plus the count, which is the old
+value when there is no first vertex, so every golden stands. PS5 PID 219, 6 of
+6 (jobs/r89-first-vertex-instance): each quad from vertex 0 and from vertex 6
+exactly, the boxes of exactly the instances firstInstance 1 and 2 start at, and
+the base-vertex, instancing, indexed and triangle controls.

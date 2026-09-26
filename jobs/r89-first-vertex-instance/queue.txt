@@ -1,0 +1,16 @@
+# Upload: python3 tools/ps5_console.py battery PPSA99988 jobs/r89-first-vertex-instance/queue.txt
+# R89, a non-indexed draw's first vertex and a first instance
+# (docs/M5_PHASE_C.md). LRPS2's hardware renderer met the driver's refusal of
+# both. r89-first-vertex draws two quads' triangle lists from vertex 0 and from
+# vertex 6; r89-first-instance draws c2-instancing's boxes from instance 1 and
+# from instance 2. The rest are the draws the change touches, as controls: the
+# indexed base vertex, instancing, an indexed draw and the triangle.
+hold 1
+capture
+r89-first-vertex
+r89-first-instance
+c2-base-vertex
+c2-instancing
+c2-indexed
+b7-triangle
+exit

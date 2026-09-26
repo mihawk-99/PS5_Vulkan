@@ -21,8 +21,8 @@ and basic compute subgroups, lists VK_KHR_sampler_mirror_clamp_to_edge,
 renders and blends the 16-bit UNORM targets, and samples and copies both
 aspects of D32_SFLOAT_S8_UINT. H1-H5 are closed. With them LRPS2's hardware
 renderer creates its device on the console; its draws then met two refusals:
-dynamic line width (R85, done) and a non-indexed draw with a first vertex (the
-next round), before R86-R87.
+dynamic line width (R85, done) and a non-indexed draw with a first vertex or a
+first instance (R89, done). R86-R88 gave it a 12 GiB heap.
 The report below is the one this plan was made from.
 
 ## What the driver reported when I audited it

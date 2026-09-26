@@ -1023,6 +1023,11 @@ struct ps5vk_triangle {
     * frame adds to its indices and how many times it runs. */
    int32_t base_vertex;
    uint32_t instance_count;
+   /* R89: a non-indexed draw's first vertex and how many it draws (0 for all
+    * of the buffer), and every draw's first instance. */
+   uint32_t first_vertex;
+   uint32_t draw_vertex_count;
+   uint32_t first_instance;
    bool explicit_viewport;
    VkImage depth_image;
    VkDeviceMemory depth_memory;
@@ -1189,6 +1194,16 @@ ps5vk_triangle_set_uniform_offset(struct ps5vk_triangle *triangle, uint32_t offs
  * frame before the step's instancing probe. */
 void
 ps5vk_triangle_set_instance_count(struct ps5vk_triangle *triangle, uint32_t count);
+
+/* R89: the next frame's non-indexed draws start at vertex first and draw count
+ * vertices (0 for the whole buffer): vkCmdDraw's firstVertex. */
+void
+ps5vk_triangle_set_first_vertex(struct ps5vk_triangle *triangle, uint32_t first, uint32_t count);
+
+/* R89: the instance the next frame's draws start at: vkCmdDraw's and
+ * vkCmdDrawIndexed's firstInstance. */
+void
+ps5vk_triangle_set_first_instance(struct ps5vk_triangle *triangle, uint32_t first);
 
 void
 ps5vk_triangle_set_query(struct ps5vk_triangle *triangle, VkQueryPool pool, uint32_t query);

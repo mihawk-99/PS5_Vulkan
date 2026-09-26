@@ -2353,17 +2353,6 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN, "%s", pipeline->draw_refusal);
       return;
    }
-   if (first_instance != 0 || (first_vertex != 0 && indexed == NULL)) {
-      /* An indexed draw's first_vertex is its base vertex, which the vertex
-       * stage's base-vertex user data carries (Phase C2's probe:
-       * src/diagnostics.cpp, run_vulkan_base_vertex_frames). A non-indexed
-       * first vertex and a first instance still need their own probe: nothing
-       * recorded sets either. */
-      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                              "a first vertex on a non-indexed draw, or a first instance, needs a "
-                              "runner probe (docs/M5_REFERENCE.md, C2)");
-      return;
-   }
    /* The viewport and scissor of the draw, which vkCmdBindPipeline took from
     * the pipeline and vkCmdSetViewport and vkCmdSetScissor may have replaced.
     * One of each fills the viewport registers; vk_meta's clears use a
@@ -2535,11 +2524,14 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
             (uint32_t)(bound->address >> 32) | (pipeline->vertex_bindings[binding].stride << 16);
          /* An indexed draw's table holds the records the bound buffer has,
           * not its index count; without a stride there is none to count, and
-          * the draw's own count stays. The non-indexed value is compared
-          * against golden frames and must not change. */
+          * the draw's own count stays. A non-indexed draw's holds the vertices
+          * it fetches, up to its first vertex plus its count: the fetch index
+          * is the vertex ID plus the first vertex, and a record count of the
+          * vertex count alone read zeros past it (R89). With no first vertex
+          * that is the value golden frames compare. */
          const uint32_t stride = pipeline->vertex_bindings[binding].stride;
          record[2] = indexed == NULL || stride == 0
-                        ? vertex_count
+                        ? (uint32_t)MIN2((uint64_t)first_vertex + vertex_count, UINT32_MAX)
                         : (uint32_t)MIN2(bound->size / stride, UINT32_MAX);
          record[3] = PS5VK_VERTEX_BUFFER_FLAGS;
       }
@@ -2556,11 +2548,30 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
          (uint32_t)(uintptr_t)table;
    }
    /* The base vertex and the LDS layout the vertex stage's ABI reads even when
-    * it reads no buffer: the corner draws write them with no table at all. */
+    * it reads no buffer: the corner draws write them with no table at all. The
+    * base vertex is an indexed draw's vertex offset or a non-indexed draw's
+    * first vertex: the shader adds it to the vertex ID for gl_VertexIndex and
+    * the vertex fetch alike (RADV's ABI; R89 for the non-indexed half). */
    if (metadata[PS5VK_PIPELINE_STAGE_VERTEX]->base_vertex_valid)
       user_data[PS5VK_PIPELINE_STAGE_VERTEX]
                [metadata[PS5VK_PIPELINE_STAGE_VERTEX]->base_vertex_user_data_dword] =
          indexed != NULL ? (uint32_t)indexed->vertex_offset : first_vertex;
+   /* R89: the first instance, in the start-instance user data the compiler
+    * places beside the base vertex when a stage reads the instance index or
+    * fetches per-instance attributes: gl_InstanceIndex and those fetches add
+    * it to the instance ID. */
+   if (metadata[PS5VK_PIPELINE_STAGE_VERTEX]->start_instance_valid) {
+      if (metadata[PS5VK_PIPELINE_STAGE_VERTEX]->start_instance_user_data_dword >=
+          PS5VK_MAX_USER_DATA) {
+         ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                                 "the vertex stage reads its first instance past the user data "
+                                 "this driver programs");
+         return;
+      }
+      user_data[PS5VK_PIPELINE_STAGE_VERTEX]
+               [metadata[PS5VK_PIPELINE_STAGE_VERTEX]->start_instance_user_data_dword] =
+         first_instance;
+   }
    if (metadata[PS5VK_PIPELINE_STAGE_VERTEX]->ngg_lds_layout_valid)
       user_data[PS5VK_PIPELINE_STAGE_VERTEX]
                [metadata[PS5VK_PIPELINE_STAGE_VERTEX]->ngg_lds_layout_user_data_dword] =

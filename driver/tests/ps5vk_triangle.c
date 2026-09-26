@@ -1761,6 +1761,19 @@ ps5vk_triangle_set_base_vertex(struct ps5vk_triangle *triangle, int32_t offset)
 }
 
 void
+ps5vk_triangle_set_first_vertex(struct ps5vk_triangle *triangle, uint32_t first, uint32_t count)
+{
+   triangle->first_vertex = first;
+   triangle->draw_vertex_count = count;
+}
+
+void
+ps5vk_triangle_set_first_instance(struct ps5vk_triangle *triangle, uint32_t first)
+{
+   triangle->first_instance = first;
+}
+
+void
 ps5vk_triangle_set_instance_count(struct ps5vk_triangle *triangle, uint32_t count)
 {
    triangle->instance_count = count;
@@ -3580,13 +3593,13 @@ draw(struct ps5vk_triangle *triangle, VkCommandBuffer command)
     * binding 0, with no buffer bound (docs/M5_PHASE_C.md, the strip wedge). */
    if (triangle->index_count == 0 && triangle->vertex_count == 0) {
       if (!triangle->indirect) {
-         CALL(triangle, CmdDraw)(command, 3, instances, 0, 0);
+         CALL(triangle, CmdDraw)(command, 3, instances, 0, triangle->first_instance);
          return;
       }
       /* Single-draw stride is ignored; use zero like vkQuake.
        * The same parameters through an indirect buffer: 3 vertices, the
        * instances the caller asked for, nothing else (VkDrawIndirectCommand). */
-      const uint32_t parameters[4] = {3, instances, 0, 0};
+      const uint32_t parameters[4] = {3, instances, 0, triangle->first_instance};
       memcpy(triangle->indirect_mapped, parameters, sizeof(parameters));
       CALL(triangle, CmdDrawIndirect)(command, triangle->indirect_buffer, 0, 1, 0);
       return;
@@ -3595,12 +3608,17 @@ draw(struct ps5vk_triangle *triangle, VkCommandBuffer command)
    CALL(triangle, CmdBindVertexBuffers)(command, 0, 1, &triangle->vertex_buffer, &zero);
    if (triangle->index_count == 0) {
       /* The caller's vertices with no indices: VkCmdDraw, which is the shape a
-       * triangle strip is (input.primitive_topology). */
+       * triangle strip is (input.primitive_topology). R89 starts it at a first
+       * vertex and draws fewer than the buffer holds. */
+      const uint32_t vertices = triangle->draw_vertex_count != 0 ? triangle->draw_vertex_count
+                                                                 : triangle->vertex_count;
       if (!triangle->indirect) {
-         CALL(triangle, CmdDraw)(command, triangle->vertex_count, instances, 0, 0);
+         CALL(triangle, CmdDraw)(command, vertices, instances, triangle->first_vertex,
+                                 triangle->first_instance);
          return;
       }
-      const uint32_t parameters[4] = {triangle->vertex_count, instances, 0, 0};
+      const uint32_t parameters[4] = {vertices, instances, triangle->first_vertex,
+                                      triangle->first_instance};
       memcpy(triangle->indirect_mapped, parameters, sizeof(parameters));
       CALL(triangle, CmdDrawIndirect)(command, triangle->indirect_buffer, 0, 1, 0);
       return;
@@ -3624,13 +3642,13 @@ draw(struct ps5vk_triangle *triangle, VkCommandBuffer command)
    first_index += triangle->first_index;
    if (!triangle->indirect) {
       CALL(triangle, CmdDrawIndexed)(command, indices, instances, first_index, triangle->base_vertex,
-                                     0);
+                                     triangle->first_instance);
       return;
    }
    /* VkDrawIndexedIndirectCommand: indexCount, instanceCount, firstIndex,
     * vertexOffset, firstInstance. */
    const uint32_t parameters[5] = {indices, instances, first_index,
-                                   (uint32_t)triangle->base_vertex, 0};
+                                   (uint32_t)triangle->base_vertex, triangle->first_instance};
    memcpy(triangle->indirect_mapped, parameters, sizeof(parameters));
    CALL(triangle, CmdDrawIndexedIndirect)(command, triangle->indirect_buffer, 0, 1, 0);
 }
