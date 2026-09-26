@@ -1,0 +1,18 @@
+PS5 Vulkan r91-position shader packages, built by tools/build-probe-shaders.sh r91-position.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
+pixel compiler (tools/build-psbc-cli.sh) sha256: 9a04f2b438821fd9d9aa1c30bf1283ee3a498c4a70a570add1f1b7b1771948de
+vertex: -g -s vertex --ngg --address32-hi 2; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2 --descriptor-binding 0:32:uniform_buffer:1:0:16 --color-format 0x99999997; writer --allow-unresolved
+pixel SPI_SHADER_COL_FORMAT: 7
+pixel push-constant binding metadata: {"array_size": 1, "binding": 32, "offset": 0, "set": 0, "stride": 16, "type": 1}
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+6e3b120d5bfe1909da2ddeb8913be373d7e9cf290a62c4c3e3b4f4ac5432289a  shaders/m2/fullscreen.vert
+e3e0bc05e0e87ad0c8fe718fd8000becbb26d92739f0f9ccc8d8497fe04d85f9  shaders/r91/position.frag
+ebc5c12b4c55b322bc1a61165e108bd3feb7b09d72f4d9a22b6f9d2a9c3143c9  build/shaders/r91-position/vertex.spv
+6381868ea71f0d9929ee12b0c420e12d46062424668d22566da4c42949a941db  build/shaders/r91-position/pixel.spv
+229cfec58ba3b610e6e46f57865637408ccc075b5815e31e543240452b39e3f9  build/shaders/r91-position/vertex.ngg.bin
+5e47d958e25f3241b7648d63d252bcefbea61d47a1fbfe3b9f3e4c7193795c28  build/shaders/r91-position/vertex.hw.json
+99819d1408f62a231d2afd464c32505ad9cca7a22e4e99e3ecd0bd7789e4c24c  build/shaders/r91-position/pixel.raw.bin
+9e949493512d879f7b994915f49aa6f874dac34daac49b7503b53a4980934371  build/shaders/r91-position/pixel.hw.json

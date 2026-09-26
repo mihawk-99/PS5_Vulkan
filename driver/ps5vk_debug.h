@@ -35,6 +35,12 @@ extern "C" {
 void *
 ps5vk_debug_image_storage(VkImage image, size_t *bytes);
 
+/* R91: the offset from a colour image's address at which the driver's CPU map
+ * places texel (x, y) of its first level -- what its CPU copies and readbacks
+ * use for that texel. False for an image with no storage or no map. */
+bool
+ps5vk_debug_image_texel_offset(VkImage image, uint32_t x, uint32_t y, uint64_t *offset);
+
 /* An occlusion query pool's counters: their CPU address and the mapping's size
  * in bytes, or NULL and 0 for no pool (Phase V0-query). The console test runner
  * logs them with the frame's capture because the submission's ZPASS_DONE

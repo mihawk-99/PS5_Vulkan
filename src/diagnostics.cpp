@@ -15875,13 +15875,12 @@ void run_vulkan_gpu_image_clears(const TestContext &test, TestOutcome &outcome) 
         log.event("r90_clear_check", ok ? "PASS" : "FAIL", ok ? 0 : -1, detail);
     };
 
-    // The colour formats LRPS2's hardware renderer clears whose tiled maps the
-    // console has measured, and the swapchain's blue-first order and two float
-    // layouts beside them. Each value's texel bytes are written out,
-    // little-endian. The one- and eight-byte elements (R8_UNORM,
-    // R16G16B16A16_UNORM and _SFLOAT) are R91's: this case's first runs (PIDs
-    // 230 and 231) found the CPU's maps for them off the hardware's in the
-    // partial tiles at the image's edge, so a readback cannot check them yet.
+    // The colour formats LRPS2's hardware renderer clears, and the swapchain's
+    // blue-first order and two float layouts beside them. Each value's texel
+    // bytes are written out, little-endian. The one- and eight-byte elements
+    // (R8_UNORM, R16G16B16A16_UNORM and _SFLOAT) read back exactly since R91:
+    // this case's first runs (PIDs 230 and 231) found the eight-byte map's
+    // twist and the one-byte map's eight-byte runs.
     const auto floats = [](float r, float g, float b, float a)
     {
         VkClearColorValue value{};
@@ -15922,6 +15921,20 @@ void run_vulkan_gpu_image_clears(const TestContext &test, TestOutcome &outcome) 
          {0x30, 0x20, 0x10, 0xff},
          floats(1.0f, 0.0f, 128.0f / 255.0f, 64.0f / 255.0f),
          {0x80, 0x00, 0xff, 0x40}},
+        {VK_FORMAT_R16G16B16A16_UNORM,
+         "R16G16B16A16_UNORM",
+         8,
+         floats(4660.0f / 65535.0f, 1.0f, 0.0f, 32768.0f / 65535.0f),
+         {0x34, 0x12, 0xff, 0xff, 0x00, 0x00, 0x00, 0x80},
+         floats(0.0f, 255.0f / 65535.0f, 43981.0f / 65535.0f, 1.0f),
+         {0x00, 0x00, 0xff, 0x00, 0xcd, 0xab, 0xff, 0xff}},
+        {VK_FORMAT_R16G16B16A16_SFLOAT,
+         "R16G16B16A16_SFLOAT",
+         8,
+         floats(0.5f, -2.0f, 1.0f, 0.25f),
+         {0x00, 0x38, 0x00, 0xc0, 0x00, 0x3c, 0x00, 0x34},
+         floats(0.0f, 1.5f, -0.125f, 3.0f),
+         {0x00, 0x00, 0x00, 0x3e, 0x00, 0xb0, 0x00, 0x42}},
         {VK_FORMAT_R32G32B32A32_SFLOAT,
          "R32G32B32A32_SFLOAT",
          16,
@@ -15959,6 +15972,13 @@ void run_vulkan_gpu_image_clears(const TestContext &test, TestOutcome &outcome) 
          {0x11, 0xee},
          floats(0.0f, 1.0f, 0.0f, 0.0f),
          {0x00, 0xff}},
+        {VK_FORMAT_R8_UNORM,
+         "R8_UNORM",
+         1,
+         floats(90.0f / 255.0f, 0, 0, 0),
+         {0x5a},
+         floats(1.0f, 0, 0, 0),
+         {0xff}},
     };
     const VkImageSubresourceRange colour_range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     for (const ColourCase &colour : colour_cases)
@@ -16130,6 +16150,350 @@ void run_vulkan_gpu_image_clears(const TestContext &test, TestOutcome &outcome) 
     std::snprintf(detail, sizeof(detail), "%u of %u GPU image clear checks passed", passed_checks,
                   expected_checks);
     log.event("r90_clears", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1, detail);
+}
+
+// R91: the tiled colour maps, read off the hardware's own storage. Each frame
+// draws r91-position's fullscreen triangle into an unsigned integer target of
+// one element size, every fragment writing its own position in the encoding the
+// push constant picks (shaders/r91/position.frag), over an allocation first
+// filled with 0xff, which no texel's encoding can be where a tile holds texels.
+// The storage is then walked with no map at all: each element says which texel
+// wrote it, so the case knows where the GPU put every texel. The driver's own
+// CPU map (ps5vk_debug_image_texel_offset -- what its copies, clears and
+// readbacks use) has to name that place for every texel of the target. Where
+// it does not, the difference between the two offsets is counted by value and
+// by the tile's column and row parity, which is the shape of the map's error.
+// A one-byte element holds eight bits, so its position takes two frames, x and
+// y, whose storages are read together.
+struct TileMapFrame
+{
+    VkFormat format;
+    const char *name;
+    std::uint32_t element_bytes;
+    std::uint32_t part;
+    std::uint32_t tile_width;
+    std::uint32_t tile_height;
+};
+
+// Draws one r91-position frame and hands its storage and image to analyse while
+// the frame's objects are alive; false when the frame did not draw.
+template <typename Analyse>
+bool tile_map_frame(const TestContext &test, const ps5vk_triangle_report &report,
+                    const TileMapFrame &frame, bool *in_flight, Analyse &&analyse) noexcept
+{
+    JsonLog &log = test.log;
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    input.target_format = frame.format;
+    input.push_constant_bytes = 16;
+    input.push_constant_stages = VK_SHADER_STAGE_FRAGMENT_BIT;
+    std::memcpy(input.push_constant_first, &frame.part, sizeof(frame.part));
+    std::memcpy(input.push_constant_second, &frame.part, sizeof(frame.part));
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return false;
+    ps5vk_triangle triangle{};
+    ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+    if (status == PS5VK_TRIANGLE_OK && triangle.target != nullptr)
+        std::memset(const_cast<void *>(triangle.target), 0xff, triangle.target_bytes);
+    if (status == PS5VK_TRIANGLE_OK)
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+    bool drawn = false;
+    if (status == PS5VK_TRIANGLE_OK)
+    {
+        std::size_t bytes = 0;
+        const void *const stored = ps5vk_debug_image_storage(triangle.images[0], &bytes);
+        drawn = stored != nullptr &&
+                analyse(static_cast<const std::uint8_t *>(stored), bytes, triangle.images[0]);
+    }
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        *in_flight = true;
+        log.event("r91_tile_map", "FAIL", -1,
+                  "a submission did not complete; the program's objects stay allocated");
+    }
+    ps5vk_triangle_finish(&triangle);
+    return drawn;
+}
+
+// The case's working memory is static: the runner's heap does not give it the
+// 33 MB a whole-target table would take (PID 236 stopped in operator new). One
+// tile's table of where the GPU put each of its texels, and the one-byte x
+// frame's storage for the tile rows the diagnosis reads.
+std::array<std::uint32_t, 65536> g_tile_placed{};
+constexpr std::uint32_t kOneByteTilesPerRow = (kOutputWidth + 255) / 256;
+constexpr std::uint32_t kOneByteTileRows = (kOutputHeight + 255) / 256;
+std::array<std::uint8_t, std::size_t{3} * kOneByteTilesPerRow * 65536> g_one_byte_x{};
+
+void run_vulkan_tile_map_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    // The tile is 64 KiB whatever the element: its texels are the element
+    // size's AddrLib block, which the driver's tables use too.
+    const TileMapFrame frames[] = {
+        {VK_FORMAT_R32G32B32A32_UINT, "sixteen-byte", 16, 0, 64, 64},
+        {VK_FORMAT_R16G16B16A16_UINT, "eight-byte", 8, 0, 128, 64},
+        {VK_FORMAT_R8G8B8A8_UINT, "four-byte", 4, 1, 128, 128},
+        {VK_FORMAT_R8G8_UINT, "two-byte", 2, 1, 256, 128},
+        {VK_FORMAT_R8_UINT, "one-byte x", 1, 2, 256, 256},
+        {VK_FORMAT_R8_UINT, "one-byte y", 1, 3, 256, 256},
+    };
+    constexpr std::size_t kTexels = std::size_t{kOutputWidth} * kOutputHeight;
+    // The one-byte tile rows the diagnosis reads: the first two and the last,
+    // which is partial.
+    const std::uint32_t one_byte_rows[3] = {0, 1, kOneByteTileRows - 1};
+    bool one_byte_x_kept = false;
+    unsigned exact = 0;
+    for (const TileMapFrame &frame : frames)
+    {
+        const bool one_byte = frame.element_bytes == 1;
+        const bool drawn = tile_map_frame(
+            test, report, frame, &outcome.stage_in_use,
+            [&](const std::uint8_t *storage, std::size_t bytes, VkImage image)
+            {
+                // Every texel: the element the driver's map names has to hold
+                // the texel's own encoding.
+                std::size_t wrong = 0;
+                std::size_t unmapped = 0;
+                long long first_wrong = -1;
+                for (std::uint32_t y = 0; y < kOutputHeight; ++y)
+                    for (std::uint32_t x = 0; x < kOutputWidth; ++x)
+                    {
+                        std::uint64_t mapped = 0;
+                        if (!ps5vk_debug_image_texel_offset(image, x, y, &mapped) ||
+                            mapped + frame.element_bytes > bytes)
+                        {
+                            ++unmapped;
+                            continue;
+                        }
+                        const std::uint8_t *const e = storage + mapped;
+                        bool holds = false;
+                        if (frame.element_bytes == 16)
+                        {
+                            std::uint32_t w[4];
+                            std::memcpy(w, e, sizeof(w));
+                            holds = w[0] == x && w[1] == y && w[2] == 0xa5u && w[3] == 0x5au;
+                        }
+                        else if (frame.element_bytes == 8)
+                        {
+                            std::uint16_t h[4];
+                            std::memcpy(h, e, sizeof(h));
+                            holds = h[0] == x && h[1] == y && h[2] == 0xa5u && h[3] == 0x5au;
+                        }
+                        else if (frame.element_bytes == 4)
+                            holds = e[0] == (x & 255u) && e[1] == (y & 255u) && e[2] == (x >> 8) &&
+                                    e[3] == (y >> 8);
+                        else if (frame.element_bytes == 2)
+                            holds = e[0] == (x & 255u) && e[1] == (y & 255u);
+                        else
+                            holds = e[0] == ((frame.part == 2 ? x : y) & 255u);
+                        if (!holds)
+                        {
+                            if (first_wrong < 0)
+                                first_wrong = (long long)y * kOutputWidth + x;
+                            ++wrong;
+                        }
+                    }
+                // The one-byte x frame keeps its diagnosis rows for the y frame.
+                if (one_byte && frame.part == 2)
+                {
+                    one_byte_x_kept = false;
+                    for (unsigned r = 0; r < 3; ++r)
+                    {
+                        const std::size_t from =
+                            std::size_t{one_byte_rows[r]} * kOneByteTilesPerRow * 65536;
+                        const std::size_t size = std::size_t{kOneByteTilesPerRow} * 65536;
+                        if (from + size > bytes)
+                            return false;
+                        std::memcpy(g_one_byte_x.data() + r * size, storage + from, size);
+                    }
+                    one_byte_x_kept = true;
+                }
+                // The diagnosis: tile by tile, where the GPU put each texel, and
+                // the driver's offset held against it.
+                struct Difference
+                {
+                    std::uint32_t xor_value;
+                    std::uint32_t parity;
+                    std::size_t count;
+                    std::uint32_t x, y;
+                };
+                std::vector<Difference> differences;
+                differences.reserve(64);
+                std::size_t foreign = 0;
+                std::size_t missing = 0;
+                std::size_t repeated = 0;
+                std::size_t compared = 0;
+                const bool diagnose = !one_byte || (frame.part == 3 && one_byte_x_kept);
+                const std::uint32_t tiles_per_row =
+                    (kOutputWidth + frame.tile_width - 1) / frame.tile_width;
+                const std::uint32_t tile_rows =
+                    (kOutputHeight + frame.tile_height - 1) / frame.tile_height;
+                const std::uint32_t tile_texels = frame.tile_width * frame.tile_height;
+                for (std::uint32_t row = 0; diagnose && row < tile_rows; ++row)
+                {
+                    unsigned kept_row = 3;
+                    for (unsigned r = 0; r < 3; ++r)
+                        if (one_byte_rows[r] == row)
+                            kept_row = r;
+                    if (one_byte && kept_row == 3)
+                        continue;
+                    for (std::uint32_t column = 0; column < tiles_per_row; ++column)
+                    {
+                        const std::size_t tile_at =
+                            (std::size_t{row} * tiles_per_row + column) * 65536;
+                        if (tile_at + 65536 > bytes)
+                            continue;
+                        const std::uint32_t tile_x = column * frame.tile_width;
+                        const std::uint32_t tile_y = row * frame.tile_height;
+                        std::fill(g_tile_placed.begin(), g_tile_placed.begin() + tile_texels,
+                                  UINT32_MAX);
+                        for (std::uint32_t at = 0; at < 65536; at += frame.element_bytes)
+                        {
+                            const std::uint8_t *const e = storage + tile_at + at;
+                            std::uint32_t x = UINT32_MAX;
+                            std::uint32_t y = UINT32_MAX;
+                            if (frame.element_bytes == 16)
+                            {
+                                std::uint32_t w[4];
+                                std::memcpy(w, e, sizeof(w));
+                                if (w[2] == 0xa5u && w[3] == 0x5au)
+                                    x = w[0], y = w[1];
+                            }
+                            else if (frame.element_bytes == 8)
+                            {
+                                std::uint16_t h[4];
+                                std::memcpy(h, e, sizeof(h));
+                                if (h[2] == 0xa5u && h[3] == 0x5au)
+                                    x = h[0], y = h[1];
+                            }
+                            else if (frame.element_bytes == 4)
+                            {
+                                x = e[0] | (std::uint32_t{e[2]} << 8);
+                                y = e[1] | (std::uint32_t{e[3]} << 8);
+                            }
+                            else if (frame.element_bytes == 2)
+                            {
+                                // x & 255 and y & 255: the tile gives the rest,
+                                // and y's bit 7 has to be the tile row's parity.
+                                x = tile_x + e[0];
+                                y = (e[1] >> 7) == ((tile_y >> 7) & 1u) ? tile_y + (e[1] & 127u)
+                                                                        : UINT32_MAX;
+                            }
+                            else
+                            {
+                                const std::size_t kept_at =
+                                    (std::size_t{kept_row} * kOneByteTilesPerRow + column) * 65536 +
+                                    at;
+                                x = tile_x + g_one_byte_x[kept_at];
+                                y = tile_y + e[0];
+                            }
+                            if (x >= kOutputWidth || y >= kOutputHeight)
+                                continue;
+                            if (x / frame.tile_width != column || y / frame.tile_height != row)
+                            {
+                                ++foreign;
+                                continue;
+                            }
+                            std::uint32_t &slot =
+                                g_tile_placed[(y - tile_y) * frame.tile_width + (x - tile_x)];
+                            repeated += slot != UINT32_MAX ? 1u : 0u;
+                            slot = at;
+                        }
+                        for (std::uint32_t in_y = 0; in_y < frame.tile_height; ++in_y)
+                            for (std::uint32_t in_x = 0; in_x < frame.tile_width; ++in_x)
+                            {
+                                const std::uint32_t x = tile_x + in_x;
+                                const std::uint32_t y = tile_y + in_y;
+                                if (x >= kOutputWidth || y >= kOutputHeight)
+                                    continue;
+                                std::uint64_t mapped = 0;
+                                if (!ps5vk_debug_image_texel_offset(image, x, y, &mapped))
+                                    continue;
+                                ++compared;
+                                const std::uint32_t placed =
+                                    g_tile_placed[in_y * frame.tile_width + in_x];
+                                if (placed == UINT32_MAX)
+                                {
+                                    ++missing;
+                                    continue;
+                                }
+                                const std::uint32_t value =
+                                    (static_cast<std::uint32_t>(tile_at) + placed) ^
+                                    static_cast<std::uint32_t>(mapped);
+                                if (value == 0)
+                                    continue;
+                                const std::uint32_t parity = (column & 1u) | ((row & 1u) << 1);
+                                bool found = false;
+                                for (Difference &difference : differences)
+                                    if (difference.xor_value == value &&
+                                        difference.parity == parity)
+                                    {
+                                        ++difference.count;
+                                        found = true;
+                                        break;
+                                    }
+                                if (!found && differences.size() < 64)
+                                    differences.push_back({value, parity, 1, x, y});
+                            }
+                    }
+                }
+                std::sort(differences.begin(), differences.end(),
+                          [](const Difference &a, const Difference &b)
+                          { return a.count > b.count; });
+                char field[96]{};
+                std::snprintf(field, sizeof(field), "%s wrong", frame.name);
+                log.number("r91_tile_map", field, (long long)wrong);
+                std::snprintf(field, sizeof(field), "%s first_wrong", frame.name);
+                log.number("r91_tile_map", field, first_wrong);
+                std::snprintf(field, sizeof(field), "%s unmapped", frame.name);
+                log.number("r91_tile_map", field, (long long)unmapped);
+                if (diagnose)
+                {
+                    std::snprintf(field, sizeof(field), "%s compared", frame.name);
+                    log.number("r91_tile_map", field, (long long)compared);
+                    std::snprintf(field, sizeof(field), "%s foreign", frame.name);
+                    log.number("r91_tile_map", field, (long long)foreign);
+                    std::snprintf(field, sizeof(field), "%s missing", frame.name);
+                    log.number("r91_tile_map", field, (long long)missing);
+                    std::snprintf(field, sizeof(field), "%s repeated", frame.name);
+                    log.number("r91_tile_map", field, (long long)repeated);
+                }
+                for (std::size_t at = 0; at < differences.size() && at < 16; ++at)
+                {
+                    const Difference &d = differences[at];
+                    char detail[192]{};
+                    std::snprintf(detail, sizeof(detail),
+                                  "%s: offset xor 0x%x, tile column %u row %u parity: %zu "
+                                  "texels, first (%u,%u) in-tile (%u,%u)",
+                                  frame.name, d.xor_value, d.parity & 1u, d.parity >> 1, d.count,
+                                  d.x, d.y, d.x % frame.tile_width, d.y % frame.tile_height);
+                    log.event("r91_tile_map_difference", "INFO", 0, detail);
+                }
+                const bool ok = wrong == 0 && unmapped == 0;
+                exact += ok ? 1u : 0u;
+                char detail[160]{};
+                std::snprintf(detail, sizeof(detail),
+                              "%s: the driver's map names the GPU's place for %zu of %zu texels",
+                              frame.name, kTexels - wrong - unmapped, kTexels);
+                log.event("r91_tile_map", ok ? "PASS" : "FAIL", ok ? 0 : -1, detail);
+                return true;
+            });
+        if (outcome.stage_in_use)
+            return;
+        if (!drawn)
+            log.event("r91_tile_map", "FAIL", -1, frame.name);
+    }
+    outcome.command_built = true;
+    outcome.passed = exact == std::size(frames);
+    char detail[128]{};
+    std::snprintf(detail, sizeof(detail), "%u of %zu frames' maps are the hardware's", exact,
+                  std::size(frames));
+    log.event("r91_tile_maps", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1, detail);
 }
 // Phase C5's image clear: vkCmdClearDepthStencilImage, the last of 1.0's three
 // clear commands. The depth image is cleared to 0.5 by the command itself (the
@@ -28770,6 +29134,9 @@ constexpr RunnerTest kRunnerTests[] = {
     // R90: attachments cleared on the GPU, every texel of each format and both
     // planes of D32_SFLOAT_S8_UINT read back (run_vulkan_gpu_image_clears).
     {"r90-image-clears", "m2", run_vulkan_gpu_image_clears},
+    // R91: each colour element size's tiled map read off the GPU's own storage
+    // and held against the driver's (run_vulkan_tile_map_frames).
+    {"r91-tile-maps", "r91-position", run_vulkan_tile_map_frames},
 #endif
     // R10: the two-subpass render pass whose second subpass reads the first's
     // colour attachment as an input attachment and writes it out. The port's UI

@@ -1952,6 +1952,12 @@ ps5vk_tiled_texel_offset(uint32_t x, uint32_t y, uint32_t level_width, uint32_t 
    if (samples == 4u) {
       in_x ^= (y / tile_height & 1u) * (tile_width / 2u);
       in_y ^= (x / tile_width & 1u) * (tile_height / 2u);
+   } else if (element_bytes == 8u) {
+      /* R91's position frame (r91-tile-maps): an eight-byte element's tile
+       * row twists x's bit 5 -- address bit 11 -- by the tile row's parity,
+       * in every column, and nothing else. Every texel of an odd tile row
+       * sat 0x800 bytes from where AddrLib's row put it. */
+      in_x ^= (y / tile_height & 1u) * 32u;
    } else if (element_bytes == 16u) {
       /* The ramp frame's measurement (docs/HARDWARE_FINDINGS.md, 2026-09-20): a
        * sixteen-byte element's tile carries the whole block XOR a four-sample
@@ -2885,6 +2891,28 @@ ps5vk_debug_image_storage(VkImage _image, size_t *bytes)
    if (stored)
       ps5vk_flush_cpu_cache((const void *)(uintptr_t)image->address, (size_t)image->size);
    return stored ? (void *)(uintptr_t)image->address : NULL;
+}
+
+/* R91: where the driver's CPU map puts texel (x, y) of a colour image's first
+ * level, as an offset from the image's address -- the bytes a CPU copy, clear
+ * or readback of the image reads or writes for that texel
+ * (ps5vk_image_copy_side, ps5vk_image_copy_address). The console runner
+ * compares it with where the GPU put the texel. False for an image with no
+ * storage or no map. */
+bool
+ps5vk_debug_image_texel_offset(VkImage _image, uint32_t x, uint32_t y, uint64_t *offset)
+{
+   VK_FROM_HANDLE(ps5vk_image, image, _image);
+   if (image == NULL || image->address == 0)
+      return false;
+   const VkImageSubresourceLayers layers = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+   uint32_t texel_bytes = 0;
+   struct ps5vk_image_copy_side side = {0};
+   if (!ps5vk_image_copy_side(image, &layers, &texel_bytes, &side))
+      return false;
+   *offset = ps5vk_image_copy_address(&side, (int32_t)x, (int32_t)y, texel_bytes, 0) -
+             image->address;
+   return true;
 }
 
 /* ---------------- clearing an image (1.0's image clears) ------------------ */

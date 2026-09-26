@@ -9781,3 +9781,20 @@ run has measured them. That is R91, and the case leaves those formats out until
 then. PS5 PID 233, 6 of 6 (jobs/r90-gpu-image-clears): 24 of 24 clears exact,
 c7-clear's tiled attachment cleared on the GPU; PID 235, 29 of 29: R88's
 existing cases on the new step end.
+
+## 2026-09-26 — R91: the tiled colour maps, read off the GPU's own storage
+
+R90's clear readbacks missed the same texels of R16G16B16A16 and R8_UNORM in
+every run. A new probe, r91-position, writes each fragment's own position into
+unsigned integer targets of every colour element size, and r91-tile-maps holds
+the driver's CPU map (ps5vk_debug_image_texel_offset) against where the GPU put
+all 8,294,400 texels of each 3840x2160 target, then walks the storage with no
+map to find where the misses went. PID 237: the 16-, 4-, 2- and 1-byte maps are
+exact; the eight-byte map misses every texel of every odd tile row by 0x800,
+in-tile x bit 5, the tile-row twist the sixteen-byte tile has, which the map
+now applies. The one-byte map was exact texel by texel: its miss was the CPU
+copy's sixteen-byte runs, where the map keeps only eight bytes contiguous (bit
+3 is y's bit 1), so every upload and readback of a one-byte tiled image moved
+half of each run from the row two below. It runs eight bytes now. PS5 PID 238,
+4 of 4 (jobs/r91-tile-maps): every element size's map exact, and R90's clears
+exact in all ten formats, the one- and eight-byte ones included.

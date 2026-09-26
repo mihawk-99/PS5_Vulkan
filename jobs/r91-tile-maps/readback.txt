@@ -1,0 +1,89 @@
+{"schema":2,"event":"run_start","pid":238}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"sixteen-byte wrong","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"sixteen-byte first_wrong","value":-1}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"sixteen-byte unmapped","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"sixteen-byte compared","value":8294400}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"sixteen-byte foreign","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"sixteen-byte missing","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"sixteen-byte repeated","value":0}
+{"schema":2,"event":"probe","probe":"r91_tile_map","status":"PASS","result":0,"detail":"sixteen-byte: the driver's map names the GPU's place for 8294400 of 8294400 texels"}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"eight-byte wrong","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"eight-byte first_wrong","value":-1}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"eight-byte unmapped","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"eight-byte compared","value":8294400}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"eight-byte foreign","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"eight-byte missing","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"eight-byte repeated","value":0}
+{"schema":2,"event":"probe","probe":"r91_tile_map","status":"PASS","result":0,"detail":"eight-byte: the driver's map names the GPU's place for 8294400 of 8294400 texels"}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"four-byte wrong","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"four-byte first_wrong","value":-1}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"four-byte unmapped","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"four-byte compared","value":8294400}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"four-byte foreign","value":61440}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"four-byte missing","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"four-byte repeated","value":0}
+{"schema":2,"event":"probe","probe":"r91_tile_map","status":"PASS","result":0,"detail":"four-byte: the driver's map names the GPU's place for 8294400 of 8294400 texels"}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"two-byte wrong","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"two-byte first_wrong","value":-1}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"two-byte unmapped","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"two-byte compared","value":8294400}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"two-byte foreign","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"two-byte missing","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"two-byte repeated","value":61440}
+{"schema":2,"event":"probe","probe":"r91_tile_map_difference","status":"INFO","result":0,"detail":"two-byte: offset xor 0xfbfe, tile column 0 row 0 parity: 8 texels, first (0,2048) in-tile (0,0)"}
+{"schema":2,"event":"probe","probe":"r91_tile_map_difference","status":"INFO","result":0,"detail":"two-byte: offset xor 0xfbfe, tile column 1 row 0 parity: 7 texels, first (256,2048) in-tile (0,0)"}
+{"schema":2,"event":"probe","probe":"r91_tile_map","status":"PASS","result":0,"detail":"two-byte: the driver's map names the GPU's place for 8294400 of 8294400 texels"}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte x wrong","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte x first_wrong","value":-1}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte x unmapped","value":0}
+{"schema":2,"event":"probe","probe":"r91_tile_map","status":"PASS","result":0,"detail":"one-byte x: the driver's map names the GPU's place for 8294400 of 8294400 texels"}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte y wrong","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte y first_wrong","value":-1}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte y unmapped","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte y compared","value":2396160}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte y foreign","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte y missing","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte y repeated","value":552960}
+{"schema":2,"event":"probe","probe":"r91_tile_map_difference","status":"INFO","result":0,"detail":"one-byte y: offset xor 0xffff, tile column 0 row 0 parity: 8 texels, first (0,2048) in-tile (0,0)"}
+{"schema":2,"event":"probe","probe":"r91_tile_map_difference","status":"INFO","result":0,"detail":"one-byte y: offset xor 0xffff, tile column 1 row 0 parity: 7 texels, first (256,2048) in-tile (0,0)"}
+{"schema":2,"event":"probe","probe":"r91_tile_map","status":"PASS","result":0,"detail":"one-byte y: the driver's map names the GPU's place for 8294400 of 8294400 texels"}
+{"schema":2,"event":"probe","probe":"r91_tile_maps","status":"PASS","result":0,"detail":"6 of 6 frames' maps are the hardware's"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"r91-tile-maps"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R8G8B8A8_UNORM clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R8G8B8A8_UNORM clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"B8G8R8A8_UNORM clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"B8G8R8A8_UNORM clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R16G16B16A16_UNORM clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R16G16B16A16_UNORM clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R16G16B16A16_SFLOAT clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R16G16B16A16_SFLOAT clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R32G32B32A32_SFLOAT clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R32G32B32A32_SFLOAT clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R32_SFLOAT clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R32_SFLOAT clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R32_UINT clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R32_UINT clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R16_UINT clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R16_UINT clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R8G8_UNORM clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R8G8_UNORM clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R8_UNORM clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"R8_UNORM clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"D32_SFLOAT clear 1: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"D32_SFLOAT clear 2: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"D32_SFLOAT_S8_UINT pattern, depth plane: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"D32_SFLOAT_S8_UINT pattern, stencil plane: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"depth-only clear, depth 0.75: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"depth-only clear, stencil kept: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"stencil-only clear, depth kept: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"stencil-only clear, stencil 0x33: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"clear of both, depth 0.25: 227688 of 227688 texels"}
+{"schema":2,"event":"probe","probe":"r90_clear_check","status":"PASS","result":0,"detail":"clear of both, stencil 0x7e: 227688 of 227688 texels"}
+{"schema":2,"event":"value","probe":"r90_clears","field":"checks","value":30}
+{"schema":2,"event":"value","probe":"r90_clears","field":"checks_passed","value":30}
+{"schema":2,"event":"probe","probe":"r90_clears","status":"PASS","result":0,"detail":"30 of 30 GPU image clear checks passed"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"r90-image-clears"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"v0-targets"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"v0-targets-uint"}
+{"schema":2,"event":"value","probe":"runner_summary","field":"ran","value":4}
+{"schema":2,"event":"probe","probe":"runner_summary","status":"PASS","result":0,"detail":"4 of 4 queued tests passed"}

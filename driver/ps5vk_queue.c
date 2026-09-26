@@ -2685,8 +2685,12 @@ ps5vk_rgba8_texel_bytes(VkFormat format)
 enum ps5vk_copy_pass { PS5VK_COPY_EVICT_SOURCE, PS5VK_COPY_RUNS, PS5VK_COPY_EVICT_DESTINATION };
 
 /* The bytes a side keeps contiguous along a row. A colour map keeps
- * PS5VK_TILED_RUN_BYTES; the Z maps of a one-sample depth or stencil plane keep
- * two texels -- x's low bit is the texel's own, and its next bit lies above
+ * PS5VK_TILED_RUN_BYTES, but the one-byte map only eight: its address bits 0-2
+ * are x's and bit 3 is y's bit 1, so a sixteen-byte run moved half its texels
+ * from the row two below (R91: R8_UNORM's last two rows read back unwritten
+ * where that row lay past the image). The Z maps of a one-sample depth or
+ * stencil plane keep two texels -- x's low bit is the texel's own, and its next
+ * bit lies above
  * y's low one (0x10 for four bytes, 0x8 for two, 0x4 for the one-byte stencil
  * plane, ps5vk_image.c) -- and a four-sample depth texel is one sixteen-byte
  * unit. A row-layout side keeps its whole row (R83: a one-sample depth side
@@ -2698,7 +2702,7 @@ ps5vk_copy_side_run_bytes(const struct ps5vk_image_copy_side *side, uint32_t tex
       return UINT64_MAX;
    if (side->depth)
       return side->samples == 4 ? texel_bytes : 2u * (uint64_t)side->element_bytes;
-   return PS5VK_TILED_RUN_BYTES;
+   return side->element_bytes == 1u ? 8u : PS5VK_TILED_RUN_BYTES;
 }
 
 static void

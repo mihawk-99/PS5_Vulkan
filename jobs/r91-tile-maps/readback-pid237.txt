@@ -1,0 +1,55 @@
+{"schema":2,"event":"run_start","pid":237}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"sixteen-byte wrong","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"sixteen-byte first_wrong","value":-1}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"sixteen-byte unmapped","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"sixteen-byte compared","value":8294400}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"sixteen-byte foreign","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"sixteen-byte missing","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"sixteen-byte repeated","value":0}
+{"schema":2,"event":"probe","probe":"r91_tile_map","status":"PASS","result":0,"detail":"sixteen-byte: the driver's map names the GPU's place for 8294400 of 8294400 texels"}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"eight-byte wrong","value":4116480}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"eight-byte first_wrong","value":245760}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"eight-byte unmapped","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"eight-byte compared","value":8294400}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"eight-byte foreign","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"eight-byte missing","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"eight-byte repeated","value":0}
+{"schema":2,"event":"probe","probe":"r91_tile_map_difference","status":"INFO","result":0,"detail":"eight-byte: offset xor 0x800, tile column 0 row 1 parity: 2058240 texels, first (0,64) in-tile (0,0)"}
+{"schema":2,"event":"probe","probe":"r91_tile_map_difference","status":"INFO","result":0,"detail":"eight-byte: offset xor 0x800, tile column 1 row 1 parity: 2058240 texels, first (128,64) in-tile (0,0)"}
+{"schema":2,"event":"probe","probe":"r91_tile_map","status":"FAIL","result":-1,"detail":"eight-byte: the driver's map names the GPU's place for 4177920 of 8294400 texels"}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"four-byte wrong","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"four-byte first_wrong","value":-1}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"four-byte unmapped","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"four-byte compared","value":8294400}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"four-byte foreign","value":61440}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"four-byte missing","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"four-byte repeated","value":0}
+{"schema":2,"event":"probe","probe":"r91_tile_map","status":"PASS","result":0,"detail":"four-byte: the driver's map names the GPU's place for 8294400 of 8294400 texels"}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"two-byte wrong","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"two-byte first_wrong","value":-1}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"two-byte unmapped","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"two-byte compared","value":8294400}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"two-byte foreign","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"two-byte missing","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"two-byte repeated","value":61440}
+{"schema":2,"event":"probe","probe":"r91_tile_map_difference","status":"INFO","result":0,"detail":"two-byte: offset xor 0xfbfe, tile column 0 row 0 parity: 8 texels, first (0,2048) in-tile (0,0)"}
+{"schema":2,"event":"probe","probe":"r91_tile_map_difference","status":"INFO","result":0,"detail":"two-byte: offset xor 0xfbfe, tile column 1 row 0 parity: 7 texels, first (256,2048) in-tile (0,0)"}
+{"schema":2,"event":"probe","probe":"r91_tile_map","status":"PASS","result":0,"detail":"two-byte: the driver's map names the GPU's place for 8294400 of 8294400 texels"}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte x wrong","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte x first_wrong","value":-1}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte x unmapped","value":0}
+{"schema":2,"event":"probe","probe":"r91_tile_map","status":"PASS","result":0,"detail":"one-byte x: the driver's map names the GPU's place for 8294400 of 8294400 texels"}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte y wrong","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte y first_wrong","value":-1}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte y unmapped","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte y compared","value":2396160}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte y foreign","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte y missing","value":0}
+{"schema":2,"event":"value","probe":"r91_tile_map","field":"one-byte y repeated","value":552960}
+{"schema":2,"event":"probe","probe":"r91_tile_map_difference","status":"INFO","result":0,"detail":"one-byte y: offset xor 0xffff, tile column 0 row 0 parity: 8 texels, first (0,2048) in-tile (0,0)"}
+{"schema":2,"event":"probe","probe":"r91_tile_map_difference","status":"INFO","result":0,"detail":"one-byte y: offset xor 0xffff, tile column 1 row 0 parity: 7 texels, first (256,2048) in-tile (0,0)"}
+{"schema":2,"event":"probe","probe":"r91_tile_map","status":"PASS","result":0,"detail":"one-byte y: the driver's map names the GPU's place for 8294400 of 8294400 texels"}
+{"schema":2,"event":"probe","probe":"r91_tile_maps","status":"FAIL","result":-1,"detail":"5 of 6 frames' maps are the hardware's"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"FAIL","result":-1,"detail":"r91-tile-maps"}
+{"schema":2,"event":"value","probe":"runner_summary","field":"ran","value":1}
+{"schema":2,"event":"probe","probe":"runner_summary","status":"FAIL","result":-1,"detail":"0 of 1 queued tests passed"}

@@ -1,0 +1,14 @@
+# Upload: python3 tools/ps5_console.py battery PPSA99988 jobs/r91-tile-maps/queue.txt
+# R91 (docs/M5_PHASE_C.md): the tiled colour maps read off the GPU's own
+# storage. r91-tile-maps draws each fragment's position into a 3840x2160
+# unsigned integer target of each element size (16, 8, 4, 2 and 1 bytes) and
+# holds the driver's CPU map against where the GPU put every texel.
+# r90-image-clears clears 636x358 attachments of ten formats on the GPU and reads
+# them back through the CPU copy's runs, R8_UNORM and the two eight-byte formats
+# included again; v0-targets and v0-targets-uint are the colour-target controls.
+hold 1
+r91-tile-maps
+r90-image-clears
+v0-targets
+v0-targets-uint
+exit

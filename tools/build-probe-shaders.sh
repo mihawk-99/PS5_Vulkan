@@ -65,7 +65,7 @@
 # bindings.txt layout the title needs when the shaders read resources,
 # SHA256SUMS and PROVENANCE.txt, after checking the compiler metadata.
 #
-# Run from the repository root:  bash tools/build-probe-shaders.sh m2|m3-uniform|v0-robust|m3-vertex|m3-texture|m4-depth|m4-blend|b7-corner|b8-corner|c1-clear|c3-quad|c7-mip|c7-mip-linear|c7-diag|c2-instance|c8-sampleid|v0-vertex-sint|v0-vertex-uint|v0-vertex-bytes-float|v0-vertex-bytes-uint|v0-vertex-bytes-sint|v0-array|v0-cube|v0-push|v0-texture-uint|v0-texture-sint|v0-target-uint|v0-target-sint|r71-dual-source|r79-lod-bias-range|r83-quadrant|r84-multiview
+# Run from the repository root:  bash tools/build-probe-shaders.sh m2|m3-uniform|v0-robust|m3-vertex|m3-texture|m4-depth|m4-blend|b7-corner|b8-corner|c1-clear|c3-quad|c7-mip|c7-mip-linear|c7-diag|c2-instance|c8-sampleid|v0-vertex-sint|v0-vertex-uint|v0-vertex-bytes-float|v0-vertex-bytes-uint|v0-vertex-bytes-sint|v0-array|v0-cube|v0-push|v0-texture-uint|v0-texture-sint|v0-target-uint|v0-target-sint|r71-dual-source|r79-lod-bias-range|r83-quadrant|r84-multiview|r91-position
 set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -186,6 +186,21 @@ v0-target-uint)
     output=probes/v0-target-uint
     vertex_flags=(--address32-hi 2)
     pixel_flags=(--address32-hi 2 --color-format 0x99999997)
+    pixel_compiler="$root/build/host/opengnm-psbc-probe"
+    expected_col_format=7
+    ;;
+r91-position)
+    # R91's position frame: the m2 fullscreen triangle writes each fragment's
+    # own position into an unsigned integer target, in the encoding a push
+    # constant picks (set 0, binding 32 -- PS5VK_PUSH_CONSTANT_BINDING, as
+    # v0-push), so the target's storage names the texel behind every element
+    # and the tiled maps are read off it (shaders/r91).
+    vertex_source=shaders/m2/fullscreen.vert
+    pixel_source=shaders/r91/position.frag
+    output=probes/r91-position
+    vertex_flags=(--address32-hi 2)
+    pixel_flags=(--address32-hi 2 --descriptor-binding 0:32:uniform_buffer:1:0:16
+        --color-format 0x99999997)
     pixel_compiler="$root/build/host/opengnm-psbc-probe"
     expected_col_format=7
     ;;
@@ -1094,6 +1109,23 @@ elif set_name == "v0-push":
     bindings = [("address32_hi", expected_hi),
                 *vertex_input("vertex attributes: location 0 r32g32_float offset 0, "
                               "location 1 r32g32b32a32_float offset 8, stride 24, binding 0"),
+                ("pixel_user_sgpr_count", pixel["user_sgpr_count"]),
+                ("pixel_descriptor_set0_dword",
+                 dword(pixel, "descriptor_set0_user_data_dword", "pixel")),
+                ("pixel_set0_binding32_offset", declared[0]["offset"]),
+                ("pixel_set0_binding32_stride", declared[0]["stride"])]
+elif set_name == "r91-position":
+    # R91: the pixel stage's push-constant block at the reserved binding, as
+    # v0-push's; the vertex stage is m2's fullscreen triangle, with no inputs.
+    declared = pixel.get("descriptor_bindings") or []
+    if len(declared) != 1 or (declared[0].get("set"), declared[0].get("binding"),
+                              declared[0].get("offset"), declared[0].get("stride")) != \
+            (0, 32, 0, 16):
+        fail(f"the push-constant block is not at set 0 binding 32: {declared!r}")
+    if vertex.get("descriptor_bindings"):
+        fail("vertex stage unexpectedly declares descriptor bindings")
+    notes.append(f"pixel push-constant binding metadata: {json.dumps(declared[0], sort_keys=True)}")
+    bindings = [("address32_hi", expected_hi),
                 ("pixel_user_sgpr_count", pixel["user_sgpr_count"]),
                 ("pixel_descriptor_set0_dword",
                  dword(pixel, "descriptor_set0_user_data_dword", "pixel")),
