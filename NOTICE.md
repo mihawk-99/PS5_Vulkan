@@ -2,10 +2,13 @@
 
 ## Native build dependencies
 
-The application build uses LLVM/Clang/lld, zlib 1.3.2, and the public
-[PS5 payload SDK](https://github.com/ps5-payload-dev/sdk). The bootstrapper
-downloads SDK v0.42 after verifying SHA-256
-`8cfbc7cd5811e719eb4f0c47eea668d3dc7b40bc8ab11c4a5031d40c23ec02da`.
+The application build uses LLVM/Clang/lld, zlib 1.3.2, and my fork of the
+public [PS5 payload SDK](https://github.com/ps5-payload-dev/sdk)
+(`../PS5_PayloadSDK`, at the revision `tools/setup-native-dependencies.sh`
+pins). The fork's setup downloads SDK v0.42 after verifying SHA-256
+`8cfbc7cd5811e719eb4f0c47eea668d3dc7b40bc8ab11c4a5031d40c23ec02da`, then installs
+the fork's headers and its PS5 platform layer over it; both are GPL-3.0-or-later
+like the SDK.
 It downloads zlib 1.3.2 from the upstream source archive after verifying
 SHA-256 `bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16`
 and compiles its static archive locally. Both dependencies remain under ignored
