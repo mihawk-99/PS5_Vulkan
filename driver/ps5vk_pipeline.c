@@ -513,8 +513,9 @@ ps5vk_color_export_options(struct ps5vk_device *device, const VkGraphicsPipeline
                        PS5VK_MAX_COLOR_EXPORTS);
 
    /* A format whose table entry names an export takes it whatever the blend
-    * state -- the integer targets export UINT16_ABGR or SINT16_ABGR, and a
-    * single-channel 32-bit one 32_R -- and every other format keeps the legacy
+    * state -- the integer targets export UINT16_ABGR or SINT16_ABGR, a
+    * single-channel 32-bit one 32_R, and the 16-bit normalized ones their
+    * 32-bit exports (R82) -- and every other format keeps the legacy
     * 32_ABGR default until its attachment blends, when the pixel stage exports
     * FP16_ABGR: what Mesa's ac_choose_spi_color_formats picks for the
     * normalized, sRGB and half-float classes. A pipeline whose attachments all
@@ -1893,6 +1894,12 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
     * front-facing by definition. Triangles keep 0, so every triangle pipeline
     * compiles to exactly the packages the goldens hold. */
    const uint32_t compile_primitive_type = line ? PS5VK_LINK_LINE_LIST : 0u;
+   /* R84: a pipeline for a subpass with a view mask keeps gl_ViewIndex, which
+    * each copy of a multiview draw writes (ps5vk_draw.c); any other pipeline
+    * reads it as zero, as Vulkan defines it outside multiview. */
+   const VkPipelineRenderingCreateInfo *const multiview_rendering =
+      vk_get_pipeline_rendering_create_info(info);
+   const bool multiview = multiview_rendering != NULL && multiview_rendering->viewMask != 0;
    PsbcCompileOptions vertex_options = {
       .target = PSBC_TARGET_PS5,
       .stage = PSBC_STAGE_VERTEX,
@@ -1901,6 +1908,7 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
       .ngg = true,
       .address32_hi = (uint32_t)PS5VK_ADDRESS_HIGH_WORD,
       .primitive_type = compile_primitive_type,
+      .multiview = multiview,
    };
    PsbcCompileOptions pixel_options = {
       .target = PSBC_TARGET_PS5,
@@ -1909,6 +1917,7 @@ ps5vk_graphics_pipeline_create(struct ps5vk_device *device, const VkGraphicsPipe
       .optimise = true,
       .address32_hi = (uint32_t)PS5VK_ADDRESS_HIGH_WORD,
       .primitive_type = compile_primitive_type,
+      .multiview = multiview,
       /* The pipeline's sample count reaches the compiler as well as the
        * rasterizer registers (ps5vk_draw.c, ps5vk_multisample_registers): the
        * fragment stage's sample-mask and barycentric lowerings are built for

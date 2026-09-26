@@ -230,7 +230,9 @@ if [[ $exports != "$expected" ]]; then
 fi
 
 manifest="$work/host/ps5vk_icd.x86_64.json"
-python3 "$mesa/src/vulkan/util/vk_icd_gen.py" --api-version 1.0 --xml "$xml" --sizeof-pointer 8 \
+# The driver's own version (R84: 1.1): the loader decides by this number which
+# core device commands to hand an application, so a 1.0 manifest hid 1.1's.
+python3 "$mesa/src/vulkan/util/vk_icd_gen.py" --api-version 1.1 --xml "$xml" --sizeof-pointer 8 \
     --icd-lib-path "$work/host" --icd-filename libvulkan_ps5vk.so --out "$manifest"
 
 # --- PS5 shared object ----------------------------------------------------------

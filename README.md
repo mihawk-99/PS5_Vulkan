@@ -1,12 +1,12 @@
 # PS5Vulkan
 
-**A Vulkan 1.0 driver and a hardware compatibility probe for the PlayStation 5.**
+**A Vulkan 1.1 driver and a hardware compatibility probe for the PlayStation 5.**
 
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 [![Tooling](https://github.com/mihawk-99/PS5_Vulkan/actions/workflows/tooling.yml/badge.svg)](https://github.com/mihawk-99/PS5_Vulkan/actions/workflows/tooling.yml)
 
 This repository builds a real Vulkan driver for the PS5's GPU — a Mesa-derived
-Vulkan 1.0 implementation that programs the console's own AGC command backend
+Vulkan 1.1 implementation that programs the console's own AGC command backend
 and VideoOut display — together with the probe harness that proves, one
 capability at a time on real hardware, what that GPU actually does. It is a
 companion to the [PS5 OpenGL SDK](https://github.com/blackbearreloaded/ps5-opengl)
@@ -241,8 +241,9 @@ PS5-specific AGC and VideoOut backend.
 **It is not** a Sony SDK, a retail-package builder, an exploit, or a conformance
 submission. It ships no Sony file, no key and no game content. It needs a
 homebrew-enabled console that you own, and it never configures that console for
-you. The device reports 1.0, with coverage recorded command by command, limit
-by limit and format by format. The audits, targeted pixel proofs and working
+you. The device reports 1.1 (R84; the 1.1 row of docs/M5_REFERENCE.md stays
+open until the console CTS runs), with coverage recorded command by command,
+limit by limit and format by format. The audits, targeted pixel proofs and working
 applications are evidence of progress, not a claim of certified conformance.
 
 ## How it works

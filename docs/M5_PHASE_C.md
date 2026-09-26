@@ -9612,3 +9612,69 @@ driver fault.
   table as the golden, so the golden stays.
 
 The gate: every case PASS, both drawing cases identical, 206 PASS records.
+
+## 2026-09-25 — R81-R84: what LRPS2's hardware renderer needs to start
+
+LRPS2, libretro's PCSX2 core, is the next title on this driver
+(docs/LRPS2_GAPS.md). Its Vulkan renderer would not create a device here for
+five reasons; these four rounds remove them, each as a general Vulkan feature
+proven on the console. Every round's directory under jobs/ holds its queue,
+README, the console readback excerpt and a check.py over it.
+
+- **R81 — VK_KHR_sampler_mirror_clamp_to_edge.** LRPS2 enables it on every
+  device it creates. The mode is SQ_TEX_MIRROR_ONCE_LAST_TEXEL in the sampler
+  word; it is refused on a device that did not enable the extension. PID 170:
+  clamp, mirrored repeat and mirror clamp over texel indices -8 to 11, three 4K
+  frames, every checked pixel exact.
+- **R82 — 16-bit UNORM colour targets.** R16, R16G16 and R16G16B16A16_UNORM
+  render and blend (LRPS2's colour-clip target is the last). A half-float export
+  rounds them and the CB cannot blend a 16-bit normalized export, so they
+  export 32-bit floats (32_R, 32_ABGR), as Mesa does once they blend. PID 171:
+  all 19 target formats of v0-targets exact, solid and blended, including
+  values a half float cannot hold.
+- **R83 — D32_SFLOAT_S8_UINT sampled and copied, each aspect.** The stencil
+  plane's one-byte Z_X map (15 terms, held against AddrLib), aspect views,
+  per-aspect uploads, readbacks, clears and copies. Copies between Z-mapped
+  images now move the two-texel run the map keeps contiguous, which also fixes
+  D32_SFLOAT tiled copies. PID 172: both aspects sampled and both planes read
+  back exact over 8,294,400 pixels.
+- **R84 — Vulkan 1.1.** The instance and device report 1.1 with its core
+  commands and properties, multiview, and basic subgroup operations in
+  compute. Multiview replays each draw per view, re-pointing the attachments at
+  the view's layer and writing the view index into the user-data dword the
+  compiler reports (tooling/psbc/patch-view-index.py, which also gives the
+  pixel stage that argument; RADV's route through the exported layer does not
+  exist in the standalone compiler, and the compile aborted). The compiler tree
+  stubs out vk_set_subgroup_size, so RADV's wave heuristics made a 64-invocation
+  workgroup using subgroup operations one wave of 64 against the reported 32
+  (PID 154); tooling/psbc/patch-subgroup-size.py pins compute to cs_wave_size.
+  PIDs 167-169: a 1.1 device, two views in their own layers with the third
+  untouched, 34 four-subgroup dispatches a run exact, and the regression cases
+  unchanged. The host half, vk_r84_multiview_test.c, draws against the replay
+  of PID 167's capture (golden/r84-multiview).
+
+Failed runs kept for what they established: PID 154's layer-2 failure was my
+probe writing a sentinel the harness then zeroed. PID 155 read a wrong
+gl_SubgroupID once, in both dispatches of a two-subgroup workgroup; 8 later
+runs of that shape and 102 four-subgroup dispatches have not repeated it. The
+compiled code reads the wave index from TG_SIZE bits 6-11, Mesa's GFX6-10
+ordered-append route, valid while the dispatch initiator leaves ordered append
+off, as the driver does; the probe keeps its repeats so a recurrence fails.
+
+The CTS on the console is still to come (docs/CTS.md), so the version rise
+rests on B2's 1.1 assertions, these probes and the host CTS's reporting
+groups against the 1.1 driver: dEQP-VK.info.* 16 pass and 3 not supported,
+api.version_check pass, api.info 2356 pass with only the two failures already
+in the 1.0 baseline (the compressed-format rule and VK_KHR_surface's core
+version under the host loader); vulkan11_features and multiview_features
+pass. The host CTS context reports usedApiVersion 0.0.0 and skips some 1.1
+property cases as unsupported, so those are not counted as passes.
+
+conformance_inventory/device_report.json is regenerated from PID 167: API
+1.1, two device extensions, 354 supported image combinations (348 before).
+Multisampled 16-bit UNORM targets come from the format-independent sample
+counts of R75-R78 and are not drawn by a probe.
+
+What remains for LRPS2 on the driver side is its speed (R85 onward in
+docs/LRPS2_GAPS.md): CPU copies that split submissions, and per-draw cache
+flushes.

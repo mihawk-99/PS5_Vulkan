@@ -5,9 +5,11 @@
     "result": "PASS"
   },
   "device_extension_versions": {
+    "VK_KHR_sampler_mirror_clamp_to_edge": 3,
     "VK_KHR_swapchain": 70
   },
   "device_extensions": [
+    "VK_KHR_sampler_mirror_clamp_to_edge",
     "VK_KHR_swapchain"
   ],
   "features": {
@@ -501,7 +503,7 @@
     "VK_FORMAT_D32_SFLOAT_S8_UINT": {
       "buffer": "0x0",
       "linear": "0x0",
-      "optimal": "0x200"
+      "optimal": "0xc201"
     },
     "VK_FORMAT_E5B9G9R9_UFLOAT_PACK32": {
       "buffer": "0x0",
@@ -586,7 +588,7 @@
     "VK_FORMAT_R16G16B16A16_UNORM": {
       "buffer": "0x40",
       "linear": "0x0",
-      "optimal": "0xdc01"
+      "optimal": "0xdd81"
     },
     "VK_FORMAT_R16G16B16A16_USCALED": {
       "buffer": "0x0",
@@ -656,7 +658,7 @@
     "VK_FORMAT_R16G16_UNORM": {
       "buffer": "0x40",
       "linear": "0x0",
-      "optimal": "0xdc01"
+      "optimal": "0xdd81"
     },
     "VK_FORMAT_R16G16_USCALED": {
       "buffer": "0x0",
@@ -691,7 +693,7 @@
     "VK_FORMAT_R16_UNORM": {
       "buffer": "0x40",
       "linear": "0x0",
-      "optimal": "0xdc01"
+      "optimal": "0xdd81"
     },
     "VK_FORMAT_R16_USCALED": {
       "buffer": "0x0",
@@ -1089,8 +1091,8 @@
     "VK_FORMAT_D16_UNORM|2d-optimal-transfer-dst": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_D16_UNORM|2d-optimal-transfer-src": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_D16_UNORM|cube-optimal-sampled": "mips 13, layers 256, samples 0xf, size 4294967296",
-    "VK_FORMAT_D24_UNORM_S8_UINT|2d-optimal-depth": "mips 13, layers 256, samples 0x1, size 4294967296",
-    "VK_FORMAT_D32_SFLOAT_S8_UINT|2d-optimal-depth": "mips 13, layers 256, samples 0x1, size 4294967296",
+    "VK_FORMAT_D24_UNORM_S8_UINT|2d-optimal-depth": "mips 1, layers 1, samples 0x1, size 4294967296",
+    "VK_FORMAT_D32_SFLOAT_S8_UINT|2d-optimal-depth": "mips 1, layers 1, samples 0x1, size 4294967296",
     "VK_FORMAT_D32_SFLOAT|2d-optimal-depth": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_D32_SFLOAT|2d-optimal-input": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_D32_SFLOAT|2d-optimal-sampled": "mips 13, layers 256, samples 0xf, size 4294967296",
@@ -1127,6 +1129,8 @@
     "VK_FORMAT_R16G16B16A16_UINT|2d-optimal-transfer-dst": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_R16G16B16A16_UINT|2d-optimal-transfer-src": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_R16G16B16A16_UINT|cube-optimal-sampled": "mips 13, layers 256, samples 0xf, size 4294967296",
+    "VK_FORMAT_R16G16B16A16_UNORM|2d-optimal-colour": "mips 13, layers 256, samples 0xf, size 4294967296",
+    "VK_FORMAT_R16G16B16A16_UNORM|2d-optimal-input": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_R16G16B16A16_UNORM|2d-optimal-sampled": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_R16G16B16A16_UNORM|2d-optimal-transfer-both": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_R16G16B16A16_UNORM|2d-optimal-transfer-dst": "mips 13, layers 256, samples 0xf, size 4294967296",
@@ -1153,6 +1157,8 @@
     "VK_FORMAT_R16G16_UINT|2d-optimal-transfer-dst": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_R16G16_UINT|2d-optimal-transfer-src": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_R16G16_UINT|cube-optimal-sampled": "mips 13, layers 256, samples 0xf, size 4294967296",
+    "VK_FORMAT_R16G16_UNORM|2d-optimal-colour": "mips 13, layers 256, samples 0xf, size 4294967296",
+    "VK_FORMAT_R16G16_UNORM|2d-optimal-input": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_R16G16_UNORM|2d-optimal-sampled": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_R16G16_UNORM|2d-optimal-transfer-both": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_R16G16_UNORM|2d-optimal-transfer-dst": "mips 13, layers 256, samples 0xf, size 4294967296",
@@ -1179,6 +1185,8 @@
     "VK_FORMAT_R16_UINT|2d-optimal-transfer-dst": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_R16_UINT|2d-optimal-transfer-src": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_R16_UINT|cube-optimal-sampled": "mips 13, layers 256, samples 0xf, size 4294967296",
+    "VK_FORMAT_R16_UNORM|2d-optimal-colour": "mips 13, layers 256, samples 0xf, size 4294967296",
+    "VK_FORMAT_R16_UNORM|2d-optimal-input": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_R16_UNORM|2d-optimal-sampled": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_R16_UNORM|2d-optimal-transfer-both": "mips 13, layers 256, samples 0xf, size 4294967296",
     "VK_FORMAT_R16_UNORM|2d-optimal-transfer-dst": "mips 13, layers 256, samples 0xf, size 4294967296",
@@ -1468,8 +1476,8 @@
     "type1_heap": 0
   },
   "properties": {
-    "api_version": 4194304,
-    "device_extension_count": 1,
+    "api_version": 4198400,
+    "device_extension_count": 2,
     "device_id": 0,
     "device_name": "PS5 AGC GPU (ps5vk)",
     "device_type": 1,
@@ -1478,8 +1486,8 @@
     "format_count": 184,
     "format_unsupported_count": 126,
     "image_combo_count": 12,
-    "image_combo_supported_count": 348,
-    "instance_api_version": 4194304,
+    "image_combo_supported_count": 354,
+    "instance_api_version": 4198400,
     "instance_extension_count": 5,
     "limit_count": 97,
     "memory_heap_count": 1,
@@ -1497,5 +1505,5 @@
     "family0_queue_count": 1,
     "family0_timestamp_bits": 64
   },
-  "source": "build/driver/runner-cases/device-report.log"
+  "source": "Klog_Logs/r84-stress1.log"
 }

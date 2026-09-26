@@ -266,7 +266,8 @@ create_image(struct ps5vk_triangle *triangle, VkPhysicalDevice physical)
       .format = triangle->format,
       .extent = {PS5VK_TRIANGLE_WIDTH, PS5VK_TRIANGLE_HEIGHT, 1},
       .mipLevels = 1,
-      .arrayLayers = 1,
+      /* R84: a layer per view of a multiview frame. */
+      .arrayLayers = triangle->target_layers,
       .samples = samples,
       .tiling = VK_IMAGE_TILING_OPTIMAL,
       /* A colour attachment and nothing else: a case that wants the frame's
@@ -2122,8 +2123,15 @@ create_render_pass(struct ps5vk_triangle *triangle, VkFormat format, VkAttachmen
       .pColorAttachments = references,
       .pDepthStencilAttachment = triangle->depth ? &depth_reference : NULL,
    };
+   /* R84: a multiview frame's subpass renders the views its mask names. */
+   const VkRenderPassMultiviewCreateInfo multiview = {
+      .sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO,
+      .subpassCount = 1,
+      .pViewMasks = &triangle->multiview_mask,
+   };
    const VkRenderPassCreateInfo pass_info = {
       .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+      .pNext = triangle->multiview_mask != 0 ? &multiview : NULL,
       .attachmentCount = colour_count + (triangle->depth ? 1u : 0u),
       .pAttachments = attachments,
       .subpassCount = 1,
@@ -2990,6 +2998,11 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
    triangle->depth_format = input->depth_format != VK_FORMAT_UNDEFINED ? input->depth_format
                                                                       : VK_FORMAT_D32_SFLOAT;
    triangle->depth_sampled_aspect = triangle->depth ? input->depth_sampled_aspect : 0;
+   triangle->multiview_mask = input->multiview_mask;
+   triangle->target_layers =
+      input->multiview_mask != 0 ? 32u - (uint32_t)__builtin_clz(input->multiview_mask) : 1u;
+   if (input->multiview_mask != 0 && input->multiview_layers > triangle->target_layers)
+      triangle->target_layers = input->multiview_layers;
    /* Phase V0-query: the scissor the pipelines declare, and the occlusion query
     * each frame's draws are recorded inside. A caller that leaves both unset
     * records what every frame before that phase recorded. */
@@ -3277,12 +3290,14 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
              "loading"))
       return PS5VK_TRIANGLE_FAILED;
    for (uint32_t index = 0; index < triangle->image_count; index++) {
+      /* R84: a multiview frame's view spans every layer its views render. */
       const VkImageViewCreateInfo view_info = {
          .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
          .image = triangle->images[index],
-         .viewType = VK_IMAGE_VIEW_TYPE_2D,
+         .viewType = triangle->multiview_mask != 0 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                                                   : VK_IMAGE_VIEW_TYPE_2D,
          .format = triangle->format,
-         .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+         .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, triangle->target_layers},
       };
       if (!step(triangle, "create_image_view",
                 CALL(triangle, CreateImageView)(triangle->device, &view_info, NULL,

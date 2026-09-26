@@ -23,6 +23,8 @@
 
 #include "ps5vk_private.h"
 
+#include "vk_descriptor_update_template.h"
+
 #include <assert.h>
 
 /* The pool's entry for one descriptor type, or NULL when the pool was not
@@ -438,6 +440,51 @@ ps5vk_UpdateDescriptorSets(VkDevice _device, uint32_t descriptorWriteCount,
    const uint64_t hitch = ps5vk_hitch_begin();
    ps5vk_UpdateDescriptorSets_untimed(_device, descriptorWriteCount, pDescriptorWrites, descriptorCopyCount, pDescriptorCopies);
    ps5vk_hitch_end(PS5VK_HITCH_DESCRIPTOR, hitch);
+}
+
+/* R84: vkUpdateDescriptorSetWithTemplate (Vulkan 1.1). The runtime keeps the
+ * template (vk_descriptor_update_template.c); each of its entries says where in
+ * the application's data a descriptor's info structure lies, element by element,
+ * so every element becomes the one-descriptor VkWriteDescriptorSet it stands for
+ * and goes through the driver's own update. */
+VKAPI_ATTR void VKAPI_CALL
+ps5vk_UpdateDescriptorSetWithTemplate(VkDevice _device, VkDescriptorSet descriptorSet,
+                                      VkDescriptorUpdateTemplate descriptorUpdateTemplate,
+                                      const void *pData)
+{
+   VK_FROM_HANDLE(vk_descriptor_update_template, update_template, descriptorUpdateTemplate);
+   for (uint32_t e = 0; e < update_template->entry_count; e++) {
+      const struct vk_descriptor_template_entry *const entry = &update_template->entries[e];
+      for (uint32_t i = 0; i < entry->array_count; i++) {
+         const void *const element =
+            (const uint8_t *)pData + entry->offset + (size_t)i * entry->stride;
+         VkWriteDescriptorSet write = {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = descriptorSet,
+            .dstBinding = entry->binding,
+            .dstArrayElement = entry->array_element + i,
+            .descriptorCount = 1,
+            .descriptorType = entry->type,
+         };
+         switch (entry->type) {
+         case VK_DESCRIPTOR_TYPE_SAMPLER:
+         case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+         case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+         case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+         case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+            write.pImageInfo = element;
+            break;
+         case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+         case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+            write.pTexelBufferView = element;
+            break;
+         default:
+            write.pBufferInfo = element;
+            break;
+         }
+         ps5vk_UpdateDescriptorSets(_device, 1, &write, 0, NULL);
+      }
+   }
 }
 
 /* vkCmdBindDescriptorSets reaches this through the runtime's common entry

@@ -148,6 +148,13 @@ ps5vk_CmdWriteTimestamp(VkCommandBuffer commandBuffer, VkPipelineStageFlagBits p
    (void)pipelineStage;
    if (vk_command_buffer_has_error(&cmd_buffer->vk))
       return;
+   if (cmd_buffer->rendering && cmd_buffer->view_mask != 0) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                              "a timestamp inside a multiview rendering (view mask 0x%x) is not "
+                              "supported yet (R84)",
+                              cmd_buffer->view_mask);
+      return;
+   }
    if (pool == NULL || pool->type != VK_QUERY_TYPE_TIMESTAMP || query >= pool->count) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                               "vkCmdWriteTimestamp names a timestamp query pool and a query inside "
@@ -263,6 +270,15 @@ ps5vk_CmdBeginQuery(VkCommandBuffer commandBuffer, VkQueryPool queryPool, uint32
     * what a non-precise query promises, so the flag is accepted and the
     * device's occlusionQueryPrecise is false. */
    (void)flags;
+   /* R84: inside a multiview rendering a query spans one slot per view, which
+    * this driver does not lay out yet: refused by name, not counted wrong. */
+   if (cmd_buffer->rendering && cmd_buffer->view_mask != 0) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                              "a query inside a multiview rendering (view mask 0x%x) is not "
+                              "supported yet (R84)",
+                              cmd_buffer->view_mask);
+      return;
+   }
    ps5vk_cmd_buffer_occlusion_sample(cmd_buffer, pool, query, 0);
 }
 

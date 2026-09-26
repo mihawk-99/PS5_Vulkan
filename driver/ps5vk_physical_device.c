@@ -32,6 +32,8 @@
 #define PS5VK_DEVICE_NAME "PS5 AGC GPU (ps5vk)"
 /* No pipeline cache exists yet; the UUID changes when one does (Phase B6). */
 #define PS5VK_PIPELINE_CACHE_UUID "ps5vk-no-cache-1"
+#define PS5VK_DEVICE_UUID "ps5vk-agc-gpu-01"
+#define PS5VK_DRIVER_UUID "ps5vk-driver-011"
 
 /* Vertex, fragment and compute; footnote 8 multiplies the per-stage
  * descriptor minimums by this count for the per-set limits. */
@@ -50,6 +52,12 @@ static const struct vk_sync_type *const ps5vk_sync_types[] = {&ps5vk_sync_type, 
  * assertions in driver/tests/vk_b2_device_test.c hold both halves of that. */
 static const struct vk_features ps5vk_features = {
    .robustBufferAccess = true,
+   /* R84: multiview, which Vulkan 1.1 requires: a draw inside a rendering with
+    * a view mask is recorded once per view, into its own layer, with
+    * gl_ViewIndex its view (ps5vk_draw.c, tooling/psbc/patch-view-index.py).
+    * Geometry and tessellation shaders do not exist here, so neither of their
+    * multiview features does. */
+   .multiview = true,
    /* Anisotropic filtering up to 16x: the sampler's MAX_ANISO_RATIO,
     * ANISO_THRESHOLD and ANISO_BIAS and the anisotropic XY filters, as RADV
     * encodes them (ps5vk_image.c, ps5vk_CreateSampler). */
@@ -197,11 +205,37 @@ ps5vk_get_properties(struct vk_properties *p)
       .optimalBufferCopyOffsetAlignment = 1,
       .optimalBufferCopyRowPitchAlignment = 1,
       .nonCoherentAtomSize = 256,
+
+      /* R84: Vulkan 1.1's properties. Compute runs in waves of 32 (the
+       * compiler's cs_wave_size, which the dispatch's CS_W32_EN follows), and
+       * the basic subgroup operations there are what 1.1 requires. Point
+       * clipping follows the clip planes, as RADV reports. Eight views, as
+       * RADV reports, and the minimum instance index. A set holds at most the
+       * 1024 descriptors 1.1 asks for, and one allocation half the 4 GiB heap.
+       * No protected memory, and no LUID: nothing is shared across APIs. */
+      .subgroupSize = 32,
+      .subgroupSupportedStages = VK_SHADER_STAGE_COMPUTE_BIT,
+      .subgroupSupportedOperations = VK_SUBGROUP_FEATURE_BASIC_BIT,
+      .subgroupQuadOperationsInAllStages = VK_FALSE,
+      .pointClippingBehavior = VK_POINT_CLIPPING_BEHAVIOR_ALL_CLIP_PLANES,
+      .maxMultiviewViewCount = 8,
+      .maxMultiviewInstanceIndex = (UINT32_C(1) << 27) - 1,
+      .protectedNoFault = VK_FALSE,
+      .maxPerSetDescriptors = 1024,
+      .maxMemoryAllocationSize = UINT64_C(1) << 31,
+      .deviceLUIDValid = VK_FALSE,
    };
    STATIC_ASSERT(sizeof(PS5VK_DEVICE_NAME) <= VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
    memcpy(p->deviceName, PS5VK_DEVICE_NAME, sizeof(PS5VK_DEVICE_NAME));
    STATIC_ASSERT(sizeof(PS5VK_PIPELINE_CACHE_UUID) - 1 == VK_UUID_SIZE);
    memcpy(p->pipelineCacheUUID, PS5VK_PIPELINE_CACHE_UUID, VK_UUID_SIZE);
+   /* R84: the device and the driver, named for Vulkan 1.1's ID properties. Only
+    * one device exists and no memory is shared outside this driver, so fixed
+    * values are all they need to be. */
+   STATIC_ASSERT(sizeof(PS5VK_DEVICE_UUID) - 1 == VK_UUID_SIZE);
+   memcpy(p->deviceUUID, PS5VK_DEVICE_UUID, VK_UUID_SIZE);
+   STATIC_ASSERT(sizeof(PS5VK_DRIVER_UUID) - 1 == VK_UUID_SIZE);
+   memcpy(p->driverUUID, PS5VK_DRIVER_UUID, VK_UUID_SIZE);
 }
 
 VkResult

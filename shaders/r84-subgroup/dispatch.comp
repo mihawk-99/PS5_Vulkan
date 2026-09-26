@@ -1,0 +1,62 @@
+// PS5 Vulkan compatibility probe - R84: Vulkan 1.1's basic subgroup operations.
+// Copyright (C) 2026 Mihawk-99
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Vulkan 1.1 requires the basic subgroup operations in compute, and the device
+// reports a subgroup of 32 (the wave compute stages are compiled for). One
+// workgroup of 128 invocations -- four subgroups, the most the device's
+// workgroup limit holds -- checks what each invocation sees against where it is
+// in the workgroup, and ORs a bit for every check that fails into word 1: the
+// subgroup size, the invocation's index in its subgroup, the subgroup's index
+// and the subgroup count. subgroupElect() counts itself
+// into word 2 with a subgroup barrier after it, which must elect exactly one
+// invocation, the lowest, in each subgroup. Each invocation also sets bit
+// gl_SubgroupID (7 for anything past 6) of word 3. After a workgroup barrier
+// invocation 0 writes word 0: 0xa5a5a5a5 when no check failed and four
+// invocations were elected, otherwise 0xbad00000 with the failed checks in bits
+// 0-4, the elected count in bits 8-15 and the subgroup IDs seen in bits 16-19.
+// The runner compares word 0 alone.
+#version 450
+#extension GL_KHR_shader_subgroup_basic : require
+
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 0) buffer Output
+{
+    uint values[];
+}
+output_buffer;
+
+void main()
+{
+    const uint index = gl_LocalInvocationIndex;
+    uint failed = 0u;
+    if (gl_SubgroupSize != 32u)
+        failed |= 1u;
+    if (gl_SubgroupInvocationID != index % 32u)
+        failed |= 2u;
+    if (gl_SubgroupID != index / 32u)
+        failed |= 4u;
+    if (gl_NumSubgroups != 4u)
+        failed |= 8u;
+    const bool elected = subgroupElect();
+    if (elected != (gl_SubgroupInvocationID == 0u))
+        failed |= 16u;
+    if (failed != 0u)
+        atomicOr(output_buffer.values[1], failed);
+    if (elected)
+        atomicAdd(output_buffer.values[2], 1u);
+    atomicOr(output_buffer.values[3], 1u << min(gl_SubgroupID, 7u));
+    subgroupBarrier();
+    memoryBarrierBuffer();
+    barrier();
+    if (index == 0u)
+    {
+        const uint failures = atomicOr(output_buffer.values[1], 0u);
+        const uint electees = atomicAdd(output_buffer.values[2], 0u);
+        const uint ids = atomicOr(output_buffer.values[3], 0u);
+        output_buffer.values[0] = failures == 0u && electees == 4u
+                                      ? 0xA5A5A5A5u
+                                      : (0xbad00000u | ((ids & 0xfu) << 16) | (electees << 8) | failures);
+    }
+}

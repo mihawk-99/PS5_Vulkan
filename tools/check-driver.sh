@@ -103,6 +103,7 @@ tests=(
     v0_capability
     v0_subpass
     r83_depth_stencil
+    r84_multiview
 )
 # Negative tests: name, and the host variable that breaks the rule it checks
 # unless the test sets it itself (b3_window).
@@ -200,6 +201,12 @@ fi
 mrt_run="$root/golden/v0-mrt/run-1.json"
 want v0_mrt &&
     python3 "$root/tools/golden.py" replay "$mrt_run" "$work/v0-mrt.replay"
+# R84's two-view frame draws against the replay of its own console capture, for
+# the same reason: its stages are the ones the capture carries
+# (jobs/r84-multiview/queue.txt names m2-solid for the register defaults).
+multiview_run="$root/golden/r84-multiview/run-1.json"
+want r84_multiview &&
+    python3 "$root/tools/golden.py" replay "$multiview_run" "$work/r84-multiview.replay"
 # The topologies draw the m3-vertex set through the harness, as v0-cull's frames
 # do, so that case's capture holds the stage mapping and the allocations their
 # replay hands out; its frames are not compared, the words are the gate.
@@ -468,8 +475,9 @@ run_test() {
             compare=(compare-run "$resolve_run" "$dump" --test c8-resolve) ;;
         d2_compute_images) replay=d2-compute-images
             compare=(compare-run "$compute_images_run" "$dump" --test d2-compute-images) ;;
+        # The R84 subgroup dispatch is the PC test's own, the last submission.
         d2_compute) replay=d2-compute
-            compare=(compare-run "$compute_run" "$dump" --test d2-compute) ;;
+            compare=(compare-run "$compute_run" "$dump" --test d2-compute --uncaptured-tail 1) ;;
         v0_timestamp) replay=v0-timestamp
             compare=(compare-run "$timestamp_run" "$dump" --test v0-timestamp-driver) ;;
         v0_vertex_sint) replay=v0-vertex-sint
@@ -531,6 +539,12 @@ run_test() {
         # render: the replay is what gives the host that split's step boundary
         # (driver/tests/vk_v0_subpass_test.c).
         v0_subpass) replay=b4-headless
+            compare=() ;;
+        # R84's two-view frame: what it asserts is the stream its per-view
+        # replay records -- each view's layer and view index
+        # (driver/tests/vk_r84_multiview_test.c) -- against the replay of the
+        # console run that drew it.
+        r84_multiview) replay=r84-multiview
             compare=() ;;
         v0_multiset_quake) replay=v0-multiset-quake
             compare=(compare-run "$multiset_quake_run" "$dump" --test v0-multiset-quake) ;;

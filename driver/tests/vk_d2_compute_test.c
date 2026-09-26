@@ -17,6 +17,11 @@
  * tools/check-driver.sh compares the submission with the console's own run of
  * it (golden/d2-compute). PS5VK_PROBES names the probes directory. The PS5 build
  * only links; it is not run.
+ *
+ * R84 adds a third dispatch, the PC's own (the comparison leaves it out): the
+ * subgroup probe (probes/r84-subgroup/dispatch.spv), SPIR-V 1.3 with Vulkan
+ * 1.1's basic subgroup operations, which the compiler has to accept and the
+ * pipeline create. The console's r84-subgroup case checks what it computes.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -128,6 +133,32 @@ int main(void)
          ps5vk_compute_finish(&compute);
       }
    }
+
+#if defined(__linux__)
+   size_t subgroup_bytes = 0;
+   uint32_t *const subgroup =
+      probes ? read_spirv(probes, "r84-subgroup/dispatch.spv", &subgroup_bytes) : NULL;
+   check(subgroup != NULL, "PS5VK_PROBES holds the R84 subgroup SPIR-V");
+   if (subgroup != NULL)
+   {
+      struct steps steps = {0};
+      const struct ps5vk_compute_input input = {
+         .get_instance_proc_addr = GET_PROC,
+         .spirv = subgroup,
+         .spirv_bytes = subgroup_bytes,
+         .entry_point = "main",
+         .initial_word = PS5VK_COMPUTE_INITIAL_WORD,
+         .expected_word = PS5VK_COMPUTE_EXPECTED_WORD,
+         .report = {&steps, record_step},
+      };
+      struct ps5vk_compute compute;
+      const bool ran = ps5vk_compute_run(&input, &compute);
+      check(ran && steps.failed == NULL,
+            "the subgroup program compiles, creates, records, submits and waits");
+      ps5vk_compute_finish(&compute);
+   }
+   free(subgroup);
+#endif
 
    free(spirv);
    (void)spirv_bytes;

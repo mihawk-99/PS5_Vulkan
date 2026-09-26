@@ -1,0 +1,93 @@
+{"schema":2,"event":"run_start","pid":167}
+{"schema":2,"event":"value","probe":"device_report","field":"instance_api_version","value":4198400}
+{"schema":2,"event":"text","probe":"device_report_extension","field":"instance","value":"VK_KHR_display"}
+{"schema":2,"event":"text","probe":"device_report_extension","field":"instance","value":"VK_KHR_get_physical_device_properties2"}
+{"schema":2,"event":"text","probe":"device_report_extension","field":"instance","value":"VK_KHR_surface"}
+{"schema":2,"event":"text","probe":"device_report_extension","field":"instance","value":"VK_EXT_debug_report"}
+{"schema":2,"event":"text","probe":"device_report_extension","field":"instance","value":"VK_EXT_debug_utils"}
+{"schema":2,"event":"value","probe":"device_report","field":"instance_extension_count","value":5}
+{"schema":2,"event":"value","probe":"device_report","field":"physical_device_count","value":1}
+{"schema":2,"event":"value","probe":"device_report","field":"api_version","value":4198400}
+{"schema":2,"event":"value","probe":"device_report","field":"driver_version","value":8192}
+{"schema":2,"event":"value","probe":"device_report","field":"vendor_id","value":4098}
+{"schema":2,"event":"value","probe":"device_report","field":"device_id","value":0}
+{"schema":2,"event":"value","probe":"device_report","field":"device_type","value":1}
+{"schema":2,"event":"text","probe":"device_report","field":"device_name","value":"PS5 AGC GPU (ps5vk)"}
+{"schema":2,"event":"value","probe":"device_report","field":"pipeline_cache_uuid_hex0","value":112}
+{"schema":2,"event":"value","probe":"device_report","field":"queue_family_count","value":1}
+{"schema":2,"event":"value","probe":"device_report_queue","field":"family0_flags","value":7}
+{"schema":2,"event":"value","probe":"device_report_queue","field":"family0_queue_count","value":1}
+{"schema":2,"event":"value","probe":"device_report_queue","field":"family0_timestamp_bits","value":64}
+{"schema":2,"event":"value","probe":"device_report_queue","field":"family0_granularity_w","value":1}
+{"schema":2,"event":"value","probe":"device_report_queue","field":"family0_granularity_h","value":1}
+{"schema":2,"event":"value","probe":"device_report_queue","field":"family0_granularity_d","value":1}
+{"schema":2,"event":"value","probe":"device_report","field":"memory_type_count","value":2}
+{"schema":2,"event":"value","probe":"device_report","field":"memory_heap_count","value":1}
+{"schema":2,"event":"value","probe":"device_report_memory","field":"type0_flags","value":1}
+{"schema":2,"event":"value","probe":"device_report_memory","field":"type0_heap","value":0}
+{"schema":2,"event":"value","probe":"device_report_memory","field":"type1_flags","value":7}
+{"schema":2,"event":"value","probe":"device_report_memory","field":"type1_heap","value":0}
+{"schema":2,"event":"value","probe":"device_report_memory","field":"heap0_size","value":4294967296}
+{"schema":2,"event":"value","probe":"device_report_memory","field":"heap0_flags","value":1}
+{"schema":2,"event":"text","probe":"device_report_extension","field":"device","value":"VK_KHR_sampler_mirror_clamp_to_edge"}
+{"schema":2,"event":"value","probe":"device_report_extension_version","field":"VK_KHR_sampler_mirror_clamp_to_edge","value":3}
+{"schema":2,"event":"text","probe":"device_report_extension","field":"device","value":"VK_KHR_swapchain"}
+{"schema":2,"event":"value","probe":"device_report_extension_version","field":"VK_KHR_swapchain","value":70}
+{"schema":2,"event":"value","probe":"device_report","field":"device_extension_count","value":2}
+{"schema":2,"event":"value","probe":"device_report","field":"format_count","value":184}
+{"schema":2,"event":"value","probe":"device_report","field":"format_unsupported_count","value":126}
+{"schema":2,"event":"value","probe":"device_report","field":"image_combo_count","value":12}
+{"schema":2,"event":"value","probe":"device_report","field":"image_combo_supported_count","value":354}
+{"schema":2,"event":"value","probe":"device_report","field":"limit_count","value":97}
+{"schema":2,"event":"value","probe":"device_report","field":"feature_count","value":55}
+{"schema":2,"event":"probe","probe":"device_report","status":"PASS","result":0,"detail":"the device's reporting is captured: properties, limits, features, queue families, memory, and the instance and device extension lists"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"device-report"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"m2-solid"}
+{"schema":2,"event":"value","probe":"r84_multiview","field":"layer_bytes","value":33554432}
+{"schema":2,"event":"value","probe":"r84_multiview","field":"layer","value":0}
+{"schema":2,"event":"hex","probe":"r84_multiview","field":"left","value":"0xff0000ff"}
+{"schema":2,"event":"hex","probe":"r84_multiview","field":"right","value":"0xffff8040"}
+{"schema":2,"event":"value","probe":"r84_multiview","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r84_multiview","field":"layer","value":1}
+{"schema":2,"event":"hex","probe":"r84_multiview","field":"left","value":"0xffff8040"}
+{"schema":2,"event":"hex","probe":"r84_multiview","field":"right","value":"0xff00ff00"}
+{"schema":2,"event":"value","probe":"r84_multiview","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r84_multiview","field":"layer","value":2}
+{"schema":2,"event":"hex","probe":"r84_multiview","field":"left","value":"0x0"}
+{"schema":2,"event":"hex","probe":"r84_multiview","field":"right","value":"0x0"}
+{"schema":2,"event":"value","probe":"r84_multiview","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r84_multiview","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r84_multiview","status":"PASS","result":0,"detail":"two views into their own layers, the third untouched"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"r84-multiview"}
+{"schema":2,"event":"value","probe":"d2_compute","field":"frame","value":0}
+{"schema":2,"event":"value","probe":"d2_compute","field":"words","value":877}
+{"schema":2,"event":"hex","probe":"d2_compute","field":"readback","value":"0xa5a5a5a5"}
+{"schema":2,"event":"hex","probe":"d2_compute","field":"expected","value":"0xa5a5a5a5"}
+{"schema":2,"event":"probe","probe":"d2_compute","status":"PASS","result":0,"detail":"the direct dispatch recorded, submitted and signalled its fence; the readback is the expected shader output"}
+{"schema":2,"event":"value","probe":"d2_compute","field":"frame","value":1}
+{"schema":2,"event":"value","probe":"d2_compute","field":"words","value":877}
+{"schema":2,"event":"hex","probe":"d2_compute","field":"readback","value":"0xa5a5a5a5"}
+{"schema":2,"event":"hex","probe":"d2_compute","field":"expected","value":"0xa5a5a5a5"}
+{"schema":2,"event":"probe","probe":"d2_compute","status":"PASS","result":0,"detail":"the indirect dispatch recorded, submitted and signalled its fence; the readback is the expected shader output"}
+{"schema":2,"event":"value","probe":"r84_subgroup","field":"repeats","value":32}
+{"schema":2,"event":"value","probe":"r84_subgroup","field":"ran","value":32}
+{"schema":2,"event":"value","probe":"r84_subgroup","field":"failed","value":0}
+{"schema":2,"event":"hex","probe":"r84_subgroup","field":"first_failure","value":"0x0"}
+{"schema":2,"event":"probe","probe":"r84_subgroup","status":"PASS","result":0,"detail":"32 more dispatches of the four-subgroup workgroup, each its own program"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"r84-subgroup"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"c4-rtt"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"v0-subpass"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"v0-stencil"}
+{"schema":2,"event":"value","probe":"d2_compute","field":"frame","value":0}
+{"schema":2,"event":"value","probe":"d2_compute","field":"words","value":144}
+{"schema":2,"event":"hex","probe":"d2_compute","field":"readback","value":"0xa5a5a5a5"}
+{"schema":2,"event":"hex","probe":"d2_compute","field":"expected","value":"0xa5a5a5a5"}
+{"schema":2,"event":"probe","probe":"d2_compute","status":"PASS","result":0,"detail":"the direct dispatch recorded, submitted and signalled its fence; the readback is the expected shader output"}
+{"schema":2,"event":"value","probe":"d2_compute","field":"frame","value":1}
+{"schema":2,"event":"value","probe":"d2_compute","field":"words","value":144}
+{"schema":2,"event":"hex","probe":"d2_compute","field":"readback","value":"0xa5a5a5a5"}
+{"schema":2,"event":"hex","probe":"d2_compute","field":"expected","value":"0xa5a5a5a5"}
+{"schema":2,"event":"probe","probe":"d2_compute","status":"PASS","result":0,"detail":"the indirect dispatch recorded, submitted and signalled its fence; the readback is the expected shader output"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"d2-compute"}
+{"schema":2,"event":"value","probe":"runner_summary","field":"ran","value":8}
+{"schema":2,"event":"probe","probe":"runner_summary","status":"PASS","result":0,"detail":"8 of 8 queued tests passed"}

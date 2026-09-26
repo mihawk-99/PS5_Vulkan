@@ -15,7 +15,10 @@ set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 set_name=${1:-c0}
-case "$set_name" in c0|c0-images|r17-descriptor-array) ;; *) echo "unknown compute probe: $set_name" >&2; exit 2 ;; esac
+case "$set_name" in c0|c0-images|r17-descriptor-array|r84-subgroup) ;; *) echo "unknown compute probe: $set_name" >&2; exit 2 ;; esac
+# R84's subgroup probe needs SPIR-V 1.3, Vulkan 1.1's; the others stay 1.0.
+target_env=vulkan1.0
+[[ $set_name != r84-subgroup ]] || target_env=vulkan1.1
 source_file="$root/shaders/$set_name/dispatch.comp"
 output="$root/probes/$set_name"
 work="$root/build/probes/$set_name"
@@ -26,7 +29,7 @@ command -v "$glslang" >/dev/null 2>&1 || command -v "$glslang" >/dev/null ||
     { echo "missing glslang; install it or set GLSLANG" >&2; exit 2; }
 
 mkdir -p "$work" "$output"
-"$glslang" -V --target-env vulkan1.0 -S comp "$source_file" -o "$work/dispatch.spv" \
+"$glslang" -V --target-env "$target_env" -S comp "$source_file" -o "$work/dispatch.spv" \
     > "$work/glslang.log" 2>&1 || { cat "$work/glslang.log" >&2; exit 1; }
 
 cp "$work/dispatch.spv" "$output/dispatch.spv"
@@ -69,7 +72,7 @@ fi
 {
     echo "PS5 Vulkan $set_name compute dispatch probe, built by tools/build-compute-probe.sh $set_name."
     echo "source: shaders/$set_name/dispatch.comp"
-    echo "pipeline: GLSL -> SPIR-V (glslang, vulkan1.0), compiled on the console by libpsbc"
+    echo "pipeline: GLSL -> SPIR-V (glslang, $target_env), compiled on the console by libpsbc"
     printf 'glslang: %s\n' "$("$glslang" --version | head -n 1)"
     printf 'dispatch.spv: %s words, sha256 %s\n' "$spirv_words" \
         "$(sha256sum "$output/dispatch.spv" | cut -d' ' -f1)"

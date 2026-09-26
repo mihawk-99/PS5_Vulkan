@@ -203,8 +203,9 @@ extensions: exposing one at the version that promotes it makes that version's
 required feature set mandatory, so exposure is a version decision rather than
 a convenience. Today the instance exposes `VK_KHR_get_physical_device_properties2`,
 `VK_KHR_surface`, `VK_KHR_display`, `VK_EXT_debug_report` and
-`VK_EXT_debug_utils`, and the device exposes `VK_KHR_swapchain` alone, which is
-what keeps 1.1's and 1.2's conditional requirements out of scope for now.
+`VK_EXT_debug_utils`, and the device exposes `VK_KHR_swapchain` and
+`VK_KHR_sampler_mirror_clamp_to_edge` (R81), which keeps 1.1's and 1.2's
+conditional requirements out of scope for now. The device reports 1.1 since R84.
 
 #### 1.0: make the current claim true
 
@@ -253,6 +254,14 @@ too, with `VK_KHR_swapchain`'s four device-group commands conditional on Vulkan
   first), and `V1-promoted` for the promoted group: Mesa supplies most of it,
   the driver adds bind_memory2, dedicated allocation and maintenance1-3, and
   libpsbc adds variable pointers.
+- **Status (R84, docs/M5_PHASE_C.md).** The device reports 1.1. Multiview
+  (`r84-multiview`: views in their own layers, gl_ViewIndex in both stages)
+  and basic subgroups in compute (`r84-subgroup`) are proven on the console;
+  B2 asserts the 1.1 commands, features and properties. Not yet probed on
+  their own: maintenance1's negative viewport height and the maintenance1-3
+  image and descriptor rules. The row stays open until the console CTS
+  subset for 1.1 runs (rule 1); the host CTS's reporting groups show no
+  failure the 1.0 baseline did not already have.
 
 #### 1.2
 

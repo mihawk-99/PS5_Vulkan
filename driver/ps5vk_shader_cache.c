@@ -109,7 +109,7 @@ ps5vk_shader_cache_key(const uint32_t *words, size_t size, const PsbcCompileOpti
    FIELD(ps5_global_streamout); FIELD(ps5_global_primitive_query);
    FIELD(split_vertex_instances); FIELD(force_accelerated_dot); FIELD(primitive_type);
    FIELD(provoking_vtx_last); FIELD(flat_input_vertex_valid); FIELD(flat_input_vertex);
-   FIELD(address32_hi); FIELD(vertex_attribute_count);
+   FIELD(address32_hi); FIELD(multiview); FIELD(vertex_attribute_count);
    for (uint32_t i = 0; i < options->vertex_attribute_count; i++) {
       FIELD(vertex_attributes[i].location); FIELD(vertex_attributes[i].binding);
       FIELD(vertex_attributes[i].format); FIELD(vertex_attributes[i].offset);

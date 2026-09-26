@@ -22264,6 +22264,104 @@ void run_vulkan_depth_stencil_aspect_frames(const TestContext &test, TestOutcome
     log.number("r83_depth_stencil", "passed_frames", passed);
 }
 
+// R84: a multiview render pass, which Vulkan 1.1 requires (LRPS2 creates a 1.1
+// device). The target has three layers and the subpass's view mask names the
+// first two: the pass clears both views, and one draw of the band quad renders
+// once per view, each copy into its own layer. Both r84-multiview stages read
+// gl_ViewIndex: the vertex stage puts view 0's quad in the left half and view
+// 1's in the right, the pixel stage colours view 0 red and view 1 green. So
+// layer 0 is red on the left and the clear colour on the right, layer 1 the
+// clear colour on the left and green on the right, and a view index that never
+// reached a stage shows as both views in one half or in one colour. Layer 2
+// must keep the zero the harness fills the whole target with before the frame
+// (ps5vk_triangle_draw): no view renders there, vk_meta's clear included, whose
+// rectangles also write gl_Layer, and everything a view writes -- the clear
+// colour, red, green -- is nonzero. Every pixel of every layer is checked.
+void run_vulkan_multiview_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const float vertices[] = {-1, -1, 0, 0, 1, -1, 1, 0, 1, 1, 1, 1, -1, 1, 0, 1};
+    const std::uint16_t indices[] = {0, 1, 2, 2, 3, 0};
+    constexpr std::uint32_t kRed = rgba_bytes_word(0xff, 0, 0);
+    constexpr std::uint32_t kGreen = rgba_bytes_word(0, 0xff, 0);
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    input.vertex_data = vertices;
+    input.vertex_count = 4;
+    input.vertex_stride = 16;
+    input.index_data = indices;
+    input.index_count = 6;
+    input.attribute_count = 2;
+    input.attributes[0] = {0, 0, VK_FORMAT_R32G32_SFLOAT, 0};
+    input.attributes[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, 8};
+    input.multiview_mask = 0x3u;
+    input.multiview_layers = 3;
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    ps5vk_triangle triangle{};
+    auto status = ps5vk_triangle_create(&triangle, &input);
+    // The layers follow one another in the image's storage, a whole slice
+    // apart (driver/ps5vk_image.c, ps5vk_image_layer_bytes). The storage is
+    // cached by the CPU, so the debug API invalidates it before the readback.
+    std::size_t storage_bytes = 0;
+    const bool stored = status == PS5VK_TRIANGLE_OK &&
+                        ps5vk_debug_image_storage(triangle.images[0], &storage_bytes) != nullptr;
+    const std::size_t slice =
+        triangle.target_layers != 0 ? storage_bytes / triangle.target_layers : 0;
+    const bool placed = stored && triangle.target_layers == 3 && slice >= kFramebufferBytes;
+    if (status == PS5VK_TRIANGLE_OK)
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        outcome.stage_in_use = true;
+        return;
+    }
+    log.number("r84_multiview", "layer_bytes", slice);
+    bool passed = false;
+    if (status == PS5VK_TRIANGLE_OK && placed)
+    {
+        if (test.capture)
+        {
+            log_driver_submission(triangle.device, "multiview", log);
+            log_driver_stages(triangle.device, log);
+        }
+        const auto *const base = static_cast<const std::uint8_t *>(
+            ps5vk_debug_image_storage(triangle.images[0], &storage_bytes));
+        unsigned bad[3] = {};
+        for (unsigned layer = 0; layer < 3; ++layer)
+        {
+            const FramebufferView view{
+                reinterpret_cast<const std::uint32_t *>(base + layer * slice), kTiledRgba8Layout};
+            for (unsigned y = 0; y < kOutputHeight; ++y)
+                for (unsigned x = 0; x < kOutputWidth; ++x)
+                {
+                    const bool left = x < kOutputWidth / 2;
+                    std::uint32_t want = 0;
+                    if (layer == 0)
+                        want = left ? kRed : kResolveClearWord;
+                    else if (layer == 1)
+                        want = left ? kResolveClearWord : kGreen;
+                    bad[layer] += view.word(x, y) == want ? 0u : 1u;
+                }
+            log.number("r84_multiview", "layer", layer);
+            log.hex("r84_multiview", "left", view.word(kOutputWidth / 4, kOutputHeight / 2));
+            log.hex("r84_multiview", "right", view.word(kOutputWidth * 3 / 4, kOutputHeight / 2));
+            log.number("r84_multiview", "mismatches", bad[layer]);
+        }
+        log.number("r84_multiview", "pixels", kOutputWidth * kOutputHeight);
+        passed = bad[0] == 0 && bad[1] == 0 && bad[2] == 0;
+    }
+    log.event("r84_multiview", passed ? "PASS" : "FAIL", passed ? 0 : -1,
+              "two views into their own layers, the third untouched");
+    ps5vk_triangle_finish(&triangle);
+    outcome.command_built = status == PS5VK_TRIANGLE_OK;
+    outcome.passed = passed;
+}
 
 // R59: gl_FragCoord's z and w in a fragment shader (Dolphin's fog and depth
 // read them). A full-screen quad whose depth ramps from 0.25 on the left edge to
@@ -23784,12 +23882,13 @@ void run_vulkan_page_mip_frames_six(const TestContext &test, TestOutcome &outcom
 // it, which is why the submission is what the PC comparison covers.
 #ifdef AGC_VULKAN_DRIVER
 void run_vulkan_compute(const TestContext &test, TestOutcome &outcome, bool images,
-                        bool descriptor_array = false) noexcept
+                        bool descriptor_array = false, const char *package = nullptr) noexcept
 {
     JsonLog &log = test.log;
-    const PackagePaths compute = package_paths(descriptor_array ? "r17-descriptor-array"
-                                               : images         ? "c0-images"
-                                                                : "c0");
+    const PackagePaths compute = package_paths(package != nullptr ? package
+                                               : descriptor_array ? "r17-descriptor-array"
+                                               : images           ? "c0-images"
+                                                                  : "c0");
     char spirv_download[96]{};
     char spirv_app[96]{};
     std::snprintf(spirv_download, sizeof(spirv_download), "%sdispatch.spv", compute.download);
@@ -23887,6 +23986,72 @@ void run_vulkan_compute_dispatch(const TestContext &test, TestOutcome &outcome) 
 void run_vulkan_compute_images(const TestContext &test, TestOutcome &outcome) noexcept
 {
     run_vulkan_compute(test, outcome, true);
+}
+
+// R84: Vulkan 1.1's basic subgroup operations in compute
+// (shaders/r84-subgroup/dispatch.comp): a workgroup of four subgroups writes
+// the same word as c0's only when every invocation saw a subgroup of 32, its
+// own index in it, its subgroup's index and the count, and each subgroup
+// elected exactly its lowest invocation; otherwise the word names the failed
+// checks and the subgroup IDs seen. One console run once read a wrong
+// gl_SubgroupID and no later run repeated it, so the first program is captured
+// like c0's and then the same dispatch runs 32 times more, direct and
+// indirect alternately, each its own program: every one must pass.
+void run_vulkan_subgroup_dispatch(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_vulkan_compute(test, outcome, false, false, "r84-subgroup");
+    if (!outcome.passed)
+        return;
+    JsonLog &log = test.log;
+    const PackagePaths compute = package_paths("r84-subgroup");
+    char spirv_download[96]{};
+    char spirv_app[96]{};
+    std::snprintf(spirv_download, sizeof(spirv_download), "%sdispatch.spv", compute.download);
+    std::snprintf(spirv_app, sizeof(spirv_app), "%sdispatch.spv", compute.app);
+    std::size_t spirv_size = 0;
+    const char *spirv_path = nullptr;
+    if (!read_shader_package(spirv_download, spirv_app, g_spirv, spirv_size, spirv_path))
+    {
+        outcome.passed = false;
+        return;
+    }
+    struct ps5vk_compute_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.spirv = reinterpret_cast<const std::uint32_t *>(g_spirv.data());
+    input.spirv_bytes = spirv_size;
+    input.entry_point = "main";
+    input.initial_word = 0;
+    input.expected_word = kComputeWord;
+    input.report = {nullptr, [](void *, const char *, bool, int, const char *) {}};
+    constexpr unsigned kRepeats = 32;
+    unsigned ran = 0;
+    unsigned failed = 0;
+    std::uint32_t first_failure = 0;
+    for (unsigned round = 0; round < kRepeats; ++round)
+    {
+        struct ps5vk_compute program{};
+        struct ps5vk_compute_input run = input;
+        run.indirect = (round & 1u) != 0;
+        if (ps5vk_compute_run(&run, &program))
+        {
+            ++ran;
+            if (program.result_word != kComputeWord)
+            {
+                if (failed == 0)
+                    first_failure = program.result_word;
+                ++failed;
+            }
+        }
+        ps5vk_compute_finish(&program);
+    }
+    log.number("r84_subgroup", "repeats", kRepeats);
+    log.number("r84_subgroup", "ran", ran);
+    log.number("r84_subgroup", "failed", failed);
+    log.hex("r84_subgroup", "first_failure", first_failure);
+    const bool all = ran == kRepeats && failed == 0;
+    log.event("r84_subgroup", all ? "PASS" : "FAIL", all ? 0 : -1,
+              "32 more dispatches of the four-subgroup workgroup, each its own program");
+    outcome.passed = all;
 }
 
 void run_vulkan_descriptor_array(const TestContext &test, TestOutcome &outcome) noexcept
@@ -26929,6 +27094,7 @@ constexpr RunnerTest kRunnerTests[] = {
     // the m2 set is only what the runner stages for every test).
     {"d2-compute", "m2", run_vulkan_compute_dispatch},
     {"d2-compute-images", "m2", run_vulkan_compute_images},
+    {"r84-subgroup", "m2", run_vulkan_subgroup_dispatch},
     {"r17-descriptor-array", "m2", run_vulkan_descriptor_array},
     // Phase C5: the tutorial's depth program, the m4-depth canary's two
     // rectangles over a D32_SFLOAT attachment the frame clears through
@@ -27001,6 +27167,7 @@ constexpr RunnerTest kRunnerTests[] = {
     {"r79-lod-bias-range", "r79-lod-bias-range", run_vulkan_lod_bias_range_frames},
     {"r81-mirror-clamp", "c7-mip", run_vulkan_mirror_clamp_frames},
     {"r83-depth-stencil", "r83-quadrant", run_vulkan_depth_stencil_aspect_frames},
+    {"r84-multiview", "r84-multiview", run_vulkan_multiview_frames},
     {"r57-border", "c7-mip", run_vulkan_border_frames},
     {"r58-restart", "m3-vertex", run_vulkan_restart_frames},
     {"r59-fragcoord", "r59-fragcoord", run_vulkan_frag_coord_frames},

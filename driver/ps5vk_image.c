@@ -819,7 +819,13 @@ ps5vk_GetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice physicalDevice,
 {
    (void)physicalDevice;
    const VkPhysicalDeviceImageFormatInfo2 *const info = pImageFormatInfo;
-   if (!ps5vk_image_supported(info->format, info->type, info->tiling, info->usage, info->flags)) {
+   /* R84: no external memory handle type is supported (Vulkan 1.1's external
+    * memory capabilities report none), so an image that would be exported or
+    * imported is not a supported combination. */
+   const VkPhysicalDeviceExternalImageFormatInfo *const external =
+      vk_find_struct_const(info->pNext, PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO);
+   if (!ps5vk_image_supported(info->format, info->type, info->tiling, info->usage, info->flags) ||
+       (external != NULL && external->handleType != 0)) {
       /* capabilities.adoc: unsupported combinations report all zeros. */
       memset(&pImageFormatProperties->imageFormatProperties, 0,
              sizeof(pImageFormatProperties->imageFormatProperties));
@@ -841,6 +847,17 @@ ps5vk_GetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice physicalDevice,
       .maxResourceSize = PS5VK_ADDRESS_WINDOW_BYTES,
    };
    return VK_SUCCESS;
+}
+
+/* R84: no external memory handle type is supported, for buffers either. */
+VKAPI_ATTR void VKAPI_CALL
+ps5vk_GetPhysicalDeviceExternalBufferProperties(
+   VkPhysicalDevice physicalDevice, const VkPhysicalDeviceExternalBufferInfo *pExternalBufferInfo,
+   VkExternalBufferProperties *pExternalBufferProperties)
+{
+   (void)physicalDevice;
+   (void)pExternalBufferInfo;
+   pExternalBufferProperties->externalMemoryProperties = (VkExternalMemoryProperties){0};
 }
 
 /* Sparse resources are not supported: no properties for any parameters. */

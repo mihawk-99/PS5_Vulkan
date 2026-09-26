@@ -641,6 +641,17 @@ struct ps5vk_triangle_input {
    /* R83: the shaders of the detached pass's pipeline, or NULL for shaders[0],
     * which is every detached frame before R83. */
    const struct ps5vk_triangle_shaders *detached_shaders;
+   /* R84: a multiview frame's view mask. The target image then has a layer for
+    * every view up to the mask's highest, its framebuffer view is a 2D array of
+    * them, and both render passes' subpass carries the mask
+    * (VkRenderPassMultiviewCreateInfo), so each draw renders every view into its
+    * own layer. The layers follow one another in the target's mapping. Zero is
+    * every frame before R84. */
+   uint32_t multiview_mask;
+   /* R84: the multiview target's layer count when it is more than the mask
+    * needs: a layer past the highest view, which no draw may write, for a probe
+    * to watch. Zero is the mask's own count. */
+   uint32_t multiview_layers;
 };
 
 
@@ -1012,6 +1023,9 @@ struct ps5vk_triangle {
    VkImage depth_image;
    VkDeviceMemory depth_memory;
    VkImageView depth_view;
+   /* R84: the multiview frame's view mask, and its target's layer count. */
+   uint32_t multiview_mask;
+   uint32_t target_layers;
    /* R83: the aspect a detached pass samples, the view that names it, and the
     * buffer ps5vk_triangle_read_depth_aspect copies an aspect into. */
    VkImageAspectFlags depth_sampled_aspect;

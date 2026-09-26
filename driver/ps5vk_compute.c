@@ -469,6 +469,28 @@ ps5vk_CmdDispatch(VkCommandBuffer commandBuffer, uint32_t groupCountX, uint32_t 
    ps5vk_dispatch(cmd_buffer, groupCountX, groupCountY, groupCountZ);
 }
 
+/* R84: vkCmdDispatchBase (Vulkan 1.1). A zero base is vkCmdDispatch. A
+ * non-zero one needs the compiler to take the base as the workgroup ID's
+ * offset, which it does not yet, so it is refused by name rather than dispatched
+ * from the wrong workgroups (docs/M5_PHASE_C.md, R84). */
+VKAPI_ATTR void VKAPI_CALL
+ps5vk_CmdDispatchBase(VkCommandBuffer commandBuffer, uint32_t baseGroupX, uint32_t baseGroupY,
+                      uint32_t baseGroupZ, uint32_t groupCountX, uint32_t groupCountY,
+                      uint32_t groupCountZ)
+{
+   VK_FROM_HANDLE(ps5vk_cmd_buffer, cmd_buffer, commandBuffer);
+   if (vk_command_buffer_has_error(&cmd_buffer->vk))
+      return;
+   if ((baseGroupX | baseGroupY | baseGroupZ) != 0) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                              "a dispatch based at workgroup (%u, %u, %u): the compiler does not "
+                              "take a base workgroup yet (R84)",
+                              baseGroupX, baseGroupY, baseGroupZ);
+      return;
+   }
+   ps5vk_dispatch(cmd_buffer, groupCountX, groupCountY, groupCountZ);
+}
+
 /* vkCmdDispatchIndirect: the same dispatch with its three workgroup counts read
  * from the bound buffer, as vkCmdDrawIndirect reads its parameters
  * (ps5vk_draw.c). A buffer is host memory here, so the read is a memcpy; the

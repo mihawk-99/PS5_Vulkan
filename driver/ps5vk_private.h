@@ -58,8 +58,10 @@ extern "C" {
  * This is separate from the *ICD interface* version, which is what the loader
  * negotiates with vk_icdNegotiateLoaderICDInterfaceVersion
  * (driver/ps5vk_instance.c) and which is unaffected by this. */
-#define PS5VK_INSTANCE_API_VERSION VK_API_VERSION_1_0
-#define PS5VK_DEVICE_API_VERSION VK_API_VERSION_1_0
+/* R84: Vulkan 1.1 -- its core commands (the runtime's and ps5vk_*), multiview
+ * (ps5vk_draw.c), the subgroup, maintenance and external-capability queries. */
+#define PS5VK_INSTANCE_API_VERSION VK_API_VERSION_1_1
+#define PS5VK_DEVICE_API_VERSION VK_API_VERSION_1_1
 #define PS5VK_DRIVER_VERSION VK_MAKE_VERSION(0, 2, 0)
 
 /* GPU-visible addresses. The shader compiler combines 32-bit pointers with a
@@ -880,6 +882,28 @@ struct ps5vk_cmd_buffer {
     * bound, where Vulkan makes the bias inert. */
    VkFormat depth_format;
    struct ps5vk_agc_register depth_registers[PS5VK_DEPTH_REGISTER_COUNT];
+   /* R84: a multiview rendering's view mask (0 outside one), the view the draw
+    * being recorded draws, and what each attachment's registers are rebuilt
+    * from for that view: its layer 0's address, the bytes between layers, and
+    * the rest of what ps5vk_target_registers and ps5vk_depth_registers take.
+    * A draw inside such a rendering is recorded once per view, each copy into
+    * its own layer with gl_ViewIndex its view (ps5vk_draw.c). */
+   uint32_t view_mask;
+   uint32_t current_view;
+   bool in_view_loop;
+   struct ps5vk_view_target {
+      uint64_t address;
+      uint64_t layer_bytes;
+      VkExtent2D extent;
+      const struct ps5vk_colour_format *format;
+      VkSampleCountFlagBits samples;
+      bool linear;
+   } view_targets[PS5VK_MAX_COLOR_TARGETS];
+   uint64_t view_depth_address;
+   uint64_t view_depth_layer_bytes;
+   uint64_t view_stencil_address;
+   VkExtent2D view_depth_extent;
+   VkSampleCountFlagBits view_depth_samples;
    /* The rendering's attachment, for the clears vk_meta draws into it. */
    struct vk_meta_rendering_info render;
    /* Vertex buffers bound for the next draws. */

@@ -56,6 +56,7 @@
 
 #include <pthread.h>
 
+#include "util/bitscan.h"
 #include "vk_format.h"
 #include "vk_framebuffer.h"
 #include "vk_render_pass.h"
@@ -811,6 +812,61 @@ ps5vk_single_layer_2d_view(const struct vk_image_view *view)
           (view->view_type == VK_IMAGE_VIEW_TYPE_2D_ARRAY && view->layer_count == 1);
 }
 
+/* R84: a view an attachment of this rendering may name. Without a view mask it
+ * is one layer of a single-level image (ps5vk_single_layer_2d_view). In a
+ * multiview rendering it is a single-level image's view with a layer for every
+ * view the mask names; each view renders into its own layer, a whole slice
+ * after the one before (ps5vk_image_layer_bytes), so an array image needs the
+ * slice size the storage rule gives. */
+static bool
+ps5vk_attachment_view_ok(const struct vk_image_view *view, const struct ps5vk_image *image,
+                         uint32_t view_mask)
+{
+   if (image->vk.mip_levels != 1)
+      return false;
+   if (view_mask == 0)
+      return ps5vk_single_layer_2d_view(view) && image->vk.array_layers == 1;
+   const uint32_t views = util_last_bit(view_mask);
+   if ((view->view_type != VK_IMAGE_VIEW_TYPE_2D && view->view_type != VK_IMAGE_VIEW_TYPE_2D_ARRAY) ||
+       view->layer_count < views)
+      return false;
+   return image->vk.array_layers == 1 || ps5vk_image_layer_bytes(image) != 0;
+}
+
+/* The bytes between one layer of an attachment and the next (R84): zero for a
+ * one-layer image, which only ever renders its layer 0. */
+static uint64_t
+ps5vk_attachment_layer_bytes(const struct ps5vk_image *image)
+{
+   return image->vk.array_layers > 1 ? ps5vk_image_layer_bytes(image) : 0;
+}
+
+/* R84: point the rendering's attachment registers at one view's layer, the
+ * view a draw inside a multiview rendering is being recorded for. The rows are
+ * the ones vkCmdBeginRendering built, rebuilt from the same values at that
+ * layer's address, so a view's draw differs from the first view's only there. */
+static bool
+ps5vk_select_view(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t view)
+{
+   if (cmd_buffer->view_targets[0].format != NULL) {
+      for (uint32_t at = 0; at < cmd_buffer->colour_attachment_count; at++) {
+         const struct ps5vk_view_target *const target = &cmd_buffer->view_targets[at];
+         if (!ps5vk_target_registers(target->address + view * target->layer_bytes,
+                                     target->extent, target->format, target->samples,
+                                     target->linear, cmd_buffer->target_registers[at], at))
+            return false;
+      }
+   }
+   if (cmd_buffer->depth_bound)
+      ps5vk_depth_registers(cmd_buffer->view_depth_address +
+                               view * cmd_buffer->view_depth_layer_bytes,
+                            cmd_buffer->view_stencil_address, cmd_buffer->view_depth_extent,
+                            cmd_buffer->view_depth_samples, cmd_buffer->depth_format,
+                            cmd_buffer->depth_registers);
+   cmd_buffer->current_view = view;
+   return true;
+}
+
 VKAPI_ATTR void VKAPI_CALL
 ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pRenderingInfo)
 {
@@ -835,12 +891,26 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
                               "rendering flags 0x%x are not supported yet", (unsigned)flags);
       return;
    }
-   if (info->layerCount != 1 || info->viewMask != 0) {
+   /* R84: a multiview rendering draws every draw once per view the mask names,
+    * each into its own layer (ps5vk_select_view); layerCount is then ignored,
+    * as Vulkan says. A layered rendering without a view mask needs a shader to
+    * choose the layer, which this driver does not export yet. */
+   const uint32_t view_mask = info->viewMask;
+   if (view_mask == 0 && info->layerCount != 1) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                              "rendering %u layers with view mask 0x%x is not supported yet",
-                              info->layerCount, info->viewMask);
+                              "rendering %u layers without a view mask is not supported yet",
+                              info->layerCount);
       return;
    }
+   if (view_mask != 0 &&
+       util_last_bit(view_mask) > device->vk.physical->properties.maxMultiviewViewCount) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                              "a view mask 0x%x past the %u views this device reports",
+                              view_mask, device->vk.physical->properties.maxMultiviewViewCount);
+      return;
+   }
+   const uint32_t first_view = view_mask != 0 ? (uint32_t)__builtin_ctz(view_mask) : 0u;
+   memset(cmd_buffer->view_targets, 0, sizeof(cmd_buffer->view_targets));
    /* The depth attachment, when the rendering has one: one D32_SFLOAT image the
     * size of the target, tiled like a colour attachment (Phase C5, the M4 step 1
     * canary's layout). */
@@ -876,8 +946,7 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
            depth_view->format != VK_FORMAT_D16_UNORM &&
            depth_view->format != VK_FORMAT_D24_UNORM_S8_UINT &&
            depth_view->format != VK_FORMAT_D32_SFLOAT_S8_UINT) ||
-          !ps5vk_single_layer_2d_view(depth_view) ||
-          depth_image->vk.mip_levels != 1 || depth_image->vk.array_layers != 1 ||
+          !ps5vk_attachment_view_ok(depth_view, depth_image, view_mask) ||
           (depth_image->vk.samples != VK_SAMPLE_COUNT_1_BIT &&
            !PS5VK_MULTISAMPLED(depth_image->vk.samples)) ||
           depth_image->storage != PS5VK_IMAGE_STORAGE_TILES ||
@@ -902,8 +971,19 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
       }
       depth_samples = depth_image->vk.samples;
       assert(depth_image->address != 0);
-      depth_address = (void *)(uintptr_t)depth_image->address;
+      /* R84: layer 0 of the view's own range; a multiview draw moves to its
+       * view's layer from there (ps5vk_select_view). A stencil format's image
+       * has one layer, so its plane never moves. */
+      const uint64_t depth_layer_bytes = ps5vk_attachment_layer_bytes(depth_image);
+      const uint64_t depth_base =
+         depth_image->address + depth_view->base_array_layer * depth_layer_bytes;
+      cmd_buffer->view_depth_address = depth_base;
+      cmd_buffer->view_depth_layer_bytes = depth_layer_bytes;
+      cmd_buffer->view_depth_extent = depth_extent;
+      cmd_buffer->view_depth_samples = depth_image->vk.samples;
+      depth_address = (void *)(uintptr_t)(depth_base + first_view * depth_layer_bytes);
       stencil_address = depth_image->address + depth_image->stencil_offset;
+      cmd_buffer->view_stencil_address = stencil_address;
       depth_attachment_image = depth_image;
       depth_format = depth_view->format;
       extent = depth_extent;
@@ -1002,8 +1082,7 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
       const struct ps5vk_colour_format *const format =
          view != NULL ? ps5vk_find_colour_format(view->format) : NULL;
       if (view == NULL || image == NULL || format == NULL ||
-          !ps5vk_single_layer_2d_view(view) || image->vk.mip_levels != 1 ||
-          image->vk.array_layers != 1 ||
+          !ps5vk_attachment_view_ok(view, image, view_mask) ||
           (image->vk.samples != VK_SAMPLE_COUNT_1_BIT && !PS5VK_MULTISAMPLED(image->vk.samples)) ||
           (image->storage != PS5VK_IMAGE_STORAGE_TILES && !ps5vk_linear_target(image))) {
          ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
@@ -1028,7 +1107,19 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
       /* Valid usage: the attachment's image is bound; swapchain images are bound
        * from their creation. */
       assert(image->address != 0);
-      if (!ps5vk_target_registers(image->address, extent, format, image->vk.samples,
+      /* R84: layer 0 of the view's own range, and what a multiview draw
+       * rebuilds these registers from for its view's layer. */
+      const uint64_t layer_bytes = ps5vk_attachment_layer_bytes(image);
+      cmd_buffer->view_targets[at] = (struct ps5vk_view_target){
+         .address = image->address + view->base_array_layer * layer_bytes,
+         .layer_bytes = layer_bytes,
+         .extent = extent,
+         .format = format,
+         .samples = image->vk.samples,
+         .linear = image->storage != PS5VK_IMAGE_STORAGE_TILES,
+      };
+      if (!ps5vk_target_registers(cmd_buffer->view_targets[at].address + first_view * layer_bytes,
+                                  extent, format, image->vk.samples,
                                   image->storage != PS5VK_IMAGE_STORAGE_TILES,
                                   cmd_buffer->target_registers[at], at)) {
          ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
@@ -1089,6 +1180,9 @@ ps5vk_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pR
                             depth_target_extent, depth_samples, depth_format,
                             cmd_buffer->depth_registers);
    cmd_buffer->target_extent = extent;
+   cmd_buffer->view_mask = view_mask;
+   cmd_buffer->current_view = first_view;
+   cmd_buffer->in_view_loop = false;
    cmd_buffer->rendering = true;
    cmd_buffer->pass_first_target = first_target;
    cmd_buffer->pass_drawn = false;
@@ -1208,6 +1302,8 @@ ps5vk_CmdEndRendering(VkCommandBuffer commandBuffer)
    cmd_buffer->pass_drawn = false;
    cmd_buffer->depth_bound = false;
    cmd_buffer->stencil_bound = false;
+   cmd_buffer->view_mask = 0;
+   cmd_buffer->current_view = 0;
    cmd_buffer->rendering = false;
 }
 
@@ -2213,6 +2309,27 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
                uint32_t first_vertex, uint32_t first_instance,
                const struct ps5vk_indexed_draw *indexed)
 {
+   /* R84: inside a multiview rendering every draw is recorded once per view the
+    * mask names, lowest first: each copy renders into its view's layer
+    * (ps5vk_select_view) and hands the stages that read gl_ViewIndex its view
+    * (below, the view index's user-data dword). vk_meta's clears are draws
+    * too, so a multiview rendering's clear covers every view. */
+   if (cmd_buffer->view_mask != 0 && !cmd_buffer->in_view_loop) {
+      cmd_buffer->in_view_loop = true;
+      u_foreach_bit (view, cmd_buffer->view_mask) {
+         if (!ps5vk_select_view(cmd_buffer, view)) {
+            ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                                    "AGC's context defaults lack a colour target register");
+            break;
+         }
+         ps5vk_cmd_draw(cmd_buffer, vertex_count, instance_count, first_vertex, first_instance,
+                        indexed);
+         if (vk_command_buffer_has_error(&cmd_buffer->vk))
+            break;
+      }
+      cmd_buffer->in_view_loop = false;
+      return;
+   }
    /* R32: every draw in the driver passes through here, so one pair of probes
     * counts them and times them. The count is what distinguishes a frame of
     * many cheap draws from a frame of a few expensive ones, which aggregate
@@ -2436,6 +2553,19 @@ ps5vk_cmd_draw(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t vertex_count, uint3
       user_data[PS5VK_PIPELINE_STAGE_VERTEX]
                [metadata[PS5VK_PIPELINE_STAGE_VERTEX]->ngg_lds_layout_user_data_dword] =
          metadata[PS5VK_PIPELINE_STAGE_VERTEX]->ngg_lds_layout;
+   /* R84: the view this copy of a multiview draw renders, in every stage that
+    * reads gl_ViewIndex (tooling/psbc/patch-view-index.py). */
+   for (uint32_t s = 0; s < PS5VK_PIPELINE_STAGE_COUNT; s++) {
+      if (!metadata[s]->view_index_valid)
+         continue;
+      if (metadata[s]->view_index_user_data_dword >= PS5VK_MAX_USER_DATA) {
+         ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                                 "a stage reads its view index past the user data this driver "
+                                 "programs");
+         return;
+      }
+      user_data[s][metadata[s]->view_index_user_data_dword] = cmd_buffer->current_view;
+   }
 
    const VkShaderStageFlags stage_bits[PS5VK_PIPELINE_STAGE_COUNT] = {
       VK_SHADER_STAGE_VERTEX_BIT, VK_SHADER_STAGE_FRAGMENT_BIT};

@@ -1,0 +1,5 @@
+PS5 Vulkan r84-subgroup compute dispatch probe, built by tools/build-compute-probe.sh r84-subgroup.
+source: shaders/r84-subgroup/dispatch.comp
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.1), compiled on the console by libpsbc
+glslang: Glslang Version: 11:16.4.0
+dispatch.spv: 877 words, sha256 78177387ab3f834fb9b793120dbe6e6f3a39bb55b3b921d9755f8795d08e91fd

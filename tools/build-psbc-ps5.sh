@@ -154,6 +154,19 @@ python3 "$root/tooling/psbc/patch-specialization.py" "$tree"
 # this driver binds; docs/M5_PHASE_C.md, R10.
 python3 "$root/tooling/psbc/patch-subpass-input.py" "$tree"
 
+# The view index: RADV's front end already declares gl_ViewIndex as a user-data
+# argument, but the standalone path lowered every view index to zero and the
+# metadata did not say where the argument goes. The patch adds a multiview
+# option that keeps it and reports its dword, which Vulkan 1.1's multiview needs;
+# docs/M5_PHASE_C.md, R84.
+python3 "$root/tooling/psbc/patch-view-index.py" "$tree"
+
+# A compute stage's subgroup: the size the device reports (32, cs_wave_size).
+# vk_set_subgroup_size is a stub in this tree, so RADV's wave heuristics chose,
+# and a stage using subgroup operations could be compiled for wave64 and report
+# 64 while the device reports 32; docs/M5_PHASE_C.md, R84.
+python3 "$root/tooling/psbc/patch-subgroup-size.py" "$tree"
+
 # libpsbc_support.ps5.a completes the archive for titles that link only the
 # compiler: ps5-opengl's C package writer (identical to the Python writer for
 # every probe package, A2), S3TC (ps5-opengl leaves it out because its Mesa

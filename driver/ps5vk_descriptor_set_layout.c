@@ -113,3 +113,70 @@ ps5vk_CreateDescriptorSetLayout(VkDevice _device, const VkDescriptorSetLayoutCre
    *pSetLayout = ps5vk_descriptor_set_layout_to_handle(layout);
    return VK_SUCCESS;
 }
+
+/* R84: vkGetDescriptorSetLayoutSupport (Vulkan 1.1's maintenance3). A layout
+ * is supported when every binding's type has a descriptor this driver writes
+ * (ps5vk_descriptor_stride) and the set's descriptors stay within the device's
+ * per-set limits, which vkCreateDescriptorSetLayout's layouts are held to. */
+VKAPI_ATTR void VKAPI_CALL
+ps5vk_GetDescriptorSetLayoutSupport(VkDevice _device,
+                                    const VkDescriptorSetLayoutCreateInfo *pCreateInfo,
+                                    VkDescriptorSetLayoutSupport *pSupport)
+{
+   VK_FROM_HANDLE(ps5vk_device, device, _device);
+   const struct vk_properties *const limits = &device->vk.physical->properties;
+   uint64_t samplers = 0, uniform = 0, uniform_dynamic = 0, storage = 0, storage_dynamic = 0;
+   uint64_t sampled = 0, storage_images = 0, input = 0, total = 0;
+   bool known = true;
+   for (uint32_t i = 0; i < pCreateInfo->bindingCount; i++) {
+      const VkDescriptorSetLayoutBinding *const binding = &pCreateInfo->pBindings[i];
+      const uint64_t count = binding->descriptorCount;
+      known = known && ps5vk_descriptor_stride(binding->descriptorType) != 0;
+      total += count;
+      switch (binding->descriptorType) {
+      case VK_DESCRIPTOR_TYPE_SAMPLER:
+         samplers += count;
+         break;
+      case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+         samplers += count;
+         sampled += count;
+         break;
+      case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+      case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+         sampled += count;
+         break;
+      case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+      case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+         storage_images += count;
+         break;
+      case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+         uniform += count;
+         break;
+      case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+         uniform_dynamic += count;
+         break;
+      case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+         storage += count;
+         break;
+      case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+         storage_dynamic += count;
+         break;
+      case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+         input += count;
+         break;
+      default:
+         known = false;
+         break;
+      }
+   }
+   pSupport->supported =
+      known && total <= limits->maxPerSetDescriptors &&
+      samplers <= limits->maxDescriptorSetSamplers &&
+      uniform + uniform_dynamic <= limits->maxDescriptorSetUniformBuffers &&
+      uniform_dynamic <= limits->maxDescriptorSetUniformBuffersDynamic &&
+      storage + storage_dynamic <= limits->maxDescriptorSetStorageBuffers &&
+      storage_dynamic <= limits->maxDescriptorSetStorageBuffersDynamic &&
+      sampled <= limits->maxDescriptorSetSampledImages &&
+      storage_images <= limits->maxDescriptorSetStorageImages &&
+      input <= limits->maxDescriptorSetInputAttachments;
+}

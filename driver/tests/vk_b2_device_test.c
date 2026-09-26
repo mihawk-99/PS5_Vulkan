@@ -38,7 +38,7 @@ check_instance_level(void)
     * matters to the CTS: its api.info.extension_core_versions case asks the
     * instance's version, so what it reads here is what it judges
     * (docs/M5_PHASE_C.md, round 6). */
-   check(version == VK_API_VERSION_1_0, "the driver reports instance version 1.0");
+   check(version == VK_API_VERSION_1_1, "the driver reports instance version 1.1 (R84)");
 #endif
 
    const __typeof__(&vkEnumerateInstanceExtensionProperties) enumerate_extensions =
@@ -62,7 +62,7 @@ check_properties(VkInstance instance, VkPhysicalDevice physical)
    VkPhysicalDeviceProperties p;
    memset(&p, 0, sizeof(p));
    VK_FUNCTION(instance, GetPhysicalDeviceProperties)(physical, &p);
-   check(p.apiVersion == VK_API_VERSION_1_0, "device API version 1.0");
+   check(p.apiVersion == VK_API_VERSION_1_1, "device API version 1.1 (R84)");
    check(p.driverVersion == VK_MAKE_VERSION(0, 2, 0), "driver version 0.2.0");
    check(p.vendorID == 0x1002, "AMD vendor ID");
    check(p.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU, "integrated GPU");
@@ -210,6 +210,93 @@ check_devices(VkInstance instance, VkPhysicalDevice physical)
       destroy_device(device, NULL);
 }
 
+/* R84: Vulkan 1.1. Its core device commands resolve by their core names on a
+ * device the application created for 1.1, the 1.1 feature it requires
+ * (multiview) is on and the optional ones off, and its properties say what the
+ * driver implements: compute subgroups of 32 with the basic operations, eight
+ * views, and no external memory. */
+static void
+check_vulkan11(VkInstance instance, VkPhysicalDevice physical)
+{
+   VkPhysicalDeviceVulkan11Features features11 = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+   VkPhysicalDeviceFeatures2 features2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                                          .pNext = &features11};
+   VK_FUNCTION(instance, GetPhysicalDeviceFeatures2)(physical, &features2);
+   check(features11.multiview && !features11.multiviewGeometryShader &&
+            !features11.multiviewTessellationShader && !features11.storageBuffer16BitAccess &&
+            !features11.variablePointers && !features11.protectedMemory &&
+            !features11.samplerYcbcrConversion && !features11.shaderDrawParameters,
+         "Vulkan 1.1 features: multiview, which 1.1 requires, and none of the optional ones");
+   VkPhysicalDeviceVulkan11Properties properties11 = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES};
+   VkPhysicalDeviceProperties2 properties2 = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &properties11};
+   VK_FUNCTION(instance, GetPhysicalDeviceProperties2)(physical, &properties2);
+   check(properties11.subgroupSize == 32 &&
+            (properties11.subgroupSupportedStages & VK_SHADER_STAGE_COMPUTE_BIT) &&
+            (properties11.subgroupSupportedOperations & VK_SUBGROUP_FEATURE_BASIC_BIT) &&
+            properties11.maxMultiviewViewCount >= 6 &&
+            properties11.maxMultiviewInstanceIndex >= (1u << 27) - 1 &&
+            properties11.maxPerSetDescriptors >= 1024 &&
+            properties11.maxMemoryAllocationSize >= (UINT64_C(1) << 30),
+         "Vulkan 1.1 properties at or above the required values");
+   VkExternalBufferProperties external = {.sType = VK_STRUCTURE_TYPE_EXTERNAL_BUFFER_PROPERTIES};
+   const VkPhysicalDeviceExternalBufferInfo external_info = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_BUFFER_INFO,
+      .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+      .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT,
+   };
+   external.externalMemoryProperties.externalMemoryFeatures = 0xffffffffu;
+   VK_FUNCTION(instance, GetPhysicalDeviceExternalBufferProperties)(physical, &external_info,
+                                                                     &external);
+   check(external.externalMemoryProperties.externalMemoryFeatures == 0,
+         "no external memory handle type is supported");
+
+   const float priority = 1.0f;
+   const VkDeviceQueueCreateInfo queue_info = {
+      .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+      .queueFamilyIndex = 0,
+      .queueCount = 1,
+      .pQueuePriorities = &priority,
+   };
+   const VkPhysicalDeviceVulkan11Features enable11 = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .multiview = VK_TRUE};
+   const VkDeviceCreateInfo device_info = {
+      .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+      .pNext = &enable11,
+      .queueCreateInfoCount = 1,
+      .pQueueCreateInfos = &queue_info,
+   };
+   VkDevice device = VK_NULL_HANDLE;
+   const VkResult result =
+      VK_FUNCTION(instance, CreateDevice)(physical, &device_info, NULL, &device);
+   check(result == VK_SUCCESS, "vkCreateDevice with Vulkan 1.1's multiview enabled");
+   if (result != VK_SUCCESS)
+      return;
+   const __typeof__(&vkGetDeviceProcAddr) get_device_proc =
+      (__typeof__(&vkGetDeviceProcAddr))VK_FUNCTION(instance, GetDeviceProcAddr);
+   static const char *const commands[] = {
+      "vkBindBufferMemory2", "vkBindImageMemory2", "vkGetBufferMemoryRequirements2",
+      "vkGetImageMemoryRequirements2", "vkGetImageSparseMemoryRequirements2",
+      "vkTrimCommandPool", "vkGetDeviceQueue2", "vkCreateDescriptorUpdateTemplate",
+      "vkDestroyDescriptorUpdateTemplate", "vkUpdateDescriptorSetWithTemplate",
+      "vkGetDescriptorSetLayoutSupport", "vkCmdDispatchBase", "vkCmdSetDeviceMask",
+      "vkGetDeviceGroupPeerMemoryFeatures", "vkCreateSamplerYcbcrConversion",
+      "vkDestroySamplerYcbcrConversion",
+   };
+   unsigned resolved = 0;
+   for (unsigned i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
+      const bool found = get_device_proc(device, commands[i]) != NULL;
+      if (!found)
+         printf("  (%s does not resolve)\n", commands[i]);
+      resolved += found;
+   }
+   check(resolved == sizeof(commands) / sizeof(commands[0]),
+         "every Vulkan 1.1 core device command resolves by its core name");
+   VK_FUNCTION(instance, DestroyDevice)(device, NULL);
+}
+
 int
 main(void)
 {
@@ -230,7 +317,9 @@ main(void)
    const VkApplicationInfo application = {
       .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
       .pApplicationName = "ps5vk-b2-test",
-      .apiVersion = VK_API_VERSION_1_0,
+      /* R84: an application of the driver's own version, so the 1.1 core
+       * commands are the ones it may call (check_vulkan11). */
+      .apiVersion = VK_API_VERSION_1_1,
    };
    const char *const enabled[] = {kProperties2Extension};
    const VkInstanceCreateInfo instance_info = {
@@ -256,6 +345,7 @@ main(void)
    if (result == VK_SUCCESS && physical != VK_NULL_HANDLE) {
       check_properties(instance, physical);
       check_devices(instance, physical);
+      check_vulkan11(instance, physical);
    } else {
       check(false, "vkEnumeratePhysicalDevices returns the device");
    }

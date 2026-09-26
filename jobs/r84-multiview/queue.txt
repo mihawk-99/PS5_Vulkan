@@ -1,0 +1,20 @@
+# Upload: python3 tools/ps5_console.py battery PPSA99988 jobs/r84-multiview/queue.txt
+# R84, Vulkan 1.1 (docs/M5_PHASE_C.md): r84-multiview draws two views into two
+# layers of a three-layer target and reads all three back; r84-subgroup runs the
+# basic subgroup operations in compute; device-report records the 1.1 device.
+# m2-solid is here for the golden: the host test replays this capture
+# (driver/tests/vk_r84_multiview_test.c), and a replay takes its register
+# defaults from a runner-built frame of the same capture. The rest is the
+# regression set the round touched: a render pass without a view mask (c4-rtt,
+# v0-subpass), depth and stencil (v0-stencil) and compute (d2-compute).
+hold 1
+capture
+device-report
+m2-solid
+r84-multiview
+r84-subgroup
+c4-rtt
+v0-subpass
+v0-stencil
+d2-compute
+exit
