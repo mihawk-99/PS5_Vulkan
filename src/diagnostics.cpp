@@ -214,6 +214,8 @@ extern "C"
     std::int32_t sceKernelMunmap(void *, std::size_t);
     std::int32_t sceKernelReleaseDirectMemory(std::int64_t, std::size_t);
     std::int32_t sceKernelQueryMemoryProtection(void *, void **, void **, std::uint32_t *);
+    std::int32_t sceKernelAvailableDirectMemorySize(std::int64_t, std::int64_t, std::size_t,
+                                                    std::int64_t *, std::size_t *);
     int sceKernelDebugOutText(int, const char *);
 #if defined(AGC_LINKED_CANARY) || defined(AGC_DRIVER_CANARY)
     std::int32_t sceAgcDriverSubmitDcb(void *);
@@ -26961,6 +26963,637 @@ void run_wide_depth(const TestContext &test, TestOutcome &outcome) noexcept
 }
 #endif
 
+#ifdef AGC_VULKAN_DRIVER
+// R87: the GPU memory ceiling -- how much GPU-visible memory the console gives
+// this process, and whether the GPU reaches all of it. R86 proved a few MiB
+// outside the window; this asks for everything. Memory goes from
+// 0x40_0000_0000 up, clear of the platform layer's arenas and measured to hold
+// 16 GiB of reservation at the hint.
+constexpr std::uint64_t kCeilingBase = 0x4000000000ull;
+constexpr std::size_t kCeilingMiB = std::size_t{1} << 20;
+constexpr std::size_t kCeilingGiB = std::size_t{1} << 30;
+// The largest storage-buffer range the device reports: one dispatch's slice.
+constexpr std::size_t kCeilingSlice = std::size_t{1} << 27;
+constexpr std::uint32_t kCeilingSliceWords = kCeilingSlice / 4;
+constexpr std::uint32_t kCeilingMaxSlices = 128;
+constexpr std::uint32_t kCeilingMaxBlocks = 128;
+constexpr std::size_t kCeilingKernelPieces = 512;
+// What the driver keeps for its own mappings while the rest is held: register
+// tables are allocated as the passes are recorded.
+constexpr std::size_t kCeilingHeadroom = 256 * kCeilingMiB;
+std::uint64_t g_ceiling_kernel_bytes = 0;
+
+std::size_t ceiling_available_direct() noexcept
+{
+    std::int64_t start = -1;
+    std::size_t available = 0;
+    if (sceKernelAvailableDirectMemorySize(0, sceKernelGetDirectMemorySize(), 0x10000, &start,
+                                           &available) != 0)
+        return 0;
+    return available;
+}
+
+long long ceiling_now_ns() noexcept
+{
+    timespec now{};
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return static_cast<long long>(now.tv_sec) * 1000000000LL + now.tv_nsec;
+}
+
+void ceiling_evict(const void *address, std::size_t bytes) noexcept
+{
+    const auto first = reinterpret_cast<std::uintptr_t>(address) & ~std::uintptr_t{63};
+    const auto end = reinterpret_cast<std::uintptr_t>(address) + bytes;
+    for (std::uintptr_t line = first; line < end; line += 64)
+        __builtin_ia32_clflush(reinterpret_cast<const void *>(line));
+    __builtin_ia32_mfence();
+}
+
+// The kernel's half, nothing submitted: GPU-visible direct memory (0x33) in
+// 1 GiB pieces, then 64 MiB, then 2 MiB, each mapped at the next address from
+// 0x40_0000_0000, until the kernel refuses. The CPU writes and reads back one
+// word per MiB. Everything is released before the case ends.
+void run_gpu_ceiling_map(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    static std::int64_t starts[kCeilingKernelPieces];
+    static void *addresses[kCeilingKernelPieces];
+    static std::size_t lengths[kCeilingKernelPieces];
+    const std::size_t before = ceiling_available_direct();
+    std::size_t count = 0;
+    std::size_t total = 0;
+    unsigned at_hint = 0;
+    unsigned in_window = 0;
+    unsigned cpu_checked = 0;
+    unsigned cpu_ok = 0;
+    std::int32_t allocate_refusal = 0;
+    std::int32_t map_refusal = 0;
+    std::uint64_t next = kCeilingBase;
+    const long long started = ceiling_now_ns();
+    for (const std::size_t piece : {kCeilingGiB, 64 * kCeilingMiB, 2 * kCeilingMiB})
+    {
+        while (count < kCeilingKernelPieces)
+        {
+            std::int64_t start = -1;
+            const std::int32_t allocated =
+                sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), piece,
+                                              kLargeAlignment, kDirectMemoryType, &start);
+            if (allocated != 0)
+            {
+                allocate_refusal = allocated;
+                break;
+            }
+            void *address = reinterpret_cast<void *>(static_cast<std::uintptr_t>(next));
+            const std::int32_t mapped = sceKernelMapDirectMemory(&address, piece, kMapProtection, 0,
+                                                                 start, kLargeAlignment);
+            if (mapped != 0)
+            {
+                map_refusal = mapped;
+                sceKernelReleaseDirectMemory(start, piece);
+                break;
+            }
+            const auto placed =
+                static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(address));
+            at_hint += placed == next ? 1u : 0u;
+            in_window += placed >> 32 == 2 ? 1u : 0u;
+            for (std::size_t offset = 0; offset < piece; offset += kCeilingMiB)
+            {
+                auto *const word = reinterpret_cast<volatile std::uint32_t *>(
+                    static_cast<char *>(address) + offset);
+                const std::uint32_t value =
+                    0x87000000u ^ static_cast<std::uint32_t>((total + offset) >> 20);
+                *word = value;
+                ++cpu_checked;
+                cpu_ok += *word == value ? 1u : 0u;
+            }
+            starts[count] = start;
+            addresses[count] = address;
+            lengths[count] = piece;
+            ++count;
+            total += piece;
+            next += piece;
+        }
+    }
+    const std::size_t during = ceiling_available_direct();
+    for (std::size_t index = 0; index < count; ++index)
+    {
+        sceKernelMunmap(addresses[index], lengths[index]);
+        sceKernelReleaseDirectMemory(starts[index], lengths[index]);
+    }
+    const std::size_t after = ceiling_available_direct();
+    const long long elapsed = ceiling_now_ns() - started;
+    log.number("r87_ceiling_map", "direct_size", sceKernelGetDirectMemorySize());
+    log.number("r87_ceiling_map", "available_before", static_cast<long long>(before));
+    log.number("r87_ceiling_map", "mapped_bytes", static_cast<long long>(total));
+    log.number("r87_ceiling_map", "pieces", static_cast<long long>(count));
+    log.number("r87_ceiling_map", "at_hint", at_hint);
+    log.number("r87_ceiling_map", "in_window", in_window);
+    log.number("r87_ceiling_map", "available_while_held", static_cast<long long>(during));
+    log.number("r87_ceiling_map", "available_after", static_cast<long long>(after));
+    log.number("r87_ceiling_map", "cpu_words_checked", cpu_checked);
+    log.number("r87_ceiling_map", "cpu_words_right", cpu_ok);
+    log.hex("r87_ceiling_map", "allocate_refusal", static_cast<std::uint32_t>(allocate_refusal));
+    log.hex("r87_ceiling_map", "map_refusal", static_cast<std::uint32_t>(map_refusal));
+    log.number("r87_ceiling_map", "ns", elapsed);
+    const bool passed =
+        total > 4 * kCeilingGiB && in_window == 0 && cpu_ok == cpu_checked && after == before;
+    g_ceiling_kernel_bytes = passed ? total : 0;
+    char detail[224]{};
+    std::snprintf(detail, sizeof(detail),
+                  "%zu bytes of GPU-visible memory mapped from 0x40_0000_0000 in %zu pieces "
+                  "(%u at the hint, %u in the window) before the kernel refused; %zu bytes "
+                  "free before, %zu while held, %zu after",
+                  total, count, at_hint, in_window, before, during, after);
+    log.event("r87_ceiling_map", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
+    outcome.command_built = true;
+    outcome.passed = passed;
+}
+
+// The GPU's half: Vulkan memory from 0x40_0000_0000 up (the R86 placement
+// switch), 1 GiB allocations and then 128 MiB ones until vkAllocateMemory
+// refuses, less what the driver keeps for its own tables. A compute shader
+// (shaders/r87-ceiling) then writes every word of it a pattern seeded per
+// 128 MiB slice, inverts every word, and compares every word with the inverted
+// pattern, counting into each slice's record. Three submissions, one per
+// pass; the CPU reads only the records.
+void run_gpu_ceiling(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    outcome.command_built = false;
+    outcome.passed = false;
+    if (g_ceiling_kernel_bytes == 0)
+    {
+        log.event("r87_ceiling", "SKIPPED", -1,
+                  "r87-ceiling-map has not mapped more than 4 GiB of GPU-visible memory; queue it "
+                  "first");
+        return;
+    }
+    const PackagePaths package = package_paths("r87-ceiling");
+    char spirv_download[96]{};
+    char spirv_app[96]{};
+    std::snprintf(spirv_download, sizeof(spirv_download), "%sdispatch.spv", package.download);
+    std::snprintf(spirv_app, sizeof(spirv_app), "%sdispatch.spv", package.app);
+    std::size_t spirv_size = 0;
+    const char *spirv_path = nullptr;
+    if (!read_shader_package(spirv_download, spirv_app, g_spirv, spirv_size, spirv_path) ||
+        spirv_size % 4 != 0)
+    {
+        log.event("r87_ceiling", "SKIPPED", -1, "missing probes/r87-ceiling/dispatch.spv");
+        return;
+    }
+    const std::size_t direct_before = ceiling_available_direct();
+
+    const auto create_instance = reinterpret_cast<PFN_vkCreateInstance>(
+        vk_icdGetInstanceProcAddr(nullptr, "vkCreateInstance"));
+    const VkApplicationInfo application = {VK_STRUCTURE_TYPE_APPLICATION_INFO,
+                                           nullptr,
+                                           "ps5vk-r87-ceiling",
+                                           0,
+                                           "ps5vk",
+                                           0,
+                                           VK_API_VERSION_1_0};
+    const VkInstanceCreateInfo instance_info = {
+        VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, nullptr, 0, &application, 0, nullptr, 0, nullptr};
+    VkInstance instance = VK_NULL_HANDLE;
+    if (create_instance == nullptr ||
+        create_instance(&instance_info, nullptr, &instance) != VK_SUCCESS)
+    {
+        log.event("r87_ceiling", "FAIL", -1, "vkCreateInstance did not answer VK_SUCCESS");
+        return;
+    }
+#define CEILING_PROC(name)                                                                         \
+    const auto name =                                                                              \
+        reinterpret_cast<PFN_vk##name>(vk_icdGetInstanceProcAddr(instance, "vk" #name))
+    CEILING_PROC(DestroyInstance);
+    CEILING_PROC(EnumeratePhysicalDevices);
+    CEILING_PROC(GetPhysicalDeviceMemoryProperties);
+    CEILING_PROC(CreateDevice);
+    CEILING_PROC(DestroyDevice);
+    CEILING_PROC(GetDeviceQueue);
+    CEILING_PROC(CreateShaderModule);
+    CEILING_PROC(DestroyShaderModule);
+    CEILING_PROC(CreateDescriptorSetLayout);
+    CEILING_PROC(DestroyDescriptorSetLayout);
+    CEILING_PROC(CreatePipelineLayout);
+    CEILING_PROC(DestroyPipelineLayout);
+    CEILING_PROC(CreateComputePipelines);
+    CEILING_PROC(DestroyPipeline);
+    CEILING_PROC(CreateDescriptorPool);
+    CEILING_PROC(DestroyDescriptorPool);
+    CEILING_PROC(AllocateDescriptorSets);
+    CEILING_PROC(UpdateDescriptorSets);
+    CEILING_PROC(AllocateMemory);
+    CEILING_PROC(FreeMemory);
+    CEILING_PROC(MapMemory);
+    CEILING_PROC(CreateBuffer);
+    CEILING_PROC(DestroyBuffer);
+    CEILING_PROC(BindBufferMemory);
+    CEILING_PROC(CreateCommandPool);
+    CEILING_PROC(DestroyCommandPool);
+    CEILING_PROC(AllocateCommandBuffers);
+    CEILING_PROC(BeginCommandBuffer);
+    CEILING_PROC(EndCommandBuffer);
+    CEILING_PROC(CmdBindPipeline);
+    CEILING_PROC(CmdBindDescriptorSets);
+    CEILING_PROC(CmdDispatch);
+    CEILING_PROC(CreateFence);
+    CEILING_PROC(DestroyFence);
+    CEILING_PROC(ResetFences);
+    CEILING_PROC(WaitForFences);
+    CEILING_PROC(QueueSubmit);
+#undef CEILING_PROC
+
+    // Every object this case makes, destroyed in reverse at the end; a pass
+    // that never signals leaves the memory held and stops the queue instead.
+    VkPhysicalDevice physical = VK_NULL_HANDLE;
+    VkDevice device = VK_NULL_HANDLE;
+    VkQueue queue = VK_NULL_HANDLE;
+    VkShaderModule module = VK_NULL_HANDLE;
+    VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
+    VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+    VkCommandPool command_pool = VK_NULL_HANDLE;
+    VkCommandBuffer commands[3] = {};
+    VkFence fence = VK_NULL_HANDLE;
+    VkDeviceMemory control_memory = VK_NULL_HANDLE;
+    VkBuffer control_buffer = VK_NULL_HANDLE;
+    static VkDeviceMemory memories[kCeilingMaxBlocks];
+    static VkBuffer buffers[kCeilingMaxBlocks];
+    static std::size_t block_bytes[kCeilingMaxBlocks];
+    static VkDescriptorSet sets[kCeilingMaxSlices];
+    std::uint32_t block_count = 0;
+    std::uint32_t slice_count = 0;
+    const char *failed = nullptr;
+    VkResult failure = VK_SUCCESS;
+    const auto require = [&failed, &failure](VkResult result, const char *step)
+    {
+        if (failed == nullptr && result != VK_SUCCESS)
+        {
+            failed = step;
+            failure = result;
+        }
+        return failed == nullptr;
+    };
+
+    std::uint32_t device_count = 1;
+    VkResult enumerated = EnumeratePhysicalDevices(instance, &device_count, &physical);
+    if (enumerated == VK_INCOMPLETE)
+        enumerated = VK_SUCCESS;
+    require(enumerated, "vkEnumeratePhysicalDevices");
+    std::uint32_t device_type = UINT32_MAX;
+    std::uint32_t host_type = UINT32_MAX;
+    if (failed == nullptr)
+    {
+        VkPhysicalDeviceMemoryProperties memory_properties{};
+        GetPhysicalDeviceMemoryProperties(physical, &memory_properties);
+        for (std::uint32_t index = 0; index < memory_properties.memoryTypeCount; ++index)
+        {
+            const VkMemoryPropertyFlags flags = memory_properties.memoryTypes[index].propertyFlags;
+            if (device_type == UINT32_MAX && (flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0)
+                device_type = index;
+            if (host_type == UINT32_MAX &&
+                (flags &
+                 (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) ==
+                    (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
+                host_type = index;
+        }
+        log.number("r87_ceiling", "reported_heap_bytes",
+                   static_cast<long long>(memory_properties.memoryHeaps[0].size));
+        if (device_type == UINT32_MAX || host_type == UINT32_MAX)
+            require(VK_ERROR_FEATURE_NOT_PRESENT, "memory types");
+    }
+    const float priority = 1.0f;
+    const VkDeviceQueueCreateInfo queue_info = {
+        VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, nullptr, 0, 0, 1, &priority};
+    const VkDeviceCreateInfo device_info = {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+                                            nullptr,
+                                            0,
+                                            1,
+                                            &queue_info,
+                                            0,
+                                            nullptr,
+                                            0,
+                                            nullptr,
+                                            nullptr};
+    if (failed == nullptr &&
+        require(CreateDevice(physical, &device_info, nullptr, &device), "vkCreateDevice"))
+        GetDeviceQueue(device, 0, 0, &queue);
+    const VkShaderModuleCreateInfo module_info = {
+        VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, nullptr, 0, spirv_size,
+        reinterpret_cast<const std::uint32_t *>(g_spirv.data())};
+    if (failed == nullptr)
+        require(CreateShaderModule(device, &module_info, nullptr, &module), "vkCreateShaderModule");
+    VkDescriptorSetLayoutBinding bindings[3]{};
+    for (std::uint32_t binding = 0; binding < 3; ++binding)
+        bindings[binding] = {binding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+                             VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
+    const VkDescriptorSetLayoutCreateInfo set_layout_info = {
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, nullptr, 0, 3, bindings};
+    if (failed == nullptr)
+        require(CreateDescriptorSetLayout(device, &set_layout_info, nullptr, &set_layout),
+                "vkCreateDescriptorSetLayout");
+    const VkPipelineLayoutCreateInfo pipeline_layout_info = {
+        VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, nullptr, 0, 1, &set_layout, 0, nullptr};
+    if (failed == nullptr)
+        require(CreatePipelineLayout(device, &pipeline_layout_info, nullptr, &pipeline_layout),
+                "vkCreatePipelineLayout");
+    const VkComputePipelineCreateInfo pipeline_info = {
+        VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        nullptr,
+        0,
+        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
+         VK_SHADER_STAGE_COMPUTE_BIT, module, "main", nullptr},
+        pipeline_layout,
+        VK_NULL_HANDLE,
+        -1};
+    if (failed == nullptr)
+        require(
+            CreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline),
+            "vkCreateComputePipelines");
+    const VkDescriptorPoolSize pool_size = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                            3 * kCeilingMaxSlices};
+    const VkDescriptorPoolCreateInfo pool_info = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+                                                  nullptr,
+                                                  0,
+                                                  kCeilingMaxSlices,
+                                                  1,
+                                                  &pool_size};
+    if (failed == nullptr)
+        require(CreateDescriptorPool(device, &pool_info, nullptr, &pool), "vkCreateDescriptorPool");
+    const VkCommandPoolCreateInfo command_pool_info = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                                                       nullptr, 0, 0};
+    if (failed == nullptr)
+        require(CreateCommandPool(device, &command_pool_info, nullptr, &command_pool),
+                "vkCreateCommandPool");
+    const VkCommandBufferAllocateInfo command_info = {
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, nullptr, command_pool,
+        VK_COMMAND_BUFFER_LEVEL_PRIMARY, 3};
+    if (failed == nullptr)
+        require(AllocateCommandBuffers(device, &command_info, commands),
+                "vkAllocateCommandBuffers");
+    const VkFenceCreateInfo fence_info = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, 0};
+    if (failed == nullptr)
+        require(CreateFence(device, &fence_info, nullptr, &fence), "vkCreateFence");
+
+    // The control word and the slices' records, host-visible, in the window
+    // (allocated before the placement moves).
+    constexpr VkDeviceSize kControlBytes = 256 * (kCeilingMaxSlices + 1);
+    void *control_map = nullptr;
+    const VkMemoryAllocateInfo control_allocation = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                                                     nullptr, kControlBytes, host_type};
+    const VkBufferCreateInfo control_buffer_info = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                                    nullptr,
+                                                    0,
+                                                    kControlBytes,
+                                                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                                    VK_SHARING_MODE_EXCLUSIVE,
+                                                    0,
+                                                    nullptr};
+    if (failed == nullptr &&
+        require(AllocateMemory(device, &control_allocation, nullptr, &control_memory),
+                "vkAllocateMemory (control)") &&
+        require(CreateBuffer(device, &control_buffer_info, nullptr, &control_buffer),
+                "vkCreateBuffer (control)") &&
+        require(BindBufferMemory(device, control_buffer, control_memory, 0),
+                "vkBindBufferMemory (control)"))
+        require(MapMemory(device, control_memory, 0, kControlBytes, 0, &control_map),
+                "vkMapMemory (control)");
+
+    // The memory under test: the ceiling is what vkAllocateMemory gives before
+    // it refuses. Then the last allocations go back until the driver has its
+    // headroom for the tables the passes are recorded into.
+    std::size_t ceiling = 0;
+    VkResult allocation_refusal = VK_SUCCESS;
+    const long long allocation_started = ceiling_now_ns();
+    if (failed == nullptr)
+    {
+        ps5vk_debug_device_memory_base(kCeilingBase);
+        for (const std::size_t size : {kCeilingGiB, kCeilingSlice})
+            while (block_count < kCeilingMaxBlocks)
+            {
+                const VkMemoryAllocateInfo allocation = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                                                         nullptr, size, device_type};
+                const VkResult result =
+                    AllocateMemory(device, &allocation, nullptr, &memories[block_count]);
+                if (result != VK_SUCCESS)
+                {
+                    allocation_refusal = result;
+                    memories[block_count] = VK_NULL_HANDLE;
+                    break;
+                }
+                block_bytes[block_count++] = size;
+                ceiling += size;
+            }
+    }
+    const long long allocation_ns = ceiling_now_ns() - allocation_started;
+    const std::size_t direct_at_ceiling = ceiling_available_direct();
+    while (block_count > 0 && ceiling_available_direct() < kCeilingHeadroom)
+    {
+        --block_count;
+        FreeMemory(device, memories[block_count], nullptr);
+        memories[block_count] = VK_NULL_HANDLE;
+    }
+    std::size_t tested = 0;
+    for (std::uint32_t block = 0; block < block_count; ++block)
+        tested += block_bytes[block];
+    log.number("r87_ceiling", "allocated_bytes", static_cast<long long>(ceiling));
+    log.number("r87_ceiling", "allocation_refusal", static_cast<long long>(allocation_refusal));
+    log.number("r87_ceiling", "allocation_ns", allocation_ns);
+    log.number("r87_ceiling", "available_at_ceiling", static_cast<long long>(direct_at_ceiling));
+    log.number("r87_ceiling", "tested_bytes", static_cast<long long>(tested));
+    log.number("r87_ceiling", "blocks", block_count);
+
+    // One buffer per block, one descriptor set per 128 MiB slice.
+    auto *const control = static_cast<std::uint32_t *>(control_map);
+    for (std::uint32_t block = 0; failed == nullptr && block < block_count; ++block)
+    {
+        const VkBufferCreateInfo buffer_info = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                                nullptr,
+                                                0,
+                                                block_bytes[block],
+                                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                                VK_SHARING_MODE_EXCLUSIVE,
+                                                0,
+                                                nullptr};
+        if (!require(CreateBuffer(device, &buffer_info, nullptr, &buffers[block]),
+                     "vkCreateBuffer (block)") ||
+            !require(BindBufferMemory(device, buffers[block], memories[block], 0),
+                     "vkBindBufferMemory (block)"))
+            break;
+        for (std::size_t offset = 0; offset < block_bytes[block] && slice_count < kCeilingMaxSlices;
+             offset += kCeilingSlice)
+        {
+            const VkDescriptorSetAllocateInfo set_info = {
+                VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, nullptr, pool, 1, &set_layout};
+            if (!require(AllocateDescriptorSets(device, &set_info, &sets[slice_count]),
+                         "vkAllocateDescriptorSets"))
+                break;
+            const VkDescriptorBufferInfo infos[3] = {
+                {buffers[block], offset, kCeilingSlice},
+                {control_buffer, 256 * VkDeviceSize{slice_count + 1}, 16},
+                {control_buffer, 0, 16}};
+            VkWriteDescriptorSet writes[3]{};
+            for (std::uint32_t binding = 0; binding < 3; ++binding)
+                writes[binding] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                   nullptr,
+                                   sets[slice_count],
+                                   binding,
+                                   0,
+                                   1,
+                                   VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                   nullptr,
+                                   &infos[binding],
+                                   nullptr};
+            UpdateDescriptorSets(device, 3, writes, 0, nullptr);
+            std::uint32_t *const record = control + 64 * (slice_count + 1);
+            record[0] = slice_count + 1;
+            record[1] = 0;
+            record[2] = 0;
+            record[3] = 0xffffffffu;
+            ++slice_count;
+        }
+    }
+    log.number("r87_ceiling", "slices", slice_count);
+
+    // The three passes, recorded alike; the mode is read from memory.
+    const VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr, 0,
+                                            nullptr};
+    for (std::uint32_t pass = 0; failed == nullptr && pass < 3; ++pass)
+    {
+        if (!require(BeginCommandBuffer(commands[pass], &begin), "vkBeginCommandBuffer"))
+            break;
+        CmdBindPipeline(commands[pass], VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+        for (std::uint32_t slice = 0; slice < slice_count; ++slice)
+        {
+            CmdBindDescriptorSets(commands[pass], VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout,
+                                  0, 1, &sets[slice], 0, nullptr);
+            CmdDispatch(commands[pass], 4096, 1, 1);
+        }
+        require(EndCommandBuffer(commands[pass]), "vkEndCommandBuffer");
+    }
+    static const char *const kPassNames[3] = {"write", "invert", "compare"};
+    long long pass_ns[3] = {};
+    bool signalled = true;
+    for (std::uint32_t pass = 0; failed == nullptr && pass < 3; ++pass)
+    {
+        control[0] = pass;
+        ceiling_evict(control, static_cast<std::size_t>(kControlBytes));
+        const VkSubmitInfo submit = {VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                                     nullptr,
+                                     0,
+                                     nullptr,
+                                     nullptr,
+                                     1,
+                                     &commands[pass],
+                                     0,
+                                     nullptr};
+        const long long started = ceiling_now_ns();
+        if (!require(QueueSubmit(queue, 1, &submit, fence), "vkQueueSubmit"))
+            break;
+        const VkResult waited = WaitForFences(device, 1, &fence, VK_TRUE, 20000000000ull);
+        pass_ns[pass] = ceiling_now_ns() - started;
+        if (waited != VK_SUCCESS)
+        {
+            signalled = false;
+            require(waited, kPassNames[pass]);
+            break;
+        }
+        ResetFences(device, 1, &fence);
+    }
+    std::uint64_t checked = 0;
+    std::uint64_t mismatches = 0;
+    std::uint32_t short_slices = 0;
+    std::uint32_t first_bad_slice = UINT32_MAX;
+    if (failed == nullptr)
+    {
+        ceiling_evict(control, static_cast<std::size_t>(kControlBytes));
+        for (std::uint32_t slice = 0; slice < slice_count; ++slice)
+        {
+            const std::uint32_t *const record = control + 64 * (slice + 1);
+            checked += record[1];
+            mismatches += record[2];
+            short_slices += record[1] != kCeilingSliceWords ? 1u : 0u;
+            if (record[2] != 0 && first_bad_slice == UINT32_MAX)
+                first_bad_slice = slice;
+        }
+    }
+    for (std::uint32_t pass = 0; pass < 3; ++pass)
+        log.number("r87_ceiling_pass_ns", kPassNames[pass], pass_ns[pass]);
+    log.number("r87_ceiling", "words_checked", static_cast<long long>(checked));
+    log.number("r87_ceiling", "words_expected",
+               static_cast<long long>(std::uint64_t{slice_count} * kCeilingSliceWords));
+    log.number("r87_ceiling", "mismatches", static_cast<long long>(mismatches));
+    log.number("r87_ceiling", "short_slices", short_slices);
+    log.number("r87_ceiling", "first_bad_slice",
+               first_bad_slice == UINT32_MAX ? -1 : first_bad_slice);
+
+    if (!signalled)
+    {
+        // The GPU may still reach this memory: keep it, and stop the queue.
+        ps5vk_debug_device_memory_base(0);
+        outcome.stage_in_use = true;
+        log.event("r87_ceiling", "FAIL", -1,
+                  "a pass did not signal its fence in 20 s; its memory is kept");
+        return;
+    }
+    for (std::uint32_t block = 0; block < block_count; ++block)
+    {
+        if (buffers[block] != VK_NULL_HANDLE)
+            DestroyBuffer(device, buffers[block], nullptr);
+        if (memories[block] != VK_NULL_HANDLE)
+            FreeMemory(device, memories[block], nullptr);
+        buffers[block] = VK_NULL_HANDLE;
+        memories[block] = VK_NULL_HANDLE;
+    }
+    const std::uint64_t outside = ps5vk_debug_device_memory_base(0);
+    if (control_buffer != VK_NULL_HANDLE)
+        DestroyBuffer(device, control_buffer, nullptr);
+    if (control_memory != VK_NULL_HANDLE)
+        FreeMemory(device, control_memory, nullptr);
+    if (fence != VK_NULL_HANDLE)
+        DestroyFence(device, fence, nullptr);
+    if (command_pool != VK_NULL_HANDLE)
+        DestroyCommandPool(device, command_pool, nullptr);
+    if (pool != VK_NULL_HANDLE)
+        DestroyDescriptorPool(device, pool, nullptr);
+    if (pipeline != VK_NULL_HANDLE)
+        DestroyPipeline(device, pipeline, nullptr);
+    if (pipeline_layout != VK_NULL_HANDLE)
+        DestroyPipelineLayout(device, pipeline_layout, nullptr);
+    if (set_layout != VK_NULL_HANDLE)
+        DestroyDescriptorSetLayout(device, set_layout, nullptr);
+    if (module != VK_NULL_HANDLE)
+        DestroyShaderModule(device, module, nullptr);
+    if (device != VK_NULL_HANDLE)
+        DestroyDevice(device, nullptr);
+    DestroyInstance(instance, nullptr);
+    const std::size_t direct_after = ceiling_available_direct();
+    log.number("r87_ceiling", "outside_mappings", static_cast<long long>(outside));
+    log.number("r87_ceiling", "available_before", static_cast<long long>(direct_before));
+    log.number("r87_ceiling", "available_after", static_cast<long long>(direct_after));
+
+    const bool passed = failed == nullptr && tested > 4 * kCeilingGiB && slice_count > 0 &&
+                        checked == std::uint64_t{slice_count} * kCeilingSliceWords &&
+                        mismatches == 0 && short_slices == 0 && outside >= block_count &&
+                        direct_after == direct_before;
+    char detail[256]{};
+    if (failed != nullptr)
+        std::snprintf(detail, sizeof(detail), "%s answered %d", failed, static_cast<int>(failure));
+    else
+        std::snprintf(detail, sizeof(detail),
+                      "vkAllocateMemory gave %zu bytes before refusing (%d); %zu bytes in %u "
+                      "slices written, inverted and compared by the GPU: %llu words checked, "
+                      "%llu differed",
+                      ceiling, static_cast<int>(allocation_refusal), tested, slice_count,
+                      static_cast<unsigned long long>(checked),
+                      static_cast<unsigned long long>(mismatches));
+    log.event("r87_ceiling", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
+    outcome.command_built = failed == nullptr;
+    outcome.passed = passed;
+}
+#endif
+
 constexpr RunnerTest kRunnerTests[] = {
     // Phase C1b: what the console's flip helper writes, into a buffer of its
     // own. No submission, so it carries no GPU risk.
@@ -27344,6 +27977,9 @@ constexpr RunnerTest kRunnerTests[] = {
     {"r86-wide-texture", "m3-texture", run_wide_texture},
     {"r86-wide-rtt", "m3-texture", run_wide_rtt},
     {"r86-wide-depth", "m4-depth", run_wide_depth},
+    // R87: the GPU memory ceiling; r87-ceiling-map has to run first.
+    {"r87-ceiling-map", "m2", run_gpu_ceiling_map},
+    {"r87-ceiling", "m2", run_gpu_ceiling},
     {"r57-border", "c7-mip", run_vulkan_border_frames},
     {"r58-restart", "m3-vertex", run_vulkan_restart_frames},
     {"r59-fragcoord", "r59-fragcoord", run_vulkan_frag_coord_frames},

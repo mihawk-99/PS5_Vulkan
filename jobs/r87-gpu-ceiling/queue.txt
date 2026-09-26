@@ -1,0 +1,16 @@
+# Upload: python3 tools/ps5_console.py battery PPSA99988 jobs/r87-gpu-ceiling/queue.txt
+# R87, the GPU memory ceiling (docs/M5_PHASE_C.md). r87-ceiling-map maps
+# GPU-visible direct memory from 0x40_0000_0000 until the kernel refuses, and
+# submits nothing. r87-ceiling then allocates Vulkan memory there until
+# vkAllocateMemory refuses, keeps 256 MiB back for the driver, and has a
+# compute shader write, invert and compare every word of the rest, 128 MiB per
+# dispatch. d2-compute last is the control that the device still works in the
+# window afterwards.
+#
+# Risk: a range the GPU cannot reach faults the GPU, which froze the screen and
+# ended the title in B8 (docs/M5_PHASE_B.md); the console recovered.
+hold 1
+r87-ceiling-map
+r87-ceiling
+d2-compute
+exit

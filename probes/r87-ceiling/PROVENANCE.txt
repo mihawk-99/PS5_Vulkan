@@ -1,0 +1,5 @@
+PS5 Vulkan r87-ceiling compute dispatch probe, built by tools/build-compute-probe.sh r87-ceiling.
+source: shaders/r87-ceiling/dispatch.comp
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0), compiled on the console by libpsbc
+glslang: Glslang Version: 11:16.4.0
+dispatch.spv: 991 words, sha256 c8e66a0dbd3d38fd82a45ed04ded48dd631ecabe3d43e7d2dfc06d62b5cdc46f

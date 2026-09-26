@@ -1,0 +1,87 @@
+#version 450
+// Copyright (C) 2026 Mihawk-99
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// R87, the GPU memory ceiling (src/diagnostics.cpp, run_gpu_ceiling): one
+// dispatch covers one 128 MiB slice of the memory under test, the largest
+// storage-buffer range the device reports. 4096 workgroups of 128 invocations
+// each visit 64 words, at a stride of every invocation of the dispatch so
+// neighbouring invocations touch neighbouring words. The runner sets the mode
+// between submissions:
+//   0  write every word the slice's pattern,
+//   1  invert every word (the GPU reads what it wrote, and writes again),
+//   2  compare every word with the inverted pattern, counting what it checked
+//      and what differed into the slice's record.
+// The pattern mixes the slice's own seed into every word, so two slices that
+// reached the same memory would overwrite each other's pattern and fail the
+// comparison. Push constants are not used: the driver does not upload them
+// for compute, so the seed and the mode come from memory.
+
+layout(local_size_x = 128) in;
+
+layout(std430, set = 0, binding = 0) buffer Slice
+{
+    uint words[];
+} slice;
+
+layout(std430, set = 0, binding = 1) buffer Record
+{
+    uint seed;
+    uint checked;
+    uint mismatches;
+    uint first_bad;
+} record;
+
+layout(std430, set = 0, binding = 2) readonly buffer Control
+{
+    uint mode;
+} control;
+
+const uint kWordsPerInvocation = 64u;
+const uint kInvocations = 4096u * 128u;
+
+uint pattern(uint seed, uint index)
+{
+    uint z = index * 0x9e3779b1u + seed * 0x85ebca77u;
+    z ^= z >> 16;
+    z *= 0x7feb352du;
+    z ^= z >> 15;
+    z *= 0x846ca68bu;
+    z ^= z >> 16;
+    return z;
+}
+
+void main()
+{
+    const uint first = gl_GlobalInvocationID.x;
+    const uint seed = record.seed;
+    const uint mode = control.mode;
+    uint bad = 0u;
+    uint first_bad = 0xffffffffu;
+    for (uint j = 0u; j < kWordsPerInvocation; ++j)
+    {
+        const uint index = first + j * kInvocations;
+        if (mode == 0u)
+        {
+            slice.words[index] = pattern(seed, index);
+        }
+        else if (mode == 1u)
+        {
+            slice.words[index] = ~slice.words[index];
+        }
+        else if (slice.words[index] != ~pattern(seed, index))
+        {
+            bad += 1u;
+            first_bad = min(first_bad, index);
+        }
+    }
+    if (mode == 2u)
+    {
+        atomicAdd(record.checked, kWordsPerInvocation);
+        if (bad != 0u)
+        {
+            atomicAdd(record.mismatches, bad);
+            atomicMin(record.first_bad, first_bad);
+        }
+    }
+}

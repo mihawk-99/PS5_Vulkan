@@ -1,0 +1,50 @@
+{"schema":2,"event":"run_start","pid":195}
+{"schema":2,"event":"value","probe":"r87_ceiling_map","field":"direct_size","value":12884901888}
+{"schema":2,"event":"value","probe":"r87_ceiling_map","field":"available_before","value":12882739200}
+{"schema":2,"event":"value","probe":"r87_ceiling_map","field":"mapped_bytes","value":12880707584}
+{"schema":2,"event":"value","probe":"r87_ceiling_map","field":"pieces","value":56}
+{"schema":2,"event":"value","probe":"r87_ceiling_map","field":"at_hint","value":56}
+{"schema":2,"event":"value","probe":"r87_ceiling_map","field":"in_window","value":0}
+{"schema":2,"event":"value","probe":"r87_ceiling_map","field":"available_while_held","value":2031616}
+{"schema":2,"event":"value","probe":"r87_ceiling_map","field":"available_after","value":12882739200}
+{"schema":2,"event":"value","probe":"r87_ceiling_map","field":"cpu_words_checked","value":12284}
+{"schema":2,"event":"value","probe":"r87_ceiling_map","field":"cpu_words_right","value":12284}
+{"schema":2,"event":"hex","probe":"r87_ceiling_map","field":"allocate_refusal","value":"0x80020023"}
+{"schema":2,"event":"hex","probe":"r87_ceiling_map","field":"map_refusal","value":"0x0"}
+{"schema":2,"event":"value","probe":"r87_ceiling_map","field":"ns","value":2690782}
+{"schema":2,"event":"probe","probe":"r87_ceiling_map","status":"PASS","result":0,"detail":"12880707584 bytes of GPU-visible memory mapped from 0x40_0000_0000 in 56 pieces (56 at the hint, 0 in the window) before the kernel refused; 12882739200 bytes free before, 2031616 while held, 12882739200 after"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"r87-ceiling-map"}
+{"schema":2,"event":"value","probe":"r87_ceiling","field":"reported_heap_bytes","value":4294967296}
+{"schema":2,"event":"value","probe":"r87_ceiling","field":"allocated_bytes","value":12750684160}
+{"schema":2,"event":"value","probe":"r87_ceiling","field":"allocation_refusal","value":-2}
+{"schema":2,"event":"value","probe":"r87_ceiling","field":"allocation_ns","value":421775}
+{"schema":2,"event":"value","probe":"r87_ceiling","field":"available_at_ceiling","value":127926272}
+{"schema":2,"event":"value","probe":"r87_ceiling","field":"tested_bytes","value":12482248704}
+{"schema":2,"event":"value","probe":"r87_ceiling","field":"blocks","value":16}
+{"schema":2,"event":"value","probe":"r87_ceiling","field":"slices","value":93}
+{"schema":2,"event":"value","probe":"r87_ceiling_pass_ns","field":"write","value":25892194}
+{"schema":2,"event":"value","probe":"r87_ceiling_pass_ns","field":"invert","value":53236945}
+{"schema":2,"event":"value","probe":"r87_ceiling_pass_ns","field":"compare","value":25761732}
+{"schema":2,"event":"value","probe":"r87_ceiling","field":"words_checked","value":3120562176}
+{"schema":2,"event":"value","probe":"r87_ceiling","field":"words_expected","value":3120562176}
+{"schema":2,"event":"value","probe":"r87_ceiling","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r87_ceiling","field":"short_slices","value":0}
+{"schema":2,"event":"value","probe":"r87_ceiling","field":"first_bad_slice","value":4294967295}
+{"schema":2,"event":"value","probe":"r87_ceiling","field":"outside_mappings","value":18}
+{"schema":2,"event":"value","probe":"r87_ceiling","field":"available_before","value":12882739200}
+{"schema":2,"event":"value","probe":"r87_ceiling","field":"available_after","value":12882739200}
+{"schema":2,"event":"probe","probe":"r87_ceiling","status":"PASS","result":0,"detail":"vkAllocateMemory gave 12750684160 bytes before refusing (-2); 12482248704 bytes in 93 slices written, inverted and compared by the GPU: 3120562176 words checked, 0 differed"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"r87-ceiling"}
+{"schema":2,"event":"value","probe":"d2_compute","field":"frame","value":0}
+{"schema":2,"event":"value","probe":"d2_compute","field":"words","value":144}
+{"schema":2,"event":"hex","probe":"d2_compute","field":"readback","value":"0xa5a5a5a5"}
+{"schema":2,"event":"hex","probe":"d2_compute","field":"expected","value":"0xa5a5a5a5"}
+{"schema":2,"event":"probe","probe":"d2_compute","status":"PASS","result":0,"detail":"the direct dispatch recorded, submitted and signalled its fence; the readback is the expected shader output"}
+{"schema":2,"event":"value","probe":"d2_compute","field":"frame","value":1}
+{"schema":2,"event":"value","probe":"d2_compute","field":"words","value":144}
+{"schema":2,"event":"hex","probe":"d2_compute","field":"readback","value":"0xa5a5a5a5"}
+{"schema":2,"event":"hex","probe":"d2_compute","field":"expected","value":"0xa5a5a5a5"}
+{"schema":2,"event":"probe","probe":"d2_compute","status":"PASS","result":0,"detail":"the indirect dispatch recorded, submitted and signalled its fence; the readback is the expected shader output"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"d2-compute"}
+{"schema":2,"event":"value","probe":"runner_summary","field":"ran","value":3}
+{"schema":2,"event":"probe","probe":"runner_summary","status":"PASS","result":0,"detail":"3 of 3 queued tests passed"}

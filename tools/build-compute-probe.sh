@@ -15,7 +15,7 @@ set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 set_name=${1:-c0}
-case "$set_name" in c0|c0-images|r17-descriptor-array|r84-subgroup) ;; *) echo "unknown compute probe: $set_name" >&2; exit 2 ;; esac
+case "$set_name" in c0|c0-images|r17-descriptor-array|r84-subgroup|r87-ceiling) ;; *) echo "unknown compute probe: $set_name" >&2; exit 2 ;; esac
 # R84's subgroup probe needs SPIR-V 1.3, Vulkan 1.1's; the others stay 1.0.
 target_env=vulkan1.0
 [[ $set_name != r84-subgroup ]] || target_env=vulkan1.1

@@ -9714,3 +9714,17 @@ rather than the window.
 What it opens is a heap beyond 4 GiB. The next step is VkDeviceMemory placed
 outside the window by default, with the heap and allocation limits raised.
 That is a round of its own.
+
+## 2026-09-25 — R87: the GPU memory ceiling
+
+How much GPU-visible memory the console gives a process. The kernel mapped
+12,880,707,584 bytes of GPU-visible direct memory from 0x40_0000_0000, every
+piece at its address, and refused only when less than 2 MiB of the 12 GiB pool
+was left. vkAllocateMemory gave 11.875 GiB before
+VK_ERROR_OUT_OF_DEVICE_MEMORY. A compute shader wrote, inverted and compared
+every word of 11.625 GiB of it (93 slices of 128 MiB, 3,120,562,176 words), and
+none differed. PS5 PID 195, 3 of 3, no GPU fault, the pool back to the byte
+(jobs/r87-gpu-ceiling). The ceiling is the pool: there is no separate limit on
+GPU-visible memory, and a title's GPU can have whatever its CPU side does not
+hold. The device still reports a 4 GiB heap and places VkDeviceMemory in the
+window; changing both is the next round.
