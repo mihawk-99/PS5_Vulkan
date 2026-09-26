@@ -27109,21 +27109,24 @@ void run_gpu_ceiling_map(const TestContext &test, TestOutcome &outcome) noexcept
     outcome.passed = passed;
 }
 
-// The GPU's half: Vulkan memory from 0x40_0000_0000 up (the R86 placement
-// switch), 1 GiB allocations and then 128 MiB ones until vkAllocateMemory
-// refuses, less what the driver keeps for its own tables. A compute shader
-// (shaders/r87-ceiling) then writes every word of it a pattern seeded per
-// 128 MiB slice, inverts every word, and compares every word with the inverted
-// pattern, counting into each slice's record. Three submissions, one per
-// pass; the CPU reads only the records.
-void run_gpu_ceiling(const TestContext &test, TestOutcome &outcome) noexcept
+// The GPU's half: Vulkan memory, 1 GiB allocations and then 128 MiB ones until
+// vkAllocateMemory refuses, less what the driver keeps for its own tables. A
+// compute shader (shaders/r87-ceiling) then writes every word of it a pattern
+// seeded per 128 MiB slice, inverts every word, and compares every word with
+// the inverted pattern, counting into each slice's record. Three submissions,
+// one per pass; the CPU reads only the records. R87 places the memory from
+// 0x40_0000_0000 with the R86 switch; R88 (placement_switch false) asks the
+// driver's default placement for it, and reads the heap and the memory budget
+// before, at the ceiling and after.
+void run_gpu_memory(const TestContext &test, TestOutcome &outcome, bool placement_switch,
+                    const char *probe, const char *pass_probe) noexcept
 {
     JsonLog &log = test.log;
     outcome.command_built = false;
     outcome.passed = false;
-    if (g_ceiling_kernel_bytes == 0)
+    if (placement_switch && g_ceiling_kernel_bytes == 0)
     {
-        log.event("r87_ceiling", "SKIPPED", -1,
+        log.event(probe, "SKIPPED", -1,
                   "r87-ceiling-map has not mapped more than 4 GiB of GPU-visible memory; queue it "
                   "first");
         return;
@@ -27138,7 +27141,7 @@ void run_gpu_ceiling(const TestContext &test, TestOutcome &outcome) noexcept
     if (!read_shader_package(spirv_download, spirv_app, g_spirv, spirv_size, spirv_path) ||
         spirv_size % 4 != 0)
     {
-        log.event("r87_ceiling", "SKIPPED", -1, "missing probes/r87-ceiling/dispatch.spv");
+        log.event(probe, "SKIPPED", -1, "missing probes/r87-ceiling/dispatch.spv");
         return;
     }
     const std::size_t direct_before = ceiling_available_direct();
@@ -27151,14 +27154,14 @@ void run_gpu_ceiling(const TestContext &test, TestOutcome &outcome) noexcept
                                            0,
                                            "ps5vk",
                                            0,
-                                           VK_API_VERSION_1_0};
+                                           VK_API_VERSION_1_1};
     const VkInstanceCreateInfo instance_info = {
         VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, nullptr, 0, &application, 0, nullptr, 0, nullptr};
     VkInstance instance = VK_NULL_HANDLE;
     if (create_instance == nullptr ||
         create_instance(&instance_info, nullptr, &instance) != VK_SUCCESS)
     {
-        log.event("r87_ceiling", "FAIL", -1, "vkCreateInstance did not answer VK_SUCCESS");
+        log.event(probe, "FAIL", -1, "vkCreateInstance did not answer VK_SUCCESS");
         return;
     }
 #define CEILING_PROC(name)                                                                         \
@@ -27167,6 +27170,7 @@ void run_gpu_ceiling(const TestContext &test, TestOutcome &outcome) noexcept
     CEILING_PROC(DestroyInstance);
     CEILING_PROC(EnumeratePhysicalDevices);
     CEILING_PROC(GetPhysicalDeviceMemoryProperties);
+    CEILING_PROC(GetPhysicalDeviceMemoryProperties2);
     CEILING_PROC(CreateDevice);
     CEILING_PROC(DestroyDevice);
     CEILING_PROC(GetDeviceQueue);
@@ -27202,6 +27206,23 @@ void run_gpu_ceiling(const TestContext &test, TestOutcome &outcome) noexcept
     CEILING_PROC(WaitForFences);
     CEILING_PROC(QueueSubmit);
 #undef CEILING_PROC
+    // VK_EXT_memory_budget (R88): what VkDeviceMemory holds, and what the heap
+    // can give in all.
+    const auto log_budget = [&](VkPhysicalDevice device_handle, const char *when)
+    {
+        VkPhysicalDeviceMemoryBudgetPropertiesEXT budget{};
+        budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
+        VkPhysicalDeviceMemoryProperties2 properties{};
+        properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
+        properties.pNext = &budget;
+        GetPhysicalDeviceMemoryProperties2(device_handle, &properties);
+        char field[48]{};
+        std::snprintf(field, sizeof(field), "budget_usage_%s", when);
+        log.number(probe, field, static_cast<long long>(budget.heapUsage[0]));
+        std::snprintf(field, sizeof(field), "budget_%s", when);
+        log.number(probe, field, static_cast<long long>(budget.heapBudget[0]));
+        return budget;
+    };
 
     // Every object this case makes, destroyed in reverse at the end; a pass
     // that never signals leaves the memory held and stops the queue instead.
@@ -27243,6 +27264,7 @@ void run_gpu_ceiling(const TestContext &test, TestOutcome &outcome) noexcept
     require(enumerated, "vkEnumeratePhysicalDevices");
     std::uint32_t device_type = UINT32_MAX;
     std::uint32_t host_type = UINT32_MAX;
+    VkDeviceSize reported_heap = 0;
     if (failed == nullptr)
     {
         VkPhysicalDeviceMemoryProperties memory_properties{};
@@ -27258,8 +27280,8 @@ void run_gpu_ceiling(const TestContext &test, TestOutcome &outcome) noexcept
                     (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
                 host_type = index;
         }
-        log.number("r87_ceiling", "reported_heap_bytes",
-                   static_cast<long long>(memory_properties.memoryHeaps[0].size));
+        reported_heap = memory_properties.memoryHeaps[0].size;
+        log.number(probe, "reported_heap_bytes", static_cast<long long>(reported_heap));
         if (device_type == UINT32_MAX || host_type == UINT32_MAX)
             require(VK_ERROR_FEATURE_NOT_PRESENT, "memory types");
     }
@@ -27366,9 +27388,13 @@ void run_gpu_ceiling(const TestContext &test, TestOutcome &outcome) noexcept
     std::size_t ceiling = 0;
     VkResult allocation_refusal = VK_SUCCESS;
     const long long allocation_started = ceiling_now_ns();
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT budget_before{};
+    if (failed == nullptr)
+        budget_before = log_budget(physical, "before");
     if (failed == nullptr)
     {
-        ps5vk_debug_device_memory_base(kCeilingBase);
+        // The count of mappings outside the window starts here either way.
+        ps5vk_debug_device_memory_base(placement_switch ? kCeilingBase : 0);
         for (const std::size_t size : {kCeilingGiB, kCeilingSlice})
             while (block_count < kCeilingMaxBlocks)
             {
@@ -27388,6 +27414,9 @@ void run_gpu_ceiling(const TestContext &test, TestOutcome &outcome) noexcept
     }
     const long long allocation_ns = ceiling_now_ns() - allocation_started;
     const std::size_t direct_at_ceiling = ceiling_available_direct();
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT budget_at_ceiling{};
+    if (failed == nullptr)
+        budget_at_ceiling = log_budget(physical, "at_ceiling");
     while (block_count > 0 && ceiling_available_direct() < kCeilingHeadroom)
     {
         --block_count;
@@ -27397,12 +27426,12 @@ void run_gpu_ceiling(const TestContext &test, TestOutcome &outcome) noexcept
     std::size_t tested = 0;
     for (std::uint32_t block = 0; block < block_count; ++block)
         tested += block_bytes[block];
-    log.number("r87_ceiling", "allocated_bytes", static_cast<long long>(ceiling));
-    log.number("r87_ceiling", "allocation_refusal", static_cast<long long>(allocation_refusal));
-    log.number("r87_ceiling", "allocation_ns", allocation_ns);
-    log.number("r87_ceiling", "available_at_ceiling", static_cast<long long>(direct_at_ceiling));
-    log.number("r87_ceiling", "tested_bytes", static_cast<long long>(tested));
-    log.number("r87_ceiling", "blocks", block_count);
+    log.number(probe, "allocated_bytes", static_cast<long long>(ceiling));
+    log.number(probe, "allocation_refusal", static_cast<long long>(allocation_refusal));
+    log.number(probe, "allocation_ns", allocation_ns);
+    log.number(probe, "available_at_ceiling", static_cast<long long>(direct_at_ceiling));
+    log.number(probe, "tested_bytes", static_cast<long long>(tested));
+    log.number(probe, "blocks", block_count);
 
     // One buffer per block, one descriptor set per 128 MiB slice.
     auto *const control = static_cast<std::uint32_t *>(control_map);
@@ -27454,7 +27483,7 @@ void run_gpu_ceiling(const TestContext &test, TestOutcome &outcome) noexcept
             ++slice_count;
         }
     }
-    log.number("r87_ceiling", "slices", slice_count);
+    log.number(probe, "slices", slice_count);
 
     // The three passes, recorded alike; the mode is read from memory.
     const VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr, 0,
@@ -27519,22 +27548,20 @@ void run_gpu_ceiling(const TestContext &test, TestOutcome &outcome) noexcept
         }
     }
     for (std::uint32_t pass = 0; pass < 3; ++pass)
-        log.number("r87_ceiling_pass_ns", kPassNames[pass], pass_ns[pass]);
-    log.number("r87_ceiling", "words_checked", static_cast<long long>(checked));
-    log.number("r87_ceiling", "words_expected",
+        log.number(pass_probe, kPassNames[pass], pass_ns[pass]);
+    log.number(probe, "words_checked", static_cast<long long>(checked));
+    log.number(probe, "words_expected",
                static_cast<long long>(std::uint64_t{slice_count} * kCeilingSliceWords));
-    log.number("r87_ceiling", "mismatches", static_cast<long long>(mismatches));
-    log.number("r87_ceiling", "short_slices", short_slices);
-    log.number("r87_ceiling", "first_bad_slice",
-               first_bad_slice == UINT32_MAX ? -1 : first_bad_slice);
+    log.number(probe, "mismatches", static_cast<long long>(mismatches));
+    log.number(probe, "short_slices", short_slices);
+    log.number(probe, "first_bad_slice", first_bad_slice == UINT32_MAX ? -1 : first_bad_slice);
 
     if (!signalled)
     {
         // The GPU may still reach this memory: keep it, and stop the queue.
         ps5vk_debug_device_memory_base(0);
         outcome.stage_in_use = true;
-        log.event("r87_ceiling", "FAIL", -1,
-                  "a pass did not signal its fence in 20 s; its memory is kept");
+        log.event(probe, "FAIL", -1, "a pass did not signal its fence in 20 s; its memory is kept");
         return;
     }
     for (std::uint32_t block = 0; block < block_count; ++block)
@@ -27546,6 +27573,9 @@ void run_gpu_ceiling(const TestContext &test, TestOutcome &outcome) noexcept
         buffers[block] = VK_NULL_HANDLE;
         memories[block] = VK_NULL_HANDLE;
     }
+    const VkPhysicalDeviceMemoryBudgetPropertiesEXT budget_after =
+        physical != VK_NULL_HANDLE ? log_budget(physical, "after")
+                                   : VkPhysicalDeviceMemoryBudgetPropertiesEXT{};
     const std::uint64_t outside = ps5vk_debug_device_memory_base(0);
     if (control_buffer != VK_NULL_HANDLE)
         DestroyBuffer(device, control_buffer, nullptr);
@@ -27569,14 +27599,24 @@ void run_gpu_ceiling(const TestContext &test, TestOutcome &outcome) noexcept
         DestroyDevice(device, nullptr);
     DestroyInstance(instance, nullptr);
     const std::size_t direct_after = ceiling_available_direct();
-    log.number("r87_ceiling", "outside_mappings", static_cast<long long>(outside));
-    log.number("r87_ceiling", "available_before", static_cast<long long>(direct_before));
-    log.number("r87_ceiling", "available_after", static_cast<long long>(direct_after));
+    log.number(probe, "outside_mappings", static_cast<long long>(outside));
+    log.number(probe, "available_before", static_cast<long long>(direct_before));
+    log.number(probe, "available_after", static_cast<long long>(direct_after));
 
+    // R88: the heap is the pool, and the budget's usage follows what
+    // VkDeviceMemory holds: up by at least the memory under test at the
+    // ceiling, and back where it was once that is freed.
+    const bool budget_right =
+        placement_switch ||
+        (reported_heap == static_cast<VkDeviceSize>(sceKernelGetDirectMemorySize()) &&
+         budget_at_ceiling.heapUsage[0] >= budget_before.heapUsage[0] + ceiling &&
+         budget_after.heapUsage[0] == budget_before.heapUsage[0] &&
+         budget_before.heapBudget[0] <= reported_heap);
+    log.number(probe, "budget_right", budget_right ? 1 : 0);
     const bool passed = failed == nullptr && tested > 4 * kCeilingGiB && slice_count > 0 &&
                         checked == std::uint64_t{slice_count} * kCeilingSliceWords &&
                         mismatches == 0 && short_slices == 0 && outside >= block_count &&
-                        direct_after == direct_before;
+                        direct_after == direct_before && budget_right;
     char detail[256]{};
     if (failed != nullptr)
         std::snprintf(detail, sizeof(detail), "%s answered %d", failed, static_cast<int>(failure));
@@ -27588,9 +27628,21 @@ void run_gpu_ceiling(const TestContext &test, TestOutcome &outcome) noexcept
                       ceiling, static_cast<int>(allocation_refusal), tested, slice_count,
                       static_cast<unsigned long long>(checked),
                       static_cast<unsigned long long>(mismatches));
-    log.event("r87_ceiling", passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
+    log.event(probe, passed ? "PASS" : "FAIL", passed ? 0 : -1, detail);
     outcome.command_built = failed == nullptr;
     outcome.passed = passed;
+}
+
+void run_gpu_ceiling(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_gpu_memory(test, outcome, true, "r87_ceiling", "r87_ceiling_pass_ns");
+}
+
+// R88: the same, through the driver's own placement -- VkDeviceMemory in the
+// device memory region by default -- with the heap and the budget checked.
+void run_gpu_default_memory(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    run_gpu_memory(test, outcome, false, "r88_memory", "r88_memory_pass_ns");
 }
 #endif
 
@@ -27980,6 +28032,8 @@ constexpr RunnerTest kRunnerTests[] = {
     // R87: the GPU memory ceiling; r87-ceiling-map has to run first.
     {"r87-ceiling-map", "m2", run_gpu_ceiling_map},
     {"r87-ceiling", "m2", run_gpu_ceiling},
+    // R88: the whole pool through the default placement, heap and budget.
+    {"r88-memory", "m2", run_gpu_default_memory},
     {"r57-border", "c7-mip", run_vulkan_border_frames},
     {"r58-restart", "m3-vertex", run_vulkan_restart_frames},
     {"r59-fragcoord", "r59-fragcoord", run_vulkan_frag_coord_frames},

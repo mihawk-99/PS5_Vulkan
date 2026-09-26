@@ -128,14 +128,24 @@ for case in "${cases[@]}"; do
 done
 # The device's reporting is an artefact the CTS selection is made from, so a run
 # that changes it has to change the committed inventory in the same commit:
-# regenerate into a scratch file and diff (docs/CTS.md, Phase E1).
+# regenerate into a scratch file and compare (docs/CTS.md, Phase E1). The
+# inventory's "source" names the log it was collected from -- the console's,
+# the authoritative one -- so it is the one field not compared.
 inventory="$root/conformance_inventory/device_report.json"
 if [[ -f $inventory ]]; then
     python3 "$root/tools/collect-device-report.py" --out "$work/device-report.json" > /dev/null ||
         { echo "the device report could not be collected"; status=1; }
-    if ! diff -q "$inventory" "$work/device-report.json" > /dev/null; then
+    if ! python3 - "$inventory" "$work/device-report.json" <<'PY'
+import json
+import sys
+committed, collected = (json.load(open(path)) for path in sys.argv[1:3])
+committed.pop("source", None)
+collected.pop("source", None)
+sys.exit(0 if committed == collected else 1)
+PY
+    then
         echo "conformance_inventory/device_report.json is stale: the device's reporting changed"
-        diff "$inventory" "$work/device-report.json" | head -20
+        diff "$inventory" "$work/device-report.json" | grep -v '"source"' | head -20
         status=1
     fi
 fi

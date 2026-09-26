@@ -65,9 +65,12 @@ extern "C" {
 #define PS5VK_DRIVER_VERSION VK_MAKE_VERSION(0, 2, 0)
 
 /* GPU-visible addresses. The shader compiler combines 32-bit pointers with a
- * fixed high word (--address32-hi 2, probes/m3/bindings.txt), and every console
- * mapping recorded so far lies at high word 2 (0x20001c000, 0x200200000), so
- * GPU-visible memory must lie in that word's 4 GiB window. */
+ * fixed high word (--address32-hi 2, probes/m3/bindings.txt), so what shaders
+ * reach through such a pointer -- register tables, push constants, the
+ * vertex-buffer table, code -- must lie in that word's 4 GiB window. The
+ * kernel's own choice for a mapping with no address is that window
+ * (0x20001c000, 0x200200000). VkDeviceMemory is reached only through 48-bit
+ * addresses and lies outside it (R86, R88). */
 #define PS5VK_ADDRESS_HIGH_WORD UINT64_C(2)
 #define PS5VK_ADDRESS_WINDOW_BYTES (UINT64_C(1) << 32)
 
@@ -122,8 +125,18 @@ ps5vk_gpu_range_valid(uint64_t address, uint64_t bytes)
           bytes <= PS5VK_GPU_ADDRESS_LIMIT - address;
 }
 
+/* Where VkDeviceMemory is placed (R88): a 256 GiB region the kernel maps
+ * GPU-visible memory into at the address asked for, and in which the GPU reads
+ * and writes the whole direct-memory pool (R86, R87). */
+#define PS5VK_DEVICE_MEMORY_REGION ((uintptr_t)UINT64_C(0x4000000000))
+#define PS5VK_DEVICE_MEMORY_REGION_BYTES (UINT64_C(256) << 30)
+/* The region is handed out in these steps: the alignment of the allocations
+ * that ask for most (PS5VK_LARGE_ALIGNMENT, ps5vk_memory.c). */
+#define PS5VK_DEVICE_MEMORY_GRANULE UINT64_C(0x200000)
+
 /* A GPU-visible direct-memory allocation, mapped for the CPU and the GPU at
- * one address inside the address window (ps5vk_direct_memory.c). */
+ * one address: in the address window, or for VkDeviceMemory in the device
+ * memory region (ps5vk_direct_memory.c). */
 /* What a direct mapping is for; the profile counts live mappings by kind, so a
  * leak names its owner (direct_kinds). */
 enum ps5vk_direct_kind {
@@ -146,9 +159,15 @@ struct ps5vk_direct_mapping {
    void *address;
    /* What it is for (the profile's direct_kinds). */
    enum ps5vk_direct_kind kind;
+   /* The device memory region's granules it asked for, first and count, while
+    * it holds them; count 0 for none. */
+   uint32_t granule;
+   uint32_t granules;
 };
 
-/* ps5vk_direct_mapping_create's result for memory mapped outside the window. */
+/* ps5vk_direct_mapping_create's result for a mapping the GPU cannot reach as
+ * its kind needs: outside the window for what shaders reach through 32-bit
+ * pointers, or beyond the GPU's 48 bits. */
 #define PS5VK_DIRECT_OUTSIDE_WINDOW INT32_C(-1)
 
 /* The direct memory the driver holds now: mappings and bytes (the profile). */
@@ -2061,6 +2080,10 @@ sceKernelMunmap(void *address, size_t bytes);
 
 int32_t
 sceKernelReleaseDirectMemory(int64_t start, size_t bytes);
+
+int32_t
+sceKernelAvailableDirectMemorySize(int64_t search_start, int64_t search_end, size_t alignment,
+                                   int64_t *start, size_t *available);
 
 #ifdef __cplusplus
 }

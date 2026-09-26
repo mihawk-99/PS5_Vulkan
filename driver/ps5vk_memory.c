@@ -46,7 +46,9 @@ ps5vk_AllocateMemory_untimed(VkDevice _device, const VkMemoryAllocateInfo *pAllo
    /* Valid usage: an existing type. */
    assert(pAllocateInfo->memoryTypeIndex < PS5VK_MEMORY_TYPE_COUNT);
 
-   if (pAllocateInfo->allocationSize > PS5VK_ADDRESS_WINDOW_BYTES)
+   /* The heap is the direct-memory pool (R88): nothing larger can be had. */
+   const int64_t pool = sceKernelGetDirectMemorySize();
+   if (pool <= 0 || pAllocateInfo->allocationSize > (uint64_t)pool)
       return vk_error(device, VK_ERROR_OUT_OF_DEVICE_MEMORY);
    const uint64_t bytes = align64(pAllocateInfo->allocationSize, PS5VK_DIRECT_PAGE_BYTES);
    const uint64_t alignment =
@@ -69,8 +71,8 @@ ps5vk_AllocateMemory_untimed(VkDevice _device, const VkMemoryAllocateInfo *pAllo
    if (result != 0) {
       ps5vk_device_memory_release(device, memory, pAllocator);
       return vk_errorf(device, VK_ERROR_OUT_OF_DEVICE_MEMORY,
-                       "%" PRIu64 " bytes of direct memory could not be mapped in the address "
-                       "window: 0x%08x", bytes, (unsigned)result);
+                       "%" PRIu64 " bytes of direct memory could not be allocated and mapped "
+                       "for the GPU: 0x%08x", bytes, (unsigned)result);
    }
 
    *pMemory = ps5vk_device_memory_to_handle(memory);

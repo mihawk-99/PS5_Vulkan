@@ -255,12 +255,15 @@ bool load_chunk(Region &region, unsigned long long offset, const char *hex) noex
 // Direct memory without a replay. Allocations are first-fit ranges of the
 // reported direct memory, aligned as requested (16 KiB at least, as the
 // console's page size requires); a range mapped whole lands at
-// kFreeMappingBase plus its start, so mappings keep address high word 2, where
-// every console mapping of the golden captures lies (0x20001c000, 0x200200000).
+// kFreeMappingBase plus its start, so the driver's first mappings keep address
+// high word 2, where every console mapping of the golden captures lies
+// (0x20001c000, 0x200200000). The pool is the console's 12 GiB (R87); a range
+// that starts past the first 4 GiB maps above the window, which only
+// VkDeviceMemory may (R88).
 constexpr int kErrorInvalid = static_cast<int>(0x80020016u);
 constexpr std::size_t kMaxFreeAllocations = 4096;
 constexpr std::size_t kDirectPageBytes = 0x4000;
-constexpr std::int64_t kFreeDirectMemoryBytes = INT64_C(0x100000000);
+constexpr std::int64_t kFreeDirectMemoryBytes = INT64_C(0x300000000);
 constexpr std::uintptr_t kFreeMappingBase = UINT64_C(0x200000000);
 
 struct FreeAllocation
@@ -734,7 +737,7 @@ int sceKernelDebugOutText(int, const char *text)
 
 std::int64_t sceKernelGetDirectMemorySize(void)
 {
-    return INT64_C(0x100000000);
+    return kFreeDirectMemoryBytes;
 }
 
 // Each replayed region is one allocation of its size, handed out in order.
@@ -808,6 +811,71 @@ std::int32_t sceKernelReleaseDirectMemory(std::int64_t start, std::size_t bytes)
     if (region == nullptr || !region->allocated || region->mapped)
         return kErrorNoMemory;
     region->allocated = false;
+    return 0;
+}
+
+// The protection of a mapping this model made: CPU and GPU read and write
+// (0x33), the driver's, over the whole mapping (R86's kernel probe asks it).
+std::int32_t sceKernelQueryMemoryProtection(void *address, void **start, void **end,
+                                            std::uint32_t *protection)
+{
+    const auto at = reinterpret_cast<std::uintptr_t>(address);
+    std::uintptr_t low = 0;
+    std::size_t bytes = 0;
+    if (free_mode())
+    {
+        const std::uintptr_t base = free_mapping_base();
+        for (std::size_t index = 0; index < g_free_count && bytes == 0; ++index)
+        {
+            const FreeAllocation &allocation = g_free[index];
+            const std::uintptr_t first = base + static_cast<std::uintptr_t>(allocation.start);
+            if (allocation.mapped && at >= first && at - first < allocation.bytes)
+            {
+                low = first;
+                bytes = allocation.bytes;
+            }
+        }
+    }
+    else
+        for (std::size_t index = 0; index < g_region_count && bytes == 0; ++index)
+        {
+            const Region &region = g_regions[index];
+            if (region.mapped && at >= region.address && at - region.address < region.bytes)
+            {
+                low = region.address;
+                bytes = region.bytes;
+            }
+        }
+    if (bytes == 0)
+        return kErrorInvalid;
+    if (start != nullptr)
+        *start = reinterpret_cast<void *>(low);
+    if (end != nullptr)
+        *end = reinterpret_cast<void *>(low + bytes);
+    if (protection != nullptr)
+        *protection = 0x33;
+    return 0;
+}
+
+// What the pool can still give (R88's memory budget). The console answers the
+// largest free range; this model answers the pool less what is handed out,
+// which is the same for a first-fit pool nobody has fragmented.
+std::int32_t sceKernelAvailableDirectMemorySize(std::int64_t, std::int64_t, std::size_t,
+                                                std::int64_t *start, std::size_t *available)
+{
+    if (start == nullptr || available == nullptr)
+        return kErrorInvalid;
+    std::int64_t used = 0;
+    if (free_mode())
+        for (std::size_t index = 0; index < g_free_count; ++index)
+            used += static_cast<std::int64_t>(g_free[index].bytes);
+    else
+        for (std::size_t index = 0; index < g_region_count; ++index)
+            if (g_regions[index].allocated)
+                used += static_cast<std::int64_t>(g_regions[index].bytes);
+    const std::int64_t pool = sceKernelGetDirectMemorySize();
+    *start = 0;
+    *available = used < pool ? static_cast<std::size_t>(pool - used) : 0;
     return 0;
 }
 

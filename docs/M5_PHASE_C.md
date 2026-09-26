@@ -9728,3 +9728,17 @@ none differed. PS5 PID 195, 3 of 3, no GPU fault, the pool back to the byte
 GPU-visible memory, and a title's GPU can have whatever its CPU side does not
 hold. The device still reports a 4 GiB heap and places VkDeviceMemory in the
 window; changing both is the next round.
+
+## 2026-09-26 — R88: VkDeviceMemory outside the window, a 12 GiB heap
+
+The driver places VkDeviceMemory in a 256 GiB region at 0x40_0000_0000,
+handed out first fit in 2 MiB granules; the kernel has the last word, and any
+GPU-reachable address it chooses is accepted. What shaders reach through
+32-bit pointers stays in the window. The heap is the whole 12 GiB pool, and
+VK_EXT_memory_budget reports what VkDeviceMemory holds and what the pool can
+still give. The host model reports the 12 GiB pool and the two kernel calls
+R86 to R88 need. PS5 PID 196, 30 of 30 (jobs/r88-device-memory): 11.875 GiB
+allocated through the default placement, 11.625 GiB of it written, inverted
+and compared by the GPU without a difference, the budget following the usage
+exactly, and 28 existing cases passing with their memory in the region.
+Applications now see 12 GiB where they saw 4.

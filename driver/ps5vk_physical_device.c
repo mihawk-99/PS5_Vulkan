@@ -73,12 +73,15 @@ static const struct vk_features ps5vk_features = {
    .dualSrcBlend = true,
 };
 
-/* Presentation to VideoOut (ps5vk_wsi.c, Phase C1), and R81's
+/* Presentation to VideoOut (ps5vk_wsi.c, Phase C1), R81's
  * mirror-clamp-to-edge sampler mode (ps5vk_image.c, the hardware's
- * mirror-once), which LRPS2 enables on every device it creates. */
+ * mirror-once), which LRPS2 enables on every device it creates, and R88's
+ * memory budget: the heap is the direct-memory pool the CPU draws on too, so
+ * an application learns from the budget how much of it is free now. */
 static const struct vk_device_extension_table ps5vk_device_extensions = {
    .KHR_swapchain = true,
    .KHR_sampler_mirror_clamp_to_edge = true,
+   .EXT_memory_budget = true,
 };
 
 static void
@@ -303,16 +306,18 @@ ps5vk_GetPhysicalDeviceQueueFamilyProperties2(VkPhysicalDevice physicalDevice,
  * and GPU. The specification requires a host-visible, host-coherent type and
  * a device-local one (Vulkan-Docs v1.4.354, chapters/memory.adoc, SHA-256
  * d53c53c4..., lines 675-681); this type is both, and every allocation stays
- * mapped for both processors (ps5vk_memory.c). GPU-visible memory must lie in
- * one 4 GiB address window, so the heap is at most that large. */
+ * mapped for both processors (ps5vk_memory.c). The heap is the whole pool:
+ * VkDeviceMemory lies outside the 4 GiB address window (R88), and the GPU
+ * reads and writes all of the pool (R87). The CPU draws on the same pool, so
+ * VK_EXT_memory_budget reports what VkDeviceMemory holds and how much more the
+ * pool can give now. */
 VKAPI_ATTR void VKAPI_CALL
 ps5vk_GetPhysicalDeviceMemoryProperties2(VkPhysicalDevice physicalDevice,
                                          VkPhysicalDeviceMemoryProperties2 *pMemoryProperties)
 {
    (void)physicalDevice;
    const int64_t direct_memory = sceKernelGetDirectMemorySize();
-   const VkDeviceSize heap_size =
-      direct_memory > 0 ? MIN2((VkDeviceSize)direct_memory, PS5VK_ADDRESS_WINDOW_BYTES) : 0;
+   const VkDeviceSize heap_size = direct_memory > 0 ? (VkDeviceSize)direct_memory : 0;
    pMemoryProperties->memoryProperties = (VkPhysicalDeviceMemoryProperties){
       /* Two types on one heap. Type 0 is device-local only: the application
        * cannot map it, so the queue never has to evict it from the CPU's
@@ -342,4 +347,22 @@ ps5vk_GetPhysicalDeviceMemoryProperties2(VkPhysicalDevice physicalDevice,
          },
       },
    };
+   vk_foreach_struct(extension, pMemoryProperties->pNext) {
+      if (extension->sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT)
+         continue;
+      VkPhysicalDeviceMemoryBudgetPropertiesEXT *const budget = (void *)extension;
+      uint64_t mappings = 0;
+      uint64_t used = 0;
+      ps5vk_direct_memory_kind_live(PS5VK_DIRECT_MEMORY, &mappings, &used);
+      int64_t start = -1;
+      size_t available = 0;
+      if (direct_memory <= 0 ||
+          sceKernelAvailableDirectMemorySize(0, direct_memory, PS5VK_DIRECT_PAGE_BYTES, &start,
+                                             &available) != 0)
+         available = 0;
+      memset(budget->heapBudget, 0, sizeof(budget->heapBudget));
+      memset(budget->heapUsage, 0, sizeof(budget->heapUsage));
+      budget->heapUsage[0] = used;
+      budget->heapBudget[0] = MIN2(heap_size, used + (uint64_t)available);
+   }
 }

@@ -102,6 +102,46 @@ release(VkInstance instance, VkDevice device, struct mapping *m)
    m->data = NULL;
 }
 
+/* R88's memory budget: what VkDeviceMemory holds, and what the heap can give
+ * in all. The budget structure is chained to a 1.1 query, which the loader
+ * passes to the driver only for a 1.1 instance, so the question is asked
+ * through one of its own; the driver's accounting is the process's. */
+static void
+query_budget(VkDeviceSize *usage, VkDeviceSize *budget)
+{
+   *usage = 0;
+   *budget = 0;
+   const VkApplicationInfo application = {
+      .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+      .pApplicationName = "B3 memory budget",
+      .apiVersion = VK_API_VERSION_1_1,
+   };
+   const VkInstanceCreateInfo instance_info = {
+      .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+      .pApplicationInfo = &application,
+   };
+   VkInstance instance = VK_NULL_HANDLE;
+   if (VK_FUNCTION(VK_NULL_HANDLE, CreateInstance)(&instance_info, NULL, &instance) != VK_SUCCESS)
+      return;
+   uint32_t count = 1;
+   VkPhysicalDevice physical = VK_NULL_HANDLE;
+   const VkResult enumerated =
+      VK_FUNCTION(instance, EnumeratePhysicalDevices)(instance, &count, &physical);
+   if ((enumerated == VK_SUCCESS || enumerated == VK_INCOMPLETE) && physical != VK_NULL_HANDLE) {
+      VkPhysicalDeviceMemoryBudgetPropertiesEXT reported = {
+         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT,
+      };
+      VkPhysicalDeviceMemoryProperties2 properties = {
+         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2,
+         .pNext = &reported,
+      };
+      VK_FUNCTION(instance, GetPhysicalDeviceMemoryProperties2)(physical, &properties);
+      *usage = reported.heapUsage[0];
+      *budget = reported.heapBudget[0];
+   }
+   VK_FUNCTION(instance, DestroyInstance)(instance, NULL);
+}
+
 int
 main(void)
 {
@@ -118,7 +158,15 @@ main(void)
    memset(&properties, 0, sizeof(properties));
    VK_FUNCTION(instance, GetPhysicalDeviceMemoryProperties)(physical, &properties);
    const VkDeviceSize heap = properties.memoryHeaps[0].size;
-   check(heap > 0 && heap <= UINT64_C(1) << 32, "the heap fits the 4 GiB GPU address window");
+   /* R88: VkDeviceMemory lies outside the address window, so the heap is the
+    * whole direct-memory pool: the console's 12 GiB, which the host model
+    * reports too. */
+   check(heap == UINT64_C(12) << 30, "the heap is the whole 12 GiB direct-memory pool");
+   VkDeviceSize usage_before = 0;
+   VkDeviceSize budget_before = 0;
+   query_budget(&usage_before, &budget_before);
+   check(budget_before > 0 && budget_before >= usage_before && budget_before <= heap,
+         "the budget lies between what VkDeviceMemory holds and the heap");
 
    struct mapping tiny;
    check(allocate(instance, device, 1, &tiny) && in_window(&tiny) &&
@@ -132,6 +180,13 @@ main(void)
          "a 3 MiB allocation maps 2 MiB-aligned at high word 2");
    check(large.data && round_trip(&large, 0x5a), "the 3 MiB allocation reads back at both ends");
    check(tiny.data && large.data && disjoint(&tiny, &large), "the two allocations are disjoint");
+   VkDeviceSize usage_after = 0;
+   VkDeviceSize budget_after = 0;
+   query_budget(&usage_after, &budget_after);
+   check(usage_after - usage_before == PAGE_BYTES + 3 * LARGE_BYTES / 2 + PAGE_BYTES,
+         "the budget's usage grows by exactly the pages the two allocations map");
+   check(budget_after == budget_before,
+         "the budget stays: what VkDeviceMemory takes, the pool no longer has");
 
    if (tiny.data) {
       tiny.data[0] = 0xc3;

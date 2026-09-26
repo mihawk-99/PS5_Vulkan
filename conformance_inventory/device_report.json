@@ -5,12 +5,14 @@
     "result": "PASS"
   },
   "device_extension_versions": {
+    "VK_EXT_memory_budget": 1,
     "VK_KHR_sampler_mirror_clamp_to_edge": 3,
     "VK_KHR_swapchain": 70
   },
   "device_extensions": [
     "VK_KHR_sampler_mirror_clamp_to_edge",
-    "VK_KHR_swapchain"
+    "VK_KHR_swapchain",
+    "VK_EXT_memory_budget"
   ],
   "features": {
     "alphaToOne": 0,
@@ -1469,7 +1471,7 @@
   },
   "memory": {
     "heap0_flags": 1,
-    "heap0_size": 4294967296,
+    "heap0_size": 12884901888,
     "type0_flags": 1,
     "type0_heap": 0,
     "type1_flags": 7,
@@ -1477,7 +1479,7 @@
   },
   "properties": {
     "api_version": 4198400,
-    "device_extension_count": 2,
+    "device_extension_count": 3,
     "device_id": 0,
     "device_name": "PS5 AGC GPU (ps5vk)",
     "device_type": 1,
@@ -1505,5 +1507,5 @@
     "family0_queue_count": 1,
     "family0_timestamp_bits": 64
   },
-  "source": "Klog_Logs/r84-stress1.log"
+  "source": "Klog_Logs/r88-device-memory.log"
 }

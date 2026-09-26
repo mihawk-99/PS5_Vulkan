@@ -8,13 +8,17 @@
  * (ps5vk_memory.c), the queue's submission buffer (ps5vk_queue.c), pipeline
  * stage workspaces (ps5vk_pipeline.c) and command buffers' register tables
  * (ps5vk_cmd_buffer.c). Each is type 12, mapped for CPU and GPU read and
- * write at one address, and must lie inside the address window.
+ * write at one address. What shaders reach through 32-bit pointers must lie
+ * in the address window, where the kernel puts a mapping asked for with no
+ * address. VkDeviceMemory goes to the device memory region instead (R88), so
+ * the heap is the whole direct-memory pool rather than the window's 4 GiB.
  */
 
 #include "ps5vk_private.h"
 
 #include <assert.h>
 #include <immintrin.h>
+#include <pthread.h>
 
 #include "util/log.h"
 #include "util/u_atomic.h"
@@ -64,13 +68,96 @@ ps5vk_direct_memory_kinds(char *out, size_t size)
    return out;
 }
 
-/* R86, test-only (ps5vk_debug_device_memory_base): where VkDeviceMemory is
- * placed instead of the address window, or 0 for the window. Each mapping asks
- * for the next address after the last one's, and how many landed outside the
- * window since the base was set is counted for the probe to assert. */
+/* R86, test-only (ps5vk_debug_device_memory_base): a base VkDeviceMemory is
+ * placed from instead of the device memory region, or 0 for the region. Each
+ * mapping asks for the next address after the last one's. How many
+ * VkDeviceMemory mappings landed outside the window since the last call is
+ * counted for a probe to assert. */
 static uint64_t ps5vk_device_memory_base;
 static uint64_t ps5vk_device_memory_next;
 static uint64_t ps5vk_device_memory_outside;
+
+/* R88: the device memory region's granules, a bit each, set while a mapping
+ * holds them. First fit, so freed ranges are used again and a long session
+ * does not walk through the region. The kernel has the last word on where a
+ * mapping goes: one it puts elsewhere gives its granules back at once. */
+#define PS5VK_REGION_GRANULES                                                                      \
+   ((uint32_t)(PS5VK_DEVICE_MEMORY_REGION_BYTES / PS5VK_DEVICE_MEMORY_GRANULE))
+static uint64_t ps5vk_region_used[PS5VK_REGION_GRANULES / 64];
+static pthread_mutex_t ps5vk_region_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void
+ps5vk_region_mark(uint32_t first, uint32_t count, bool used)
+{
+   for (uint32_t granule = first; granule < first + count; granule++) {
+      const uint64_t bit = UINT64_C(1) << (granule % 64);
+      if (used)
+         ps5vk_region_used[granule / 64] |= bit;
+      else
+         ps5vk_region_used[granule / 64] &= ~bit;
+   }
+}
+
+/* count free granules in a row, taken; UINT32_MAX when the region has none. */
+static uint32_t
+ps5vk_region_take(uint32_t count)
+{
+   if (count == 0 || count > PS5VK_REGION_GRANULES)
+      return UINT32_MAX;
+   pthread_mutex_lock(&ps5vk_region_lock);
+   uint32_t run = 0;
+   for (uint32_t granule = 0; granule < PS5VK_REGION_GRANULES; granule++) {
+      if (granule % 64 == 0 && ps5vk_region_used[granule / 64] == UINT64_MAX) {
+         granule += 63;
+         run = 0;
+         continue;
+      }
+      if (ps5vk_region_used[granule / 64] & (UINT64_C(1) << (granule % 64))) {
+         run = 0;
+         continue;
+      }
+      if (++run == count) {
+         const uint32_t first = granule + 1 - count;
+         ps5vk_region_mark(first, count, true);
+         pthread_mutex_unlock(&ps5vk_region_lock);
+         return first;
+      }
+   }
+   pthread_mutex_unlock(&ps5vk_region_lock);
+   return UINT32_MAX;
+}
+
+static void
+ps5vk_region_give(struct ps5vk_direct_mapping *mapping)
+{
+   if (mapping->granules == 0)
+      return;
+   pthread_mutex_lock(&ps5vk_region_lock);
+   ps5vk_region_mark(mapping->granule, mapping->granules, false);
+   pthread_mutex_unlock(&ps5vk_region_lock);
+   mapping->granules = 0;
+}
+
+/* Where a new mapping of this kind asks to go: the test switch's next address,
+ * the device memory region's first fit for VkDeviceMemory, or NULL -- the
+ * kernel's own choice, the window -- for everything else. */
+static void *
+ps5vk_direct_mapping_hint(struct ps5vk_direct_mapping *mapping)
+{
+   if (mapping->kind != PS5VK_DIRECT_MEMORY)
+      return NULL;
+   const uint64_t step = align64(mapping->bytes, PS5VK_DEVICE_MEMORY_GRANULE);
+   const uint64_t base = p_atomic_read(&ps5vk_device_memory_base);
+   if (base != 0)
+      return (void *)(uintptr_t)(base + p_atomic_add_return(&ps5vk_device_memory_next, step) - step);
+   const uint32_t count = (uint32_t)(step / PS5VK_DEVICE_MEMORY_GRANULE);
+   const uint32_t first = ps5vk_region_take(count);
+   if (first == UINT32_MAX)
+      return NULL;
+   mapping->granule = first;
+   mapping->granules = count;
+   return (void *)(PS5VK_DEVICE_MEMORY_REGION + (uintptr_t)first * PS5VK_DEVICE_MEMORY_GRANULE);
+}
 
 uint64_t
 ps5vk_debug_device_memory_base(uint64_t base)
@@ -100,18 +187,23 @@ ps5vk_direct_mapping_create(struct ps5vk_direct_mapping *mapping, size_t bytes, 
    p_atomic_inc(&ps5vk_direct_kind_count[kind]);
    p_atomic_add(&ps5vk_direct_kind_bytes[kind], (uint64_t)bytes);
 
-   void *address = NULL;
-   const uint64_t base = kind == PS5VK_DIRECT_MEMORY ? p_atomic_read(&ps5vk_device_memory_base) : 0;
-   if (base != 0) {
-      const uint64_t step = align64(bytes, UINT64_C(0x200000));
-      address = (void *)(uintptr_t)(base + p_atomic_add_return(&ps5vk_device_memory_next, step) - step);
-   }
+   void *const hint = ps5vk_direct_mapping_hint(mapping);
+   void *address = hint;
    result = sceKernelMapDirectMemory(&address, bytes, PS5VK_MAP_PROTECTION, 0, start, alignment);
+   if (result != 0 && hint != NULL) {
+      /* An address the kernel would not map at: its own choice instead. */
+      ps5vk_region_give(mapping);
+      address = NULL;
+      result = sceKernelMapDirectMemory(&address, bytes, PS5VK_MAP_PROTECTION, 0, start, alignment);
+   }
    if (result == 0 && address) {
       mapping->address = address;
+      if (address != hint)
+         ps5vk_region_give(mapping);
       if (ps5vk_address_range_valid((uint64_t)(uintptr_t)address, bytes))
          return 0;
-      if (base != 0 && ps5vk_gpu_range_valid((uint64_t)(uintptr_t)address, bytes)) {
+      if (kind == PS5VK_DIRECT_MEMORY &&
+          ps5vk_gpu_range_valid((uint64_t)(uintptr_t)address, bytes)) {
          p_atomic_inc(&ps5vk_device_memory_outside);
          return 0;
       }
@@ -144,6 +236,7 @@ ps5vk_direct_mapping_destroy(struct ps5vk_direct_mapping *mapping)
       p_atomic_dec(&ps5vk_direct_kind_count[mapping->kind]);
       p_atomic_add(&ps5vk_direct_kind_bytes[mapping->kind], -(int64_t)mapping->bytes);
    }
+   ps5vk_region_give(mapping);
    mapping->start = -1;
    mapping->address = NULL;
 }

@@ -601,7 +601,12 @@ critical path rather than in Phase D.
   1. *Is the window global or per resource?* Read the compiler's address-high
      handling and the descriptor forms. If the high word is fixed for the
      shader, every shader-visible resource must fit one 4 GiB window, which
-     caps several 1.4 limits.
+     caps several 1.4 limits. *Answered by R86-R88 (docs/M5_PHASE_C.md):* the
+     fixed high word binds only what shaders reach through 32-bit pointers
+     (register tables, push constants, the vertex-buffer table, code).
+     Resources reach the GPU through descriptors, target registers and packets
+     with 48-bit addresses; VkDeviceMemory lives outside the window, and the
+     heap is the 12 GiB pool.
   2. *Does a 1.4-sized target work?* The allocator half is answered: the pool
      is 12 GiB and served every request up to 1,061,683,200 bytes on
      2026-09-16 (`HARDWARE_FINDINGS.md`). What remains is rendering: allocate,

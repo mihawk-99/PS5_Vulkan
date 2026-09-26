@@ -41,8 +41,9 @@ The report below is the one this plan was made from.
   `maxUniformBufferRange` 16384, `maxPerStageDescriptorStorageImages` and
   `maxPerStageDescriptorStorageBuffers` 4, `maxBoundDescriptorSets` 4 and
   `maxPushConstantsSize` 128.
-- One heap of 4 GiB. Type 0 is device-local, and type 1 is device-local, host-visible
-  and host-coherent.
+- One heap of 12 GiB, the whole direct-memory pool, with VK_EXT_memory_budget
+  (R88). Type 0 is device-local, and type 1 is device-local, host-visible and
+  host-coherent.
 
 ## The hardware renderer (GSDeviceVK), the shipping path
 

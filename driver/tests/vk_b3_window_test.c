@@ -1,18 +1,20 @@
 /*
- * PS5 Vulkan driver - Phase B3 negative test: memory outside the address window.
+ * PS5 Vulkan driver - Phase B3 test: memory outside the address window.
  * Copyright (C) 2026 Mihawk-99
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Milestone 5 Phases B3 and B5 (docs/M5_PHASE_B.md). tools/check-driver.sh
- * runs the direct PC build only. The test sets PS5_HOST_DIRECT_MAPPING_BASE
- * itself around the calls under test, so the host kernel maps direct memory
- * at high word 3 for them alone. Shaders could not address such memory, and
- * the driver must refuse it:
- * - memory allocations fail with VK_ERROR_OUT_OF_DEVICE_MEMORY;
- * - so does creating a device, whose queue maps its submission buffer;
- * - the refused memory is released: after refusals totalling four times the
- *   heap, the variable is cleared and nearly the whole heap is allocated at
- *   high word 2.
+ * Milestone 5 Phases B3 and B5 (docs/M5_PHASE_B.md), and R88
+ * (docs/M5_PHASE_C.md). tools/check-driver.sh runs the direct PC build only.
+ * The test sets PS5_HOST_DIRECT_MAPPING_BASE itself around the calls under
+ * test, so the host kernel maps direct memory at high word 3 for them alone.
+ * - VkDeviceMemory there is accepted: the GPU reaches it only through 48-bit
+ *   addresses, and reads and writes it outside the window on the console
+ *   (R86, R87). 64 allocations of 256 MiB, 16 GiB together, are made and
+ *   freed one after another through the 4 GiB pool.
+ * - A device is refused, because its queue's submission buffer is read
+ *   through a 32-bit pointer and has to lie in the window.
+ * - Afterwards, with the variable cleared, nearly the whole pool allocates
+ *   again: nothing was kept.
  * The test runs only on the PC, where it may change its environment.
  */
 
@@ -56,18 +58,17 @@ main(void)
    }
 
    setenv(kMappingBase, "0x300000000", 1);
-   check(try_allocate(instance, device, 1) == VK_ERROR_OUT_OF_DEVICE_MEMORY,
-         "a page mapped at high word 3 is refused");
-   check(try_allocate(instance, device, UINT64_C(0x300000)) == VK_ERROR_OUT_OF_DEVICE_MEMORY,
-         "a 2 MiB-aligned allocation mapped at high word 3 is refused");
+   check(try_allocate(instance, device, 1) == VK_SUCCESS,
+         "VkDeviceMemory mapped at high word 3 is accepted (R88)");
+   check(try_allocate(instance, device, UINT64_C(0x300000)) == VK_SUCCESS,
+         "a 2 MiB-aligned allocation mapped at high word 3 is accepted");
 
-   /* 64 refusals of 256 MiB: 16 GiB together, four times the heap. Each one
-    * reaches the mapping, so each must hand its direct memory back. */
-   bool refused = true;
+   /* 64 allocations of 256 MiB, each freed before the next: 16 GiB together,
+    * four times the pool, so each must hand its direct memory back. */
+   bool accepted = true;
    for (unsigned i = 0; i < 64; i++)
-      refused = try_allocate(instance, device, QUARTER_GIB) == VK_ERROR_OUT_OF_DEVICE_MEMORY &&
-                refused;
-   check(refused, "64 allocations of 256 MiB mapped at high word 3 are refused");
+      accepted = try_allocate(instance, device, QUARTER_GIB) == VK_SUCCESS && accepted;
+   check(accepted, "64 allocations of 256 MiB at high word 3 are made and freed in turn");
 
    const float priority = 1.0f;
    const VkDeviceQueueCreateInfo queue_info = {
@@ -89,8 +90,8 @@ main(void)
    if (created == VK_SUCCESS)
       VK_FUNCTION(instance, DestroyDevice)(refused_device, NULL);
 
-   /* 15 x 256 MiB = 3.75 GiB of the 4 GiB heap, beside the working device's
-    * 2 MiB queue buffer, fits only if nothing refused kept its memory. */
+   /* 15 x 256 MiB = 3.75 GiB of the 4 GiB pool, beside the working device's
+    * 2 MiB queue buffer, fits only if nothing kept its memory. */
    unsetenv(kMappingBase);
    const VkMemoryAllocateInfo info = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -103,7 +104,7 @@ main(void)
           VK_FUNCTION(instance, AllocateMemory)(device, &info, NULL, &kept[allocated]) == VK_SUCCESS)
       ++allocated;
    check(allocated == REUSED_COUNT,
-         "afterwards 3.75 GiB allocates at high word 2: refused memory was released");
+         "afterwards 3.75 GiB allocates at high word 2: nothing kept its memory");
    while (allocated > 0)
       VK_FUNCTION(instance, FreeMemory)(device, kept[--allocated], NULL);
 
