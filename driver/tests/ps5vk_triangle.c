@@ -1968,6 +1968,69 @@ ps5vk_triangle_query_copy(const struct ps5vk_triangle *triangle, uint64_t *value
    return true;
 }
 
+const void *
+ps5vk_triangle_read_depth_aspect(struct ps5vk_triangle *triangle, VkImageAspectFlags aspect)
+{
+   if (triangle == NULL || triangle->depth_readback_mapped == NULL ||
+       triangle->depth_image == VK_NULL_HANDLE)
+      return NULL;
+   const VkCommandBufferAllocateInfo allocate = {
+      .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+      .commandPool = triangle->pool,
+      .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+      .commandBufferCount = 1,
+   };
+   VkCommandBuffer command = VK_NULL_HANDLE;
+   if (!step(triangle, "allocate_depth_readback",
+             CALL(triangle, AllocateCommandBuffers)(triangle->device, &allocate, &command), NULL))
+      return NULL;
+   const VkCommandBufferBeginInfo begin = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                                           .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
+   CALL(triangle, BeginCommandBuffer)(command, &begin);
+   /* From the read-only layout the frame's barrier left, to a copy source. */
+   const VkImageMemoryBarrier barrier = {
+      .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+      .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
+      .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+      .oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+      .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .image = triangle->depth_image,
+      .subresourceRange = {aspect, 0, 1, 0, 1},
+   };
+   CALL(triangle, CmdPipelineBarrier)(command, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                      VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1,
+                                      &barrier);
+   const VkBufferImageCopy region = {
+      .imageSubresource = {aspect, 0, 0, 1},
+      .imageExtent = {PS5VK_TRIANGLE_WIDTH, PS5VK_TRIANGLE_HEIGHT, 1},
+   };
+   CALL(triangle, CmdCopyImageToBuffer)(command, triangle->depth_image,
+                                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                        triangle->depth_readback_buffer, 1, &region);
+   if (!step(triangle, "end_depth_readback", CALL(triangle, EndCommandBuffer)(command),
+             aspect == VK_IMAGE_ASPECT_STENCIL_BIT ? "stencil" : "depth"))
+      return NULL;
+   const VkFenceCreateInfo fence_info = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+   VkFence fence = VK_NULL_HANDLE;
+   const VkSubmitInfo submit = {
+      .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+      .commandBufferCount = 1,
+      .pCommandBuffers = &command,
+   };
+   const bool ran =
+      step(triangle, "create_depth_readback_fence",
+           CALL(triangle, CreateFence)(triangle->device, &fence_info, NULL, &fence), NULL) &&
+      step(triangle, "submit_depth_readback",
+           CALL(triangle, QueueSubmit)(triangle->queue, 1, &submit, fence), NULL) &&
+      step(triangle, "wait_depth_readback",
+           CALL(triangle, WaitForFences)(triangle->device, 1, &fence, VK_TRUE, UINT64_MAX), NULL);
+   CALL(triangle, DestroyFence)(triangle->device, fence, NULL);
+   CALL(triangle, FreeCommandBuffers)(triangle->device, triangle->pool, 1, &command);
+   return ran ? triangle->depth_readback_mapped : NULL;
+}
+
 void
 ps5vk_triangle_set_query(struct ps5vk_triangle *triangle, VkQueryPool pool, uint32_t query)
 {
@@ -2609,7 +2672,12 @@ create_depth_attachment(struct ps5vk_triangle *triangle, VkPhysicalDevice physic
        * four-sample attachment. */
       .samples = triangle->samples,
       .tiling = VK_IMAGE_TILING_OPTIMAL,
-      .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+      /* R83: an attachment a later pass samples is created sampled too, and a
+       * copy source for ps5vk_triangle_read_depth_aspect. */
+      .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+               (triangle->depth_sampled_aspect != 0
+                   ? VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                   : 0),
       .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
       .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
    };
@@ -2663,10 +2731,48 @@ create_depth_attachment(struct ps5vk_triangle *triangle, VkPhysicalDevice physic
       .format = triangle->depth_format,
       .subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1},
    };
-   return step(triangle, "create_depth_view",
-               CALL(triangle, CreateImageView)(triangle->device, &view_info, NULL,
-                                               &triangle->depth_view),
-               NULL);
+   if (!step(triangle, "create_depth_view",
+             CALL(triangle, CreateImageView)(triangle->device, &view_info, NULL,
+                                             &triangle->depth_view),
+             NULL))
+      return false;
+   if (triangle->depth_sampled_aspect == 0)
+      return true;
+   /* R83: the view a detached pass samples, of the one aspect it names. */
+   const VkImageViewCreateInfo sample_view_info = {
+      .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+      .image = triangle->depth_image,
+      .viewType = VK_IMAGE_VIEW_TYPE_2D,
+      .format = triangle->depth_format,
+      .subresourceRange = {triangle->depth_sampled_aspect, 0, 1, 0, 1},
+   };
+   return step(triangle, "create_depth_sample_view",
+               CALL(triangle, CreateImageView)(triangle->device, &sample_view_info, NULL,
+                                               &triangle->depth_sample_view),
+               triangle->depth_sampled_aspect == VK_IMAGE_ASPECT_STENCIL_BIT ? "stencil"
+                                                                             : "depth");
+}
+
+/* R83: the texture set's binding 0 names the sampled aspect of the depth
+ * attachment instead of the caller's texture, through the frame's nearest
+ * sampler, in the layout the barrier between the passes leaves it in. */
+static void
+point_texture_at_depth(struct ps5vk_triangle *triangle)
+{
+   const VkDescriptorImageInfo image_info = {
+      .sampler = triangle->texture_samplers[0],
+      .imageView = triangle->depth_sample_view,
+      .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+   };
+   const VkWriteDescriptorSet write = {
+      .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+      .dstSet = triangle->texture_set,
+      .dstBinding = 0,
+      .descriptorCount = 1,
+      .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      .pImageInfo = &image_info,
+   };
+   CALL(triangle, UpdateDescriptorSets)(triangle->device, 1, &write, 0, NULL);
 }
 
 /* Pipeline index: the shaders over the whole target, compatible with both
@@ -2883,6 +2989,7 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
    triangle->depth_clear_value = input->depth_clear_value;
    triangle->depth_format = input->depth_format != VK_FORMAT_UNDEFINED ? input->depth_format
                                                                       : VK_FORMAT_D32_SFLOAT;
+   triangle->depth_sampled_aspect = triangle->depth ? input->depth_sampled_aspect : 0;
    /* Phase V0-query: the scissor the pipelines declare, and the occlusion query
     * each frame's draws are recorded inside. A caller that leaves both unset
     * records what every frame before that phase recorded. */
@@ -2997,12 +3104,20 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
       .queueCount = 1,
       .pQueuePriorities = &priority,
    };
-   const char *const device_extensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+   /* The swapchain for a display frame, then the caller's (R81). */
+   const char *device_extensions[1 + 8];
+   uint32_t device_extension_count = 0;
+   if (display)
+      device_extensions[device_extension_count++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+   if (input->device_extension_count > 8)
+      return PS5VK_TRIANGLE_FAILED;
+   for (uint32_t index = 0; index < input->device_extension_count; index++)
+      device_extensions[device_extension_count++] = input->device_extensions[index];
    const VkDeviceCreateInfo device_info = {
       .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
       .queueCreateInfoCount = 1,
       .pQueueCreateInfos = &queue_info,
-      .enabledExtensionCount = display ? 1 : 0,
+      .enabledExtensionCount = device_extension_count,
       .ppEnabledExtensionNames = device_extensions,
    };
    if (!step(triangle, "create_device",
@@ -3097,6 +3212,14 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
                       &triangle->display_readback_buffer, &triangle->display_readback_memory,
                       &triangle->display_readback_mapped))
       return PS5VK_TRIANGLE_FAILED;
+   /* R83: room for one aspect of the depth attachment, four bytes a texel. */
+   if (triangle->depth_sampled_aspect != 0 &&
+       !create_buffer(triangle, physical,
+                      (VkDeviceSize)PS5VK_TRIANGLE_WIDTH * PS5VK_TRIANGLE_HEIGHT * 4u,
+                      VK_BUFFER_USAGE_TRANSFER_DST_BIT, "depth aspect readback", NULL,
+                      &triangle->depth_readback_buffer, &triangle->depth_readback_memory,
+                      &triangle->depth_readback_mapped))
+      return PS5VK_TRIANGLE_FAILED;
 
    /* The caller's geometry, when it draws an indexed frame (Phase C2). */
    if (!create_geometry(triangle, physical, input))
@@ -3129,6 +3252,14 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
        !create_texel_buffer(triangle, physical, input) ||
        !create_storage_image(triangle, physical, input))
       return PS5VK_TRIANGLE_FAILED;
+   if (triangle->depth_sampled_aspect != 0) {
+      if (triangle->texture_set == VK_NULL_HANDLE || !input->detach_depth) {
+         step(triangle, "point_texture_at_depth", VK_ERROR_INITIALIZATION_FAILED,
+              "sampling the depth attachment needs a texture set and a detached pass");
+         return PS5VK_TRIANGLE_FAILED;
+      }
+      point_texture_at_depth(triangle);
+   }
 
    /* A view and a framebuffer per target, both render passes. */
    const VkImageLayout target_layout = display ? VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
@@ -3329,8 +3460,10 @@ ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triang
       colour_input.depth = false;
       const VkRenderPass saved = triangle->first_pass;
       triangle->first_pass = triangle->detached_pass;
-      const bool pipeline_ok = create_pipeline(triangle, PS5VK_TRIANGLE_MAX_PIPELINES - 1,
-                                                &input->shaders[0], &colour_input);
+      const bool pipeline_ok = create_pipeline(
+         triangle, PS5VK_TRIANGLE_MAX_PIPELINES - 1,
+         input->detached_shaders != NULL ? input->detached_shaders : &input->shaders[0],
+         &colour_input);
       triangle->first_pass = saved;
       if (!pipeline_ok)
          return PS5VK_TRIANGLE_FAILED;
@@ -3655,6 +3788,32 @@ record(struct ps5vk_triangle *triangle, VkCommandBuffer command, VkRenderPass pa
    CALL(triangle, CmdBeginRenderPass)(command, &pass_begin, VK_SUBPASS_CONTENTS_INLINE);
    record_body(triangle, command, pipeline, split_pipelines ? VK_NULL_HANDLE : then);
    CALL(triangle, CmdEndRenderPass)(command);
+   if (triangle->detached_pass != VK_NULL_HANDLE && triangle->depth_sampled_aspect != 0) {
+      /* R83: the attachment's writes, made visible to the detached pass's
+       * fragment reads, and the image moved to the read-only layout the
+       * descriptor names. */
+      const VkImageMemoryBarrier barrier = {
+         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+         .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+         .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+         .oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+         .newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+         .image = triangle->depth_image,
+         .subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT |
+                                 (triangle->depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
+                                        triangle->depth_format == VK_FORMAT_D24_UNORM_S8_UINT
+                                     ? VK_IMAGE_ASPECT_STENCIL_BIT
+                                     : 0),
+                              0, 1, 0, 1},
+      };
+      CALL(triangle, CmdPipelineBarrier)(command,
+                                         VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                                            VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0,
+                                         NULL, 1, &barrier);
+   }
    if (triangle->detached_pass != VK_NULL_HANDLE) {
       const VkRenderPassBeginInfo detached = {
          .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
@@ -4185,6 +4344,10 @@ ps5vk_triangle_finish(struct ps5vk_triangle *triangle)
       /* As the Vulkan Tutorial cleans up: nothing is released while the queue
        * may still use it. */
       step(triangle, "device_wait_idle", CALL(triangle, DeviceWaitIdle)(device), NULL);
+      if (triangle->depth_readback_mapped)
+         CALL(triangle, UnmapMemory)(device, triangle->depth_readback_memory);
+      CALL(triangle, DestroyBuffer)(device, triangle->depth_readback_buffer, NULL);
+      CALL(triangle, FreeMemory)(device, triangle->depth_readback_memory, NULL);
       if (triangle->display_readback_mapped)
          CALL(triangle, UnmapMemory)(device, triangle->display_readback_memory);
       CALL(triangle, DestroyBuffer)(device, triangle->display_readback_buffer, NULL);
@@ -4294,6 +4457,7 @@ ps5vk_triangle_finish(struct ps5vk_triangle *triangle)
       CALL(triangle, FreeMemory)(device, triangle->copied_memory, NULL);
       if (triangle->fill_mapped != NULL)
          CALL(triangle, UnmapMemory)(device, triangle->fill_memory);
+      CALL(triangle, DestroyImageView)(device, triangle->depth_sample_view, NULL);
       CALL(triangle, DestroyImageView)(device, triangle->depth_view, NULL);
       CALL(triangle, DestroyImage)(device, triangle->depth_image, NULL);
       if (triangle->depth_mapped != NULL)

@@ -1,0 +1,31 @@
+{"schema":2,"event":"run_start","pid":170}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"m2-solid"}
+{"schema":2,"event":"value","probe":"r81_mirror_clamp","field":"frame","value":0}
+{"schema":2,"event":"value","probe":"r81_mirror_clamp","field":"boundary_pixels_skipped","value":1977600}
+{"schema":2,"event":"hex","probe":"r81_mirror_clamp","field":"corner","value":"0xff802020"}
+{"schema":2,"event":"hex","probe":"r81_mirror_clamp","field":"left_middle","value":"0xff80a020"}
+{"schema":2,"event":"hex","probe":"r81_mirror_clamp","field":"center","value":"0xff80a0a0"}
+{"schema":2,"event":"value","probe":"r81_mirror_clamp","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r81_mirror_clamp","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r81_mirror_clamp","status":"PASS","result":0,"detail":"clamp to edge frame 0"}
+{"schema":2,"event":"value","probe":"r81_mirror_clamp","field":"frame","value":1}
+{"schema":2,"event":"value","probe":"r81_mirror_clamp","field":"boundary_pixels_skipped","value":1977600}
+{"schema":2,"event":"hex","probe":"r81_mirror_clamp","field":"corner","value":"0xff802020"}
+{"schema":2,"event":"hex","probe":"r81_mirror_clamp","field":"left_middle","value":"0xff80a0a0"}
+{"schema":2,"event":"hex","probe":"r81_mirror_clamp","field":"center","value":"0xff80a0a0"}
+{"schema":2,"event":"value","probe":"r81_mirror_clamp","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r81_mirror_clamp","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r81_mirror_clamp","status":"PASS","result":0,"detail":"mirrored repeat frame 1"}
+{"schema":2,"event":"value","probe":"r81_mirror_clamp","field":"frame","value":2}
+{"schema":2,"event":"value","probe":"r81_mirror_clamp","field":"boundary_pixels_skipped","value":1977600}
+{"schema":2,"event":"hex","probe":"r81_mirror_clamp","field":"corner","value":"0xff80e0e0"}
+{"schema":2,"event":"hex","probe":"r81_mirror_clamp","field":"left_middle","value":"0xff80a0e0"}
+{"schema":2,"event":"hex","probe":"r81_mirror_clamp","field":"center","value":"0xff80a0a0"}
+{"schema":2,"event":"value","probe":"r81_mirror_clamp","field":"mismatches","value":0}
+{"schema":2,"event":"value","probe":"r81_mirror_clamp","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r81_mirror_clamp","status":"PASS","result":0,"detail":"mirror clamp to edge frame 2"}
+{"schema":2,"event":"value","probe":"r81_mirror_clamp","field":"passed_frames","value":3}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"r81-mirror-clamp"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"r57-border"}
+{"schema":2,"event":"value","probe":"runner_summary","field":"ran","value":3}
+{"schema":2,"event":"probe","probe":"runner_summary","status":"PASS","result":0,"detail":"3 of 3 queued tests passed"}

@@ -1,0 +1,6 @@
+hold 1
+capture
+m2-solid
+r81-mirror-clamp
+r57-border
+exit

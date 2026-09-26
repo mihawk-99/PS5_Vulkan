@@ -1447,7 +1447,28 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
    /* The descriptor drops the address's low byte, which images keep zero:
     * ps5vk_image.c aligns them to it. */
    assert((image->address & 0xffu) == 0);
-   const struct ps5vk_format *const entry = ps5vk_find_format(image->vk.format);
+   /* R83: a combined depth/stencil image is sampled one aspect a view. Its
+    * depth aspect is the depth surface at the image's address, which the
+    * format's own entry describes (32_FLOAT for D32_SFLOAT_S8_UINT, as for
+    * D32_SFLOAT); its stencil aspect is the one-byte plane beside it
+    * (ps5vk_image_stencil_plane), fetched as R8_UINT in the same Z tiles --
+    * the value in red, as Vulkan's stencil sampling returns it. The plane is
+    * laid out for one level and one layer of one sample. */
+   const bool stencil_aspect = view->aspects == VK_IMAGE_ASPECT_STENCIL_BIT;
+   if (stencil_aspect &&
+       (image->stencil_offset == 0 || image->vk.mip_levels != 1 || image->vk.array_layers != 1 ||
+        image->vk.samples != VK_SAMPLE_COUNT_1_BIT)) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                              "set %u binding %u samples the stencil of a format %u image with "
+                              "%u levels, %u layers and %u samples; the stencil plane is laid out "
+                              "for one of each (R83)",
+                              (unsigned)set, binding, (unsigned)image->vk.format,
+                              image->vk.mip_levels, image->vk.array_layers,
+                              (unsigned)image->vk.samples);
+      return false;
+   }
+   const struct ps5vk_format *const entry =
+      ps5vk_find_format(stencil_aspect ? VK_FORMAT_R8_UINT : image->vk.format);
    if (entry == NULL || entry->image_format == 0 || entry->dst_sel == 0) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                               "set %u binding %u samples a format %u image, whose descriptor "
@@ -1456,7 +1477,7 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
                               (unsigned)set, binding, (unsigned)image->vk.format);
       return false;
    }
-   sampled->address = image->address;
+   sampled->address = image->address + (stencil_aspect ? image->stencil_offset : 0);
    sampled->extent = (VkExtent2D){image->vk.extent.width, image->vk.extent.height};
    sampled->format_word = entry->image_format << 20;
    sampled->pitch_texels = !tiled && single_2d && (padded || image->vk.mip_levels > 1)
@@ -1489,7 +1510,7 @@ ps5vk_sampled_image(struct ps5vk_cmd_buffer *cmd_buffer, uint32_t set, uint32_t 
                 view->swizzle.g, view->swizzle.b, view->swizzle.a, rendered_here,
                 needs_sampler ? sampler->word : 0, needs_sampler ? sampler->lod_word : 0,
                 needs_sampler ? sampler->address_word : 0);
-   sampled->depth_tiles = tiled && vk_format_has_depth(image->vk.format);
+   sampled->depth_tiles = tiled && (vk_format_has_depth(image->vk.format) || stencil_aspect);
    sampled->barrier = rendered_here;
    return true;
 }

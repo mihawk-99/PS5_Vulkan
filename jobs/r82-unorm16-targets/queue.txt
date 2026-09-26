@@ -1,0 +1,6 @@
+hold 1
+capture
+m2-solid
+v0-targets
+v0-formats
+exit

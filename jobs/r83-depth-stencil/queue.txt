@@ -1,0 +1,7 @@
+hold 1
+capture
+m2-solid
+r83-depth-stencil
+v0-stencil
+v0-formats
+exit

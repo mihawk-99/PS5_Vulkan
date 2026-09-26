@@ -65,7 +65,7 @@
 # bindings.txt layout the title needs when the shaders read resources,
 # SHA256SUMS and PROVENANCE.txt, after checking the compiler metadata.
 #
-# Run from the repository root:  bash tools/build-probe-shaders.sh m2|m3-uniform|v0-robust|m3-vertex|m3-texture|m4-depth|m4-blend|b7-corner|b8-corner|c1-clear|c3-quad|c7-mip|c7-mip-linear|c7-diag|c2-instance|c8-sampleid|v0-vertex-sint|v0-vertex-uint|v0-vertex-bytes-float|v0-vertex-bytes-uint|v0-vertex-bytes-sint|v0-array|v0-cube|v0-push|v0-texture-uint|v0-texture-sint|v0-target-uint|v0-target-sint|r71-dual-source|r79-lod-bias-range
+# Run from the repository root:  bash tools/build-probe-shaders.sh m2|m3-uniform|v0-robust|m3-vertex|m3-texture|m4-depth|m4-blend|b7-corner|b8-corner|c1-clear|c3-quad|c7-mip|c7-mip-linear|c7-diag|c2-instance|c8-sampleid|v0-vertex-sint|v0-vertex-uint|v0-vertex-bytes-float|v0-vertex-bytes-uint|v0-vertex-bytes-sint|v0-array|v0-cube|v0-push|v0-texture-uint|v0-texture-sint|v0-target-uint|v0-target-sint|r71-dual-source|r79-lod-bias-range|r83-quadrant
 set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -665,6 +665,18 @@ c7-diag)
         --vertex-attribute 1:r32g32_float:0:8:16:4)
     pixel_flags=(--address32-hi 2)
     ;;
+r83-quadrant)
+    # R83: the band quad, and a pixel stage that writes only the lower right
+    # quadrant (the pass that fills a depth/stencil attachment's two planes),
+    # with no descriptors.
+    vertex_source=shaders/c7/band.vert
+    pixel_source=shaders/r83/quadrant.frag
+    output=probes/r83-quadrant
+    vertex_flags=(--address32-hi 2
+        --vertex-attribute 0:r32g32_float:0:0:16:4
+        --vertex-attribute 1:r32g32_float:0:8:16:4)
+    pixel_flags=(--address32-hi 2)
+    ;;
 r60-big)
     vertex_source=shaders/r59/fragcoord.vert
     pixel_source=shaders/r60/big.frag
@@ -1241,7 +1253,7 @@ elif set_name == "c2-instance":
     bindings = [("address32_hi", expected_hi),
                 *vertex_input("vertex attributes: location 0 r32g32_float offset 0, "
                               "location 1 r32g32b32a32_float offset 8, stride 24, binding 0")]
-elif set_name in ("c7-diag", "r59-fragcoord", "r60-big"):
+elif set_name in ("c7-diag", "r59-fragcoord", "r60-big", "r83-quadrant"):
     if pixel.get("descriptor_bindings"):
         fail("pixel stage unexpectedly declares descriptor bindings")
     bindings = [("address32_hi", expected_hi),

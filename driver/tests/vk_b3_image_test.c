@@ -83,19 +83,23 @@ check_formats(void)
    check(p.optimalTilingFeatures == kDepthFeatures && p.linearTilingFeatures == 0 &&
             p.bufferFeatures == 0,
          "D16_UNORM: its own depth word and the same fetch, blit source and transfers");
-   /* The two stencil formats report the attachment bit round 12's console probe
-    * proved (Klog_Logs/v0-stencil-run5.log), and nothing else: no transfer,
-    * fetch or blit of a stencil plane has been measured, so the rest of their
-    * features must stay zero. What the audit's clause requires of one of them is
-    * exactly this bit. */
-   for (int stencil_format = 0; stencil_format < 2; stencil_format++) {
-      const VkFormat format = stencil_format == 0 ? VK_FORMAT_D24_UNORM_S8_UINT
-                                                   : VK_FORMAT_D32_SFLOAT_S8_UINT;
-      p = format_properties(format);
-      check(p.optimalTilingFeatures == VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT &&
-               p.linearTilingFeatures == 0 && p.bufferFeatures == 0,
-            "a stencil format reports the attachment bit the probe proved and nothing else");
-   }
+   /* D24_UNORM_S8_UINT reports the attachment bit round 12's console probe
+    * proved (Klog_Logs/v0-stencil-run5.log), and nothing else. What the audit's
+    * clause requires of one stencil format is exactly this bit. */
+   p = format_properties(VK_FORMAT_D24_UNORM_S8_UINT);
+   check(p.optimalTilingFeatures == VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT &&
+            p.linearTilingFeatures == 0 && p.bufferFeatures == 0,
+         "D24_UNORM_S8_UINT reports the attachment bit the probe proved and nothing else");
+   /* R83: D32_SFLOAT_S8_UINT is also sampled and both transfers, one aspect at
+    * a time (the r83-depth-stencil case proves both planes on the console), and
+    * no blit: a blit of a stencil plane has not been measured. */
+   p = format_properties(VK_FORMAT_D32_SFLOAT_S8_UINT);
+   check(p.optimalTilingFeatures == (VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                                     VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+                                     VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+                                     VK_FORMAT_FEATURE_TRANSFER_DST_BIT) &&
+            p.linearTilingFeatures == 0 && p.bufferFeatures == 0,
+         "D32_SFLOAT_S8_UINT: attachment, sampled and both transfers");
 
    VkImageFormatProperties ip;
    VkResult result = image_format_properties(VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TYPE_2D,

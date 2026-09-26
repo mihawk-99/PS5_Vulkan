@@ -1,0 +1,25 @@
+{"schema":2,"event":"run_start","pid":172}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"m2-solid"}
+{"schema":2,"event":"value","probe":"r83_depth_stencil","field":"frame","value":0}
+{"schema":2,"event":"hex","probe":"r83_depth_stencil","field":"corner","value":"0xff000060"}
+{"schema":2,"event":"hex","probe":"r83_depth_stencil","field":"quadrant","value":"0xff000000"}
+{"schema":2,"event":"value","probe":"r83_depth_stencil","field":"sample_mismatches","value":0}
+{"schema":2,"event":"value","probe":"r83_depth_stencil","field":"depth_readback_mismatches","value":0}
+{"schema":2,"event":"value","probe":"r83_depth_stencil","field":"stencil_readback_mismatches","value":0}
+{"schema":2,"event":"value","probe":"r83_depth_stencil","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r83_depth_stencil","status":"PASS","result":0,"detail":"depth aspect sampled"}
+{"schema":2,"event":"value","probe":"r83_depth_stencil","field":"frame","value":1}
+{"schema":2,"event":"hex","probe":"r83_depth_stencil","field":"corner","value":"0x1000000"}
+{"schema":2,"event":"hex","probe":"r83_depth_stencil","field":"quadrant","value":"0x100005a"}
+{"schema":2,"event":"value","probe":"r83_depth_stencil","field":"sample_mismatches","value":0}
+{"schema":2,"event":"value","probe":"r83_depth_stencil","field":"depth_readback_mismatches","value":0}
+{"schema":2,"event":"value","probe":"r83_depth_stencil","field":"stencil_readback_mismatches","value":0}
+{"schema":2,"event":"value","probe":"r83_depth_stencil","field":"pixels","value":8294400}
+{"schema":2,"event":"probe","probe":"r83_depth_stencil","status":"PASS","result":0,"detail":"stencil aspect sampled"}
+{"schema":2,"event":"value","probe":"r83_depth_stencil","field":"passed_frames","value":2}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"r83-depth-stencil"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"v0-stencil"}
+{"schema":2,"event":"probe","probe":"v0_formats_format","status":"INFO","result":0,"detail":"D32_SFLOAT_S8_UINT: optimal 0x0000c201, buffer 0x00000000"}
+{"schema":2,"event":"probe","probe":"runner_test","status":"PASS","result":0,"detail":"v0-formats"}
+{"schema":2,"event":"value","probe":"runner_summary","field":"ran","value":4}
+{"schema":2,"event":"probe","probe":"runner_summary","status":"PASS","result":0,"detail":"4 of 4 queued tests passed"}

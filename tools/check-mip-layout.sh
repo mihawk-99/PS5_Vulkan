@@ -218,6 +218,7 @@ for symbol, bpe, samples, mode, what in [
         ("ps5vk_tiled_8b_terms", 8, 1, "64kb_r_x", "the eight-byte colour map"),
         ("ps5vk_tiled_16b_terms", 16, 1, "64kb_r_x", "the sixteen-byte colour map"),
         ("ps5vk_tiled_depth2_terms", 2, 1, "64kb_z_x", "the two-byte depth map"),
+        ("ps5vk_tiled_stencil_terms", 1, 1, "64kb_z_x", "the one-byte stencil plane map"),
         ("ps5vk_tiled_depth4_terms", 4, 4, "64kb_z_x", "the four-sample depth map")]:
     want = oracle_terms(bpe, samples, mode)
     # The depth row's sample term is the byte offset the driver adds itself

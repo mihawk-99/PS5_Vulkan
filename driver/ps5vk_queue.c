@@ -2662,6 +2662,23 @@ ps5vk_rgba8_texel_bytes(VkFormat format)
  * read, copying, or evicting the destination lines it wrote. */
 enum ps5vk_copy_pass { PS5VK_COPY_EVICT_SOURCE, PS5VK_COPY_RUNS, PS5VK_COPY_EVICT_DESTINATION };
 
+/* The bytes a side keeps contiguous along a row. A colour map keeps
+ * PS5VK_TILED_RUN_BYTES; the Z maps of a one-sample depth or stencil plane keep
+ * two texels -- x's low bit is the texel's own, and its next bit lies above
+ * y's low one (0x10 for four bytes, 0x8 for two, 0x4 for the one-byte stencil
+ * plane, ps5vk_image.c) -- and a four-sample depth texel is one sixteen-byte
+ * unit. A row-layout side keeps its whole row (R83: a one-sample depth side
+ * copied four texels a run, which scattered every other pair). */
+static uint64_t
+ps5vk_copy_side_run_bytes(const struct ps5vk_image_copy_side *side, uint32_t texel_bytes)
+{
+   if (!side->tiled)
+      return UINT64_MAX;
+   if (side->depth)
+      return side->samples == 4 ? texel_bytes : 2u * (uint64_t)side->element_bytes;
+   return PS5VK_TILED_RUN_BYTES;
+}
+
 static void
 ps5vk_image_copy_pass(const struct ps5vk_memory_copy *copy, enum ps5vk_copy_pass pass)
 {
@@ -2669,9 +2686,12 @@ ps5vk_image_copy_pass(const struct ps5vk_memory_copy *copy, enum ps5vk_copy_pass
    const uint64_t row_bytes = (uint64_t)copy->width * texel_bytes;
    /* Two row-layout sides can copy a whole row at once. Tiled sides keep
     * the measured contiguous run size so no memcpy crosses a tile boundary. */
-   const uint64_t run_texels = !copy->source_side.tiled && !copy->destination_side.tiled
+   const uint64_t run_bytes_limit =
+      MIN2(ps5vk_copy_side_run_bytes(&copy->source_side, texel_bytes),
+           ps5vk_copy_side_run_bytes(&copy->destination_side, texel_bytes));
+   const uint64_t run_texels = run_bytes_limit == UINT64_MAX
                                   ? MAX2(copy->width, 1u)
-                                  : MAX2(PS5VK_TILED_RUN_BYTES / texel_bytes, 1u);
+                                  : MAX2(run_bytes_limit / texel_bytes, 1u);
    uint64_t last_line = UINT64_MAX;
    for (uint32_t row = 0; row < copy->height; row++) {
       for (uint64_t at = 0; at < row_bytes; at += run_texels * texel_bytes) {

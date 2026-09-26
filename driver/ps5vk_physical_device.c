@@ -65,9 +65,12 @@ static const struct vk_features ps5vk_features = {
    .dualSrcBlend = true,
 };
 
-/* Presentation to VideoOut (ps5vk_wsi.c, Phase C1). */
+/* Presentation to VideoOut (ps5vk_wsi.c, Phase C1), and R81's
+ * mirror-clamp-to-edge sampler mode (ps5vk_image.c, the hardware's
+ * mirror-once), which LRPS2 enables on every device it creates. */
 static const struct vk_device_extension_table ps5vk_device_extensions = {
    .KHR_swapchain = true,
+   .KHR_sampler_mirror_clamp_to_edge = true,
 };
 
 static void

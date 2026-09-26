@@ -11172,7 +11172,7 @@ struct TargetFormat
 // (driver/ps5vk_image.c): 8_8_8_8 with SWAP_STD, SWAP_ALT (the swapchain's
 // B8G8R8A8 byte order) and SWAP_STD_REV (the A8B8G8R8 order), 8_8_8_8 with the
 // sRGB number type, and 2_10_10_10 (R 256, G 512, B 768 of 1023, A 3).
-constexpr std::array<TargetFormat, 16> kTargetFormats = {{
+constexpr std::array<TargetFormat, 19> kTargetFormats = {{
     // The solid frame's bytes R, G, B, A, then the blended frame's bytes:
     // 10 + 40 = 50, 20 + 50 = 70 and 30 + 60 = 90 of 255 in every channel, in
     // the format's own order.
@@ -11335,6 +11335,37 @@ constexpr std::array<TargetFormat, 16> kTargetFormats = {{
      0,
      {0x38003400u, 0x3c003a00u},
      {0x38003400u, 0x40003a00u},
+     8},
+    // R82: the 16-bit normalized targets, with values half floats cannot hold
+    // (0x1235, 0x5679 and 0x9abd of 65535), so an FP16 export would round them
+    // and only a 32-bit one stores them exact. The blended frame adds 0x0234,
+    // 0x0456, 0x0678 and 0x4000 to 0x1000, 0x2000, 0x3000 and 0x8000.
+    {VK_FORMAT_R16_UNORM,
+     "R16_UNORM",
+     {0x1235 / 65535.0f, 0.0f, 0.0f, 1.0f},
+     0,
+     {0x1000 / 65535.0f, 0.0f, 0.0f, 1.0f},
+     {0x0234 / 65535.0f, 0.0f, 0.0f, 1.0f},
+     0,
+     {0x1235u},
+     {0x1234u},
+     2},
+    {VK_FORMAT_R16G16_UNORM,
+     "R16G16_UNORM",
+     {0x1235 / 65535.0f, 0x5679 / 65535.0f, 0.0f, 1.0f},
+     0x56791235u,
+     {0x1000 / 65535.0f, 0x2000 / 65535.0f, 0.0f, 1.0f},
+     {0x0234 / 65535.0f, 0x0456 / 65535.0f, 0.0f, 1.0f},
+     0x24561234u},
+    {VK_FORMAT_R16G16B16A16_UNORM,
+     "R16G16B16A16_UNORM",
+     {0x1235 / 65535.0f, 0x5679 / 65535.0f, 0x9abd / 65535.0f, 1.0f},
+     0,
+     {0x1000 / 65535.0f, 0x2000 / 65535.0f, 0x3000 / 65535.0f, 0x8000 / 65535.0f},
+     {0x0234 / 65535.0f, 0x0456 / 65535.0f, 0x0678 / 65535.0f, 0x4000 / 65535.0f},
+     0,
+     {0x56791235u, 0xffff9abdu},
+     {0x24561234u, 0xc0003678u},
      8},
     // The sixteen-byte four-channel float target, kept **last** on purpose:
     // four full floats through the 32_ABGR export, 0.25, 0.5, 0.75 and 1.0, and
@@ -14443,12 +14474,20 @@ constexpr FormatQuery kFormatQueries[] = {
      KSAMPLED | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
          VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT,
      VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT | VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT},
-    {VK_FORMAT_R16_UNORM, "R16_UNORM", KSAMPLED, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT},
+    {VK_FORMAT_R16_UNORM, "R16_UNORM",
+     KSAMPLED | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+         VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT,
+     VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT},
     {VK_FORMAT_R16_SNORM, "R16_SNORM", 0, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT},
     {VK_FORMAT_R16G16_SNORM, "R16G16_SNORM", 0, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT},
     {VK_FORMAT_R16G16B16A16_SNORM, "R16G16B16A16_SNORM", 0, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT},
-    {VK_FORMAT_R16G16_UNORM, "R16G16_UNORM", KSAMPLED, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT},
-    {VK_FORMAT_R16G16B16A16_UNORM, "R16G16B16A16_UNORM", KSAMPLED,
+    {VK_FORMAT_R16G16_UNORM, "R16G16_UNORM",
+     KSAMPLED | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+         VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT,
+     VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT},
+    {VK_FORMAT_R16G16B16A16_UNORM, "R16G16B16A16_UNORM",
+     KSAMPLED | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+         VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT,
      VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT},
     {VK_FORMAT_R16_SFLOAT, "R16_SFLOAT",
      KSAMPLED | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
@@ -14480,8 +14519,12 @@ constexpr FormatQuery kFormatQueries[] = {
     // transfer of a stencil plane has been measured.
     {VK_FORMAT_D24_UNORM_S8_UINT, "D24_UNORM_S8_UINT",
      VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT, 0},
+    // R83: D32_SFLOAT_S8_UINT's two aspects are sampled and copied, each from
+    // its own plane (r83-depth-stencil proves both on the console).
     {VK_FORMAT_D32_SFLOAT_S8_UINT, "D32_SFLOAT_S8_UINT",
-     VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT, 0},
+     VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+         VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT,
+     0},
     {VK_FORMAT_R32G32_SFLOAT, "R32G32_SFLOAT",
      KSAMPLED | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT,
      VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT | VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT |
@@ -21921,6 +21964,307 @@ void run_vulkan_lod_bias_range_frames(const TestContext &test, TestOutcome &outc
     log.number("r79_lod_bias_range", "passed_frames", passed);
 }
 
+// R81: VK_KHR_sampler_mirror_clamp_to_edge (LRPS2 enables it on every device).
+// A full-screen quad samples a 4x4 texture whose texel (x, y) has red 0x20 +
+// 0x40x and green 0x20 + 0x40y, nearest, with coordinates from -2 to 3 on both
+// axes: every texel index from -8 to 11. Frame 0 is clamp-to-edge and frame 1
+// mirrored repeat, the controls; frame 2 is mirror-clamp-to-edge, which
+// mirrors an index once about zero (-1 reads 0, -4 reads 3) and clamps beyond.
+// The three differ left of the texture, so a mode read as another fails there.
+// Every pixel is checked except those within the reported subtexel precision
+// (1/16 texel) of a texel boundary, which Vulkan lets read either side.
+void run_vulkan_mirror_clamp_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const float vertices[] = {-1, -1, -2, -2, 1, -1, 3, -2, 1, 1, 3, 3, -1, 1, -2, 3};
+    const std::uint16_t indices[] = {0, 1, 2, 2, 3, 0};
+    std::array<std::uint8_t, 4 * 4 * 4> texels{};
+    for (unsigned y = 0; y < 4; ++y)
+        for (unsigned x = 0; x < 4; ++x)
+        {
+            std::uint8_t *const texel = &texels[(y * 4 + x) * 4];
+            texel[0] = static_cast<std::uint8_t>(0x20 + 0x40 * x);
+            texel[1] = static_cast<std::uint8_t>(0x20 + 0x40 * y);
+            texel[2] = 0x80;
+            texel[3] = 0xff;
+        }
+    static const char *const kExtensions[] = {"VK_KHR_sampler_mirror_clamp_to_edge"};
+    ps5vk_triangle_input input{};
+    input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+    input.pipeline_count = 1;
+    input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    input.report = &report;
+    input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+    input.vertex_data = vertices;
+    input.vertex_count = 4;
+    input.vertex_stride = 16;
+    input.index_data = indices;
+    input.index_count = 6;
+    input.attribute_count = 2;
+    input.attributes[0] = {0, 0, VK_FORMAT_R32G32_SFLOAT, 0};
+    input.attributes[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, 8};
+    input.texture_data = texels.data();
+    input.texture_width = input.texture_height = 4;
+    input.device_extensions = kExtensions;
+    input.device_extension_count = 1;
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    ps5vk_triangle triangle{};
+    auto status = ps5vk_triangle_create(&triangle, &input);
+    struct Frame
+    {
+        VkSamplerAddressMode mode;
+        const char *name;
+    };
+    constexpr Frame frames[] = {
+        {VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, "clamp to edge"},
+        {VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT, "mirrored repeat"},
+        {VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE, "mirror clamp to edge"},
+    };
+    // The texel a nearest fetch of index i reads under each mode (the spec's
+    // formulas for a 4-texel axis).
+    const auto texel_for = [](VkSamplerAddressMode mode, long index) -> long
+    {
+        switch (mode)
+        {
+        case VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT:
+        {
+            const long period = ((index % 8) + 8) % 8;
+            return period < 4 ? period : 7 - period;
+        }
+        case VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE:
+        {
+            const long mirrored = index >= 0 ? index : -(1 + index);
+            return mirrored > 3 ? 3 : mirrored;
+        }
+        default:
+            return index < 0 ? 0 : (index > 3 ? 3 : index);
+        }
+    };
+    unsigned passed = 0;
+    for (unsigned frame = 0; frame < std::size(frames) && status == PS5VK_TRIANGLE_OK; ++frame)
+    {
+        if (!ps5vk_triangle_set_texture_border(&triangle, frames[frame].mode,
+                                               VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK))
+        {
+            status = PS5VK_TRIANGLE_FAILED;
+            break;
+        }
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (status != PS5VK_TRIANGLE_OK || triangle.target_bytes < kFramebufferBytes)
+            break;
+        char label[64]{};
+        std::snprintf(label, sizeof(label), "%s frame %u", frames[frame].name, frame);
+        if (test.capture)
+            log_driver_submission(triangle.device, label, log);
+        const FramebufferView view{static_cast<const std::uint32_t *>(triangle.target),
+                                   kTiledRgba8Layout};
+        const auto near_boundary = [](double texel)
+        { return std::fabs(texel - std::floor(texel + 0.5)) < 1.0 / 16; };
+        unsigned mismatches = 0;
+        unsigned skipped = 0;
+        for (unsigned y = 0; y < kOutputHeight; ++y)
+        {
+            const double v = (-2.0 + 5.0 * (y + 0.5) / kOutputHeight) * 4.0;
+            for (unsigned x = 0; x < kOutputWidth; ++x)
+            {
+                const double u = (-2.0 + 5.0 * (x + 0.5) / kOutputWidth) * 4.0;
+                if (near_boundary(u) || near_boundary(v))
+                {
+                    ++skipped;
+                    continue;
+                }
+                const long column = texel_for(frames[frame].mode, static_cast<long>(std::floor(u)));
+                const long row = texel_for(frames[frame].mode, static_cast<long>(std::floor(v)));
+                const std::uint32_t expected = 0xff800000u |
+                                               static_cast<std::uint32_t>(0x20 + 0x40 * row) << 8 |
+                                               static_cast<std::uint32_t>(0x20 + 0x40 * column);
+                mismatches += view.word(x, y) != expected;
+            }
+        }
+        log.number("r81_mirror_clamp", "frame", frame);
+        log.number("r81_mirror_clamp", "boundary_pixels_skipped", skipped);
+        log.hex("r81_mirror_clamp", "corner", view.word(0, 0));
+        log.hex("r81_mirror_clamp", "left_middle", view.word(kOutputWidth / 10, kOutputHeight / 2));
+        log.hex("r81_mirror_clamp", "center", view.word(kOutputWidth / 2, kOutputHeight / 2));
+        log.number("r81_mirror_clamp", "mismatches", mismatches);
+        log.number("r81_mirror_clamp", "pixels", kOutputWidth * kOutputHeight);
+        log.event("r81_mirror_clamp", mismatches == 0 ? "PASS" : "FAIL", mismatches == 0 ? 0 : -1,
+                  label);
+        passed += mismatches == 0;
+    }
+    outcome.command_built = status != PS5VK_TRIANGLE_FAILED;
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        outcome.stage_in_use = true;
+        return;
+    }
+    if (test.capture && status == PS5VK_TRIANGLE_OK)
+        log_driver_stages(triangle.device, log);
+    ps5vk_triangle_finish(&triangle);
+    outcome.passed = passed == std::size(frames);
+    log.number("r81_mirror_clamp", "passed_frames", passed);
+}
+
+// R83: the two aspects of D32_SFLOAT_S8_UINT, which LRPS2 creates its depth
+// target in and samples. The first pass clears the attachment's depth to 0.375
+// and its stencil to 0, and a quad whose pixel stage discards everything but the
+// lower right quadrant (r83-quadrant) writes depth 0 there with an ALWAYS test
+// and stencil 0x5a with REPLACE: the depth block writes both planes. A barrier
+// hands the attachment to the detached pass, whose full-screen quad samples one
+// aspect through a view of it: frame 0 the depth (c7-mip's pixel stage, the
+// value in red: 0 in the quadrant, 0.375 of 255 elsewhere), frame 1 the stencil
+// (v0-texture-uint's, the byte in red and alpha 1 of 255). Every pixel is
+// checked. After each frame both aspects are read back through
+// vkCmdCopyImageToBuffer and every texel compared: the driver's copy maps
+// against what the hardware wrote.
+void run_vulkan_depth_stencil_aspect_frames(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    JsonLog &log = test.log;
+    const ps5vk_triangle_report report{&log, log_vulkan_step};
+    const float vertices[] = {-1, -1, 0, 0, 1, -1, 1, 0, 1, 1, 1, 1, -1, 1, 0, 1};
+    const std::uint16_t indices[] = {0, 1, 2, 2, 3, 0};
+    std::array<std::uint8_t, 4 * 4 * 4> texels{};
+    constexpr float kClearDepth = 0.375f;
+    constexpr std::uint32_t kStencil = 0x5au;
+    struct Frame
+    {
+        VkImageAspectFlags aspect;
+        const char *package;
+        const char *name;
+    };
+    constexpr Frame frames[] = {
+        {VK_IMAGE_ASPECT_DEPTH_BIT, "c7-mip", "depth aspect sampled"},
+        {VK_IMAGE_ASPECT_STENCIL_BIT, "v0-texture-uint", "stencil aspect sampled"},
+    };
+    unsigned passed = 0;
+    ps5vk_triangle_shaders detached{};
+    for (unsigned frame = 0; frame < std::size(frames); ++frame)
+    {
+        ps5vk_triangle_input input{};
+        input.get_instance_proc_addr = vk_icdGetInstanceProcAddr;
+        input.pipeline_count = 1;
+        input.load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.report = &report;
+        input.output = PS5VK_TRIANGLE_OUTPUT_IMAGE;
+        input.vertex_data = vertices;
+        input.vertex_count = 4;
+        input.vertex_stride = 16;
+        input.index_data = indices;
+        input.index_count = 6;
+        input.attribute_count = 2;
+        input.attributes[0] = {0, 0, VK_FORMAT_R32G32_SFLOAT, 0};
+        input.attributes[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, 8};
+        // The texture set the detached pass samples through; its binding is
+        // pointed at the attachment's aspect (depth_sampled_aspect).
+        input.texture_data = texels.data();
+        input.texture_width = input.texture_height = 4;
+        input.depth = true;
+        input.depth_format = VK_FORMAT_D32_SFLOAT_S8_UINT;
+        input.depth_test = true;
+        input.depth_write = true;
+        input.depth_compare_op = VK_COMPARE_OP_ALWAYS;
+        input.depth_load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.depth_clear_value = kClearDepth;
+        input.stencil_load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        input.stencil[0] = ps5vk_triangle_input::ps5vk_stencil_state{true,
+                                                                     VK_STENCIL_OP_KEEP,
+                                                                     VK_STENCIL_OP_REPLACE,
+                                                                     VK_STENCIL_OP_KEEP,
+                                                                     VK_COMPARE_OP_ALWAYS,
+                                                                     kStencil,
+                                                                     0xffu,
+                                                                     0xffu};
+        input.detach_depth = true;
+        input.depth_sampled_aspect = frames[frame].aspect;
+        if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log) ||
+            !load_vulkan_shaders(package_paths(frames[frame].package), &g_vulkan_spirv[2], detached,
+                                 log))
+            return;
+        input.detached_shaders = &detached;
+        ps5vk_triangle triangle{};
+        auto status = ps5vk_triangle_create(&triangle, &input);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+        {
+            outcome.stage_in_use = true;
+            return;
+        }
+        bool frame_passed = false;
+        if (status == PS5VK_TRIANGLE_OK && triangle.target_bytes >= kFramebufferBytes)
+        {
+            if (test.capture)
+            {
+                log_driver_submission(triangle.device, frames[frame].name, log);
+                log_driver_stages(triangle.device, log);
+            }
+            const FramebufferView view{static_cast<const std::uint32_t *>(triangle.target),
+                                       kTiledRgba8Layout};
+            const bool stencil = frames[frame].aspect == VK_IMAGE_ASPECT_STENCIL_BIT;
+            unsigned mismatches = 0;
+            for (unsigned y = 0; y < kOutputHeight; ++y)
+                for (unsigned x = 0; x < kOutputWidth; ++x)
+                {
+                    const bool inside = x >= kOutputWidth / 2 && y >= kOutputHeight / 2;
+                    const std::uint32_t word = view.word(x, y);
+                    const std::uint32_t red = word & 0xffu;
+                    bool good;
+                    if (stencil)
+                        good = word == (0x01000000u | (inside ? kStencil : 0u));
+                    else
+                        // 0.375 of 255 is 95.625: the conversion may round
+                        // either way within the precision Vulkan allows.
+                        good = (word & 0xffffff00u) == 0xff000000u &&
+                               (inside ? red == 0 : (red == 95 || red == 96));
+                    mismatches += good ? 0u : 1u;
+                }
+            log.number("r83_depth_stencil", "frame", frame);
+            log.hex("r83_depth_stencil", "corner", view.word(0, 0));
+            log.hex("r83_depth_stencil", "quadrant",
+                    view.word(kOutputWidth * 3 / 4, kOutputHeight * 3 / 4));
+            log.number("r83_depth_stencil", "sample_mismatches", mismatches);
+            // Both planes through the driver's readback.
+            unsigned depth_bad = 0;
+            unsigned stencil_bad = 0;
+            const auto *const depths = static_cast<const float *>(
+                ps5vk_triangle_read_depth_aspect(&triangle, VK_IMAGE_ASPECT_DEPTH_BIT));
+            for (unsigned y = 0; depths != nullptr && y < kOutputHeight; ++y)
+                for (unsigned x = 0; x < kOutputWidth; ++x)
+                {
+                    const bool inside = x >= kOutputWidth / 2 && y >= kOutputHeight / 2;
+                    depth_bad += depths[y * kOutputWidth + x] != (inside ? 0.0f : kClearDepth);
+                }
+            const auto *const stencils = static_cast<const std::uint8_t *>(
+                ps5vk_triangle_read_depth_aspect(&triangle, VK_IMAGE_ASPECT_STENCIL_BIT));
+            for (unsigned y = 0; stencils != nullptr && y < kOutputHeight; ++y)
+                for (unsigned x = 0; x < kOutputWidth; ++x)
+                {
+                    const bool inside = x >= kOutputWidth / 2 && y >= kOutputHeight / 2;
+                    stencil_bad += stencils[y * kOutputWidth + x] != (inside ? kStencil : 0u);
+                }
+            log.number("r83_depth_stencil", "depth_readback_mismatches",
+                       depths != nullptr ? depth_bad : kOutputWidth * kOutputHeight);
+            log.number("r83_depth_stencil", "stencil_readback_mismatches",
+                       stencils != nullptr ? stencil_bad : kOutputWidth * kOutputHeight);
+            log.number("r83_depth_stencil", "pixels", kOutputWidth * kOutputHeight);
+            frame_passed = mismatches == 0 && depths != nullptr && depth_bad == 0 &&
+                           stencils != nullptr && stencil_bad == 0;
+        }
+        log.event("r83_depth_stencil", frame_passed ? "PASS" : "FAIL", frame_passed ? 0 : -1,
+                  frames[frame].name);
+        passed += frame_passed ? 1u : 0u;
+        ps5vk_triangle_finish(&triangle);
+        if (status != PS5VK_TRIANGLE_OK)
+            break;
+    }
+    outcome.command_built = passed != 0;
+    outcome.passed = passed == std::size(frames);
+    log.number("r83_depth_stencil", "passed_frames", passed);
+}
+
+
 // R59: gl_FragCoord's z and w in a fragment shader (Dolphin's fog and depth
 // read them). A full-screen quad whose depth ramps from 0.25 on the left edge to
 // 0.75 on the right and whose clip w is 2 writes gl_FragCoord.z to red and
@@ -26655,6 +26999,8 @@ constexpr RunnerTest kRunnerTests[] = {
     {"r27-menu-alpha", "r27-menu-alpha", run_vulkan_menu_alpha_frames},
     {"r26-lod-bias", "r26-lod-bias", run_vulkan_lod_bias_frames},
     {"r79-lod-bias-range", "r79-lod-bias-range", run_vulkan_lod_bias_range_frames},
+    {"r81-mirror-clamp", "c7-mip", run_vulkan_mirror_clamp_frames},
+    {"r83-depth-stencil", "r83-quadrant", run_vulkan_depth_stencil_aspect_frames},
     {"r57-border", "c7-mip", run_vulkan_border_frames},
     {"r58-restart", "m3-vertex", run_vulkan_restart_frames},
     {"r59-fragcoord", "r59-fragcoord", run_vulkan_frag_coord_frames},

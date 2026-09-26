@@ -306,10 +306,49 @@ main(void)
          check(!ps5vk_triangle_set_texture_border(
                   &triangle, VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE,
                   VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK),
-               "mirror-clamp-to-edge, an extension that is not exposed, is still refused");
+               "mirror-clamp-to-edge is refused on a device that did not enable its extension");
       }
       if (status != PS5VK_TRIANGLE_IN_FLIGHT)
          ps5vk_triangle_finish(&triangle);
+
+      /* R81: a device that enables VK_KHR_sampler_mirror_clamp_to_edge creates
+       * the sampler, and its descriptor's word 8 carries mirror-once (3) on U
+       * and V and clamp-to-edge (2) on W: 0x9b. */
+      {
+         struct steps mirror_steps = {0};
+         const struct ps5vk_triangle_report mirror_report = {&mirror_steps, record_step};
+         static const char *const mirror_extensions[] = {"VK_KHR_sampler_mirror_clamp_to_edge"};
+         struct ps5vk_triangle_input mirrored = input;
+         mirrored.report = &mirror_report;
+         mirrored.device_extensions = mirror_extensions;
+         mirrored.device_extension_count = 1;
+         struct ps5vk_triangle mirror_triangle = {0};
+         enum ps5vk_triangle_status mirror_status =
+            ps5vk_triangle_create(&mirror_triangle, &mirrored);
+         const bool mirror_created =
+            mirror_status == PS5VK_TRIANGLE_OK &&
+            ps5vk_triangle_set_texture_border(&mirror_triangle,
+                                              VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE,
+                                              VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK);
+         check(mirror_created, "with its extension enabled, a mirror-clamp-to-edge sampler creates");
+         if (mirror_created)
+            mirror_status = ps5vk_triangle_draw(&mirror_triangle, PS5VK_TRIANGLE_ONE_DRAW);
+         check(mirror_created && mirror_status == PS5VK_TRIANGLE_OK,
+               "a frame samples through the mirror-clamp-to-edge sampler");
+#if defined(PS5VK_TEST_DIRECT)
+         if (mirror_created && mirror_status == PS5VK_TRIANGLE_OK) {
+            ps5vk_debug_table tables[4] = {{0}};
+            const uint32_t count = ps5vk_debug_descriptor_tables(mirror_triangle.device, tables, 4);
+            bool encoded = false;
+            for (uint32_t table = 0; table < count; table++)
+               for (size_t word = 0; word < tables[table].bytes / sizeof(uint32_t); word++)
+                  encoded = encoded || (tables[table].words[word] & 0x1ffu) == 0x9bu;
+            check(encoded, "the descriptor carries mirror-once on U and V");
+         }
+#endif
+         if (mirror_status != PS5VK_TRIANGLE_IN_FLIGHT)
+            ps5vk_triangle_finish(&mirror_triangle);
+      }
 
       /* A view whose component mapping is not the identity: Vulkan applies the
        * mapping to what a combined image sampler returns, and the driver

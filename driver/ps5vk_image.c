@@ -176,15 +176,18 @@ static const struct ps5vk_format ps5vk_formats[] = {
        VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT, 14 /* 8_8_UNORM */, PS5VK_FORMAT_SWIZZLE_RG01},
    {VK_FORMAT_R16_UNORM,
     VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
-       VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT,
+       VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT |
+       VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT,
     VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT, 7 /* 16_UNORM */, PS5VK_FORMAT_SWIZZLE_R001},
    {VK_FORMAT_R16G16_UNORM,
     VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
-       VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT,
+       VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT |
+       VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT,
     VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT, 23 /* 16_16_UNORM */, PS5VK_FORMAT_SWIZZLE_RG01},
    {VK_FORMAT_R16G16B16A16_UNORM,
     VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
-       VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT,
+       VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT |
+       VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT,
     VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT, 65 /* 16_16_16_16_UNORM */, PS5VK_FORMAT_SWIZZLE_RGBA},
    {VK_FORMAT_R16_SFLOAT,
     VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
@@ -514,8 +517,15 @@ static const struct ps5vk_format ps5vk_formats[] = {
     VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT,
     0, 141 /* 8_24_UNORM, inert until a fetch path reaches a depth format */,
     PS5VK_FORMAT_SWIZZLE_R001},
+   /* R83: D32_SFLOAT_S8_UINT is also sampled and a transfer source and
+    * destination, one aspect at a time (ps5vk_image_plane): its depth plane is
+    * D32_SFLOAT's surface, fetched and copied as D32_SFLOAT's is, and its
+    * stencil plane is fetched as R8_UINT and copied a byte a texel through the
+    * one-byte Z_X map (ps5vk_tiled_stencil_terms). LRPS2 creates its depth
+    * target in this format with both usages. */
    {VK_FORMAT_D32_SFLOAT_S8_UINT,
-    VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT,
+    VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+       VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT,
     0, 22 /* 32_FLOAT */, PS5VK_FORMAT_SWIZZLE_R001},
    /* Vertex attributes the probes drew with exactly and no other use: 3D
     * positions (M4), which the table's sampled SFLOAT entries above do not
@@ -666,6 +676,17 @@ static const struct ps5vk_colour_format ps5vk_colour_formats[] = {
     * integer, FP16_ABGR for the half-float, 32_AR for the two 32-bit-channel
     * ones (a float colour stored as two full floats). */
    {VK_FORMAT_R16G16B16A16_UINT, 12 /* 16_16_16_16 */, 4 /* UINT */, 0, 7 /* UINT16_ABGR */},
+   /* R82: the 16-bit normalized targets (LRPS2's colour-clip target is
+    * R16G16B16A16_UNORM, and it blends). Mesa's ac_choose_spi_color_formats
+    * exports them as UNORM16_ABGR only while nothing blends, since the CB
+    * cannot blend a 16-bit normalized export, and as 32-bit floats when it
+    * does. The default blended export here is FP16_ABGR, whose 11-bit
+    * mantissa would round 16-bit values, so each row names its 32-bit export
+    * whatever the blend state: 32_R for one channel, and the four-slot 32_ABGR
+    * the two-channel 32-bit rows already take (round 10). */
+   {VK_FORMAT_R16_UNORM, 2 /* 16 */, 0 /* UNORM */, 0, 1 /* 32_R */},
+   {VK_FORMAT_R16G16_UNORM, 5 /* 16_16 */, 0, 0, 9 /* 32_ABGR */},
+   {VK_FORMAT_R16G16B16A16_UNORM, 12 /* 16_16_16_16 */, 0, 0, 9 /* 32_ABGR */},
    {VK_FORMAT_R16G16B16A16_SFLOAT, 12, 7 /* FLOAT */, 0, 4 /* FP16_ABGR */},
    /* The two-channel 32-bit rows take the four-slot export: with 32_AR the
     * console wrote the first channel and left the second untouched (round 10's
@@ -806,10 +827,13 @@ ps5vk_GetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice physicalDevice,
    }
    /* 2D, optimal and not cube-compatible, so the sample counts cover the
     * framebuffer and sampled-image limits: 1 and 4 (Supported Sample Counts). */
+   /* A stencil format's image is one level and one layer, the shape its
+    * stencil plane is laid out for (ps5vk_image_stencil_plane; R83). */
+   const bool stencil = vk_format_has_stencil(info->format);
    pImageFormatProperties->imageFormatProperties = (VkImageFormatProperties){
       .maxExtent = {PS5VK_MAX_EXTENT_2D, PS5VK_MAX_EXTENT_2D, 1},
-      .maxMipLevels = PS5VK_MAX_MIP_LEVELS,
-      .maxArrayLayers = PS5VK_MAX_ARRAY_LAYERS,
+      .maxMipLevels = stencil ? 1u : PS5VK_MAX_MIP_LEVELS,
+      .maxArrayLayers = stencil ? 1u : PS5VK_MAX_ARRAY_LAYERS,
       /* A stencil format's plane is laid out for one sample only
        * (ps5vk_image_stencil_plane), so its images are created with one. */
       .sampleCounts = vk_format_has_stencil(info->format) ? VK_SAMPLE_COUNT_1_BIT
@@ -849,8 +873,10 @@ ps5vk_tile_extent(unsigned texel_bytes, bool depth, VkSampleCountFlagBits sample
                   unsigned *width, unsigned *height)
 {
    /* A depth element is four bytes except the two-byte one, whose row is its
-    * own table and whose tile is 256x128 texels (ps5vk_tiled_depth2_terms). */
-   if (depth && texel_bytes != 2)
+    * own table and whose tile is 256x128 texels (ps5vk_tiled_depth2_terms),
+    * and the one-byte stencil plane's, 256x256 (R83,
+    * ps5vk_tiled_stencil_terms). */
+   if (depth && texel_bytes != 2 && texel_bytes != 1)
       texel_bytes = 4;
    /* A 64 KiB tile holds 2^n texels of every sample, n = 16 - log2(texel bytes)
     * - log2(samples), laid out 2^ceil(n/2) wide and 2^floor(n/2) high: AddrLib's
@@ -994,6 +1020,11 @@ ps5vk_image_layer_bytes(const struct ps5vk_image *image)
 uint64_t
 ps5vk_image_tiled_layer_level_base(const struct ps5vk_image *image, uint32_t level, uint32_t layer)
 {
+   /* Layer 0 starts at the level's own base whatever a slice measures -- a
+    * stencil-bearing image has no slice size (its allocation holds the stencil
+    * plane too), and its one layer is still at the start (R83). */
+   if (layer == 0)
+      return ps5vk_image_tiled_level_base(image, level);
    const uint64_t slice = ps5vk_image_layer_bytes(image);
    if (slice == 0)
       return UINT64_MAX;
@@ -1052,8 +1083,12 @@ ps5vk_image_storage(const VkImageCreateInfo *info, enum ps5vk_image_storage *sto
                               (texel_bytes == 1 || texel_bytes == 2 || texel_bytes == 4 ||
                                texel_bytes == 8 || texel_bytes == 16) &&
                               (info->extent.width * texel_bytes) % 256 != 0;
+   /* A format with a stencil is always tiled: its stencil plane exists only
+    * beside a tiled depth surface (ps5vk_image_stencil_plane), whatever the
+    * image is used for (R83). */
    const bool tiled = (info->usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                                       VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)) != 0 ||
+                      vk_format_has_stencil(info->format) ||
                       ((ps5vk_ab_flags & PS5VK_AB_TILE_PADDED) && padded_single);
    uint64_t layer_bytes = 0;
    *stencil_offset = 0;
@@ -1351,11 +1386,18 @@ ps5vk_CreateSampler_untimed(VkDevice _device, const VkSamplerCreateInfo *pCreate
          clamp = 6;
          break;
       case VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE:
-         return vk_errorf(device, VK_ERROR_UNKNOWN,
-                          "sampler axis %u asks mirror-clamp-to-edge, which is "
-                          "VK_KHR_sampler_mirror_clamp_to_edge and not core Vulkan 1.0; an "
-                          "extension needs its own probe (docs/M5_REFERENCE.md, C4)",
-                          axis);
+         /* R81: SQ_TEX_MIRROR_ONCE_LAST_TEXEL, the field's 3 (RADV's
+          * radv_tex_wrap): the coordinate is mirrored once about zero and then
+          * clamped to the edge texel, as the mode's formula says. Valid only
+          * with VK_KHR_sampler_mirror_clamp_to_edge enabled
+          * (VUID-VkSamplerCreateInfo-addressModeU-01079). */
+         if (!device->vk.enabled_extensions.KHR_sampler_mirror_clamp_to_edge)
+            return vk_errorf(device, VK_ERROR_UNKNOWN,
+                             "sampler axis %u asks mirror-clamp-to-edge, but the device did "
+                             "not enable VK_KHR_sampler_mirror_clamp_to_edge",
+                             axis);
+         clamp = 3;
+         break;
       default:
          return vk_errorf(device, VK_ERROR_UNKNOWN,
                           "sampler axis %u has address mode %d, which is not a Vulkan address "
@@ -1524,6 +1566,43 @@ ps5vk_DestroySampler(VkDevice _device, VkSampler _sampler, const VkAllocationCal
       vk_object_free(&device->vk, pAllocator, sampler);
 }
 
+/* R83: the plane an aspect names. A colour image has one, its format's own.
+ * A depth format's depth aspect is its depth surface at the image's address,
+ * whose texel is the format's element for a depth-only format and four bytes
+ * for a combined one (D32_SFLOAT_S8_UINT's depth plane is D32_SFLOAT's
+ * surface). A combined format's stencil aspect is the one-byte plane beside
+ * it (ps5vk_image_stencil_plane), which only a tiled image has. Both depth
+ * planes walk the Z maps (ps5vk_tiled_depth_offset). */
+struct ps5vk_image_plane {
+   uint64_t offset;
+   uint32_t element_bytes;
+   bool depth_map;
+};
+
+static bool
+ps5vk_image_plane(const struct ps5vk_image *image, VkImageAspectFlags aspect,
+                  struct ps5vk_image_plane *plane)
+{
+   const VkFormat format = image->vk.format;
+   const bool depth = vk_format_has_depth(format);
+   const bool stencil = vk_format_has_stencil(format);
+   if (!depth && !stencil) {
+      if (aspect != VK_IMAGE_ASPECT_COLOR_BIT)
+         return false;
+      *plane = (struct ps5vk_image_plane){0, vk_format_get_blocksize(format), false};
+      return true;
+   }
+   if (aspect == VK_IMAGE_ASPECT_DEPTH_BIT && depth) {
+      *plane = (struct ps5vk_image_plane){0, stencil ? 4u : vk_format_get_blocksize(format), true};
+      return true;
+   }
+   if (aspect == VK_IMAGE_ASPECT_STENCIL_BIT && stencil && image->stencil_offset != 0) {
+      *plane = (struct ps5vk_image_plane){image->stencil_offset, 1u, true};
+      return true;
+   }
+   return false;
+}
+
 /* vkCmdCopyBufferToImage lands here: the runtime's
  * vk_common_CmdCopyBufferToImage2 turns the source buffer into the address
  * range this takes and forwards to disp->CmdCopyMemoryToImageKHR
@@ -1561,21 +1640,14 @@ ps5vk_CmdCopyMemoryToImageKHR(VkCommandBuffer commandBuffer,
    /* Valid usage: a copy's destination is a transfer destination, its format
     * has texels and it is not multisampled. */
    assert((image->vk.usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) != 0);
-   const unsigned texel_bytes = vk_format_get_blocksize(image->vk.format);
-   assert(texel_bytes != 0 && image->vk.samples == VK_SAMPLE_COUNT_1_BIT);
+   assert(vk_format_get_blocksize(image->vk.format) != 0 &&
+          image->vk.samples == VK_SAMPLE_COUNT_1_BIT);
    /* The copy falls where this command buffer's words end now: the queue splits
     * the submission there and runs the records once the words before them have
-    * completed. */
+    * completed. The element size and the tile a tiled destination's map walks
+    * are each region's aspect's (R83; ps5vk_tile_extent below). */
    const uint32_t after_words =
       (uint32_t)util_dynarray_num_elements(&cmd_buffer->words, uint32_t);
-   /* The tile a tiled destination's map walks: the element size decides it
-    * (ps5vk_tile_extent), and the copy above already refused an element size the
-    * map does not cover. */
-   uint32_t tile_width = 0;
-   uint32_t tile_height = 0;
-   if (tiled)
-      ps5vk_tile_extent(texel_bytes, vk_format_has_depth(image->vk.format), image->vk.samples,
-                        &tile_width, &tile_height);
 
    for (uint32_t r = 0; r < info->regionCount; r++) {
       const VkDeviceMemoryImageCopyKHR *const region = &info->pRegions[r];
@@ -1610,19 +1682,29 @@ ps5vk_CmdCopyMemoryToImageKHR(VkCommandBuffer commandBuffer,
                                  image->vk.array_layers);
          return;
       }
-      /* Valid usage: a 2D image copies one slice with the aspect its format
+      /* Valid usage: a 2D image copies one slice with an aspect its format
        * has -- colour for a colour format, depth for a depth one (round 21's
-       * depth pair uploads a D16 image) -- at a non-negative offset and inside
-       * the image. Any other aspect is refused by name. */
-      const VkImageAspectFlags aspect = vk_format_has_depth(image->vk.format)
-                                           ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                           : VK_IMAGE_ASPECT_COLOR_BIT;
-      if (region->imageSubresource.aspectMask != aspect) {
+       * depth pair uploads a D16 image), and depth or stencil for a combined
+       * one, each into its own plane (R83, ps5vk_image_plane) -- at a
+       * non-negative offset and inside the image. Any other aspect is refused
+       * by name, as is a stencil plane of more than one level or layer. */
+      struct ps5vk_image_plane plane;
+      if (!ps5vk_image_plane(image, region->imageSubresource.aspectMask, &plane) ||
+          (plane.offset != 0 && (image->vk.mip_levels != 1 || image->vk.array_layers != 1))) {
          ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                                 "an upload names aspect 0x%x of a format whose aspect is 0x%x",
-                                 (unsigned)region->imageSubresource.aspectMask, (unsigned)aspect);
+                                 "an upload names aspect 0x%x of a format %d image with %u levels "
+                                 "and %u layers",
+                                 (unsigned)region->imageSubresource.aspectMask,
+                                 (int)image->vk.format, image->vk.mip_levels,
+                                 image->vk.array_layers);
          return;
       }
+      const unsigned texel_bytes = plane.element_bytes;
+      uint32_t tile_width = 0;
+      uint32_t tile_height = 0;
+      if (tiled)
+         ps5vk_tile_extent(texel_bytes, plane.depth_map, image->vk.samples, &tile_width,
+                           &tile_height);
       assert(region->imageOffset.x >= 0 && region->imageOffset.y >= 0 &&
              region->imageOffset.z == 0);
       assert(region->imageExtent.depth == 1);
@@ -1676,19 +1758,23 @@ ps5vk_CmdCopyMemoryToImageKHR(VkCommandBuffer commandBuffer,
                                     "no memory to record an image copy");
             return;
          }
+         /* A depth plane walks the Z maps a depth target is written in, which
+          * the readback of every C5 frame proved (ps5vk_tiled_depth_offset):
+          * the colour map would scatter its texels (R83). */
          *copy = (struct ps5vk_memory_copy){
             .image_write = true,
             .source = region->addressRange.address,
             .source_pitch = source_pitch,
             .destination_side =
                {
-                  .address = image->address + (level_base & ~UINT64_C(0xffff)),
+                  .address = image->address + plane.offset + (level_base & ~UINT64_C(0xffff)),
                   .tile_xor = (uint32_t)(level_base & UINT64_C(0xffff)),
                   .level_width = level_extent.width,
                   .tile_width = tile_width,
                   .tile_height = tile_height,
                   .element_bytes = texel_bytes,
                   .samples = 1,
+                  .depth = plane.depth_map,
                   .tiled = true,
                },
             .destination_x = (uint32_t)region->imageOffset.x,
@@ -1892,6 +1978,18 @@ static const struct ps5vk_tiled_term ps5vk_tiled_depth2_terms[] = {
    {1, 8, 0x5000u},
 };
 
+/* R83: the one-byte stencil plane's map, AddrLib's 64 KiB Z_X row for a
+ * one-byte element: a 256x256-texel tile with fifteen terms, which
+ * `mip-layout-oracle swizzle 1 1 64kb_z_x` prints and verifies over all 65536
+ * texels of the tile (tools/check-mip-layout.sh holds the table against it).
+ * It is the plane the depth block writes stencil into (ps5vk_image_stencil_plane)
+ * and what an upload, readback, copy or clear of the stencil aspect walks. */
+static const struct ps5vk_tiled_term ps5vk_tiled_stencil_terms[] = {
+   {0, 0, 0x1u},   {0, 1, 0x4u},   {0, 2, 0x10u},   {0, 3, 0x40u},   {0, 5, 0x300u},
+   {0, 6, 0x800u}, {0, 4, 0x400u}, {0, 7, 0x2000u}, {0, 8, 0x8000u}, {1, 1, 0x2u},
+   {1, 2, 0x8u},   {1, 3, 0xa0u},  {1, 5, 0xf00u},  {1, 6, 0x1000u}, {1, 7, 0x4000u},
+};
+
 /* Where texel (x, y) of a single-level tiled *depth* image lives, relative to
  * the image's address: 128x128-texel blocks of 0x10000 bytes in row-major order
  * with fixed XOR masks for the block-local coordinates, which is ps5-opengl's
@@ -1903,6 +2001,19 @@ static const struct ps5vk_tiled_term ps5vk_tiled_depth2_terms[] = {
 static uint64_t
 ps5vk_tiled_depth_offset(uint32_t x, uint32_t y, uint32_t level_width, uint32_t element_bytes)
 {
+   if (element_bytes == 1u) {
+      /* The stencil plane's row (R83), over a 256x256-texel tile. */
+      const uint32_t in_x = x & 255u;
+      const uint32_t in_y = y & 255u;
+      uint64_t local = 0;
+      for (unsigned index = 0; index < ARRAY_SIZE(ps5vk_tiled_stencil_terms); index++) {
+         const uint64_t value = ps5vk_tiled_stencil_terms[index].coord == 0u ? in_x : in_y;
+         local ^= (value << ps5vk_tiled_stencil_terms[index].shift) &
+                  ps5vk_tiled_stencil_terms[index].mask;
+      }
+      const uint64_t blocks_per_row = DIV_ROUND_UP(level_width, 256u);
+      return (((uint64_t)y >> 8) * blocks_per_row + (x >> 8)) * PS5VK_TILE_BYTES + local;
+   }
    if (element_bytes == 2u) {
       /* The two-byte row's own table, over a 256x128-texel tile. */
       const uint32_t in_x = x & 255u;
@@ -1987,7 +2098,12 @@ static bool
 ps5vk_image_copy_side(struct ps5vk_image *image, const VkImageSubresourceLayers *subresource,
                       uint32_t *texel_bytes, struct ps5vk_image_copy_side *side)
 {
-   const uint32_t element_bytes = vk_format_get_blocksize(image->vk.format);
+   /* The subresource's aspect picks the plane (R83): a combined depth/stencil
+    * image copies its depth and its stencil separately. */
+   struct ps5vk_image_plane plane;
+   if (!ps5vk_image_plane(image, subresource->aspectMask, &plane))
+      return false;
+   const uint32_t element_bytes = plane.element_bytes;
    if (element_bytes == 0)
       return false;
    /* A four-sample image's texel is its four samples, sixteen bytes of a
@@ -1999,8 +2115,14 @@ ps5vk_image_copy_side(struct ps5vk_image *image, const VkImageSubresourceLayers 
    const uint32_t samples = image->vk.samples == VK_SAMPLE_COUNT_4_BIT ? 4u : 1u;
    *texel_bytes = element_bytes * samples;
    const bool tiled = image->storage == PS5VK_IMAGE_STORAGE_TILES;
-   /* A depth image's tiled map is its own (ps5vk_tiled_depth_offset). */
-   const bool depth = vk_format_has_depth(image->vk.format);
+   /* A depth image's tiled map is its own (ps5vk_tiled_depth_offset), and so is
+    * its stencil plane's. The stencil plane is laid out for one level and one
+    * layer only (ps5vk_image_stencil_plane sums its levels' tiles, a shape no
+    * probe has checked for more), and a four-sample one is not measured. */
+   const bool depth = plane.depth_map;
+   if (plane.offset != 0 && (image->vk.mip_levels != 1 || image->vk.array_layers != 1 ||
+                             image->vk.samples != VK_SAMPLE_COUNT_1_BIT))
+      return false;
    uint64_t level_offset = 0;
    VkExtent2D extent = {0, 0};
    uint64_t row_pitch = 0;
@@ -2050,9 +2172,9 @@ ps5vk_image_copy_side(struct ps5vk_image *image, const VkImageSubresourceLayers 
       row_pitch = 0;
       /* A four-sample depth image is mapped: its texel is one sixteen-byte unit
        * holding all four samples, so a copy needs no per-sample walk
-       * (ps5vk_tiled_depth4_offset). A one-sample depth image is four bytes a
-       * texel, and anything else has no map. */
-      if (depth && *texel_bytes != 4 && *texel_bytes != 16)
+       * (ps5vk_tiled_depth4_offset). A one-sample depth plane is four bytes a
+       * texel, a stencil plane one (R83), and anything else has no map. */
+      if (depth && *texel_bytes != 4 && *texel_bytes != 16 && *texel_bytes != 1)
          return false;
       if (depth && image->vk.mip_levels != 1)
          return false;
@@ -2064,7 +2186,7 @@ ps5vk_image_copy_side(struct ps5vk_image *image, const VkImageSubresourceLayers 
       ps5vk_image_level_layout(image, subresource->mipLevel, &level_offset, &row_pitch, &extent);
    }
    *side = (struct ps5vk_image_copy_side){
-      .address = image->address + level_offset,
+      .address = image->address + plane.offset + level_offset,
       .row_pitch = tiled ? 0 : row_pitch,
       .level_width = extent.width,
       .tile_width = tile_width,
@@ -2271,6 +2393,16 @@ ps5vk_image_region_sides(struct ps5vk_cmd_buffer *cmd_buffer, struct ps5vk_image
                               "%s of %u layers from layer %u; array layers are D1 "
                               "(docs/M5_REFERENCE.md)", what, region->source.layerCount,
                               region->source.baseArrayLayer);
+      return false;
+   }
+   /* Valid usage: a copy between images of one format names the same aspect on
+    * both sides, so a combined depth/stencil copy moves one plane into the
+    * same plane (R83). */
+   if (region->source.aspectMask != region->destination.aspectMask) {
+      ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                              "%s from aspect 0x%x into aspect 0x%x", what,
+                              (unsigned)region->source.aspectMask,
+                              (unsigned)region->destination.aspectMask);
       return false;
    }
    if (!ps5vk_image_copy_side(source, &region->source, source_texel_bytes, source_side) ||
@@ -2542,12 +2674,14 @@ ps5vk_CmdCopyImageToBuffer2KHR(VkCommandBuffer commandBuffer,
    /* A depth image reads back through its own map: one sample of D16 or D32 is
     * the shape the depth rows' transfer round trip proves (round 21), which is
     * what the maintenance1 note's TRANSFER_SRC asks of a format the driver
-    * reports as sampled. Stencil and non-2D images still refuse by name. */
-   if (source->vk.image_type != VK_IMAGE_TYPE_2D || vk_format_has_stencil(source->vk.format)) {
+    * reports as sampled. A combined depth/stencil image reads back one aspect a
+    * region, each from its own plane (R83, ps5vk_image_plane): four bytes a
+    * texel of depth, one of stencil, as Vulkan's buffer layout has them.
+    * Non-2D images still refuse by name. */
+   if (source->vk.image_type != VK_IMAGE_TYPE_2D) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                              "a readback of %s images; C7's are 2D ones, depth included for a "
-                              "format whose map is measured (docs/M5_REFERENCE.md)",
-                              source->vk.image_type != VK_IMAGE_TYPE_2D ? "non-2D" : "stencil");
+                              "a readback of non-2D images; C7's are 2D ones, depth included for "
+                              "a format whose map is measured (docs/M5_REFERENCE.md)");
       return;
    }
    const uint32_t after_words =
@@ -2989,16 +3123,22 @@ ps5vk_CmdClearDepthStencilImage(VkCommandBuffer commandBuffer, VkImage _image,
                                             : "an image whose format is not a depth one");
       return;
    }
+   /* The depth plane's texel is the depth-only format's: a combined
+    * D32_SFLOAT_S8_UINT image's depth plane is D32_SFLOAT's surface (R83,
+    * ps5vk_image_plane), and its stencil plane's texel is the clear's byte. */
+   const VkFormat depth_format =
+      image->vk.format == VK_FORMAT_D32_SFLOAT_S8_UINT ? VK_FORMAT_D32_SFLOAT : image->vk.format;
    uint8_t texel[16] = {0};
    uint32_t texel_bytes = 0;
    const VkClearColorValue value = {.float32 = {pDepthStencil->depth, 0.0f, 0.0f, 0.0f}};
-   if (!ps5vk_format_encode_clear(image->vk.format, &value, texel, &texel_bytes)) {
+   if (!ps5vk_format_encode_clear(depth_format, &value, texel, &texel_bytes)) {
       ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
                               "clearing a depth format %d image; that format's clear encoding is "
                               "not in the table (docs/V0_FORMATS_AUDIT.md)",
                               (int)image->vk.format);
       return;
    }
+   uint8_t stencil_texel[16] = {(uint8_t)(pDepthStencil->stencil & 0xffu)};
    const uint32_t after_words =
       (uint32_t)util_dynarray_num_elements(&cmd_buffer->words, uint32_t);
    /* A four-sample depth image's storage is four words a texel -- one a sample
@@ -3040,11 +3180,17 @@ ps5vk_CmdClearDepthStencilImage(VkCommandBuffer commandBuffer, VkImage _image,
    }
    for (uint32_t r = 0; r < rangeCount; r++) {
       const VkImageSubresourceRange *const range = &pRanges[r];
-      if (range->aspectMask != VK_IMAGE_ASPECT_DEPTH_BIT) {
+      /* Each aspect the range names is its own plane's clear (R83): the depth
+       * surface takes the depth texel and a combined image's stencil plane the
+       * stencil byte. An aspect the format lacks is invalid usage. */
+      const VkImageAspectFlags known = VK_IMAGE_ASPECT_DEPTH_BIT |
+                                       (vk_format_has_stencil(image->vk.format)
+                                           ? VK_IMAGE_ASPECT_STENCIL_BIT
+                                           : 0);
+      if (range->aspectMask == 0 || (range->aspectMask & ~known) != 0) {
          ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                                 "clearing aspect 0x%x of a depth image; the driver's depth "
-                                 "targets carry no stencil (Phase C5, docs/M5_REFERENCE.md)",
-                                 (unsigned)range->aspectMask);
+                                 "clearing aspect 0x%x of a format %d image",
+                                 (unsigned)range->aspectMask, (int)image->vk.format);
          return;
       }
       if (range->baseArrayLayer != 0 || range->layerCount != 1) {
@@ -3054,36 +3200,43 @@ ps5vk_CmdClearDepthStencilImage(VkCommandBuffer commandBuffer, VkImage _image,
                                  range->baseArrayLayer);
          return;
       }
-      for (uint32_t level = range->baseMipLevel; level < range->baseMipLevel + range->levelCount;
-           level++) {
-         uint32_t side_texel_bytes = 0;
-         struct ps5vk_image_copy_side side = {0};
-         const VkImageSubresourceLayers subresource = {range->aspectMask, level, 0, 1};
-         if (!ps5vk_image_copy_side(image, &subresource, &side_texel_bytes, &side)) {
-            ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
-                                    "clearing a depth image that is not a single-level four-byte "
-                                    "one; anything else has no measured depth map "
-                                    "(docs/HARDWARE_FINDINGS.md)");
-            return;
+      for (uint32_t aspect_bit = VK_IMAGE_ASPECT_DEPTH_BIT;
+           aspect_bit <= VK_IMAGE_ASPECT_STENCIL_BIT; aspect_bit <<= 1) {
+         if ((range->aspectMask & aspect_bit) == 0)
+            continue;
+         const uint8_t *const aspect_texel =
+            aspect_bit == VK_IMAGE_ASPECT_STENCIL_BIT ? stencil_texel : texel;
+         for (uint32_t level = range->baseMipLevel; level < range->baseMipLevel + range->levelCount;
+              level++) {
+            uint32_t side_texel_bytes = 0;
+            struct ps5vk_image_copy_side side = {0};
+            const VkImageSubresourceLayers subresource = {aspect_bit, level, 0, 1};
+            if (!ps5vk_image_copy_side(image, &subresource, &side_texel_bytes, &side)) {
+               ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_UNKNOWN,
+                                       "clearing aspect 0x%x of a depth image that is not a "
+                                       "single-level one; anything else has no measured depth map "
+                                       "(docs/HARDWARE_FINDINGS.md)", (unsigned)aspect_bit);
+               return;
+            }
+            struct ps5vk_memory_copy *const copy =
+               util_dynarray_grow(&cmd_buffer->copies, struct ps5vk_memory_copy, 1);
+            if (!copy) {
+               ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
+                                       "no memory to record a depth clear");
+               return;
+            }
+            *copy = (struct ps5vk_memory_copy){
+               .clear = true,
+               .destination_side = side,
+               .destination_texel_bytes = side_texel_bytes,
+               .destination_x = 0,
+               .destination_y = 0,
+               .width = MAX2(image->vk.extent.width >> level, 1u),
+               .height = MAX2(image->vk.extent.height >> level, 1u),
+               .after_words = after_words,
+            };
+            memcpy(copy->clear_texel, aspect_texel, sizeof(texel));
          }
-         struct ps5vk_memory_copy *const copy =
-            util_dynarray_grow(&cmd_buffer->copies, struct ps5vk_memory_copy, 1);
-         if (!copy) {
-            ps5vk_cmd_buffer_refuse(cmd_buffer, VK_ERROR_OUT_OF_HOST_MEMORY,
-                                    "no memory to record a depth clear");
-            return;
-         }
-         *copy = (struct ps5vk_memory_copy){
-            .clear = true,
-            .destination_side = side,
-            .destination_texel_bytes = side_texel_bytes,
-            .destination_x = 0,
-            .destination_y = 0,
-            .width = MAX2(image->vk.extent.width >> level, 1u),
-            .height = MAX2(image->vk.extent.height >> level, 1u),
-            .after_words = after_words,
-         };
-         memcpy(copy->clear_texel, texel, sizeof(texel));
       }
    }
 }

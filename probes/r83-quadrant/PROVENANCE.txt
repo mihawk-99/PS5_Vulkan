@@ -1,0 +1,16 @@
+PS5 Vulkan r83-quadrant shader packages, built by tools/build-probe-shaders.sh r83-quadrant.
+pipeline: GLSL -> SPIR-V (glslang, vulkan1.0) -> opengnm-psbc NIR/ACO -> ps5-opengl agc_shader_package_writer.py
+glslang: Glslang Version: 11:16.4.0
+opengnm-psbc sha256: 13906a1e1398e8ab1262c1dcaf813dc3e477cdf05c5907b42caf87f389af2a80
+vertex: -g -s vertex --ngg --address32-hi 2 --vertex-attribute 0:r32g32_float:0:0:16:4 --vertex-attribute 1:r32g32_float:0:8:16:4; writer --esgs-ring-itemsize 1 --allow-unresolved
+pixel: -g -s fragment --raw --address32-hi 2; writer --allow-unresolved
+vertex attributes: location 0 r32g32_float offset 0, location 1 r32g32_float offset 8, stride 16, binding 0
+program-checksum registers are unresolved, as in ps5-opengl's runtime packages
+0e7625b473a62091b1f1250c1439c509d7e193eec2dc414b6cb815b4bb5f21c5  shaders/c7/band.vert
+119b819e428e5c35eedc964fd29f7321db7031aa6ef272497f8faaad4b5323d2  shaders/r83/quadrant.frag
+26a020c3fe92d88b23c73ea10711b41b2d4b8f9225d4ce6bba6feabc66fe13ea  build/shaders/r83-quadrant/vertex.spv
+d1405bce215a0fbd0be02c026d608086ef90ef7f385ba9815b04eab5b8722092  build/shaders/r83-quadrant/pixel.spv
+9797d9dc72fab55a72b118538a98ef6cf9f474810034021ab2d2a3083a9cf0f3  build/shaders/r83-quadrant/vertex.ngg.bin
+a1f0fde09355aeed62ff8dfaf9c4f02791666a7f319916b61bf465f6250340e5  build/shaders/r83-quadrant/vertex.hw.json
+74b2477522e036bbd675d87ac12ee105587645bfd7c5f57dd007b31e42b447f3  build/shaders/r83-quadrant/pixel.raw.bin
+597198fff339557a085c70b48bfd4aefc497a2b12df30f81f532c492bd1ad72b  build/shaders/r83-quadrant/pixel.hw.json

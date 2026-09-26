@@ -625,6 +625,22 @@ struct ps5vk_triangle_input {
     * load the target in the second pass instead of clearing it, so no draw
     * falls between the two passes' draws. */
    bool split_between_passes;
+   /* R81: device extensions the frame's device enables, beside the swapchain a
+    * display frame always enables -- the extension a probe's sampler mode or
+    * format belongs to. NULL and 0 enable none, as every frame before R81. */
+   const char *const *device_extensions;
+   uint32_t device_extension_count;
+   /* R83: sample one aspect of the frame's own depth attachment. With a depth
+    * attachment and detach_depth, the attachment is created sampled, a view of
+    * this aspect (VK_IMAGE_ASPECT_DEPTH_BIT or VK_IMAGE_ASPECT_STENCIL_BIT)
+    * takes the texture set's binding 0 in place of the caller's texture (which
+    * still has to be passed, for the set), and a barrier between the passes
+    * hands the attachment to the detached pass's pipeline, which samples it.
+    * Zero is every frame before R83. */
+   VkImageAspectFlags depth_sampled_aspect;
+   /* R83: the shaders of the detached pass's pipeline, or NULL for shaders[0],
+    * which is every detached frame before R83. */
+   const struct ps5vk_triangle_shaders *detached_shaders;
 };
 
 
@@ -996,6 +1012,13 @@ struct ps5vk_triangle {
    VkImage depth_image;
    VkDeviceMemory depth_memory;
    VkImageView depth_view;
+   /* R83: the aspect a detached pass samples, the view that names it, and the
+    * buffer ps5vk_triangle_read_depth_aspect copies an aspect into. */
+   VkImageAspectFlags depth_sampled_aspect;
+   VkImageView depth_sample_view;
+   VkBuffer depth_readback_buffer;
+   VkDeviceMemory depth_readback_memory;
+   void *depth_readback_mapped;
    void *depth_mapped;
    size_t depth_bytes;
    void *depth_target;
@@ -1039,6 +1062,14 @@ struct ps5vk_triangle {
  * PS5VK_TRIANGLE_IN_FLIGHT, ps5vk_triangle_finish must release it. */
 enum ps5vk_triangle_status
 ps5vk_triangle_create(struct ps5vk_triangle *triangle, const struct ps5vk_triangle_input *input);
+
+/* R83: one aspect of a frame's depth attachment (depth_sampled_aspect's frame),
+ * copied with vkCmdCopyImageToBuffer into the program's readback buffer after
+ * the frame: tightly packed rows of PS5VK_TRIANGLE_WIDTH texels, four bytes a
+ * depth texel and one a stencil texel. Returns the buffer's mapped bytes, or
+ * NULL when the copy could not be recorded or run. */
+const void *
+ps5vk_triangle_read_depth_aspect(struct ps5vk_triangle *triangle, VkImageAspectFlags aspect);
 
 /* Draws a frame: clears the program's image, or acquires a swapchain image;
  * records the frame's draws, submits them as grouping says and waits for the
