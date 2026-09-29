@@ -937,3 +937,25 @@ The quality warnings are four families:
 Next, before any further full run: the targeted rerun of these 61 cases, and
 the not-supported features, each either implemented for real or confirmed as
 a genuine absence of the hardware or the platform.
+
+## 2026-09-29 — swapchains smaller than the mode
+
+Prospero Win (Wine WoW64 with DXVK 2.6.2) runs its games at a 1920x1080
+desktop. The VideoOut swapchain only took 3840x2160, so Wine created the
+host swapchain at 4K and the 1080p image showed in the top-left quarter.
+The backend now registers a framebuffer set per swapchain size and reports
+any size from 1x1 to the mode's, with `VK_PRESENT_SCALING_STRETCH`
+(PS5_Mesa 5115a1d; HARDWARE_FINDINGS.md, same date). `tools/build-radv.sh`
+pins 5d9f448 (that change and a README note).
+
+Console, FW 12.02, through Prospero Win with the release archive linked as
+a title `libvulkan.prx`:
+
+| Check | Result |
+| --- | --- |
+| DXVK 2.6.2 pixel controls, D3D8/9/10/11, x64 and x86 | 8/8 pass (on cedb774; the WSI change does not touch them) |
+| DXVK 2.6.2 real-draw controls, D3D8/9/10/11, x64 and x86 | 8/8 pass on cedb774; D3D11 x64 and D3D9 x86 again on the new code |
+| 1920x1080 D3D11 and D3D9 four-quadrant scanout controls | pass, full screen on the TV and in Remote Play |
+| 3840x2160 D3D11 control, and a 1080p to 4K resize in one swapchain | pass |
+| x64 Vulkan probe, x86 placed-map probe | pass |
+

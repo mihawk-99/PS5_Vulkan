@@ -3731,6 +3731,9 @@ device as host memory and laid out by RADV as 64 KiB R_X tiles without DCC or
 pipe and bank swizzle. Each present waits for its frame on a thread and flips
 with sceVideoOutSubmitFlip(handle, index, 1, argument).
 
+(Since 2026-09-29 a set of framebuffers is registered per swapchain size;
+see "VideoOut scales a smaller framebuffer set to the output" below.)
+
 - 60 frames cleared and presented through three images; the last 50 took
   0.834 s, 50 periods of the 59.94 Hz mode: the flips gate the presents.
 - The last frame read back its first and last pixels as cleared.
@@ -3769,3 +3772,21 @@ Measured from RADV's shader cache in vkQuake, from time stamps around each call:
   group 0, yet the title opens for writing a file of mode 0644 it made
   earlier: the mode bits do not predict what a title may do.
 - `/data`, where FTP sees the title's folder, does not exist for the title.
+
+## 2026-09-29 — VideoOut scales a smaller framebuffer set to the output (RADV)
+
+Mesa's VideoOut backend (PS5_Mesa 5115a1d) registers one set of five
+framebuffers per swapchain size, as set *i* at buffer indices 5*i* onwards,
+each with sceVideoOutSetBufferAttribute2 at the swapchain's width and height
+(tiling 0, B8G8R8A8 SDR) and sized in whole 128x128-pixel 64 KiB tiles
+(1920x1080: 15x9 tiles). On FW 12.02 with the 3840x2160 59.94 Hz mode:
+
+- A 1920x1080 set fills the whole output. DXVK 2.6.2's D3D11 and D3D9
+  four-quadrant controls, through Wine (Prospero Win), showed full-screen
+  quadrants on the TV and in a Remote Play capture; with only the 4K set
+  (before) the same 1080p image sat in the top-left quarter.
+- A second set in one process registers: one D3D11 swapchain presented three
+  1920x1080 frames, was resized to 3840x2160 (set 1, indices 5 to 9) and
+  presented three more; all correct on the TV.
+- Other sizes, and more than two sets in one process, were not measured.
+
