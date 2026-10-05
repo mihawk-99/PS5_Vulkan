@@ -266,6 +266,10 @@ int link_command(std::span<char *> args)
         link_options.companion_sdk = static_cast<std::uint32_t>(parse_integer(*value));
     for (std::string_view value : options(args, "--component"))
         link_options.version_components.emplace_back(value);
+    if (const auto value = option(args, "--flexible-memory"))
+        link_options.flexible_memory = parse_integer(*value);
+    if (const auto value = option(args, "--parameter-pointers-in-file"))
+        link_options.parameter_pointer_base = parse_integer(*value);
 
     const Bytes output = ps5::module::write_executable(image, stubs, link_options);
     const auto path = std::filesystem::absolute(std::filesystem::path{std::string{*output_name}});
@@ -282,7 +286,8 @@ void usage()
               << "  ps5-native-tool self --extract --file <fself> --out <elf>\n"
               << "  ps5-native-tool self --inspect --file <module>\n"
               << "  ps5-native-tool link --in <llvm-pie> --out <ps5-elf>"
-                 " (--stub <sdk-so>... | --stub-dir <sdk-lib>)\n";
+                 " (--stub <sdk-so>... | --stub-dir <sdk-lib>)\n"
+              << "      experimental: [--flexible-memory <bytes>] [--parameter-pointers-in-file <base>]\n";
 }
 
 } // namespace

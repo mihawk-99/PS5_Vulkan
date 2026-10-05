@@ -306,9 +306,10 @@ struct ParameterBlocks
     std::array<std::size_t, 6> offsets{};
     std::size_t heap_size{};
     std::size_t heap_extended{};
+    std::size_t flexible_memory{}; // 0 when no flexible memory size is asked for
 };
 
-ParameterBlocks build_parameter_blocks()
+ParameterBlocks build_parameter_blocks(std::uint64_t flexible_memory)
 {
     constexpr std::array<std::size_t, 6> sizes = {0xa8, 0x38, 0x10, 0x78, 0xc0, 0x38};
     constexpr std::array<std::uint64_t, 6> counts = {0x000000010000000e, 0, 0, 2, 3, 1};
@@ -330,6 +331,12 @@ ParameterBlocks build_parameter_blocks()
     }
     write_u64(result.data, result.heap_size, std::numeric_limits<std::uint64_t>::max());
     write_u32(result.data, result.heap_extended, 1);
+    if (flexible_memory != 0)
+    {
+        result.flexible_memory = result.data.size();
+        result.data.resize(result.data.size() + 8);
+        write_u64(result.data, result.flexible_memory, flexible_memory);
+    }
     return result;
 }
 
@@ -677,7 +684,7 @@ Bytes write_executable(const Image &image, std::span<const Stub> stubs, const Op
 
     const Bytes process_parameters =
         build_process_parameters(options.module_sdk, options.companion_sdk);
-    const ParameterBlocks blocks = build_parameter_blocks();
+    const ParameterBlocks blocks = build_parameter_blocks(options.flexible_memory);
     const std::uint64_t process_address =
         align_up(std::max(relro_content_end, ro_end > relro_start ? ro_end : 0), 8);
     const std::uint64_t blocks_address = align_up(process_address + process_parameters.size(), 8);
@@ -769,7 +776,7 @@ Bytes write_executable(const Image &image, std::span<const Stub> stubs, const Op
         else
             symbolic.push_back(relocation);
     }
-    const std::array<std::pair<std::uint64_t, std::uint64_t>, 8> parameter_pointers = {{
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> parameter_pointers = {
         {process_address + 0x38, blocks_address + blocks.offsets[0]},
         {process_address + 0x40, blocks_address + blocks.offsets[1]},
         {process_address + 0x48, blocks_address + blocks.offsets[2]},
@@ -778,7 +785,11 @@ Bytes write_executable(const Image &image, std::span<const Stub> stubs, const Op
         {blocks_address + 0x60, blocks_address + blocks.offsets[5]},
         {blocks_address + 0x10, blocks_address + blocks.heap_size},
         {blocks_address + 0x20, blocks_address + blocks.heap_extended},
-    }};
+    };
+    // The memory parameter block (offsets[1]): its +0x10 points to the flexible memory size, when one is asked for.
+    if (blocks.flexible_memory != 0)
+        parameter_pointers.push_back(
+            {blocks_address + blocks.offsets[1] + 0x10, blocks_address + blocks.flexible_memory});
     std::vector<DynamicRelocation> relocations;
     for (const auto &[offset, addend] : parameter_pointers)
         relocations.push_back({offset, kRelRelative, addend});
@@ -857,6 +868,9 @@ Bytes write_executable(const Image &image, std::span<const Stub> stubs, const Op
     const std::uint64_t relro_file = relro_first->file_offset;
     copy_bytes(output, relro_file + process_address - relro_start, process_parameters);
     copy_bytes(output, relro_file + blocks_address - relro_start, blocks.data);
+    if (options.parameter_pointer_base)
+        for (const auto &[at, target] : parameter_pointers)
+            write_u64(output, relro_file + at - relro_start, *options.parameter_pointer_base + target);
     copy_bytes(output, dynamic_file_at(string_address), dynamic_strings);
     copy_bytes(output, dynamic_file_at(symbol_address), dynamic_symbols);
     copy_bytes(output, dynamic_file_at(jump_address), rela_plt);

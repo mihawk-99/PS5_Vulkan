@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <span>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -26,6 +27,14 @@ struct Options
     std::uint32_t module_sdk = 0x02000009;
     std::uint32_t companion_sdk = 0x08050001;
     std::vector<std::string> version_components;
+    // Experimental: the flexible memory the process asks the kernel for, through the memory parameter block's
+    // sceKernelFlexibleMemorySize field (the PS4 layout: a pointer at +0x10 to the size). 0 leaves the field empty,
+    // as before, and the output unchanged.
+    std::uint64_t flexible_memory = 0;
+    // Experimental: also store each process-parameter pointer in the file, as this base plus its address, for a
+    // kernel that reads them before the image's relocations are applied. Without it they are filled by relocation
+    // only, as before.
+    std::optional<std::uint64_t> parameter_pointer_base;
 };
 
 [[nodiscard]] elf::Bytes write_executable(const elf::Image &image, std::span<const elf::Stub> stubs,
