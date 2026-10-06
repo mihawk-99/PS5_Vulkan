@@ -13,6 +13,12 @@ void ps5_gpu_broker_close(int cookie,int lifecycle_token);
 bool ps5_gpu_broker_stop();
 bool ps5_gpu_broker_warm(FILE *output);
 void ps5_gpu_broker_set_desktop(int (*foreground)(),void (*cursor)(int *,int *));
+/* Frames the display has shown since the broker started: an application's mark for a program's first frame (a
+ * scripted run's clock, when the program presents through the broker). */
+unsigned long long ps5_gpu_broker_flips(void);
+/* The next frame the display shows is also written to path, a PPM picture, once: false when the broker is not running
+ * or a picture is already waiting for its frame. */
+bool ps5_gpu_broker_capture_next(const char *path);
 /* attach consumes fd. Frame-page format is frame_page.h. */
 void ps5_gpu_broker_frame_attach(int pid,int fd);
 void ps5_gpu_broker_frame_detach(int pid);

@@ -480,6 +480,8 @@ struct Broker {
     struct FrameSource { int pid=0;PwFramePage *page=nullptr;uint32_t shown=0; } frames[32];
     uint8_t *frame_copy=nullptr;int cursor_x=INT32_MIN,cursor_y=INT32_MIN;
     pthread_t compositor{};bool compositing=false,compositor_stop=false;
+    // Under display_lock: a picture the application asked for (ps5_gpu_broker_capture_next), of the next frame shown.
+    std::string capture_next;
 } broker_state;
 // The desktop state, supplied by the application: the native process of the foreground window, and the cursor.
 int (*desktop_foreground)()=nullptr;
@@ -591,8 +593,10 @@ void *client_main(void *argument)
                     const bool shown=may_show(b,c.cookie,c.pid,radv_ps5_now_ns());
                     if(shown) {
                         int cursor_x,cursor_y;screen_cursor(0,0,(unsigned)m.argument[0],(unsigned)m.argument[1],cursor_x,cursor_y);
+                        std::string asked;asked.swap(b.capture_next);
+                        const std::string &picture=asked.empty() ? capture : asked;
                         m.status=b.display.present((void *)m.address,(unsigned)m.argument[0],(unsigned)m.argument[1],
-                            (unsigned)m.argument[2],b.log,capture.empty() ? nullptr : capture.c_str(),m.argument[3]!=0,
+                            (unsigned)m.argument[2],b.log,picture.empty() ? nullptr : picture.c_str(),m.argument[3]!=0,
                             cursor_x,cursor_y);
                     } else m.status=0;
                     pthread_mutex_unlock(&b.display_lock);
@@ -647,7 +651,9 @@ void *compositor_main(void *)
             // PROTON_GPU_CAPTURE: a picture of each helper's first frame as the screen showed it, pointer included.
             char path[96];snprintf(path,sizeof(path),"/app0/gpu-desktop-%d.ppm",f.pid);
             const std::string capture=b.capture && !f.shown ? output_path(path) : std::string();
-            const int status=b.display.present(b.frame_copy,width,height,stride,b.log,capture.empty() ? nullptr : capture.c_str(),
+            std::string asked;asked.swap(b.capture_next);
+            const std::string &picture=asked.empty() ? capture : asked;
+            const int status=b.display.present(b.frame_copy,width,height,stride,b.log,picture.empty() ? nullptr : picture.c_str(),
                 true,screen_x,screen_y);
             if(!f.shown || status)fprintf(b.log,"gpu-desktop frame pid=%d %ux%u at %d,%d cursor=%d,%d status=%#x\n",f.pid,
                 width,height,x,y,screen_x,screen_y,unsigned(status));
@@ -658,6 +664,24 @@ void *compositor_main(void *)
         pthread_mutex_unlock(&b.display_lock);
     }
 }
+}
+unsigned long long ps5_gpu_broker_flips()
+{
+    auto &b=broker_state;
+    pthread_mutex_lock(&b.display_lock);
+    const unsigned long long flips=b.display.flips;
+    pthread_mutex_unlock(&b.display_lock);
+    return flips;
+}
+bool ps5_gpu_broker_capture_next(const char *path)
+{
+    auto &b=broker_state;
+    if(!path || !*path)return false;
+    pthread_mutex_lock(&b.display_lock);
+    const bool asked=b.started && b.capture_next.empty();
+    if(asked)b.capture_next=path;
+    pthread_mutex_unlock(&b.display_lock);
+    return asked;
 }
 void ps5_gpu_broker_set_desktop(int (*foreground)(),void (*cursor)(int *,int *))
 {

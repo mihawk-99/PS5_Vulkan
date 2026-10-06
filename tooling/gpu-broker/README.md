@@ -19,7 +19,9 @@ endpoint returned by `ps5_gpu_broker_open` into a trusted client process. The
 application owns process creation, desktop focus and input. Give its opaque
 lifecycle token to close; `is_absent(token)` must prove the native process ended.
 Socket EOF alone never permits backing reclamation. Stop only after all clients
-close; pending GPU fences drain before buffers are freed. Failed drains retain
+close; pending GPU fences drain before buffers are freed. `ps5_gpu_broker_flips` and
+`ps5_gpu_broker_capture_next` give the application the frames shown so far and a picture
+of the next one, for scripted runs of programs that present through the broker. Failed drains retain
 backing and report device loss. The owner title must use its shell-close or
 LoadExec path, never `exit()` or return from `_start`.
 
