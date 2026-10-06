@@ -17,7 +17,7 @@ OUTPUT := $(ROOT)/build/ps5vkctl
 ELF := $(OUTPUT)/ps5vkctl.elf
 
 CFLAGS := -std=c11 -O2 -g -Wall -Wextra -Werror
-LDLIBS := -lSceSystemService -lSceUserService
+LDLIBS := -lSceSystemService -lSceUserService -lpthread
 
 all: $(ELF)
 

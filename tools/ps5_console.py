@@ -260,6 +260,7 @@ def ps5vkctl_command(settings, command, timeout=60.0):
 def payload_status(args):
     settings = load_settings()
     print(f"ps5vkctl: {ps5vkctl_command(settings, 'ping')}")
+    print(f"ps5vkctl: {ps5vkctl_command(settings, 'health')}")
     print(f"ps5vkctl: {ps5vkctl_command(settings, 'status')}")
     return 0
 

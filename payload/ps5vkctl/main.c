@@ -12,6 +12,7 @@
  * 9111:
  *
  *   ping              is the agent there, and which process is it
+ *   health            the same, and the system call still running, if any: its command and for how long
  *   status            which application the console is running, and its title
  *   users             what the user service answers: init, foreground, logged-in
  *   procs             the pids of that application's processes
@@ -30,6 +31,16 @@
  * application, and PPSA99999 -- the default profile this project never launches
  * for a run -- is refused outright.
  *
+ * Every command that asks the system (status, users, procs, launch, kill, restart) runs on one worker thread
+ * and is answered within a deadline: 20 s, or 180 s for launch, kill and restart. A call that does not return
+ * keeps the worker, and every later system command is answered "err busy <command> for <s> s" at once; ping,
+ * health and quit never touch the system. On 2026-10-06 a `procs` call never returned while the console's own
+ * services were stuck (a title held in its exit, SceSysCore stopped), and the agent, then single-threaded,
+ * accepted connections and answered nothing. A second copy never logged its first line or listened: it waited in
+ * an IPC call (IpmWSv0), most likely sceUserServiceInitialize, its first. The user service is now initialized on
+ * the worker, after the agent listens, so health can say the worker is stuck in "init".
+ * A client has 5 s to send its line and to take the answer. The log rolls over to ps5vkctl.log.old at 4 MiB.
+ *
  * Build with tools/build-ps5vkctl.sh, which needs PS5_PAYLOAD_SDK, and load
  * build/ps5vkctl/ps5vkctl.elf once per console boot with whatever payload
  * loader the console runs. tools/ps5_console.py is the client; docs/DEPLOYMENT.md
@@ -39,6 +50,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -47,9 +59,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/sysctl.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/user.h>
+#include <time.h>
 #include <unistd.h>
 
 /* The agent's port, the longest command it answers, and its own log. */
@@ -58,6 +73,9 @@
 #define PS5VKCTL_LOG "/data/ps5vkctl.log"
 #define PS5VKCTL_MAX_PIDS 16
 #define PS5VKCTL_TITLE 9
+#define PS5VKCTL_LOG_LIMIT (4L << 20)
+#define PS5VKCTL_DEADLINE 20
+#define PS5VKCTL_LONG_DEADLINE 180
 
 /* libSceSystemService reports these for a title that is already up, and for no
  * application at all. */
@@ -67,8 +85,21 @@
 /* The default profile: never launched, and never closed, by a run. */
 static const char *const refused_title = "PPSA99999";
 
-/* What sceUserServiceInitialize returned at startup, reported by "users". */
+/* What sceUserServiceInitialize returned on the worker, reported by "users". */
 static int g_user_init;
+
+/* The worker: the one system command it runs, the answer reply() writes for it, and whether it is in one. The
+ * main thread reads the answer only once the worker has left the command, under g_work_lock. */
+static pthread_mutex_t g_log_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_work_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_work_cond = PTHREAD_COND_INITIALIZER;
+static char g_work_line[PS5VKCTL_LINE];
+static char g_work_command[16];
+static char g_answer[PS5VKCTL_LINE];
+static bool g_work_pending;
+static bool g_work_busy;
+static time_t g_work_since;
+static unsigned long long g_served;
 
 /* The console's own record of a process, as sceKernelGetAppInfo fills it (the
  * layout ps5-payload-manager's process manager reads). */
@@ -122,9 +153,13 @@ static void log_line(const char *format, ...)
     va_start(arguments, format);
     va_list copy;
     va_copy(copy, arguments);
+    pthread_mutex_lock(&g_log_lock);
     vprintf(format, arguments);
     printf("\n");
     fflush(stdout);
+    struct stat state;
+    if (stat(PS5VKCTL_LOG, &state) == 0 && state.st_size > PS5VKCTL_LOG_LIMIT)
+        (void)rename(PS5VKCTL_LOG, PS5VKCTL_LOG ".old");
     FILE *const file = fopen(PS5VKCTL_LOG, "a");
     if (file != NULL)
     {
@@ -132,21 +167,25 @@ static void log_line(const char *format, ...)
         fputc('\n', file);
         fclose(file);
     }
+    pthread_mutex_unlock(&g_log_lock);
     va_end(copy);
     va_end(arguments);
 }
 
-// Answer one line, newline terminated.
-static void reply(int client, const char *format, ...) __attribute__((format(printf, 2, 3)));
-static void reply(int client, const char *format, ...)
+// The answer to the command the worker runs; the main thread sends it if the worker finished in time.
+static void reply(const char *format, ...) __attribute__((format(printf, 1, 2)));
+static void reply(const char *format, ...)
 {
-    char line[PS5VKCTL_LINE];
     va_list arguments;
     va_start(arguments, format);
-    vsnprintf(line, sizeof(line), format, arguments);
+    vsnprintf(g_answer, sizeof(g_answer), format, arguments);
     va_end(arguments);
-    const size_t length = strlen(line);
-    if (send(client, line, length, 0) < 0 || send(client, "\n", 1, 0) < 0)
+}
+
+// Send one line, newline terminated, on the main thread.
+static void send_line(int client, const char *line)
+{
+    if (send(client, line, strlen(line), 0) < 0 || send(client, "\n", 1, 0) < 0)
         log_line("ps5vkctl: reply failed: %s", strerror(errno));
 }
 
@@ -346,30 +385,25 @@ static int valid_title(const char *title)
     return title != NULL && strlen(title) == PS5VKCTL_TITLE;
 }
 
-// Answer one command. Returns 0 to keep serving, -1 to leave the console.
-static int handle_command(int client, char *line)
+// Answer one system command, on the worker.
+static void handle_command(char *line)
 {
     char *const command = strtok(line, " \t");
     if (command == NULL)
     {
-        reply(client, "err empty");
-        return 0;
+        reply("err empty");
+        return;
     }
     const char *const title = strtok(NULL, " \t");
-    if (strcmp(command, "ping") == 0)
-    {
-        reply(client, "ok ps5vkctl 1 pid=%d", (int)getpid());
-        return 0;
-    }
     if (strcmp(command, "status") == 0)
     {
         char running[32] = {0};
         const uint32_t app_id = running_app(running, sizeof(running));
         if (app_id == PS5VKCTL_NO_APP)
-            reply(client, "ok idle");
+            reply("ok idle");
         else
-            reply(client, "ok running app=%u title=%s", app_id, running);
-        return 0;
+            reply("ok running app=%u title=%s", app_id, running);
+        return;
     }
     if (strcmp(command, "users") == 0)
     {
@@ -386,9 +420,9 @@ static int handle_command(int client, char *line)
                 strncat(list, entry, sizeof(list) - strlen(list) - 1);
             }
         }
-        reply(client, "ok users init=0x%08x foreground=%d list=0x%08x [%s]", g_user_init,
+        reply("ok users init=0x%08x foreground=%d list=0x%08x [%s]", g_user_init,
               foreground_user(), (uint32_t)list_result, list);
-        return 0;
+        return;
     }
     if (strcmp(command, "procs") == 0)
     {
@@ -403,24 +437,19 @@ static int handle_command(int client, char *line)
             snprintf(entry, sizeof(entry), "%s%d", index == 0 ? "" : ",", pids[index]);
             strncat(list, entry, sizeof(list) - strlen(list) - 1);
         }
-        reply(client, "ok procs app=%u title=%s count=%d pids=%s", app_id,
+        reply("ok procs app=%u title=%s count=%d pids=%s", app_id,
               app_id == PS5VKCTL_NO_APP ? "" : running, count, list);
-        return 0;
-    }
-    if (strcmp(command, "quit") == 0)
-    {
-        reply(client, "ok bye");
-        return -1;
+        return;
     }
     if (!valid_title(title))
     {
-        reply(client, "err usage: %s needs a nine-character title id", command);
-        return 0;
+        reply("err usage: %s needs a nine-character title id", command);
+        return;
     }
     if (strcmp(title, refused_title) == 0)
     {
-        reply(client, "err refused %s is the default profile", title);
-        return 0;
+        reply("err refused %s is the default profile", title);
+        return;
     }
     if (strcmp(command, "launch") == 0)
     {
@@ -428,22 +457,22 @@ static int handle_command(int client, char *line)
         uint32_t code = 0;
         char detail[160] = {0};
         if (start_title(title, &name, &code, detail, sizeof(detail)) == 0)
-            reply(client, "ok launched %s result=0x%08x %s", title, code, detail);
+            reply("ok launched %s result=0x%08x %s", title, code, detail);
         else
-            reply(client, "err launch %s %s", title, detail);
-        return 0;
+            reply("err launch %s %s", title, detail);
+        return;
     }
     if (strcmp(command, "kill") == 0)
     {
         char detail[160] = {0};
         const int status = close_title(title, detail, sizeof(detail));
         if (status == 0)
-            reply(client, "ok killed %s: %s", title, detail);
+            reply("ok killed %s: %s", title, detail);
         else if (status == 1)
-            reply(client, "ok idle %s: %s", title, detail);
+            reply("ok idle %s: %s", title, detail);
         else
-            reply(client, "err kill %s: %s", title, detail);
-        return 0;
+            reply("err kill %s: %s", title, detail);
+        return;
     }
     if (strcmp(command, "restart") == 0)
     {
@@ -451,19 +480,45 @@ static int handle_command(int client, char *line)
         const int status = close_title(title, detail, sizeof(detail));
         if (status < 0)
         {
-            reply(client, "err restart %s: %s", title, detail);
-            return 0;
+            reply("err restart %s: %s", title, detail);
+            return;
         }
         const char *name = NULL;
         uint32_t code = 0;
         if (start_title(title, &name, &code, detail, sizeof(detail)) == 0)
-            reply(client, "ok restarted %s result=0x%08x %s", title, code, detail);
+            reply("ok restarted %s result=0x%08x %s", title, code, detail);
         else
-            reply(client, "err restart %s %s", title, detail);
-        return 0;
+            reply("err restart %s %s", title, detail);
+        return;
     }
-    reply(client, "err unknown %s", command);
-    return 0;
+    reply("err unknown %s", command);
+    return;
+}
+
+// The worker: initializes the user service, then runs one system command at a time.
+static void *worker(void *unused)
+{
+    (void)unused;
+    g_user_init = sceUserServiceInitialize(NULL);
+    log_line("ps5vkctl: user service 0x%08x", (uint32_t)g_user_init);
+    pthread_mutex_lock(&g_work_lock);
+    g_work_busy = false;
+    pthread_cond_broadcast(&g_work_cond);
+    for (;;)
+    {
+        while (!g_work_pending)
+            pthread_cond_wait(&g_work_cond, &g_work_lock);
+        char line[PS5VKCTL_LINE];
+        memcpy(line, g_work_line, sizeof(line));
+        g_work_pending = false;
+        pthread_mutex_unlock(&g_work_lock);
+        g_answer[0] = '\0';
+        handle_command(line);
+        pthread_mutex_lock(&g_work_lock);
+        g_work_busy = false;
+        pthread_cond_broadcast(&g_work_cond);
+    }
+    return NULL;
 }
 
 // Read one command line and answer it. Returns 0 to keep serving, -1 to leave.
@@ -486,7 +541,66 @@ static int serve_client(int client)
     if (used == 0)
         return 0;
     log_line("ps5vkctl: command %s", line);
-    return handle_command(client, line);
+    char word[16] = {0};
+    (void)sscanf(line, "%15s", word);
+    char text[PS5VKCTL_LINE];
+    if (strcmp(word, "ping") == 0)
+    {
+        snprintf(text, sizeof(text), "ok ps5vkctl 1 pid=%d", (int)getpid());
+        send_line(client, text);
+        return 0;
+    }
+    if (strcmp(word, "quit") == 0)
+    {
+        send_line(client, "ok bye");
+        return -1;
+    }
+    pthread_mutex_lock(&g_work_lock);
+    const bool busy = g_work_busy;
+    const long long busy_for = busy ? (long long)(time(NULL) - g_work_since) : 0;
+    char busy_command[sizeof(g_work_command)];
+    memcpy(busy_command, g_work_command, sizeof(busy_command));
+    if (strcmp(word, "health") == 0 || busy)
+    {
+        pthread_mutex_unlock(&g_work_lock);
+        if (strcmp(word, "health") == 0)
+            snprintf(text, sizeof(text), "ok health pid=%d busy=%s for=%lld served=%llu", (int)getpid(),
+                     busy ? busy_command : "none", busy_for, g_served);
+        else
+            snprintf(text, sizeof(text), "err busy %s for %lld s", busy_command, busy_for);
+        send_line(client, text);
+        return 0;
+    }
+    const int deadline = strcmp(word, "launch") == 0 || strcmp(word, "kill") == 0 || strcmp(word, "restart") == 0
+                             ? PS5VKCTL_LONG_DEADLINE
+                             : PS5VKCTL_DEADLINE;
+    snprintf(g_work_line, sizeof(g_work_line), "%s", line);
+    snprintf(g_work_command, sizeof(g_work_command), "%s", word);
+    g_work_since = time(NULL);
+    g_work_pending = true;
+    g_work_busy = true;
+    pthread_cond_broadcast(&g_work_cond);
+    struct timespec until;
+    clock_gettime(CLOCK_REALTIME, &until);
+    until.tv_sec += deadline;
+    while (g_work_busy)
+        if (pthread_cond_timedwait(&g_work_cond, &g_work_lock, &until) == ETIMEDOUT)
+            break;
+    const bool finished = !g_work_busy;
+    char answer[PS5VKCTL_LINE] = {0};
+    if (finished)
+        memcpy(answer, g_answer, sizeof(answer));
+    g_served++;
+    pthread_mutex_unlock(&g_work_lock);
+    if (finished)
+    {
+        send_line(client, answer[0] != '\0' ? answer : "err no answer");
+        return 0;
+    }
+    log_line("ps5vkctl: %s still in a system call after %d s", word, deadline);
+    snprintf(text, sizeof(text), "err timeout %s after %d s, still in a system call", word, deadline);
+    send_line(client, text);
+    return 0;
 }
 
 int main(int argc, char *argv[])
@@ -499,11 +613,7 @@ int main(int argc, char *argv[])
             port = (unsigned)requested;
     }
     (void)signal(SIGPIPE, SIG_IGN);
-    // The launch calls need the user service, and an uninitialized one answers
-    // nothing: initialize it once, whatever the result, and report it.
-    g_user_init = sceUserServiceInitialize(NULL);
-    log_line("ps5vkctl: starting, port %u, pid %d, user service 0x%08x", port, (int)getpid(),
-             (uint32_t)g_user_init);
+    log_line("ps5vkctl: starting, port %u, pid %d", port, (int)getpid());
 
     const int server = socket(AF_INET, SOCK_STREAM, 0);
     if (server < 0)
@@ -526,6 +636,18 @@ int main(int argc, char *argv[])
         return 1;
     }
     log_line("ps5vkctl: listening");
+    // The launch calls need the user service, and an uninitialized one answers nothing: the worker initializes it
+    // once, whatever the result, and is busy with "init" until then.
+    snprintf(g_work_command, sizeof(g_work_command), "init");
+    g_work_since = time(NULL);
+    g_work_busy = true;
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, worker, NULL) != 0)
+    {
+        log_line("ps5vkctl: no worker thread");
+        close(server);
+        return 1;
+    }
     for (;;)
     {
         const int client = accept(server, NULL, NULL);
@@ -536,6 +658,9 @@ int main(int argc, char *argv[])
             log_line("ps5vkctl: accept failed: %s", strerror(errno));
             break;
         }
+        struct timeval patience = {5, 0};
+        (void)setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &patience, sizeof(patience));
+        (void)setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &patience, sizeof(patience));
         const int leaving = serve_client(client);
         close(client);
         if (leaving != 0)

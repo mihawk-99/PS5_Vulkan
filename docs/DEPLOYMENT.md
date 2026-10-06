@@ -150,9 +150,15 @@ trusted to close itself. The console therefore keeps a small agent resident,
    ```
 
    The agent answers on port `9111` (`PS5VKCTL_PORT`), logs to
-   `/data/ps5vkctl.log`, and speaks one command per connection: `ping`,
-   `status`, `users`, `procs`, `launch <TITLEID>`, `kill <TITLEID>`,
-   `restart <TITLEID>` and `quit`. `launch` tries the calls the ecosystem's
+   `/data/ps5vkctl.log` (rolled over to `ps5vkctl.log.old` at 4 MiB), and
+   speaks one command per connection: `ping`, `health`, `status`, `users`,
+   `procs`, `launch <TITLEID>`, `kill <TITLEID>`, `restart <TITLEID>` and
+   `quit`. The commands that ask the system run on one worker thread and are
+   answered within 20 s (180 s for `launch`, `kill` and `restart`); while a
+   call has not returned, they are answered `err busy <command> for <s> s` at
+   once, and `health` says which call it is and for how long. `ping`, `health`
+   and `quit` never touch the system, so a stuck console service no longer
+   silences the agent. `launch` tries the calls the ecosystem's
    dashboards use (`sceLncUtilLaunchApp` and `sceSystemServiceLaunchApp`, with
    the foreground and the logged-in user) and reports what each returned;
    `kill` suspends the title, SIGKILLs its processes and then calls
