@@ -233,6 +233,21 @@ uint64_t local_offer()
     const uint64_t room=available>kLocalFloor ? (available-kLocalFloor)&~16383ull : 0;
     return room<kLocalOffer ? room : kLocalOffer;
 }
+// A client buffer's object, sized: from the application's maker when it set one (its pages written through there, so
+// they are not this process's when the GPU grant makes them resident), else made here. -1 on failure.
+int (*shared_alloc)(size_t)=nullptr;
+int (*shared_touch)(int,size_t,size_t)=nullptr;
+int shared_object(uint64_t bytes)
+{
+    if(shared_alloc) {
+        const int fd=shared_alloc(bytes);
+        if(fd>=0 && (!shared_touch || !shared_touch(fd,0,bytes)))return fd;
+        if(fd>=0)close(fd);
+    }
+    const int fd=shm_open(SHM_ANON,O_RDWR,0600);
+    if(fd>=0 && ftruncate(fd,bytes)) { close(fd);return -1; }
+    return fd;
+}
 int allocate_local(Client &c,PwGpuMessage &m,Buffer &b,uint64_t bytes,uint64_t alignment)
 {
     c.allocation_stage="local_budget";
@@ -268,9 +283,9 @@ int allocate(Client &c,PwGpuMessage &m,uint64_t &next_window,uint64_t &next_high
         const uint64_t address=range.take(bytes,alignment);
         if(!address)return ENOMEM;
         c.allocation_stage="shm";
-        const int shared=shm_open(SHM_ANON,O_RDWR,0600);
+        const int shared=shared_object(bytes);
         void *mapped=MAP_FAILED;
-        if(shared>=0 && !ftruncate(shared,bytes)) {
+        if(shared>=0) {
             c.allocation_stage="map";
             mapped=mmap((void *)address,bytes,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,shared,0);
         }
@@ -303,14 +318,11 @@ int allocate(Client &c,PwGpuMessage &m,uint64_t &next_window,uint64_t &next_high
         cursor=address+(bytes>(UINT64_C(2)<<20) ? bytes : UINT64_C(2)<<20);
     }
     c.allocation_stage="shm";
-    const int shared=shm_open(SHM_ANON,O_RDWR,0600);
+    const int shared=shared_object(bytes);
     void *mapped=MAP_FAILED;
     if(shared>=0) {
-        c.allocation_stage="truncate";
-        if(!ftruncate(shared,bytes)) {
-            c.allocation_stage="map";
-            mapped=mmap(reserved,bytes,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,shared,0);
-        }
+        c.allocation_stage="map";
+        mapped=mmap(reserved,bytes,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,shared,0);
     }
     bool granted=false;
     if(mapped==reserved) { c.allocation_stage="gpu_permissions";granted=radv_ps5_memory_grant_gpu(mapped,bytes); }
@@ -682,6 +694,10 @@ bool ps5_gpu_broker_capture_next(const char *path)
     if(asked)b.capture_next=path;
     pthread_mutex_unlock(&b.display_lock);
     return asked;
+}
+void ps5_gpu_broker_set_shared_memory(int (*alloc)(size_t),int (*touch)(int,size_t,size_t))
+{
+    shared_alloc=alloc;shared_touch=touch;
 }
 void ps5_gpu_broker_set_desktop(int (*foreground)(),void (*cursor)(int *,int *))
 {

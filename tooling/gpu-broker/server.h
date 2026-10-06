@@ -19,6 +19,10 @@ unsigned long long ps5_gpu_broker_flips(void);
 /* The next frame the display shows is also written to path, a PPM picture, once: false when the broker is not running
  * or a picture is already waiting for its frame. */
 bool ps5_gpu_broker_capture_next(const char *path);
+/* Where the memory a client maps comes from: alloc gives a new object of bytes (or -1), touch writes through
+ * [from, to) of one in another process before the broker maps it for the GPU (0, or -1). An application whose clients
+ * outlive it sets both, so none of that memory is its own; unset, the broker makes it, as before. */
+void ps5_gpu_broker_set_shared_memory(int (*alloc)(size_t bytes),int (*touch)(int fd,size_t from,size_t to));
 /* attach consumes fd. Frame-page format is frame_page.h. */
 void ps5_gpu_broker_frame_attach(int pid,int fd);
 void ps5_gpu_broker_frame_detach(int pid);
