@@ -190,6 +190,44 @@ void radv_ps5_cpu_flush(const void *address,size_t bytes)
         __asm__ volatile("clflushopt %0" : "+m"(*(volatile char *)p));
     __asm__ volatile("mfence");
 }
+/* The shared memory behind each host-visible allocation, kept for a placed mapping (VK_EXT_map_memory_placed): a
+ * 32-bit Windows program under WoW64 maps its memory again below 4 GiB, which takes the descriptor after the first
+ * mapping (PS5_Proton's docs/IA32_DESIGN.md, M4 step 3). One per allocation, closed when the allocation is freed,
+ * and only when the application asked (ps5_gpu_client_keep_sources): a payload process has a few hundred
+ * descriptors (636 measured), which a 64-bit program with many allocations would otherwise spend. */
+struct shared_source { uintptr_t address; int fd; };
+static int keep_sources;
+void ps5_gpu_client_keep_sources(void) { __atomic_store_n(&keep_sources,1,__ATOMIC_RELEASE); }
+static struct shared_source *sources;
+static size_t source_count,source_capacity;
+static pthread_mutex_t sources_lock=PTHREAD_MUTEX_INITIALIZER;
+static bool source_add(uintptr_t address,int fd)
+{
+    pthread_mutex_lock(&sources_lock);
+    if(source_count==source_capacity) {
+        const size_t capacity=source_capacity ? source_capacity*2 : 64;
+        struct shared_source *grown=realloc(sources,capacity*sizeof(*grown));
+        if(!grown) { pthread_mutex_unlock(&sources_lock);return false; }
+        sources=grown;source_capacity=capacity;
+    }
+    sources[source_count++]=(struct shared_source){address,fd};
+    pthread_mutex_unlock(&sources_lock);
+    return true;
+}
+/* The descriptor of the allocation at address, or -1; take removes it from the table. */
+static int source_find(uintptr_t address,bool take)
+{
+    int fd=-1;
+    pthread_mutex_lock(&sources_lock);
+    for(size_t i=0;i<source_count;++i)
+        if(sources[i].address==address) {
+            fd=sources[i].fd;
+            if(take)sources[i]=sources[--source_count];
+            break;
+        }
+    pthread_mutex_unlock(&sources_lock);
+    return fd;
+}
 bool radv_ps5_memory_alloc(uint64_t bytes,uint64_t alignment,bool window32,struct radv_ps5_memory *out)
 {
     if(!bytes || bytes>host_limit || alignment>PW_GPU_ALIGNMENT_MAX || (alignment && (alignment&(alignment-1))))return false;
@@ -216,7 +254,8 @@ bool radv_ps5_memory_alloc(uint64_t bytes,uint64_t alignment,bool window32,struc
             if(!okay)sceKernelMunmap(at,message.bytes);
         }
     }
-    close(fd);
+    /* Kept for a placed mapping of this memory (radv_ps5_memory_map_at); closed when it is freed. */
+    if(!okay || !__atomic_load_n(&keep_sources,__ATOMIC_ACQUIRE) || !source_add((uintptr_t)at,fd))close(fd);
     if(!okay) {
         message.operation=PW_GPU_FREE;rpc(&message,NULL);return false;
     }
@@ -238,6 +277,8 @@ void radv_ps5_memory_free(struct radv_ps5_memory *memory)
         if(!(ranges_reserved && pw_gpu_host_range((uint64_t)(uintptr_t)at,memory->bytes)>=0 &&
              !sceKernelReserveVirtualRange(&at,memory->bytes,PW_GPU_RESERVE_FIXED,16384) && at==memory->cpu))
             sceKernelMunmap(memory->cpu,memory->bytes);
+        const int fd=source_find((uintptr_t)memory->cpu,true);
+        if(fd>=0)close(fd);
         __atomic_sub_fetch(&allocated,memory->bytes,__ATOMIC_RELAXED);
     }
     memset(memory,0,sizeof(*memory));
@@ -280,8 +321,24 @@ int radv_ps5_set_hs_offchip_param(uint32_t granularity,uint32_t buffering)
 bool radv_ps5_memory_alloc_replayable(uint64_t b,uint64_t a,bool w,uint64_t v,struct radv_ps5_memory *m)
 { (void)b;(void)a;(void)w;(void)v;(void)m;return false; }
 bool radv_ps5_memory_grant_gpu(void *a,uint64_t b) { (void)a;(void)b;return false; }
-bool radv_ps5_memory_map_at(const struct radv_ps5_memory *m,void *a) { (void)m;(void)a;return false; }
-void radv_ps5_memory_unmap_at(void *a,uint64_t b,bool r) { (void)a;(void)b;(void)r; }
+/* A placed mapping (VK_EXT_map_memory_placed): the same shared memory mapped again for the CPU at the address the
+ * application chose, over its reservation there; the GPU keeps the first mapping's address. Device-local memory has
+ * no CPU mapping in this process, and so no source. */
+bool radv_ps5_memory_map_at(const struct radv_ps5_memory *m,void *a)
+{
+    const int fd=m->physical==PS5_GPU_LOCAL_MEMORY ? -1 : source_find((uintptr_t)m->cpu,false);
+    if(fd<0 || !a || ((uintptr_t)a&16383))return false;
+    return mmap(a,m->bytes,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,fd,0)==a;
+}
+void radv_ps5_memory_unmap_at(void *a,uint64_t b,bool r)
+{
+    if(r) {
+        /* A reservation laid over the mapping replaces it, as a fixed mapping does. */
+        void *at=a;
+        if(!sceKernelReserveVirtualRange(&at,b,PW_GPU_RESERVE_FIXED,16384) && at==a)return;
+    }
+    sceKernelMunmap(a,b);
+}
 bool radv_ps5_vrange_reserve(uint64_t b,bool w,bool r,uint64_t v,struct radv_ps5_memory *m)
 { (void)b;(void)w;(void)r;(void)v;(void)m;return false; }
 void radv_ps5_vrange_release(struct radv_ps5_memory *m) { (void)m; }
