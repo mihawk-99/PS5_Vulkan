@@ -95,7 +95,7 @@ int ps5_gpu_client_bind(int fd, bool reserved)
     const int status=rpc(&request,NULL);
     if(!status) {
         if(request.argument[2]<=PW_GPU_LOCAL_MAX && !(request.argument[2]&16383))local_limit=request.argument[2];
-        if(request.argument[3] && request.argument[3]<=PW_GPU_LIMIT && !(request.argument[3]&16383))host_limit=request.argument[3];
+        if(request.argument[3] && request.argument[3]<=PW_GPU_HOST_LIMIT_MAX && !(request.argument[3]&16383))host_limit=request.argument[3];
     }
     return status;
 }

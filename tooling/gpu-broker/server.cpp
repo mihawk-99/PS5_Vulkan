@@ -162,6 +162,8 @@ void host_ranges_release(FILE *log)
 // Device-local memory: what a client is offered as its heap, and the direct memory always left to the owner and to
 // every process's own (Wine's) allocations, whatever the clients ask.
 constexpr uint64_t kLocalOffer=UINT64_C(8)<<30,kLocalFloor=UINT64_C(1)<<30;
+/* The host-visible bytes each client may hold: the application's choice (ps5_gpu_broker_set_host_limit). */
+static uint64_t host_limit=PW_GPU_LIMIT;
 constexpr unsigned kClientBuffers=1024;
 struct Client {
     int socket=-1,service=-1,pid=-1;uint32_t sequence=0,next_token=0;
@@ -268,7 +270,7 @@ int allocate(Client &c,PwGpuMessage &m,uint64_t &next_window,uint64_t &next_high
 {
     c.allocation_stage="validation";
     const bool local=m.argument[2]&PW_GPU_ALLOC_LOCAL;
-    if(!m.bytes || m.bytes>(local ? kLocalOffer : PW_GPU_LIMIT) || m.argument[0]>PW_GPU_ALIGNMENT_MAX ||
+    if(!m.bytes || m.bytes>(local ? kLocalOffer : host_limit) || m.argument[0]>PW_GPU_ALIGNMENT_MAX ||
        (m.argument[0] && (m.argument[0]&(m.argument[0]-1))) || m.argument[1]>1 ||
        (m.argument[2]&~(PW_GPU_ALLOC_LOCAL|PW_GPU_ALLOC_ZERO)))return EINVAL;
     const uint64_t bytes=(m.bytes+16383)&~16383ull,alignment=m.argument[0]>16384 ? m.argument[0] : 16384;
@@ -276,7 +278,7 @@ int allocate(Client &c,PwGpuMessage &m,uint64_t &next_window,uint64_t &next_high
     c.allocation_stage="slot";if(!b)return ENOSPC;
     if(local)return allocate_local(c,m,*b,bytes,alignment);
     c.allocation_stage="client_budget";
-    if(bytes>PW_GPU_LIMIT-c.allocated)return ENOMEM;
+    if(bytes>host_limit-c.allocated)return ENOMEM;
     HostRange &range=host_ranges[m.argument[1] ? 0 : 1];
     if(range.reserved) {
         c.allocation_stage="range";
@@ -556,7 +558,9 @@ void *client_main(void *argument)
             if(m.operation==PW_GPU_INIT && c.pid<0 && m.argument[0]>0 && m.argument[0]<=INT32_MAX && m.argument[0]!=uint64_t(getpid())) {
                 c.pid=(int)m.argument[0];m.status=0;
                 const uint64_t ranges_reserved_reported=m.argument[2];m.argument[2]=m.argument[3]=0;
-                if(b.local_memory) { m.argument[2]=local_offer();m.argument[3]=PW_GPU_LIMIT; }
+                /* The host-visible budget always: a client keeps PW_GPU_LIMIT without it. */
+                if(b.local_memory)m.argument[2]=local_offer();
+                m.argument[3]=host_limit;
                 fprintf(b.log,"gpu-wine cookie=%d pid=%d local_offer=%llu host_limit=%llu flexible=%zu ranges_reserved=%llu\n",c.cookie,c.pid,
                     (unsigned long long)m.argument[2],(unsigned long long)m.argument[3],flexible_now(),(unsigned long long)ranges_reserved_reported);
             } else if(c.pid>0) switch(m.operation) {
@@ -725,6 +729,12 @@ void ps5_gpu_broker_frame_detach(int pid)
     if(b.holder==-pid) { b.holder=0;b.holder_pid=0; }
     pthread_mutex_unlock(&b.display_lock);
 }
+bool ps5_gpu_broker_set_host_limit(unsigned long long bytes)
+{
+    if(!bytes || bytes>PW_GPU_HOST_LIMIT_MAX || (bytes&16383) || broker_state.started)return false;
+    host_limit=bytes;
+    return true;
+}
 bool ps5_gpu_broker_start(const char *directory,bool capture,bool local,bool (*is_absent)(int))
 {
     auto &b=broker_state;if(b.started || !directory || !*directory || !is_absent)return false;
@@ -748,7 +758,7 @@ bool ps5_gpu_broker_start(const char *directory,bool capture,bool local,bool (*i
     host_ranges_reserve(b.log);
     fprintf(b.log,"gpu-wine broker test_fail_submit=%u capture_every=%u\n",test_fail_submit,b.capture_every);
     fprintf(b.log,"gpu-wine broker local_memory=%d local_offer=%llu local_floor=%llu host_limit=%llu\n",local,
-        (unsigned long long)(local ? local_offer() : 0),(unsigned long long)kLocalFloor,(unsigned long long)PW_GPU_LIMIT);
+        (unsigned long long)(local ? local_offer() : 0),(unsigned long long)kLocalFloor,(unsigned long long)host_limit);
     b.holder=b.holder_pid=0;b.switches=b.hidden=0;b.compositor_stop=false;
     if(!b.frame_copy)b.frame_copy=static_cast<uint8_t *>(malloc(size_t(PW_FRAME_WIDTH)*PW_FRAME_HEIGHT*4));
     b.compositing=b.frame_copy && !pthread_create(&b.compositor,nullptr,compositor_main,nullptr);

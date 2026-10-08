@@ -8,6 +8,9 @@
  * close takes an opaque application lifecycle token; zero means no child was
  * started. The application owns spawning and process termination. */
 bool ps5_gpu_broker_start(const char *directory,bool capture,bool local,bool (*is_absent)(int));
+/* Before start: the host-visible bytes each client may hold, a multiple of 16 KiB up to PW_GPU_HOST_LIMIT_MAX;
+ * PW_GPU_LIMIT when not called. False, and nothing changed, for any other value or once the broker is running. */
+bool ps5_gpu_broker_set_host_limit(unsigned long long bytes);
 int ps5_gpu_broker_open(int *cookie);
 void ps5_gpu_broker_close(int cookie,int lifecycle_token);
 bool ps5_gpu_broker_stop();

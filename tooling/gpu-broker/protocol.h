@@ -6,6 +6,10 @@
 #include <stdint.h>
 #define PW_GPU_MAGIC 0x47505232u
 #define PW_GPU_LIMIT (UINT64_C(128)<<20)
+/* The most host-visible memory an owner may grant a client (ps5_gpu_broker_set_host_limit); PW_GPU_LIMIT is the default.
+ * An application chooses: a program that uploads large textures through staging memory needs more than the default
+ * (PS5_Proton: a 32-bit game's 64 MiB uploads through Zink). */
+#define PW_GPU_HOST_LIMIT_MAX (UINT64_C(4)<<30)
 /* Device-local memory a client may be offered, and the largest alignment either kind may ask. */
 #define PW_GPU_LOCAL_MAX (UINT64_C(16)<<30)
 #define PW_GPU_ALIGNMENT_MAX (UINT64_C(2)<<20)
