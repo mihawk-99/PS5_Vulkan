@@ -3789,3 +3789,47 @@ modes test, on a base PS5 (firmware 13.40) on a 1080p screen:
   on screen with every flip reported successful; RetroArch alone did not. Which
   limit 15-19 crossed (16 buffer indices, or three sets) is not yet measured,
   so the WSI offers the three sizes above and no more.
+
+## 2026-10-10 — VideoOut's 120 Hz mode follows the console's output resolution (RADV)
+
+Measured through PS5_FrameGen's FrameGen Lab, whose param.json declares
+attribute3 0x80040. The console was a base PS5 on a 1440p display, whose
+variable refresh range the console's log gives as 48-144 Hz
+(`capable(... range 48 - 144)`).
+
+**Resolution set to 1080p.** The console's video output setting gave
+1920x1080. The console's log: `port:HDMI 1080P_5994 RGB444 limited
+RGB2100_PQ 36bpp`, `VideoOutStatus : res=(1920,1080) freq=59.94006`.
+
+- At each launch of the title, the console's AV control asked for the 120 Hz
+  rate and logged `Unavailabe format.(cause path :HDMI)`. A launch without
+  0x80040 asked for nothing.
+- `sceVideoOutIsOutputSupported(15)` answered 0: neither 1 nor an error code.
+- `sceVideoOutConfigureOutput(15)`, called anyway, returned `0x80290019`, and
+  the vblank stayed at 16.68 ms. This is a third refusal code, beside
+  `0x80290016` (mode not declared) and `0x8029001E` (unknown selector).
+
+**Resolution set to 1440p** in the console's settings:
+
+- At launch the signal became `1440P_11988 YUV422 limited YCC2100_PQ 36bpp`.
+  The console chose 4:2:2 itself.
+- 15 answered 1 and configured with 0. The vblank then measured 8.338 ms;
+  configuring 1 brought back 16.684 ms.
+- FrameGen Lab presented 300 frames at 119.9 fps.
+
+**At both resolutions:** `sceVideoOutGetResolutionStatus` reported
+3840x2160. Its refresh id was 3 at 1080p, and 13 at 1440p, already when the
+title opened VideoOut.
+
+**Declarations.** Twenty runs set the bits of param.json's `attribute`,
+`attribute2` and `attribute3`, beside 0x80040, a byte at a time, halved down
+to single bits where a run differed:
+
+- No bit changed any selector's answer to IsOutputSupported or
+  ConfigureOutput.
+- Without 0x80040, ConfigureOutput(15) returned 0x80290016.
+- attribute3 0x200 made `sceVideoOutOpen` fail with `0x80290001`.
+
+So a 0 from IsOutputSupported means the console's present output has no
+120 Hz format, and it changes with the console's settings. PS5_Mesa 47e9eb6
+configures the mode only on a positive answer.

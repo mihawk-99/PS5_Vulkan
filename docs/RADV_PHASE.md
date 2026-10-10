@@ -1001,3 +1001,29 @@ The release archive was rebuilt at the new pin. The host clc tools under
 .deps/work had been built against LLVM 22, gone from this host since its LLVM 23
 update, so tools/build-radv.sh rebuilt them (the old build is kept beside it as
 radv-clc-build.llvm22-stale until it is deleted).
+
+## 2026-10-10 — 119.88 Hz counts only when offered and taken (PS5 Mesa 47e9eb6)
+
+The VideoOut WSI took `sceVideoOutIsOutputSupported`'s 0 for the 120 Hz mode
+as a successful configure. It never asked for the mode, logged "119.88 Hz
+accepted", then measured 16.68 ms vblanks and restored 59.94 Hz.
+
+PS5_Mesa 47e9eb6:
+
+- configures the mode only on a positive answer;
+- counts it only when the configure returns 0;
+- no longer counts a failed vblank wait as 119.88 Hz.
+
+The pin also takes f7ce91a and b3588f7: Zink, and the optional broker
+overlay's patch files. The native archive builds neither.
+
+Console: PS5_FrameGen's FrameGen Lab on a base PS5, on a 1440p display.
+
+- With the console's resolution at 1080p, the driver logged the mode not
+  offered, and the lab passed at 59.9 fps. That run used the fix's first
+  wording of the message.
+- With the console at 1440p, the lab on this archive passed at 119.9 fps
+  (VERDICT PASS, 9 checks; PS5_FrameGen klog/20261010-133835).
+- Findings: HARDWARE_FINDINGS.md (2026-10-10).
+
+The release archive was rebuilt at the new pin (sha256 9563ad5d...).
