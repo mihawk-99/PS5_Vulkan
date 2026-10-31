@@ -1,0 +1,458 @@
+# launch PPSA99014: ok launched PPSA99014 result=0x0000e016 via lncUtilApp/foreground as user <id> (the console reports the title running)
+<118>[SceLncService] launchApp(PPSA99014)
+<118>[SceLncService] category={gd} appCategoryType={0x00000000} VRMode={0,0}
+<118>[SceLncService] hnm,psnf,pc,tk,ns,pf,pn={1,0,0,0,0,1,0} appBootMode={2}
+<118>[SceLncService] appType={SCE_LNC_APP_TYPE_BIG_APP} [] appVer={} contentVersion={01.000.000} appCategoryType={0x00000000}
+<118>[SceLncService] Waiting for LoginMgr
+<118>[SceLncService] Num. of logged-in users is 1
+<118>[SceLncService] BigApp Launch Ready: Waiting
+<118>[SceLncService] BigApp Launch Ready: OK
+<118>[SceLncService] PrepareProcessLaunchDebuggerCheck()
+<118>[SceLncService] PrepareProcessLaunchDebuggerCheck() returned
+<118>[SceLncService] EnsureBigAppBudget()
+<118>[ResArbitrator][api      ]sceResourceArbitratorEnsureBigAppBudget[187ec](238)  : categoryType[0x0], titleId[PPSA99014], isConfirmed[false]
+<118>[ResArbitrator][TestId   ]EnsureBudget            [187ec]( 41)  : EnsureBudget()
+<118>[ResArbitrator][QUEUE    ]Enqueue                 [187ec]( 38)  : Enqueue(id[0], t[1], user[0] state[RUNNING]) queue.size[1]
+<118>[ResArbitrator][App      ]GetExecutable           [18931](136)  : Target id[0] budgets{vcn[  0] acp[ 0] mem[  0]} prio[2(2)]
+<118>[ResArbitrator][App      ]SetVCNBudget            [18931](610)  : pid/appId is INVALID_ID.vcn budget not set.
+<118>[ResArbitrator][RA_main  ]cbResult                [18931](350)  : Callback id[0] type[RESULT] result[true] state[RUNNING]
+<118>[ResArbitrator][TestId   ]raCallback              [18931](128)  : BigApp[0xffffffff] Changed state"RUNNING"
+<118>[ResArbitrator][QUEUE    ]Remove                  [18931]( 69)  : Remove:(id[0] state[RUNNING] type[1]) queue.size[0]
+<118>[SceLncService] EnsureBigAppBudget() returned
+<118>[ResArbitrator][App      ]Dump                    [18931](501)  : -- Exec Apps *************************
+<118>[ResArbitrator][App      ]Dump                    [18931](510)  : -1: Id[  0] state[RUNNING] vcn[  0] acp[ 0] mem[  0] prio[2(2)] from[DIRECT(0x0)] userData[0x0] appId[0xffffffff]
+<118>[ResArbitrator][App      ]Dump                    [18931](518)  : -2: Id[100] state[RUNNING] vcn[  0] acp[ 0] mem[  0] prio[0(0)] from[IPMI(0x208614760)] userData[0x0] pid[0x42]
+<118>[ResArbitrator][App      ]Dump                    [18931](518)  : -3: Id[190] state[RUNNING] vcn[  0] acp[ 0] mem[ 34] prio[10(10)] from[DIRECT(0x0)] userData[0x0] pid[0x38]
+<118>[ResArbitrator][App      ]Dump                    [18931](819)  : -- No kicking Apps *************************
+<118>[SceSystemStateMgr] Power Mode Change: BIG_APP
+<118>[AvControl] Waiting for the pstate event 
+<118>[Syscore Umd] Set memory pstate (hasRunningGame=0, hasRunningMiniApp=0, isSplashDisplayed=0
+<118>[AvControl] Waiting for the pstate event : done
+<118>[SceSystemStateMgr] CPU                                     HLT GC   GFX  F    U   ID       FAN BAPM
+<118>[SceSystemStateMgr]  800  800  800  800 3200 3200 3200 3200   0 gen2 1285 1200 875 00840f60   1 off
+<118>[SceLncService] sceApplicationSave() categoryType={0x00000000}, debuggerRequestId={0xffffffff}
+<118>[Syscore App] No App needs to save. BigApp does not exist on the memory.
+<118>[SceLncService] W:\Build\J02159366\vsh\shell\shell_core\lnc_service\lnc_manager.cpp(2687) getAppType: LNC_ISOK::0x80940004->0xffffffff
+<118>[SceLncService] BeginAppMount()
+[KERNEL] INFO: begin_app_mount 00000000
+appmgr_create_app(), appid=e016 category=0
+[KERNEL] INFO: launch bigapp: category 0x00000000, container 1
+[Amm config] Page table memory : 64 MiB, VA range size 512 GiB, MultiMap VA range size 0 GiB
+wt_application_launch_callback:new target appid=0xe016
+<118>[SceLncService] is_pkgstep={0}
+<118>[SceLncService] PrepareProcessLaunchDebugger()
+<118>[sceProcessStarter] MountDownloadData() title_id = [PPSA99014] data_path = [**************/PPSA99014/download0.dat] mount_path = [************/download/PPSA99014] budget = [game]
+<118>[PS]Error: W:\Build\J02159366\vsh\shell\shell_core\process_starter\process_starter_util.cpp at 1027
+<118>num is 2
+<118>[SceLncService] PrepareProcessLaunchDebugger() returned
+<118>[SceLncService] sandboxType={0x00000002}
+<118>[SceLncService] W:\Build\J02159366\vsh\shell\shell_core\lnc_service\lnc_manager.cpp(2687) getAppType: LNC_ISOK::0x80940004->0xffffffff
+<118>[SceLncService] spawnApp
+<118>[Syscore App] createApp PPSA99014
+<118>[Syscore App]  ExpandCpuSetMode : disable
+<118>[AvControl] onAppLaunch(appid=0xe016)
+<118>[AvControl] Entry appId(0xe016) supplementaryInfo: 0x0 
+<118>[AvControl SystemRequest:746] ERROR unknown vrr parameter(0x80040) 
+<118>[AvControl] -- app[0](appid=0xe016 attr=0x2a0057)(GAME RUNNING)(HDR:x HFR:o VR:x VRR:x) SpecialModeInBg(none) HDCP23(none) supInfo(0x0)
+<118>[AvControl] App Event[POST_BEGIN]: elapse 0[ms] 
+<118>[Syscore App] processSpawn(pid, 0xe016, 0x1e016310, appParam, processParam, 1, 1, 1, param, debug, 0)
+<118>[Syscore App] appParam: appType = 0, titleId = PPSA99014
+<118>[Syscore App] new pid=0x8c[Syscore App] attributeExe= 0
+<118>[AvControl] AudioOut: shared (pid=0x8c)
+<118>[AvControl] VideoOut: shared (pid=0x8c appId=0xe016)
+<118>[AvControl] video owner is switched to registered app(appId=0xe016) 
+<118>[Syscore App] Ready to exec
+<118>[Syscore App] wait for NOTE_EXIT|NOTE_EXEC
+[KERNEL] INFO: Disable workaround PPRREQ55470_NO_ADDITIONAL_DMEM_192MB
+<118>[Syscore App] Add event : pid=0x8c
+<118>[AppMgr Trace]: New Process, pid=0x8c, created.
+<118>[AppMgr Trace]: New App, appId=0xe016, created
+<118>[Syscore App]  ExpandCpuSetMode : disable
+<118>[SceLncService] W:\Build\J02159366\vsh\shell\shell_core\lnc_service\lnc_common.cpp(889) getCurrentTick: LNC_RTRACE::0x80b50001
+<118>[SceLncService] update: appId={0x0000e016} appSessionId={63929008160000000}
+[KERNEL] INFO: pid 140
+[KERNEL] INFO: Application Category Type: 00000000
+[KERNEL] INFO: SDK vesion: PS4:08050001 PPR:02000009
+<118>[SceLncUtil] blockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={1}
+<118>[SceLncUtil] unblockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={0}
+<118>[SceLncUtil] blockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={1}
+<118>[SceLncUtil] unblockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={0}
+<118>[SceLncUtil] blockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={1}
+<118>[SceLncUtil] unblockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={0}
+<118>[SceLncUtil] blockAppSuspend: name={SceSaveData}, appId={0x00000006}, refCount={1}
+<118>[SceLncUtil] unblockAppSuspend: name={SceSaveData}, appId={0x00000006}, refCount={0}
+[KERNEL] INFO: Total Memory Size: 0x32d600000
+<118>[ResArbitrator][QUEUE    ]Enqueue                 [187e2]( 38)  : Enqueue(id[0], t[1], user[0] state[RUNNING]) queue.size[1]
+<118>[ResArbitrator][TestId   ]lncEventCallback        [187e2]( 64)  : Set Target BigAppId[0xe016] pid[0x8c]
+<118>[ResArbitrator][App      ]GetExecutable           [18931](136)  : Target id[0] budgets{vcn[  0] acp[ 0] mem[  0]} prio[2(2)]
+<118>[ResArbitrator][App      ]ChangeState             [18931]( 43)  : replace id[0] state:['RUNNING'->'RUNNING']
+<118>[ResArbitrator][App      ]SetVCNBudget            [18931](614)  : vcnType is TYPE_UNKNOWN.vcn budget not set.
+<118>[ResArbitrator][RA_main  ]cbResult                [18931](350)  : Callback id[0] type[RESULT] result[true] state[RUNNING]
+<118>[ResArbitrator][TestId   ]raCallback              [18931](128)  : BigApp[0xe016] Changed state"RUNNING"
+<118>[ResArbitrator][QUEUE    ]Remove                  [18931]( 69)  : Remove:(id[0] state[RUNNING] type[1]) queue.size[0]
+<118>[ResArbitrator][App      ]Dump                    [18931](501)  : -- Exec Apps *************************
+<118>[ResArbitrator][App      ]Dump                    [18931](510)  : -1: Id[  0] state[RUNNING] vcn[  0] acp[ 0] mem[  0] prio[2(2)] from[DIRECT(0x0)] userData[0x0] appId[0xe016]
+<118>[ResArbitrator][App      ]Dump                    [18931](518)  : -2: Id[100] state[RUNNING] vcn[  0] acp[ 0] mem[  0] prio[0(0)] from[IPMI(0x208614760)] userData[0x0] pid[0x42]
+<118>[ResArbitrator][App      ]Dump                    [18931](518)  : -3: Id[190] state[RUNNING] vcn[  0] acp[ 0] mem[ 34] prio[10(10)] from[DIRECT(0x0)] userData[0x0] pid[0x38]
+<118>[ResArbitrator][App      ]Dump                    [18931](819)  : -- No kicking Apps *************************
+<118>[ResArbitrator][VA_main  ]GetMediaAppInfo         [187e2](122)  : sceKernelGetAppCategoryType(0x8c) ret:SCE_OK categoryType[0x0]
+<118>[NoticeScreenSkip] start NoticeScreenSkipTimerThread wait_time = 120 sec
+[KERNEL] INFO: DMEM size: 0x300000000
+[KERNEL] INFO: FMEM size: 0x1c000000
+<118>[SceLncUtil] blockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={1}
+<118>[SceLncUtil] unblockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={0}
+[KERNEL] INFO: NDA Text size: 0
+<118>[SceLncUtil] blockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={1}
+<118>[SceLncUtil] unblockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={0}
+[KERNEL] INFO: CPU/GPU page table count: 0x4000 0x4000
+[BAPM] CPU/GPU Frequency: Default
+[BAPM] Param Set: 2 (Ver:02000009)
+<140> EXEC /app0/eboot.bin [user], vm#1, dmem#1 abi=native category=native_game <44761097 msec>
+### GFX(pipe0) Game. proc gen:2 vmid:1 pid:140
+ +++ num clients 2
+### gc_gfx_queue_status : in_frame=0 rptr=0x00000000 wptr=0x00000000 IBlist(rptr=0x0000 wptr=0x0000 i_wptr=0x0000)
+<118>[TTS Arbitrator][INF]  FG App was changed. 2007 -> e016
+<118>[SceLncService] SetControllerFocus(0x0000e016)
+<118>[NoticeScreenSkip] NoticeScreenSkipGetFlag(notice_screen_skip_flag= 0, appId= 0x0000e016)
+<118>[PFAuthClient][ERROR]pf_auth_client_request_for_ppr.cpp(458) Failed(ret=0x8041013d)
+<118>[PFAuthClient][ERROR]pf_auth_client_request_for_ppr.cpp(252) Failed(ret=0x8041013d)
+<118>[PFAuthClient][ERROR]pf_auth_client.cpp(84) Failed(ret=0x8041013d)
+<118>[PFAuthClient][ERROR]pf_auth_client.cpp(90) Notified error:(0x8041013d)
+<118>[SceLncService] SetAppFocus(): SetControllerFocus(-1)
+<118>* updateVibrationTriggerEffectWeak:L7804 getVibrationTriggerEffectWeakWhileEmbeddedMicInUse return MBUS_ERROR_NO_PROCESS_INFO. pid = 0xffffffff
+<118>[SceLncService] SetControllerFocus(0x0000e016)
+[PS5VK] {"schema":2,"event":"run_start","pid":140}
+[PS5VK] {"schema":2,"event":"probe","probe":"canary_mode","status":"PASS","result":0,"detail":"linked AGC import path"}
+[PS5VK] {"schema":2,"event":"value","probe":"system","field":"direct_memory_size","value":12884901888}
+[PS5VK] {"schema":2,"event":"probe","probe":"direct_memory_request","status":"PASS","result":0,"detail":"4k-target 33177600 bytes"}
+[PS5VK] {"schema":2,"event":"value","probe":"direct_memory_request","field":"last_start","value":2097152}
+[PS5VK] {"schema":2,"event":"probe","probe":"direct_memory_request","status":"PASS","result":0,"detail":"1.4-framebuffer 132710400 bytes"}
+[PS5VK] {"schema":2,"event":"value","probe":"direct_memory_request","field":"last_start","value":2097152}
+[PS5VK] {"schema":2,"event":"probe","probe":"direct_memory_request","status":"PASS","result":0,"detail":"1.4-image-dimension 268435456 bytes"}
+[PS5VK] {"schema":2,"event":"value","probe":"direct_memory_request","field":"last_start","value":2097152}
+[PS5VK] {"schema":2,"event":"probe","probe":"direct_memory_request","status":"PASS","result":0,"detail":"1.4-framebuffer-4x-msaa 530841600 bytes"}
+[PS5VK] {"schema":2,"event":"value","probe":"direct_memory_request","field":"last_start","value":2097152}
+[PS5VK] {"schema":2,"event":"probe","probe":"direct_memory_request","status":"PASS","result":0,"detail":"eight-1.4-attachments 1061683200 bytes"}
+[PS5VK] {"schema":2,"event":"value","probe":"direct_memory_request","field":"last_start","value":2097152}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_linked_init","status":"PASS","result":0}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_linked_register_defaults","field":"pointer","value":"0x800514680"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_linked_register_defaults","status":"PASS","result":0,"detail":"pointer queried only; register memory not dereferenced"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_linked_register_table","field":"count","value":489}
+<118>[PFAuthClient][ERROR]pf_auth_client_request_for_ppr.cpp(458) Failed(ret=0x8041013d)
+<118>[PFAuthClient][ERROR]pf_auth_client_request_for_ppr.cpp(252) Failed(ret=0x8041013d)
+<118>[PFAuthClient][ERROR]pf_auth_client.cpp(84) Failed(ret=0x8041013d)
+<118>[PFAuthClient][ERROR]pf_auth_client.cpp(90) Notified error:(0x8041013d)
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_linked_register_table","field":"blocks_pointer","value":"0x800519fe0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_linked_register_table","field":"first_block","value":"0x80050ca98"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_linked_register_table","field":"entry_0_offset","value":514}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_linked_register_table","field":"entry_0_value","value":"0xcc0010"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_linked_register_table","field":"entry_1_offset","value":265}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_linked_register_table","field":"entry_1_value","value":"0x8"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_linked_register_table","field":"entry_2_offset","value":260}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_linked_register_table","field":"entry_2_value","value":"0x0"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_linked_register_table","field":"entry_3_offset","value":143}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_linked_register_table","field":"entry_3_value","value":"0x0"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_linked_register_table","field":"entry_4_offset","value":142}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_linked_register_table","field":"entry_4_value","value":"0x0"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_linked_register_table","field":"entry_5_offset","value":732}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_linked_register_table","field":"entry_5_value","value":"0xaa00"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_linked_register_table","field":"entry_6_offset","value":1}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_linked_register_table","field":"entry_6_value","value":"0x11000100"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_linked_register_table","field":"entry_7_offset","value":512}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_linked_register_table","field":"entry_7_value","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_linked_register_table","status":"PASS","result":0,"detail":"bounded sample of first register block"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_required_register","field":"offset_0x318","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_required_register","status":"PASS","result":0,"detail":"offset_0x318"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_required_register","field":"offset_0x31b","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_required_register","status":"PASS","result":0,"detail":"offset_0x31b"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_required_register","field":"offset_0x31c","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_required_register","status":"PASS","result":0,"detail":"offset_0x31c"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_required_register","field":"offset_0x31d","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_required_register","status":"PASS","result":0,"detail":"offset_0x31d"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_required_register","field":"offset_0x31e","value":"0x48"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_required_register","status":"PASS","result":0,"detail":"offset_0x31e"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_required_register","field":"offset_0x31f","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_required_register","status":"PASS","result":0,"detail":"offset_0x31f"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_required_register","field":"offset_0x321","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_required_register","status":"PASS","result":0,"detail":"offset_0x321"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_required_register","field":"offset_0x323","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_required_register","status":"PASS","result":0,"detail":"offset_0x323"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_required_register","field":"offset_0x324","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_required_register","status":"PASS","result":0,"detail":"offset_0x324"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_required_register","field":"offset_0x325","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_required_register","status":"PASS","result":0,"detail":"offset_0x325"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_required_register","field":"offset_0x390","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_required_register","status":"PASS","result":0,"detail":"offset_0x390"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_required_register","field":"offset_0x398","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_required_register","status":"PASS","result":0,"detail":"offset_0x398"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_required_register","field":"offset_0x3a0","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_required_register","status":"PASS","result":0,"detail":"offset_0x3a0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_required_register","field":"offset_0x3a8","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_required_register","status":"PASS","result":0,"detail":"offset_0x3a8"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_required_register","field":"offset_0x3b0","value":"0x0"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_required_register","status":"PASS","result":0,"detail":"offset_0x3b0"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_required_register","field":"offset_0x3b8","value":"0x8c6c000"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_required_register","status":"PASS","result":0,"detail":"offset_0x3b8"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_required_registers","status":"PASS","result":0,"detail":"OpenGL/ProsperoLight target-register set"}
+[PS5VK] {"schema":2,"event":"hex","probe":"agc_linked_shader_creation","field":"import_pointer","value":"0x8004f4380"}
+<118>@ mbusGetAudioOutDeviceInfoByBusType:L5950
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_linked_shader_creation","status":"PASS","result":0,"detail":"linked address verified; function not called"}
+[PS5VK] {"schema":2,"event":"value","probe":"runner_queue","field":"tests","value":1}
+[PS5VK] {"schema":2,"event":"value","probe":"runner_queue","field":"hold_vblanks","value":300}
+[PS5VK] {"schema":2,"event":"value","probe":"runner_queue","field":"capture","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"runner_queue","field":"compile","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"runner_queue","field":"exit","value":1}
+[PS5VK] {"schema":2,"event":"probe","probe":"runner_queue","status":"PASS","result":0,"detail":"/app0/jobs/queue.txt"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_live_hide_splash","status":"PASS","result":0}
+[PS5VK] {"schema":2,"event":"probe","probe":"runner_test_start","status":"INFO","result":0,"detail":"present-timing"}
+<118>[ResArbitrator][QUEUE    ]Enqueue                 [18930]( 38)  : Enqueue(id[110], t[1], user[0] state[RUNNING]) queue.size[1]
+<118>[ResArbitrator][App      ]GetExecutable           [18931](136)  : Target id[110] budgets{vcn[ 20] acp[368] mem[  0]} prio[10(10)]
+<118>[ResArbitrator][IpcServer]Callback                [18931]( 78)  : S->C Callback Set(id[110] type[RESULT] result[true] state[RUNNING])
+<118>[ResArbitrator][QUEUE    ]Remove                  [18931]( 69)  : Remove:(id[110] state[RUNNING] type[1]) queue.size[0]
+<118>[ResArbitrator][App      ]Dump                    [18931](501)  : -- Exec Apps *************************
+<118>[ResArbitrator][App      ]Dump                    [18931](510)  : -1: Id[  0] state[RUNNING] vcn[  0] acp[ 0] mem[  0] prio[2(2)] from[DIRECT(0x0)] userData[0x0] appId[0xe016]
+<118>[ResArbitrator][App      ]Dump                    [18931](518)  : -2: Id[100] state[RUNNING] vcn[  0] acp[ 0] mem[  0] prio[0(0)] from[IPMI(0x208614760)] userData[0x0] pid[0x42]
+<118>[ResArbitrator][App      ]Dump                    [18931](518)  : -3: Id[110] state[RUNNING] vcn[ 20] acp[368] mem[  0] prio[10(10)] from[IPMI(0x2086146a0)] userData[0x0] pid[0x7f]*HB*
+<118>[ResArbitrator][App      ]Dump                    [18931](518)  : -4: Id[190] state[RUNNING] vcn[  0] acp[ 0] mem[ 34] prio[10(10)] from[DIRECT(0x0)] userData[0x0] pid[0x38]
+<118>[ResArbitrator][App      ]Dump                    [18931](819)  : -- No kicking Apps *************************
+<118>[ResArbitrator][IpcServer]GetCallbackDataInt      [18930](334)  : C->S Callback Get(id[110] type[RESULT] result[true] state[RUNNING] cb[966460])
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_shader_stage_allocate","status":"PASS","result":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_shader_stage_allocate","field":"bytes","value":65536}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_shader_stage_allocate","field":"sets","value":1}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_shader_stage_allocate","field":"direct_start","value":2097152}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_shader_stage_map","status":"PASS","result":0}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_shader_package_vertex","status":"INCONCLUSIVE","result":-1,"detail":"missing /download0 and /app0 package paths"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_shader_package_pixel","status":"INCONCLUSIVE","result":-1,"detail":"missing /download0 and /app0 package paths"}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_shader_package_vertex","field":"bytes","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_shader_package_pixel","field":"bytes","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_shader_package_vertex","field":"address_mod_4096","value":0}
+[PS5VK] {"schema":2,"event":"value","probe":"agc_shader_package_pixel","field":"address_mod_4096","value":0}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_shader_checksum_forensics_vertex","status":"NOT_REQUIRED","result":0,"detail":"read-only checksum-register inspection"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_shader_checksum_forensics_pixel","status":"NOT_REQUIRED","result":0,"detail":"read-only checksum-register inspection"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_program_checksum_vertex","status":"NOT_REQUIRED","result":0,"detail":"unresolved checksum register accepted, as in ps5-opengl runtime packages"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_program_checksum_pixel","status":"NOT_REQUIRED","result":0,"detail":"unresolved checksum register accepted, as in ps5-opengl runtime packages"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_shader_checksum_vertex","status":"INCONCLUSIVE","result":-1,"detail":"missing vertex entry in checksums.txt"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_shader_checksum_pixel","status":"INCONCLUSIVE","result":-1,"detail":"missing pixel entry in checksums.txt"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_shader_package_validation","status":"INCONCLUSIVE","result":-1,"detail":"PS5 OpenGL ELF section and shader-header rules"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_shader_create","status":"SKIPPED","result":-1,"detail":"requires two validated packages and successful AGC init"}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_shader_stage_unmap","status":"PASS","result":0}
+[PS5VK] {"schema":2,"event":"probe","probe":"agc_shader_stage_release","status":"PASS","result":0}
+[PS5VK] {"schema":2,"event":"probe","probe":"runner_test","status":"FAIL","result":-1,"detail":"present-timing"}
+[PS5VK] {"schema":2,"event":"value","probe":"runner_summary","field":"ran","value":1}
+[PS5VK] {"schema":2,"event":"probe","probe":"runner_summary","status":"FAIL","result":-1,"detail":"0 of 1 queued tests passed"}
+[PS5VK] {"schema":2,"event":"probe","probe":"overall_safe_probe","status":"INCONCLUSIVE","result":-1}
+[PS5VK] {"schema":2,"event":"run_end"}
+# process pid=140, eboot.bin calls exit() exit_value=0.
+#
+# A user thread receives a fatal signal
+#
+# signal: 12 (SIGSYS)
+# thread ID: 101486
+# thread name: eboot.bin
+# proc ID: 140
+# proc name: eboot.bin
+#
+# registers:
+# rax: 0000000000000000  rbx: 0000000000000000
+# rcx: 0000000000000000  rdx: 0000000000000000
+# rsi: 0000000000000000  rdi: 0000000000000000
+# rbp: 00000007eeffbd80  rsp: 00000007eeffbd58
+# r8 : 0000000000000000  r9 : 0000000880004730
+# r10: 000000000515ca11  r11: 0000000000000246
+# r12: 0000000000000000  r13: 0000000000000000
+# r14: 0000000000000000  r15: 0000000800030600
+# rip: 00000008000003ac  eflags: 00000246
+# lbf: ffffffffffffffff  lbt: ffffffffffffffff
+# lb0: ffffffffffffffff  lb1: ffffffffffffffff
+# lb2: ffffffffffffffff  lb3: ffffffffffffffff
+# lb4: ffffffffffffffff  lb5: ffffffffffffffff
+# lb6: ffffffffffffffff  lb7: ffffffffffffffff
+#
+# backtrace:
+copyin: eboot.bin has nonsleeping lock
+# 0000000000400185
+# 0000000000000000
+#
+# dynamic libraries:
+# /app0/eboot.bin
+#  xotext: 0000000000400000:0000000000a30000 nsegs: 4
+#  fingerprint: 38bc126c3a66057fbdbc0e513c5f551d00000000
+# /7bHRCbsIXG/common/lib/libkernel.sprx
+#  xotext: 0000000800000000:0000000800044000 nsegs: 4
+#  fingerprint: b1d61fffc2ea64936961e4be0bb7219400000000
+# /7bHRCbsIXG/common/lib/libSceLibcInternal.sprx
+#  xotext: 000000080009c000:0000000800178000 nsegs: 4
+#  fingerprint: 19232fcba5d1363844b0b513662c891500000000
+# /7bHRCbsIXG/common/lib/libSceSysmodule.sprx
+#  xotext: 00000008001e4000:00000008001f0000 nsegs: 4
+#  fingerprint: bd700c4843e5b8bfad9031776733823900000000
+# /7bHRCbsIXG/common/lib/libSceAmpr.sprx
+#  xotext: 0000000800210000:0000000800218000 nsegs: 4
+#  fingerprint: 57fce5dc3bd3882d2bf3e909ca65558100000000
+# /app0/sce_module/libc.prx
+#  xotext: 0000000080000000:00000000800cc000 nsegs: 4
+#  fingerprint: 5f73a9defd7d02be9079d4d6dbd9617455b4d62b
+# /7bHRCbsIXG/common/lib/libSceNet.sprx
+#  xotext: 0000000800224000:0000000800254000 nsegs: 4
+#  fingerprint: 6dbebc4586453cd58ae7a336c0ad7c2b00000000
+# /7bHRCbsIXG/common/lib/libSceIpmi.sprx
+#  xotext: 0000000800408000:0000000800410000 nsegs: 4
+#  fingerprint: 354b9ad891282eae7696c64151dca2d900000000
+# /7bHRCbsIXG/common/lib/libSceMbus.sprx
+#  xotext: 000000080042c000:0000000800434000 nsegs: 4
+#  fingerprint: 6ad5890a7dfd3f35b1a5ad9678de66e100000000
+# /7bHRCbsIXG/common/lib/libSceRegMgr.sprx
+#  xotext: 0000000800440000:0000000800444000 nsegs: 4
+#  fingerprint: d9510dd68093f938cfe93e6b019c4ccf00000000
+# /7bHRCbsIXG/common/lib/libSceRtc.sprx
+#  xotext: 0000000800450000:0000000800454000 nsegs: 4
+#  fingerprint: 5e3b614a1bfeae88cfcd085a6935e2b700000000
+# /7bHRCbsIXG/common/lib/libSceRazorCpu.sprx
+#  xotext: 0000000800460000:000000080046c000 nsegs: 4
+#  fingerprint: ef3c5b426f6f17c38d4b658ebf4a9f0000000000
+# /7bHRCbsIXG/common/lib/libSceAvSetting.sprx
+#  xotext: 0000000800478000:0000000800488000 nsegs: 4
+#  fingerprint: c07f1109b1082052d83774b30ea795e000000000
+# /7bHRCbsIXG/common/lib/libSceVideoOut.sprx
+#  xotext: 0000000800498000:00000008004b4000 nsegs: 4
+#  fingerprint: bbe2350d9b3ed95f8b0b03728f65154800000000
+# /7bHRCbsIXG/common/lib/libSceAgcDriver.sprx
+#  xotext: 00000008004cc000:00000008004d8000 nsegs: 4
+#  fingerprint: bce00921a63b128e226d18e02959ba0500000000
+# /7bHRCbsIXG/common/lib/libSceAgc.sprx
+#  xotext: 00000008004e8000:00000008004fc000 nsegs: 4
+#  fingerprint: 0225aa6eb1789c586e9efc6b91db2dc300000000
+# /7bHRCbsIXG/common/lib/libSceAudioOut.sprx
+#  xotext: 000000080051c000:0000000800564000 nsegs: 4
+#  fingerprint: 1e9ef669f071d476b18c9ff2a61d114c00000000
+# /7bHRCbsIXG/common/lib/libSceAudioIn.sprx
+#  xotext: 000000080075c000:0000000800764000 nsegs: 4
+#  fingerprint: c27804ab5d5099e2428e75cde34bd7f400000000
+# /7bHRCbsIXG/common/lib/libSceAjmi.sprx
+#  xotext: 0000000800770000:0000000800774000 nsegs: 4
+#  fingerprint: 9ccb973d18451219ba2564bfddc2a5ac00000000
+# /7bHRCbsIXG/common/lib/libSceAjm.native.sprx
+#  xotext: 0000000800780000:0000000800788000 nsegs: 4
+#  fingerprint: 65f2ca60f2b572bf8cadc6497a4a5bcb00000000
+# /7bHRCbsIXG/common/lib/libScePad.sprx
+#  xotext: 00000008007a4000:00000008007b8000 nsegs: 4
+#  fingerprint: fb9dd4a3dc5f389eeeef09bc5bd2e52e00000000
+# /7bHRCbsIXG/common/lib/libSceNetCtl.sprx
+#  xotext: 00000008007cc000:00000008007d4000 nsegs: 4
+#  fingerprint: b458c76410295870657b23837de38e7c00000000
+# /7bHRCbsIXG/common/lib/libSceSsl.sprx
+#  xotext: 00000008007e0000:00000008008bc000 nsegs: 4
+#  fingerprint: 31e56e7197d5fb3ab99ce7f5fb78505c00000000
+# /7bHRCbsIXG/common/lib/libSceHttpCache.sprx
+#  xotext: 0000000800934000:000000080097c000 nsegs: 4
+#  fingerprint: 17c392837e543a90190a780eccf80f5900000000
+# /7bHRCbsIXG/common/lib/libSceHttp.sprx
+#  xotext: 0000000800998000:00000008009c4000 nsegs: 4
+#  fingerprint: 397c5768e8cc87dcf5aa1f4e4ffbad0c00000000
+# /7bHRCbsIXG/common/lib/libSceHttp2.sprx
+#  xotext: 00000008009dc000:0000000800a04000 nsegs: 4
+#  fingerprint: d4017f414afb113b32cb0db6d5f5cb0200000000
+# /7bHRCbsIXG/common/lib/libSceNpCommon.sprx
+#  xotext: 0000000800a18000:0000000800a4c000 nsegs: 4
+#  fingerprint: 40d0389059a99c2a4961c874d16d07eb00000000
+# /7bHRCbsIXG/common/lib/libSceNpManager.sprx
+#  xotext: 0000000800a68000:0000000800aac000 nsegs: 4
+#  fingerprint: 1e52add37ef71089d2c412739b6e18f500000000
+# /7bHRCbsIXG/common/lib/libSceNpGameIntent.sprx
+#  xotext: 0000000800acc000:0000000800ad4000 nsegs: 4
+#  fingerprint: 53acb6749ca0ce06d4418d61af3b896c00000000
+# /7bHRCbsIXG/common/lib/libSceNpWebApi2.sprx
+#  xotext: 0000000800ae0000:0000000800afc000 nsegs: 4
+#  fingerprint: 4589d64dd889cca4b19d1bf834daaa8800000000
+# /7bHRCbsIXG/common/lib/libSceSaveData.native.sprx
+#  xotext: 0000000800b0c000:0000000800b3c000 nsegs: 4
+#  fingerprint: 6428c0af640deeba36bd2d982c0afe8000000000
+# /7bHRCbsIXG/common/lib/libSceSystemService.sprx
+#  xotext: 0000000800b54000:0000000800b84000 nsegs: 4
+#  fingerprint: 1e187e42d8573597334a158368cd101c00000000
+# /7bHRCbsIXG/common/lib/libSceUserService.sprx
+#  xotext: 0000000800bb0000:0000000800bc0000 nsegs: 4
+#  fingerprint: 2a6e01fa0892fda20cb450fac151b43200000000
+# /7bHRCbsIXG/common/lib/libSceCommonDialog.sprx
+#  xotext: 0000000800bd0000:0000000800bd4000 nsegs: 4
+#  fingerprint: 3f13b47341dd5274094187f5deee122800000000
+# /7bHRCbsIXG/common/lib/libSceSysUtil.sprx
+#  xotext: 0000000800be0000:0000000800be4000 nsegs: 4
+#  fingerprint: d0cf585abaf33c7838eb0722e59f50ef00000000
+mDBG: Sending signal(pid: 140, tid: 101486, signo: 0xc)
+<118>[Syscore App] App Crash : PID=0x8c, reason=0xc
+<118>[Syscore App] Syscore Event Queue Push : SCE_SYSCORE_EVENT_APP_CRASH
+<118>[Syscore App] Syscore Event Queue Pop : SCE_SYSCORE_EVENT_APP_CRASH
+<118>[SceLncService] AppCrash: pid={0x0000008c} appId={0x0000e016} appLocalPid={0x1e016310}
+<118>[ResArbitrator][TestId   ]lncEventCallback        [187e2]( 87)  : CRASH KILL_END event->appId[0xe016] event->pid[0x8c] 
+<118>[ResArbitrator][QUEUE    ]Enqueue                 [187e2]( 38)  : Enqueue(id[0], t[1], user[0] state[STOP]) queue.size[1]
+<118>[ResArbitrator][App      ]ChangeState             [18931]( 43)  : replace id[0] state:['RUNNING'->'STOP']
+<118>[ResArbitrator][RA_main  ]cbResult                [18931](350)  : Callback id[0] type[RESULT] result[true] state[STOP]
+<118>[ResArbitrator][TestId   ]raCallback              [18931](128)  : BigApp[0xe016] Changed state"STOP"
+<118>[ResArbitrator][QUEUE    ]Remove                  [18931]( 69)  : Remove:(id[0] state[STOP] type[1]) queue.size[0]
+<118>[ResArbitrator][App      ]Dump                    [18931](501)  : -- Exec Apps *************************
+<118>[ResArbitrator][App      ]Dump                    [18931](518)  : -1: Id[100] state[RUNNING] vcn[  0] acp[ 0] mem[  0] prio[0(0)] from[IPMI(0x208614760)] userData[0x0] pid[0x42]
+<118>[ResArbitrator][App      ]Dump                    [18931](518)  : -2: Id[110] state[RUNNING] vcn[ 20] acp[368] mem[  0] prio[10(10)] from[IPMI(0x2086146a0)] userData[0x0] pid[0x7f]*HB*
+<118>[ResArbitrator][App      ]Dump                    [18931](518)  : -3: Id[190] state[RUNNING] vcn[  0] acp[ 0] mem[ 34] prio[10(10)] from[DIRECT(0x0)] userData[0x0] pid[0x38]
+<118>[ResArbitrator][App      ]Dump                    [18931](819)  : -- No kicking Apps *************************
+<118>[SceLncUtil] blockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={1}
+<118>[SceLncUtil] unblockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={0}
+<118>[SceLncUtil] blockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={1}
+<118>[SceLncUtil] unblockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={0}
+<118>[SceLncUtil] blockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={1}
+<118>[SceLncUtil] unblockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={0}
+<118>[SceLncUtil] blockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={1}
+<118>[SceLncUtil] unblockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={0}
+<118>[SceLncUtil] blockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={1}
+<118>[SceLncUtil] unblockAppSuspend: name={SceNpUds}, appId={0x00000006}, refCount={0}
+<118>[CRS][coredump_seq] enableCrashReport={0}, crashReportMode={0}, isAllowed={1}
+<118>[CRS][coredump_seq] prepare() pid=0x0000008c, appId=0x0000e016, localPid=0x1e016310, path=/user/devlog/system/sce_coredumps.0/PPSA99014_1793407973/prosperocore-1793407973-0x0000008c-eboot.bin.prosperodmp
+<118>[CRS][coredump_seq] hasProcess=true
+<118>[CRS][coredump_seq] canCoredump=false
+<118>[CRS][coredump_seq] needsShellUiCoredump=false
+<118>[CRS][coredump_seq] needsToNotifyCoredumpUi=false, needsProgressBar=true
+<118>[CRS][coredump_seq] needsToNotifyHost=false
+<118>[CRS][coredump_seq] canPostCoredumpInfo=false
+<118>[CRS][coredump_seq] canKill=true
+<118>[CRS][coredump_seq] canContinue=false
+<118>[CRS][coredump_seq] needsToNotifyWatcher=false
+<118>[CRS][coredump_seq] killing app (appId=0x0000e016) ...
+<118>[SceLncService] KillApp() appId={0x0000e016}, withSuspend={0}, forceKill={1} killReason={0}
+<118>[SceLncService] BlockingKill() appId={0x0000e016}, titleId={PPSA99014}, is_coredumpFinished={0}, forceKill={1}
+<118>[SceLncService] convertToSysCoreKillReason: {0x00000000}->{0x00000000}
+<118>[Syscore App] Kill App : 0xe016 PPSA99014
+<118>[Syscore App] Kill process: 0x8c
+Terminating pid=140
+<6>pid 140 (eboot.bin), uid 1: exited on signal 12
+[BAPM] universal mode exit
+<118>[TTS Arbitrator][INF]  FG App was changed. e016 -> 2007
+### gc_gfx_queue_status : in_frame=0 rptr=0x00000000 wptr=0x00000000 IBlist(rptr=0x0000 wptr=0x0000 i_wptr=0x0000)
+<118>[Syscore App] EVFILT_PROC NOTE_EXIT received : pid=0x8c
+<118>[Syscore App] Kill process: 0x8c => 0
+### HP3D(pipe1) GnmCompositor. proc gen:2 vmid:4
+ +++ num clients 1
+<118>[AvControl] AudioOut: shared (pid=0xffffffff)
+<118>[AppMgr Trace]: pid=0x8c, deleted.
+<118>[Syscore App] Syscore Event Queue Push : SCE_SYSCORE_EVENT_ON_PROCESS_UNLOADED
+<118>[AppMgr] All processes exited
+<118>[Syscore App] Syscore Event Queue Push : SCE_SYSCORE_EVENT_ON_APP_UNLOADED
+<118>[AvControl] VideoOut: shared (pid=0xffffffff appId=0xffffffff)
+<118>[AvControl] -- app[0](appid=0xe016 attr=0x2a0057)(GAME RUNNING)(HDR:x HFR:o VR:x VRR:x) SpecialModeInBg(none) HDCP23(none) supInfo(0x0)
+<118>[Syscore App] Syscore Event Queue Pop : SCE_SYSCORE_EVENT_ON_PROCESS_UNLOADED
+<118>[Syscore App] Syscore Event Queue Pop : SCE_SYSCORE_EVENT_ON_APP_UNLOADED
+<118>[Syscore App] process delete event : pid=0x8c
+<118>[AvControl] onAppKill(appid=0xe016)
+<118>[AvControl] current video owner app is removed (appid=0xe016)
+<118>[AvControl] App Event[PRE_END]: elapse 2[ms] 
+<118>[AppMgr Trace]: AppId=0xe016  deleted
+<118>[Syscore App]  _appIpcDeleteBudgetCallBack(), budget=e001
+<118>[Syscore App] Kill App : 0xffffffff  => 0
+<118>[Syscore App] blockingKill(0x0000e016, 1) complete
+<118>[AppMgr] checkAppTerminated invalid app.
+<118>[Syscore App]  ExpandCpuSetMode : enable
+<118>[SceLncService] start unmountAllForShellCoreInternal()
+<118>[SceLncService] end unmountAllForShellCoreInternal()
+<118>[SceSystemStateMgr] Power Mode Change: NAVIGATION_ACTIVE_1
+<118>[AvControl] Waiting for the pstate event 
+<118>[Syscore Umd] Set memory pstate (hasRunningGame=0, hasRunningMiniApp=0, isSplashDisplayed=0
+<118>[AvControl] Waiting for the pstate event : done

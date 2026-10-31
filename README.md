@@ -66,10 +66,21 @@ is the round-by-round record.
         |                       submissions, each ending with a write of its
         |                       sequence number, which the CPU waits for
   VK_KHR_display on VideoOut .. the swapchain: buffers registered with
-        |                       VideoOut, flipped at vblank, 120 Hz where the
-        |                       title declares it and the display takes it
+        |                       VideoOut, flipped at vblank, fixed 120 Hz or
+        |                       retail VRR where the title declares it and the
+        |                       display takes it
   PS5 GPU
 ```
+
+High-refresh metadata carries `attribute3` bit `0x40`.
+`sce_sys/param-runner-vrr.json` pairs it with `0x40000`;
+`sce_sys/param-runner-hfr.json` retains the `0x80000` pairing as a
+fixed-rate diagnostic. After positive support and successful configuration,
+the driver measures idle vblanks. It rejects failed measurements and, for
+fixed-rate titles, periods over 12.5 ms. For titles with the VRR metadata
+combination it accepts positive periods outside the inclusive 16.2–17.2 ms
+band, allowing slower idle periods. Rejected measurements trigger a restore
+request to the default mode.
 
 What stands on the console (2026-10-01, PS5 Mesa `504adad`):
 

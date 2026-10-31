@@ -12,6 +12,7 @@
 #include "agc_abi.hpp"
 #include "diagnostics.hpp"
 #include "probe_pack.hpp"
+#include "present_metadata.h"
 
 #include <cstdint>
 #include <algorithm>
@@ -20999,6 +21000,98 @@ bool present_five_images(const TestContext &test, ps5vk_triangle &triangle, Json
     return passed;
 }
 
+// Bounded FIFO workload: time successful draw/present iterations, not CPU
+// submission alone. The driver owns the flip pacing; these intervals do not
+// independently establish scanout timestamps.
+void run_present_timing(const TestContext &test, TestOutcome &outcome) noexcept
+{
+    constexpr unsigned warmup = 30;
+    constexpr unsigned frames = 360;
+    JsonLog &log = test.log;
+    std::uint32_t attribute3 = 0;
+    if (present_read_attribute3(&attribute3))
+        log.hex("present_timing", "attribute3", attribute3);
+    else
+        log.event("present_timing_metadata", "INFO", 0, "attribute3 unavailable");
+    ps5vk_triangle_input input{vk_icdGetInstanceProcAddr,
+                               1,
+                               {},
+                               VK_ATTACHMENT_LOAD_OP_CLEAR,
+                               nullptr,
+                               PS5VK_TRIANGLE_OUTPUT_DISPLAY,
+                               nullptr,
+                               0,
+                               0,
+                               nullptr,
+                               0,
+                               0,
+                               {},
+                               false,
+                               nullptr,
+                               0,
+                               0};
+    if (!load_vulkan_shaders(test.packages, &g_vulkan_spirv[0], input.shaders[0], log))
+        return;
+    ps5vk_triangle triangle{};
+    ps5vk_triangle_status status = ps5vk_triangle_create(&triangle, &input);
+    timespec start{}, previous{}, end{};
+    long long minimum = 0, maximum = 0;
+    unsigned measured = 0;
+    bool clock_ok = true;
+    for (unsigned i = 0; i < warmup + frames && status == PS5VK_TRIANGLE_OK; ++i)
+    {
+        if (i == warmup)
+        {
+            clock_ok = clock_gettime(CLOCK_MONOTONIC, &start) == 0;
+            previous = start;
+        }
+        if (!clock_ok)
+            break;
+        status = ps5vk_triangle_draw(&triangle, PS5VK_TRIANGLE_ONE_DRAW);
+        if (status == PS5VK_TRIANGLE_OK)
+            status = ps5vk_triangle_present(&triangle);
+        if (status != PS5VK_TRIANGLE_OK)
+            break;
+        if (i >= warmup)
+        {
+            clock_ok = clock_gettime(CLOCK_MONOTONIC, &end) == 0;
+            if (!clock_ok)
+                break;
+            const long long interval = microseconds_between(previous, end);
+            if (interval <= 0)
+            {
+                clock_ok = false;
+                break;
+            }
+            if (!measured || interval < minimum)
+                minimum = interval;
+            if (interval > maximum)
+                maximum = interval;
+            previous = end;
+            ++measured;
+        }
+    }
+    const long long elapsed = measured ? microseconds_between(start, end) : 0;
+    log.number("present_timing", "warmup_frames", warmup);
+    log.number("present_timing", "measured_frames", measured);
+    log.number("present_timing", "elapsed_us", elapsed);
+    log.number("present_timing", "interval_min_us", minimum);
+    log.number("present_timing", "interval_max_us", maximum);
+    log.number("present_timing", "rate_millihz",
+               elapsed > 0 ? static_cast<long long>(measured) * 1000000000LL / elapsed : 0);
+    outcome.command_built = status != PS5VK_TRIANGLE_FAILED;
+    if (status == PS5VK_TRIANGLE_IN_FLIGHT)
+    {
+        outcome.stage_in_use = true;
+        log.event("present_timing", "FAIL", -1, "GPU work remains in flight");
+        return;
+    }
+    ps5vk_triangle_finish(&triangle);
+    outcome.passed = status == PS5VK_TRIANGLE_OK && clock_ok && measured == frames && elapsed > 0;
+    log.event("present_timing", outcome.passed ? "PASS" : "FAIL", outcome.passed ? 0 : -1,
+              "FIFO draw/present throughput; not independent scanout timestamps");
+}
+
 void run_vulkan_present_frames_impl(const TestContext &test, TestOutcome &outcome,
                                     bool readback) noexcept
 {
@@ -29249,6 +29342,7 @@ constexpr RunnerTest kRunnerTests[] = {
     // through the driver's swapchain. The corner set draws half the target, so
     // the readback sees the clear's colour in the other half.
     {"c1-triangle", "b8-corner", run_vulkan_present_frames},
+    {"present-timing", "b8-corner", run_present_timing},
     {"c1-readback", "b8-corner", run_vulkan_display_readback},
 #endif
 };

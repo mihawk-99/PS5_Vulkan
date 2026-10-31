@@ -210,10 +210,11 @@ struct ps5vk_instance {
 
 /* The one VideoOut display and its modes (ps5vk_wsi.c): their addresses are the
  * VkDisplayKHR and VkDisplayModeKHR handles. A mode carries the refresh it
- * reports, in millihertz, and whether presenting in it asks VideoOut for its
- * high-frame-rate output. */
+ * reports, in millihertz, and the title's attribute3 metadata needed when
+ * opening VideoOut in that mode. */
 struct ps5vk_display {
    uint32_t refresh_millihertz;
+   uint32_t attribute3;
    bool high_frame_rate;
 };
 

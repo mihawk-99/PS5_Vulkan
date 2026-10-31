@@ -22,7 +22,8 @@ sdk_root="$root/.deps/native/ps5-payload-sdk"
 native="$root/tooling/native"
 tool="$root/build/host/ps5-native-tool"
 work="$root/build/radv"
-param="$root/sce_sys/param-radv.json"
+param=${PARAM_PATH:-"$root/sce_sys/param-radv.json"}
+[[ $param = /* ]] || param="$root/$param"
 
 for file in "$archive" "$tool" "$param" "$sdk_root/bin/prospero-lld"; do
     [[ -e $file ]] || { echo "missing $file" >&2; exit 2; }
@@ -100,6 +101,9 @@ rm -rf -- "$app"
 mkdir -p "$app/sce_sys" "$app/sce_module"
 "$tool" self --sign --in "$work/eboot.elf" --out "$app/eboot.bin" --magic "$fself_magic"
 cp "$param" "$app/sce_sys/param.json"
+if [[ -n ${RADV_SMOKE_ENV:-} ]]; then
+    cp "$RADV_SMOKE_ENV" "$app/radv-smoke-env.txt"
+fi
 for asset in icon0.png pic0.dds pic1.dds snd0.at9; do
     [[ -f $root/sce_sys/$asset ]] && cp "$root/sce_sys/$asset" "$app/sce_sys/$asset"
 done

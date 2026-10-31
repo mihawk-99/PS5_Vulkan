@@ -42,6 +42,8 @@ RUNTIME_INPUTS := tools/rebuild-libc.sh \
 	$(wildcard tooling/native/*.cpp tooling/native/*.hpp) \
 	$(wildcard tooling/native/runtime/*.txt)
 HOST_UNIT_TEST := build/tests/demo_renderer_tests
+HOST_UNIT_TEST_SOURCES := tests/test_demo_renderer.cpp tests/test_ps5vk_output_mode.cpp \
+	src/demo_renderer.cpp
 
 .PHONY: all app build init doctor test test-deps test-unit test-integration libc deps pacbrew pacbrew-list assets-check assets-deps inspect format format-check tidy lint check ci ffpkg ffpfsc packages deploy undeploy clean distclean help
 
@@ -66,7 +68,7 @@ test-unit: $(HOST_UNIT_TEST)
 	@printf '%s\n' '==> [test-unit] Running host-native GoogleTest application tests'
 	@$(HOST_UNIT_TEST) $(GTEST_ARGS)
 
-$(HOST_UNIT_TEST): tests/test_demo_renderer.cpp src/demo_renderer.cpp src/demo_renderer.hpp tools/setup-test-dependencies.sh | test-deps
+$(HOST_UNIT_TEST): $(HOST_UNIT_TEST_SOURCES) src/demo_renderer.hpp driver/ps5vk_output_mode.h tools/setup-test-dependencies.sh | test-deps
 	@printf '%s\n' '==> [test-unit] Compiling the host-native GoogleTest binary'
 	@mkdir -p -- $(@D)
 	@gtest=$$(bash tools/setup-test-dependencies.sh); \
@@ -76,9 +78,9 @@ $(HOST_UNIT_TEST): tests/test_demo_renderer.cpp src/demo_renderer.cpp src/demo_r
 		$(HOST_CXX) -std=c++20 -O2 -pthread \
 			-isystem "$$gtest/googletest/include" -I"$$gtest/googletest" \
 			-c "$$gtest/googletest/src/gtest_main.cc" -o $(@D)/gtest-main.o; \
-		$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -pthread -Isrc \
+		$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -pthread -Isrc -Idriver \
 			-isystem "$$gtest/googletest/include" \
-			tests/test_demo_renderer.cpp src/demo_renderer.cpp \
+			$(HOST_UNIT_TEST_SOURCES) \
 			$(@D)/gtest-all.o $(@D)/gtest-main.o \
 			$(HOST_TEST_LDFLAGS) -o $@
 

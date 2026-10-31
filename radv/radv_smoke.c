@@ -29,6 +29,7 @@
 #include <time.h>
 
 #include "radv_smoke_shaders.h"
+#include "../src/present_metadata.h"
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_icdGetInstanceProcAddr(VkInstance instance, const char *name);
 
@@ -2269,8 +2270,12 @@ display_frame(struct context *c, VkSwapchainKHR swapchain, const VkImage *images
       .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
       .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
    };
-   vkResetCommandBuffer(c->cmd, 0);
-   vkBeginCommandBuffer(c->cmd, &begin_info);
+   result = vkResetCommandBuffer(c->cmd, 0);
+   if (result != VK_SUCCESS)
+      return result;
+   result = vkBeginCommandBuffer(c->cmd, &begin_info);
+   if (result != VK_SUCCESS)
+      return result;
    display_image_barrier(c, images[index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                          VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0, VK_PIPELINE_STAGE_2_CLEAR_BIT,
                          VK_ACCESS_2_TRANSFER_WRITE_BIT);
@@ -2295,7 +2300,9 @@ display_frame(struct context *c, VkSwapchainKHR swapchain, const VkImage *images
    }
    display_image_barrier(c, images[index], layout, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                          VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0);
-   vkEndCommandBuffer(c->cmd);
+   result = vkEndCommandBuffer(c->cmd);
+   if (result != VK_SUCCESS)
+      return result;
 
    const VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
    const VkSubmitInfo submit = {
@@ -2308,7 +2315,9 @@ display_frame(struct context *c, VkSwapchainKHR swapchain, const VkImage *images
       .signalSemaphoreCount = 1,
       .pSignalSemaphores = &rendered,
    };
-   vkResetFences(c->device, 1, &c->fence);
+   result = vkResetFences(c->device, 1, &c->fence);
+   if (result != VK_SUCCESS)
+      return result;
    result = vkQueueSubmit(c->queue, 1, &submit, c->fence);
    if (result != VK_SUCCESS)
       return result;
@@ -2322,8 +2331,8 @@ display_frame(struct context *c, VkSwapchainKHR swapchain, const VkImage *images
    };
    result = vkQueuePresentKHR(c->queue, &present);
    /* The one command buffer is recorded again next frame. */
-   vkWaitForFences(c->device, 1, &c->fence, VK_TRUE, UINT64_MAX);
-   return result;
+   VkResult waited = vkWaitForFences(c->device, 1, &c->fence, VK_TRUE, UINT64_MAX);
+   return result == VK_SUCCESS ? waited : result;
 }
 
 static VkSwapchainKHR
@@ -2360,6 +2369,11 @@ static void
 test_display(struct context *c)
 {
    bool ok = true;
+   uint32_t attribute3;
+   if (present_read_attribute3(&attribute3))
+      report("display timing: title attribute3 0x%08x", attribute3);
+   else
+      report("display timing: title attribute3 unavailable");
 #define LOAD_I(name)                                                                               \
    vk##name = (PFN_vk##name)vk_icdGetInstanceProcAddr(c->instance, "vk" #name);                    \
    ok &= vk##name != NULL;
@@ -2380,13 +2394,13 @@ test_display(struct context *c)
    check(result == VK_SUCCESS && count == 1 && display.physicalResolution.width == 3840 &&
             display.physicalResolution.height == 2160,
          "display: one 3840x2160 display");
-   if (count != 1)
+   if (result != VK_SUCCESS || count != 1)
       return;
    VkDisplayModePropertiesKHR modes[2];
    count = 2;
    result = vkGetDisplayModePropertiesKHR(c->physical, display.display, &count, modes);
-   check(result == VK_SUCCESS && count >= 1, "display: its modes");
-   if (count == 0)
+   check((result == VK_SUCCESS || result == VK_INCOMPLETE) && count >= 1, "display: its modes");
+   if ((result != VK_SUCCESS && result != VK_INCOMPLETE) || count == 0)
       return;
    report("display: %s, %u mode(s), the first at %.3f Hz", display.displayName, count,
           modes[0].parameters.refreshRate / 1000.0);
@@ -2425,35 +2439,50 @@ test_display(struct context *c)
    VkImage images[8];
    VkSwapchainKHR swapchain = display_swapchain(c, surface, VK_NULL_HANDLE, images, &count);
    if (swapchain) {
-      const unsigned frames = 60, paced = 50;
-      uint64_t start = 0;
-      unsigned presented = 0;
+      const unsigned warmup = 30, paced = 360, frames = warmup + paced;
+      uint64_t start = 0, previous = 0, end = 0, minimum = UINT64_MAX, maximum = 0;
+      unsigned presented = 0, measured = 0;
       for (unsigned frame = 0; frame < frames; frame++) {
-         if (frame == frames - paced)
-            start = now_ns();
+         if (frame == warmup)
+            start = previous = now_ns();
          const float gray = 0.10f + 0.10f * (float)(frame % 16) / 16.0f;
          result = display_frame(c, swapchain, images, acquired, rendered, gray,
                                 frame == frames - 1 ? &readback : NULL);
          if (result != VK_SUCCESS)
             break;
          presented++;
+         if (frame >= warmup) {
+            end = now_ns();
+            if (end <= previous)
+               break;
+            uint64_t interval = end - previous;
+            if (interval < minimum)
+               minimum = interval;
+            if (interval > maximum)
+               maximum = interval;
+            previous = end;
+            measured++;
+         }
       }
-      const double seconds = (now_ns() - start) / 1e9;
-      const double expected = paced * 1000.0 / modes[0].parameters.refreshRate;
-      check(presented == frames, "display: 60 frames acquired, cleared and presented");
-      report("display: the last %u frames took %.3f s, %.3f s at the mode's refresh", paced, seconds, expected);
-      check(presented == frames && seconds > expected * 0.85 && seconds < expected * 1.15,
-            "display: FIFO presents paced by the display's flips");
-      /* B8G8R8A8: 0.10 + 0.10 * 11/16 of 255, rounded. */
+      const double seconds = measured ? (end - start) / 1e9 : 0.0;
+      check(presented == frames && measured == paced && seconds > 0.0,
+            "display: 30 warmup and 360 FIFO frames acquired, cleared and presented");
+      report("display timing: %u frames, %.6f s, %.3f paced presents/s, interval min %.3f ms max %.3f ms",
+             measured, seconds, seconds > 0.0 ? measured / seconds : 0.0,
+             measured ? minimum / 1e6 : 0.0, maximum / 1e6);
+      report("display timing: FIFO throughput, not independently measured scanout timestamps");
+      /* B8G8R8A8: the last frame's gray, rounded to a byte. */
       const uint8_t *pixels = readback.map;
-      const uint8_t want = (uint8_t)((0.10f + 0.10f * 11.0f / 16.0f) * 255.0f + 0.5f);
+      const uint8_t want = (uint8_t)((0.10f + 0.10f * ((frames - 1) % 16) / 16.0f) * 255.0f + 0.5f);
       check(presented == frames && pixels[0] == want && pixels[1] == want && pixels[2] == want && pixels[3] == 255 &&
                pixels[4] == want && pixels[7] == 255,
             "display: the last frame's first and last pixels read back");
 
       uint32_t new_count = 0;
       VkImage new_images[8];
-      VkSwapchainKHR replacement = display_swapchain(c, surface, swapchain, new_images, &new_count);
+      VkSwapchainKHR replacement = presented == frames && measured == paced
+                                     ? display_swapchain(c, surface, swapchain, new_images, &new_count)
+                                     : VK_NULL_HANDLE;
       if (replacement) {
          uint32_t index;
          result = vkAcquireNextImageKHR(c->device, swapchain, 0, VK_NULL_HANDLE, c->fence, &index);
@@ -2461,8 +2490,11 @@ test_display(struct context *c)
          vkDestroySwapchainKHR(c->device, swapchain, NULL);
          swapchain = VK_NULL_HANDLE;
          unsigned more = 0;
-         for (unsigned frame = 0; frame < 5; frame++)
-            more += display_frame(c, replacement, new_images, acquired, rendered, 0.0f, NULL) == VK_SUCCESS;
+         for (unsigned frame = 0; frame < 5; frame++) {
+            if (display_frame(c, replacement, new_images, acquired, rendered, 0.0f, NULL) != VK_SUCCESS)
+               break;
+            more++;
+         }
          check(more == 5, "display: 5 frames through the replacement");
          vkDeviceWaitIdle(c->device);
          vkDestroySwapchainKHR(c->device, replacement, NULL);
@@ -2976,7 +3008,12 @@ main(void)
       test_title_files();
 #endif
    const char *const only = getenv("RADV_SMOKE_ONLY");
-   if (ready && only && strcmp(only, "task") == 0) {
+   if (ready && only && strcmp(only, "display") == 0) {
+      if (c.display)
+         test_display(&c);
+      else
+         check(false, "display: VK_KHR_display is not reported");
+   } else if (ready && only && strcmp(only, "task") == 0) {
       if (c.task)
          test_task(&c);
    } else if (ready && only && strcmp(only, "barycentric") == 0) {
