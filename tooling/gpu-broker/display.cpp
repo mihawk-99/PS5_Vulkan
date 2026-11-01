@@ -1,9 +1,11 @@
 /* Copyright (C) 2026 Mihawk-99 */
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "display.h"
+#include "pw_display_copy.h"
 #include <ps5platform/kernel.h>
 #include <ps5platform/videoout.h>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <unistd.h>
 extern "C" int sceKernelUsleep(unsigned);
@@ -86,6 +88,10 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
         if(!status)status=sceVideoOutRegisterBuffers2(handle,0,0,buffers,buffer_count,attribute,0,nullptr);
         if(status)return status;
         registered=true;
+        // PS5_Proton's PROTON_GPU_FAST_COPY=1: an unscaled frame is copied a 64-byte line at a time with streaming
+        // stores (pw_display_copy.h); a scaled one, and every frame without it, pixel by pixel below.
+        const char *fast=getenv("PROTON_GPU_FAST_COPY");fast_copy=fast && !strcmp(fast,"1");
+        fprintf(log,"gpu-display opened fast_copy=%d\n",fast_copy);
     }
     if(!registered)return EBUSY;
     // Three buffers: the one written next was last on screen two flips ago, so it is free once the flip after it has
@@ -103,6 +109,8 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
     }
     const uint64_t copy_start=now_ns();
     auto *buffer=(uint8_t *)mapped+back*buffer_bytes;
+    if(fast_copy && w==width && h==height)pw_display_copy_lines(buffer,(const uint8_t *)pixels,pitch,bgra);
+    else {
     // Scaling, nearest neighbour, as tables; then each tile in memory order, flushed as it is finished.
     static uint16_t source_x[width],source_y[height];
     for(unsigned x=0;x<width;++x)source_x[x]=uint16_t(x*w/width);
@@ -117,6 +125,7 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
             tile[k]=bgra ? rgba : (rgba&0xff00ff00)|((rgba&0xff)<<16)|((rgba>>16)&0xff);
         }
         for(size_t at=0;at<65536;at+=64)__asm__ volatile("clflushopt (%0)"::"r"((uint8_t *)tile+at):"memory");
+    }
     }
     if(cursor_x>=0 && cursor_y>=0)draw_cursor(buffer,cursor_x,cursor_y);
     __asm__ volatile("sfence":::"memory");

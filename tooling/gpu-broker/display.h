@@ -11,6 +11,7 @@ struct Ps5GpuDisplay {
     void *mapped=nullptr;
     uint64_t flips=0,last_copy_ns=0;
     bool registered=false;
+    bool fast_copy=false;   /* PS5_Proton's PROTON_GPU_FAST_COPY=1, read when the display opens */
     /* cursor_x, cursor_y: where to draw the pointer on the 1920x1080 screen, or -1 for none. */
     int present(const void *pixels,unsigned width,unsigned height,unsigned pitch,FILE *log,const char *capture,bool bgra=false,
                 int cursor_x=-1,int cursor_y=-1);
