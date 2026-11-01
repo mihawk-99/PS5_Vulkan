@@ -12,7 +12,7 @@ mkdir -p "$work"
 work=$(cd -- "$work" && pwd)
 mesa_fork=$(cd -- "$mesa_fork" && pwd)
 mingw_archive=$(realpath "$mingw_archive")
-revision=e7c317df9c11e25963d07e87d8e908cb5eabb15d
+revision=a8800d9130583fbd4a436c4c64ab9e33b98edf10
 printf '%s  %s\n' bb7bb7654b33d5aa8712acb837c963b2e0c56352560c76105270a3268c665c21 "$mingw_archive" | sha256sum --check --status
 mkdir -p "$work"
 mingw=$work/toolchain
@@ -63,7 +63,7 @@ from pathlib import Path
 root,work=map(Path,sys.argv[1:])
 digest=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
 files={p.name:digest(p) for p in work.glob('build/src/gallium/targets/*/*.dll')}
-manifest={'mesa_version':'26.2.0','mesa_revision':'e7c317df9c11e25963d07e87d8e908cb5eabb15d',
+manifest={'mesa_version':'26.2.0','mesa_revision':'a8800d9130583fbd4a436c4c64ab9e33b98edf10',
           'llvm_mingw':'20260922-ucrt','build_script':digest(root/'tools/build-mesa-windows-zink.sh'),
           'architecture':'x86_64','driver':'zink','files':files,'console_validated':False}
 manifest['zink_source_sha256']=digest(work/'source/src/gallium/drivers/zink/zink_kopper.c')
