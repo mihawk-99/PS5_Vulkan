@@ -29,6 +29,7 @@ int sceKernelUsleep(unsigned);
 
 #include <new>
 #include <cstring>
+#include <atomic>
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/mman.h>
@@ -528,6 +529,9 @@ struct Broker {
     bool direct=false;int32_t direct_pid=0;uint32_t direct_hwnd=0,direct_width=0,direct_height=0;
     uint64_t direct_generation=0,direct_ns=0,direct_checked_ns=0;
     uint64_t direct_entries=0,direct_exits=0,direct_restores=0,direct_flips=0;
+    // The game-mode process, for the title's session supervisor without the display lock (a present holds that lock
+    // through its flip wait): its native pid while game mode lasts, 0 otherwise.
+    std::atomic<int32_t> direct_published{0};
     pthread_t compositor{};bool compositing=false,compositor_stop=false;
     // Under display_lock: a picture the application asked for (ps5_gpu_broker_capture_next), of the next frame shown.
     std::string capture_next;
@@ -587,6 +591,7 @@ void leave_direct(Broker &b,const PwWindowSnapshot *snapshot,int reason,bool res
                             snapshot))
         { restored=1;++b.direct_restores; }
     b.direct=false;++b.direct_exits;b.window_composed=false;b.window_dirty=true;
+    b.direct_published.store(0,std::memory_order_release);
     if(b.direct_exits<=64) {
         char line[200];
         snprintf(line,sizeof(line),"gpu-direct leave pid=%d hwnd=%#x reason=%s restored=%d flips=%llu\n",b.direct_pid,
@@ -718,6 +723,7 @@ void *client_main(void *argument)
                                 }
                             }
                             b.direct=true;b.direct_pid=c.pid;b.direct_hwnd=hwnd;b.direct_generation=m.argument[2];
+                            b.direct_published.store(c.pid,std::memory_order_release);
                             b.direct_width=width;b.direct_height=height;b.direct_ns=b.direct_checked_ns=radv_ps5_now_ns();
                             ++b.direct_flips;b.window_composed=false;b.window_dirty=true;b.cursor_x=cx;b.cursor_y=cy;
                         }
@@ -896,6 +902,10 @@ void *compositor_main(void *)
         pthread_mutex_unlock(&b.display_lock);
     }
 }
+}
+int ps5_gpu_broker_game_mode()
+{
+    return broker_state.direct_published.load(std::memory_order_acquire);
 }
 unsigned long long ps5_gpu_broker_flips()
 {
@@ -1094,6 +1104,7 @@ bool ps5_gpu_broker_stop()
     fprintf(b.log,"gpu-wine stopped=1 clients_closed=%d flips=%llu flexible_min=%llu direct_min=%llu host_peak=%llu local_peak=%llu\n",
         b.next_cookie,(unsigned long long)b.display.flips,(unsigned long long)(b.flexible_min==SIZE_MAX ? 0 : b.flexible_min),
         (unsigned long long)(b.direct_min==UINT64_MAX ? 0 : b.direct_min),(unsigned long long)b.host_peak,(unsigned long long)b.local_peak);
+    b.direct=false;b.direct_published.store(0,std::memory_order_release);
     b.log_pipe.close();fclose(b.log_file);b.log=b.log_file=nullptr;b.started=false;return true;
 }
 

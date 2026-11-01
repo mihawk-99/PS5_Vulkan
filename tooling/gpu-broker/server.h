@@ -15,6 +15,8 @@ int ps5_gpu_broker_open(int *cookie);
 /* Bind to the owner's acknowledged payload PID before bootstrap gives the
  * helper its broker descriptor. INIT must match; window packets require it. */
 int ps5_gpu_broker_open_for_pid(int *cookie,int pid);
+/* Game mode (src/pw_window_direct.h): the native pid whose full-screen frames are flipped directly, or 0. No lock. */
+int ps5_gpu_broker_game_mode();
 void ps5_gpu_broker_close(int cookie,int lifecycle_token);
 bool ps5_gpu_broker_stop();
 bool ps5_gpu_broker_warm(FILE *output);
