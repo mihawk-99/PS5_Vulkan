@@ -717,7 +717,7 @@ struct Broker {
     std::string capture_next;
     // The application's cover (ps5_gpu_broker_set_cover), under display_lock: shown instead of the desktop while set.
     // Its flips are not the program's: while it lasts, ps5_gpu_broker_flips stays at the count it began with.
-    const void *cover=nullptr;uint64_t cover_serial=0,cover_shown=0,cover_flips=0;int cover_error=0;
+    const void *cover=nullptr;uint64_t cover_serial=0,cover_shown=0,cover_flips=0,cover_held_frames=0;int cover_error=0;
     std::atomic<bool> cover_held{false};std::atomic<unsigned long long> cover_frozen_flips{0};
 } broker_state;
 static std::string take_capture(decltype(broker_state) &b)
@@ -1012,11 +1012,14 @@ static void *serve(Client &c,bool present)
                         fprintf(b.log,"gpu-window-backing cookie=%d frame=%u flags=%#x clips=%u coloured_samples=%u/9\n",
                                 c.cookie,c.presentations+1,row?row->flags:0,row?row->clip_count:0,coloured);
                     }
-                    if(!m.status && !direct && !behind) {
+                    // While the application's cover is set a window's frame only updates the scene: shown, it replaced
+                    // the cover until the cover's next picture, a tenth of a second later, and the screen flickered.
+                    if(!m.status && !direct && !behind && !b.cover) {
                         int cx=INT32_MIN,cy=INT32_MIN;if(desktop_cursor)desktop_cursor(&cx,&cy);
                         m.status=show_windows(b,snapshot,cx,cy);
                     }
-                    if(!m.status && behind)b.window_dirty=true;
+                    if(!m.status && !direct && b.cover)++b.cover_held_frames;
+                    if(!m.status && (behind || b.cover))b.window_dirty=true;
                     const uint64_t end=radv_ps5_now_ns(),copied=b.display.flips!=flips_before ? b.display.last_copy_ns : 0;
                     pthread_mutex_unlock(&b.display_lock);
                     pthread_mutex_lock(&b.lock);
@@ -1057,7 +1060,8 @@ static void *serve(Client &c,bool present)
                     pthread_mutex_lock(&b.display_lock);
                     // A client that does not hold the screen is told its frame was shown, a frame's time later,
                     // so it paces as it would on a display.
-                    const bool shown=may_show(b,c.cookie,c.pid,radv_ps5_now_ns());
+                    const bool shown=!b.cover && may_show(b,c.cookie,c.pid,radv_ps5_now_ns());
+                    if(b.cover)++b.cover_held_frames;
                     if(shown) {
                         int cursor_x,cursor_y;screen_cursor(0,0,(unsigned)m.argument[0],(unsigned)m.argument[1],cursor_x,cursor_y);
                         std::string asked=take_capture(b);
@@ -1219,7 +1223,8 @@ bool ps5_gpu_broker_set_cover(const void *pixels)
         b.cover_held.store(true,std::memory_order_release);
     }
     if(!pixels && b.cover) {
-        if(b.log)fprintf(b.log,"gpu-cover ended flips=%llu\n",(unsigned long long)b.cover_flips);
+        if(b.log)fprintf(b.log,"gpu-cover ended flips=%llu held=%llu\n",(unsigned long long)b.cover_flips,
+                         (unsigned long long)b.cover_held_frames);
         b.cover_held.store(false,std::memory_order_release);
     }
     b.cover=pixels;++b.cover_serial;
