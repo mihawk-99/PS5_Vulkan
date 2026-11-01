@@ -1,0 +1,27 @@
+--- a/src/vulkan/wsi/wsi_common_videoout.c
++++ b/src/vulkan/wsi/wsi_common_videoout.c
+@@ -513,8 +513,14 @@
+    const VkSwapchainCreateInfoKHR *info,const VkAllocationCallbacks *a,struct wsi_swapchain **out)
+ {
+    /* Any present mode is presented as FIFO (c->base.present_mode): Windows drivers offer IMMEDIATE and MAILBOX, and a
+-    * program that names one without checking the list got no swapchain at all (Wine's vulkan-1, vulkan.c:975). */
+-   if(!info->imageExtent.width || info->imageExtent.width>1920 || !info->imageExtent.height || info->imageExtent.height>1080 ||
++    * program that names one without checking the list got no swapchain at all (Wine's vulkan-1, vulkan.c:975).
++    * A window's swapchain is its client area, which may be larger than the screen (Steam's restored window is 1922x1081):
++    * the owner clips it to the screen as Windows does, up to the size it composes (PS5_Proton's src/pw_window_page.h,
++    * 2176x1408). Only a swapchain for the whole display is held to the display's size. */
++   const struct broker_surface *surface=(const void *)s;
++   const uint32_t max_width=surface->hwnd ? 2176 : 1920,max_height=surface->hwnd ? 1408 : 1080;
++   if(!info->imageExtent.width || info->imageExtent.width>max_width || !info->imageExtent.height ||
++      info->imageExtent.height>max_height ||
+       info->minImageCount>VIDEOOUT_BUFFERS ||
+       (info->imageFormat!=VK_FORMAT_B8G8R8A8_UNORM && info->imageFormat!=VK_FORMAT_B8G8R8A8_SRGB)) {
+       fprintf(stderr,"gpu-wsi rejected extent=%ux%u count=%u format=%d mode=%d flags=%u usage=%u\n",
+@@ -529,7 +535,6 @@
+    const struct wsi_cpu_image_params params={.base.image_type=WSI_IMAGE_TYPE_CPU};
+    VkResult result=wsi_swapchain_init(w,&c->base,device,info,&params.base,a);
+    if(result!=VK_SUCCESS) { mtx_destroy(&c->lock);vk_free(a,c);return result; }
+-   const struct broker_surface *surface=(const void *)s;
+    c->hwnd=surface->hwnd;c->generation=surface->generation;
+    c->base.destroy=broker_destroy;c->base.get_wsi_image=broker_image;c->base.acquire_next_image=broker_acquire;
+    c->base.release_images=broker_release;c->base.queue_present=broker_present;c->base.wait_for_present=broker_wait;

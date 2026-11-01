@@ -61,7 +61,9 @@ static inline int pw_gpu_window_image(const PwGpuMessage *m)
 {
     const uint32_t width=(uint32_t)m->argument[0],height=(uint32_t)(m->argument[0]>>32);
     const uint32_t stride=(uint32_t)m->argument[1],hwnd=(uint32_t)(m->argument[1]>>32);
-    return width && width<=1920 && height && height<=1080 && stride>=width*4 && stride<=1920*4 &&
+    /* A window may be larger than the screen (its client area: Steam's restored window is 1922x1081); the owner
+     * clips it, up to the size it composes (PS5_Proton's src/pw_window_page.h, 2176x1408). */
+    return width && width<=2176 && height && height<=1408 && stride>=width*4 && stride<=2176*4 &&
            !(stride&3) && hwnd && m->argument[2] && m->argument[3]<=1 &&
            m->bytes==(uint64_t)height*stride && m->address && !(m->address&3);
 }
