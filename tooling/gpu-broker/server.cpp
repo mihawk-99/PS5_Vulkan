@@ -25,10 +25,12 @@ extern "C" {
 #include <ps5platform/agc.h>
 
 int sceKernelUsleep(unsigned);
+int sceKernelGetPageTableStats(int *cpu_total, int *cpu_free, int *gpu_total, int *gpu_free);
 }
 #include <cerrno>
 #include <string>
 #include <vector>
+#include <map>
 #include <sched.h>
 #include <cstdlib>
 
@@ -189,8 +191,13 @@ static uint64_t host_limit=PW_GPU_LIMIT;
 constexpr unsigned kClientBuffers=1024;
 // A client's sparse ranges (patch 0041): reserved in the owner's device-memory region, as the owner's own are. A
 // Direct3D 12 game makes one per reserved resource: 256 was too few (a big racing game was refused a 1.4 MiB range and
-// crashed on the null it got back, 2026-10-31), so a client may hold 4096, kept as they come (not 4096 per client).
-constexpr unsigned kClientRanges=4096;
+// crashed on the null it got back, 2026-10-31), and so was 4096 (the same game streaming its open world, a tester's
+// standard PS5, 2026-11-01). A range costs a 2 MiB granule of the region (256 GiB) and, mapped over the zero block in
+// 2 MiB pieces, about 0.2 of the owner's CPU page tables and 0.1 of its GPU ones (that run: 4096 ranges and the game's
+// device-local buffers together took about 810 and 415 of 16384). The page tables are what runs out, so they decide:
+// a range is refused while either pool has fewer than kRangeTableFloor free, and the count only bounds the bookkeeping.
+constexpr unsigned kClientRanges=32768;
+constexpr int kRangeTableFloor=1024;
 struct Range { uint64_t address=0,bytes=0;radv_ps5_memory memory{}; };
 struct Client {
     int socket=-1,service=-1,pid=-1,expected_pid=0;uint32_t sequence=0,next_token=0;
@@ -199,7 +206,8 @@ struct Client {
     int present_socket=-1;uint32_t present_sequence=0;uint64_t pin_address=0,pin_bytes=0;
     bool present_serving=false;pthread_t presenter{};
     Buffer buffers[kClientBuffers];unsigned submissions=0;
-    std::vector<Range> ranges;unsigned range_count=0;
+    std::vector<Range> ranges;unsigned range_count=0,range_peak=0;
+    std::map<uint64_t,unsigned> range_index;   // a live range's address: its slot in ranges (a bind finds it in log n)
     uint64_t allocated=0,local=0,local_peak=0,tess=0;uint32_t tess_bytes=0,granularity=0,buffering=0;
     // Where submission time goes, in nanoseconds: staging allocation and copy, the native submit, the completion wait
     // and the staging release.
@@ -237,11 +245,13 @@ std::string output_path(const char *path)
 void pacing_report(FILE *log,Client &c,uint64_t now,bool final)
 {
     if(!c.pacing.frames && !c.pacing.hidden)return;
-    char fields[320],line[400];
+    char fields[320],line[448];
     pw_frame_pacing_format(&c.pacing,now,fields,sizeof(fields));
-    snprintf(line,sizeof(line),"gpu-pacing cookie=%d pid=%d route=%s final=%d direct=%llu composed=%llu refused=%s %s\n",
-        c.cookie,c.pid,c.route,final,(unsigned long long)c.direct_frames,(unsigned long long)c.composed_frames,
-        c.direct_reason<0 ? "none" : pw_window_direct_reason(c.direct_reason),fields);
+    // The sparse ranges it holds and its most so far, against kClientRanges and the page tables (patch 0044).
+    snprintf(line,sizeof(line),"gpu-pacing cookie=%d pid=%d route=%s final=%d direct=%llu composed=%llu refused=%s ranges=%u "
+        "ranges_peak=%u %s\n",c.cookie,c.pid,c.route,final,(unsigned long long)c.direct_frames,
+        (unsigned long long)c.composed_frames,c.direct_reason<0 ? "none" : pw_window_direct_reason(c.direct_reason),
+        c.range_count,c.range_peak,fields);
     c.direct_frames=c.composed_frames=0;c.direct_reason=-1;
     if(log)fputs(line,log);
     fputs(line,stderr);
@@ -610,10 +620,13 @@ bool fences_ready(FILE *out)
 // client holds kClientRanges already, ENOMEM no room in the owner's device-memory region.
 int vrange_reserve(Client &c,PwGpuMessage &m,FILE *log)
 {
-    const char *why=!m.bytes || m.bytes>(UINT64_C(64)<<30) ? "size" : c.range_count>=kClientRanges ? "count" : nullptr;
+    int cpu_total=0,cpu_free=0,gpu_total=0,gpu_free=0;
+    const bool tables=!sceKernelGetPageTableStats(&cpu_total,&cpu_free,&gpu_total,&gpu_free) && cpu_total>0 && gpu_total>0;
+    const char *why=!m.bytes || m.bytes>(UINT64_C(64)<<30) ? "size" : c.range_count>=kClientRanges ? "count" :
+                    tables && (cpu_free<kRangeTableFloor || gpu_free<kRangeTableFloor) ? "tables" : nullptr;
     if(why) {
-        fprintf(log,"gpu-wine vrange_refused=1 cookie=%d pid=%d bytes=%llu ranges=%u reason=%s\n",c.cookie,c.pid,
-            (unsigned long long)m.bytes,c.range_count,why);
+        fprintf(log,"gpu-wine vrange_refused=1 cookie=%d pid=%d bytes=%llu ranges=%u reason=%s tables_free=%d/%d\n",c.cookie,
+            c.pid,(unsigned long long)m.bytes,c.range_count,why,cpu_free,gpu_free);
         return *why=='s' ? EINVAL : ENOSPC;
     }
     Range *slot=nullptr;
@@ -626,21 +639,25 @@ int vrange_reserve(Client &c,PwGpuMessage &m,FILE *log)
     }
     if(!slot) { c.ranges.emplace_back();slot=&c.ranges.back(); }
     slot->address=(uint64_t)(uintptr_t)memory.cpu;slot->bytes=memory.bytes;slot->memory=memory;++c.range_count;
+    c.range_index[slot->address]=(unsigned)(slot-c.ranges.data());
+    if(c.range_count>c.range_peak)c.range_peak=c.range_count;
     m.address=slot->address;m.bytes=slot->bytes;return 0;
 }
 Range *vrange_of(Client &c,uint64_t address,uint64_t bytes)
 {
-    for(auto &r:c.ranges)if(r.address && pw_gpu_contains(r.address,r.bytes,address,bytes))return &r;
-    return nullptr;
+    auto at=c.range_index.upper_bound(address);
+    if(at==c.range_index.begin())return nullptr;
+    Range &r=c.ranges[(--at)->second];
+    return r.address && pw_gpu_contains(r.address,r.bytes,address,bytes) ? &r : nullptr;
 }
 int vrange_release(Client &c,PwGpuMessage &m)
 {
-    for(auto &r:c.ranges)if(r.address && r.address==m.address) {
-        // Work in flight may still read through it: it is unmapped once nothing is.
-        if(!drain(5000000000ull))return EBUSY;
-        radv_ps5_vrange_release(&r.memory);r=Range{};--c.range_count;return 0;
-    }
-    return EINVAL;
+    auto at=m.address ? c.range_index.find(m.address) : c.range_index.end();
+    if(at==c.range_index.end())return EINVAL;
+    Range &r=c.ranges[at->second];
+    // Work in flight may still read through it: it is unmapped once nothing is.
+    if(!drain(5000000000ull))return EBUSY;
+    radv_ps5_vrange_release(&r.memory);r=Range{};--c.range_count;c.range_index.erase(at);return 0;
 }
 int vrange_bind(Client &c,PwGpuMessage &m,bool bind,FILE *log)
 {
