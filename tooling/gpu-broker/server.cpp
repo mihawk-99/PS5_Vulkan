@@ -19,6 +19,7 @@ extern "C" {
 #include "pw_frame_pacing.h"
 #include "pw_gpu_timing.h"
 #include "pw_window_direct.h"
+#include "pw_log_drain.h"
 #include "packet_io.h"
 #include <ps5platform/kernel.h>
 #include <ps5platform/agc.h>
@@ -72,21 +73,21 @@ int await_message(int socket,uint64_t spin_until,bool *spun=nullptr)
     return found==1 ? 1 : found==0 || (found<0 && errno!=EAGAIN && errno!=EWOULDBLOCK && errno!=EINTR) ? -1 : 0;
 }
 constexpr uint64_t kServeSpinNs=1000000;
-// The broker's log goes through a pipe that a thread of its own drains to the file: a line written straight to the
-// console's disk under the broker's lock held every other client up to 262 ms (graphics-child-gpu-async-18), which
-// showed as 2.3 ms per submission in the other client's 30-submission phases. A whole line is one write, atomic in the
-// pipe, so lines from several threads do not interleave.
+// The broker's log goes through a socket pair that a thread of its own drains to the file: a line written straight to
+// the console's disk under the broker's lock held every other client up to 262 ms (graphics-child-gpu-async-18), which
+// showed as 2.3 ms per submission in the other client's 30-submission phases. Not a pipe: once the system's pipe memory
+// is used up a new pipe's buffer is small, and each line waited for the disk again (pw_log_drain.h). The writing end
+// is non-blocking with a buffer of about a megabyte: a line that does not fit is lost whole, never waited for.
 struct LogPipe {
     FILE *front=nullptr,*back=nullptr;int reader=-1;pthread_t writer{};bool running=false;
     bool open(FILE *file)
     {
-        int ends[2];if(pipe(ends))return false;
+        int ends[2];if(pw_log_drain_pair(ends,1<<20))return false;
         front=fdopen(ends[1],"w");
         if(!front) { ::close(ends[0]);::close(ends[1]);return false; }
         setvbuf(front,nullptr,_IOLBF,0);back=file;reader=ends[0];
-        // The kernel makes a pipe's buffer on its first write, and refuses (ENOMEM) when the system's pipe memory is
-        // used up: the writes then vanished and the file stayed empty. One line now shows whether the pipe takes writes.
-        static const char ready[]="gpu-broker log=pipe\n";
+        // One line now shows the way out takes writes (a pipe's refused them, ENOMEM, once the pipe memory was used up).
+        static const char ready[]="gpu-broker log=socket\n";
         if(write(ends[1],ready,sizeof(ready)-1)!=ssize_t(sizeof(ready)-1)) { fclose(front);::close(reader);front=nullptr;reader=-1;return false; }
         running=!pthread_create(&writer,nullptr,[](void *argument) -> void * {
             auto *self=static_cast<LogPipe *>(argument);char buffer[4096];
@@ -104,6 +105,9 @@ struct LogPipe {
     void close()
     {
         if(!front)return;
+        // The last lines wait for the file: blocking again, the final flush is not dropped.
+        const int flags=fcntl(fileno(front),F_GETFL);
+        if(flags>=0)fcntl(fileno(front),F_SETFL,flags&~O_NONBLOCK);
         fclose(front);front=nullptr;
         if(running)pthread_join(writer,nullptr);
         running=false;::close(reader);reader=-1;fsync(fileno(back));
