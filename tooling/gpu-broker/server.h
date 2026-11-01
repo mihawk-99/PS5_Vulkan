@@ -47,6 +47,10 @@ bool ps5_gpu_broker_set_cover(const void *pixels);
  * Any thread. */
 struct Ps5GpuBrokerHealth { unsigned lock_busy,display_busy,fences_issued,fences_completed;const char *phase;unsigned long long phase_ms;int holder_tid; };
 void ps5_gpu_broker_health(Ps5GpuBrokerHealth *health);
+/* Whether the application is away from the foreground (PS5_Proton's src/pw_suspend.h): from away, the broker drains what
+ * is in flight (up to 1 s) and holds every client's next submission and present until it is back. Any thread; a repeat
+ * of the current state costs one atomic load. */
+void ps5_gpu_broker_set_away(bool away);
 /* Where the memory a client maps comes from: alloc gives a new object of bytes (or -1), touch writes through
  * [from, to) of one in another process before the broker maps it for the GPU (0, or -1). An application whose clients
  * outlive it sets both, so none of that memory is its own; unset, the broker makes it, as before. */

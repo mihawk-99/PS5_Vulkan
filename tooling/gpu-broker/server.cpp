@@ -36,6 +36,7 @@ int sceKernelUsleep(unsigned);
 #include <atomic>
 #include <fcntl.h>
 #include <poll.h>
+#include <time.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -666,6 +667,9 @@ namespace {
 struct Broker {
     pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER,display_lock=PTHREAD_MUTEX_INITIALIZER;
     pthread_cond_t pin_released=PTHREAD_COND_INITIALIZER;   // a present link's frame unpinned (Client::pin_*)
+    // The app is not in the foreground (ps5_gpu_broker_set_away, under lock): submissions and presents wait here.
+    bool away=false;uint64_t away_held=0;
+    pthread_cond_t away_changed=PTHREAD_COND_INITIALIZER;
     Client clients[32];
     Ps5GpuDisplay display;
     uint64_t window=0x240000000ull,high=0x5100000000ull;
@@ -879,6 +883,18 @@ static void *serve(Client &c,bool present)
                 c.ended=true;break;
             }
             sequence=m.sequence;m.status=EINVAL;int fd=-1;bool sent_away=false;   // sent_away: fd is closed once sent
+            // Away (ps5_gpu_broker_set_away): no new GPU work and no flip while the app is not in the foreground. This one
+            // waits, without the lock, until it is again; the client's thread waits on its reply meanwhile.
+            if(c.pid>0 && b.away && (m.operation==PW_GPU_SUBMIT || m.operation==PW_GPU_SWAPCHAIN ||
+                                     m.operation==PW_GPU_WINDOW_SWAPCHAIN)) {
+                ++b.away_held;
+                // Timed, so a client closed or a broker stopped meanwhile is seen within 100 ms.
+                while(b.away && !b.stopping && !c.ended) {
+                    struct timespec until;clock_gettime(CLOCK_REALTIME,&until);
+                    until.tv_nsec+=100000000;if(until.tv_nsec>=1000000000) { until.tv_nsec-=1000000000;++until.tv_sec; }
+                    pthread_cond_timedwait(&b.away_changed,&b.lock,&until);
+                }
+            }
             if(present && m.operation!=PW_GPU_SWAPCHAIN && m.operation!=PW_GPU_WINDOW_SWAPCHAIN && m.operation!=PW_GPU_TIMING) {
                 // Refused (EINVAL): the present link carries presents alone.
             } else if(m.operation==PW_GPU_INIT && c.pid<0 && pw_gpu_client_pid(c.expected_pid,m.argument[0],getpid())) {
@@ -1250,6 +1266,23 @@ bool ps5_gpu_broker_capture_next(const char *path)
     if(asked)b.capture_next=path;
     pthread_mutex_unlock(&b.capture_lock);
     return asked;
+}
+void ps5_gpu_broker_set_away(bool away)
+{
+    auto &b=broker_state;
+    if(__atomic_load_n(&b.away,__ATOMIC_RELAXED)==away)return;
+    pthread_mutex_lock(&b.lock);
+    __atomic_store_n(&b.away,away,__ATOMIC_RELAXED);
+    // Nothing in flight when the system freezes the app: what was submitted completes now, and nothing new starts.
+    if(away && b.started && fences.page.cpu) {
+        const bool drained=drain(1000000000ull);
+        fprintf(b.log,"gpu-broker away=1 drained=%d fences=%u/%u\n",drained,fences.issued,completed());
+    } else if(!away && b.started && fences.page.cpu) {
+        fprintf(b.log,"gpu-broker away=0 fences=%u/%u held=%llu\n",fences.issued,completed(),(unsigned long long)b.away_held);
+    }
+    if(!away)pthread_cond_broadcast(&b.away_changed);
+    if(b.log)fflush(b.log);
+    pthread_mutex_unlock(&b.lock);
 }
 void ps5_gpu_broker_health(Ps5GpuBrokerHealth *health)
 {
