@@ -24,7 +24,7 @@ static uint64_t allocated,local_allocated;
 /* The broker's answer to INIT: device-local bytes (the owner's direct memory, never mapped here) and host-visible
  * bytes (shared memory). No local bytes: one unified host-visible pool, as before. */
 static uint64_t local_limit,host_limit=PW_GPU_LIMIT;
-/* This process reserved the broker's host ranges before anything else could map there (set by the application before binding): buffers are mapped over that reservation, and freed back to it. */
+/* This process reserved the broker's host ranges before anything else could map there (set by the application before binding): buffers are mapped over that reservation, and freed back to it. Without them no host-visible buffer is mapped. */
 static int ranges_reserved;
 /* A host-visible buffer at `at`: the broker's direct memory when it names an offset (dmem_plus_one, the offset and one), else its
  * shared-memory object (fd). */
@@ -40,6 +40,29 @@ static void *map_host_at(void *at,uint64_t bytes,int fd,uint64_t dmem_plus_one)
         return got;
     }
     return mmap(at,bytes,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,fd,0);
+}
+extern int sceKernelVirtualQuery(const void *,int,void *,size_t);
+/* 1 when [at, +bytes) is bare reservation end to end (protection 0, no hole). A fixed mapping goes only there: never over
+ * a mapping this process's application made (PS5_Proton's Wine keeps its memory in reservations of its own, and tearing
+ * down wired GPU memory hung the console, "unwire timeout"), nor into a hole another mapping may have taken. One query
+ * per entry (NEXT: the entry holding the address, or the one after it). */
+static int bare(void *at,uint64_t bytes)
+{
+    static unsigned refusals;
+    struct { void *start,*end; uint64_t offset; int32_t protection,type; uint8_t flags; char name[32]; uint8_t padding[7]; } entry={0};
+    _Static_assert(sizeof(entry)==72,"libkernel query record");
+    for(uintptr_t cursor=(uintptr_t)at;cursor<(uintptr_t)at+bytes;cursor=(uintptr_t)entry.end) {
+        const int status=sceKernelVirtualQuery((void *)cursor,1,&entry,sizeof(entry));
+        if(status || (uintptr_t)entry.start>cursor || (uintptr_t)entry.end<=cursor || entry.protection) {
+            /* Otherwise a refused buffer reads as an ordinary out-of-memory in DXVK or Zink, and the owner logs nothing. */
+            if(__atomic_fetch_add(&refusals,1,__ATOMIC_RELAXED)<8)
+                fprintf(stderr,"gpu-client: %p +%llu not bare at %#llx: query %#x, entry %p-%p protection %#x\n",at,
+                        (unsigned long long)bytes,(unsigned long long)cursor,(unsigned)status,entry.start,entry.end,
+                        (unsigned)entry.protection);
+            return 0;
+        }
+    }
+    return 1;
 }
 #define PS5_GPU_LOCAL_MEMORY (-2)
 
@@ -276,21 +299,16 @@ bool radv_ps5_memory_alloc(uint64_t bytes,uint64_t alignment,bool window32,struc
         !(message.address&16383) && (!alignment || !(message.address&(alignment-1))) &&
         message.argument[0]>0 && message.argument[0]<=UINT32_MAX && message.address>=RADV_PS5_WINDOW_BASE && message.address<=RADV_PS5_GPU_ADDRESS_LIMIT-message.bytes &&
         (!window32 || pw_gpu_contains(RADV_PS5_WINDOW_BASE,RADV_PS5_WINDOW_BYTES,message.address,message.bytes));
-    const int ranged=okay && ranges_reserved && pw_gpu_host_range(message.address,message.bytes)>=0;
+    /* Only over this process's own reservation of a host range, still bare: an address the owner chose anywhere else
+     * was taken where the kernel found a hole, which may lie inside the application's own reservations. */
+    const int ranged=okay && ranges_reserved && pw_gpu_host_range(message.address,message.bytes)>=0 &&
+        bare(at,message.bytes);
     if(ranged) {
         /* Over this process's own reservation of the range: a fixed mapping replaces it. */
         void *mapped=map_host_at(at,message.bytes,fd,message.argument[2]);
         okay=mapped==at;
         if(!okay) { void *again=at;sceKernelReserveVirtualRange(&again,message.bytes,PW_GPU_RESERVE_FIXED,16384); }
-    } else if(okay) {
-        okay=sceKernelReserveVirtualRange(&at,message.bytes,0,16384)==0;
-        if(okay && at!=(void *)(uintptr_t)message.address) { sceKernelMunmap(at,message.bytes);okay=false; }
-        if(okay) {
-            void *mapped=map_host_at(at,message.bytes,fd,message.argument[2]);
-            okay=mapped==at;
-            if(!okay)sceKernelMunmap(at,message.bytes);
-        }
-    }
+    } else okay=false;
     /* Kept for a placed mapping of this memory (radv_ps5_memory_map_at); closed when it is freed. */
     if(!okay || (!message.argument[2] && !__atomic_load_n(&keep_sources,__ATOMIC_ACQUIRE)) || !source_add((uintptr_t)at,fd,message.argument[2]))close(fd);
     if(!okay) {
@@ -371,7 +389,8 @@ bool radv_ps5_memory_grant_gpu(void *a,uint64_t b) { (void)a;(void)b;return fals
  * no CPU mapping in this process, and so no source. */
 bool radv_ps5_memory_map_at(const struct radv_ps5_memory *m,void *a)
 {
-    if(m->physical==PS5_GPU_LOCAL_MEMORY || !a || ((uintptr_t)a&16383))return false;
+    /* The application hands over a bare reservation there (PS5_Proton's win32u, patch 1130); anything else is refused. */
+    if(m->physical==PS5_GPU_LOCAL_MEMORY || !a || ((uintptr_t)a&16383) || !bare(a,m->bytes))return false;
     /* Direct memory: the same range mapped again at a. */
     const uint64_t dmem=source_dmem((uintptr_t)m->cpu);
     if(dmem)return map_host_at(a,m->bytes,-1,dmem)==a;
