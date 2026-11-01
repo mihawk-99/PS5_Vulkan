@@ -24,9 +24,14 @@ void ps5_gpu_broker_set_desktop(int (*foreground)(),void (*cursor)(int *,int *))
 /* Frames the display has shown since the broker started: an application's mark for a program's first frame (a
  * scripted run's clock, when the program presents through the broker). */
 unsigned long long ps5_gpu_broker_flips(void);
-/* The next frame the display shows is also written to path, a PPM picture, once: false when the broker is not running
- * or a picture is already waiting for its frame. */
+/* The next frame the display shows is also written to path, a PPM picture, once: false when the broker is not running,
+ * a picture is already waiting for its frame, or the display stayed busy for 100 ms (it waits no longer than that). */
 bool ps5_gpu_broker_capture_next(const char *path);
+/* The broker as of now, for an application's watchdog, without waiting on anything the broker holds: whether its
+ * client lock and its display lock are held this instant (a trylock, released at once), the GPU submissions it made
+ * and the last one the GPU completed (its fence page's value; 0 before the first submission). Any thread. */
+struct Ps5GpuBrokerHealth { unsigned lock_busy,display_busy,fences_issued,fences_completed; };
+void ps5_gpu_broker_health(Ps5GpuBrokerHealth *health);
 /* Where the memory a client maps comes from: alloc gives a new object of bytes (or -1), touch writes through
  * [from, to) of one in another process before the broker maps it for the GPU (0, or -1). An application whose clients
  * outlive it sets both, so none of that memory is its own; unset, the broker makes it, as before. */

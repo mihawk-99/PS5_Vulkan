@@ -307,7 +307,11 @@ int shared_object(uint64_t bytes)
     if(shared_alloc) {
         const int fd=shared_alloc(bytes);
         if(fd>=0 && (!shared_touch || !shared_touch(fd,0,bytes)))return fd;
+        const int error=errno;
         if(fd>=0)close(fd);
+        // The maker is gone or did not answer in time: an object made here would be the application's, held by a client
+        // when the system closes the application, which panicked the console (PS5_Proton src/pw_shared_page.h).
+        if(error==ENOTCONN || error==ETIMEDOUT) { errno=error;return -1; }
     }
     const int fd=shm_open(SHM_ANON,O_RDWR,0600);
     if(fd>=0 && ftruncate(fd,bytes)) { close(fd);return -1; }
@@ -458,17 +462,24 @@ bool drain(uint64_t timeout_ns)
     while((fences.count || fences.deferred_count) && radv_ps5_now_ns()<end) { sceKernelUsleep(50);reap(); }
     return !fences.count && !fences.deferred_count;
 }
+// Held only to publish or take back the fence page, never across a wait: ps5_gpu_broker_health reads the page under it.
+pthread_mutex_t fence_page_lock=PTHREAD_MUTEX_INITIALIZER;
 // After a drain: the fence page goes back, and the state is as at start. In place, as Fences is about 100 KiB.
 void fences_reset()
 {
-    if(fences.page.cpu)radv_ps5_memory_free(&fences.page);
+    pthread_mutex_lock(&fence_page_lock);
+    radv_ps5_memory page=fences.page;
     fences.~Fences();new (&fences) Fences();
+    pthread_mutex_unlock(&fence_page_lock);
+    if(page.cpu)radv_ps5_memory_free(&page);
 }
 bool fences_ready(FILE *out)
 {
     if(fences.page.cpu)return true;
-    if(!radv_ps5_memory_alloc(16384,16384,false,&fences.page))return false;
-    *(volatile uint32_t *)fences.page.cpu=fences.issued;radv_ps5_cpu_flush(fences.page.cpu,64);
+    radv_ps5_memory page{};
+    if(!radv_ps5_memory_alloc(16384,16384,false,&page))return false;
+    *(volatile uint32_t *)page.cpu=fences.issued;radv_ps5_cpu_flush(page.cpu,64);
+    pthread_mutex_lock(&fence_page_lock);fences.page=page;pthread_mutex_unlock(&fence_page_lock);
     fprintf(out,"gpu-broker fences address=%#llx\n",(unsigned long long)(uint64_t)fences.page.cpu);
     return true;
 }
@@ -504,7 +515,7 @@ int submit(Client &c,const PwGpuMessage &m,FILE *out,unsigned client)
     radv_ps5_memory staging{};
     if(!radv_ps5_memory_alloc(m.bytes+32,16384,false,&staging))return ENOMEM;
     memcpy(staging.cpu,(void *)m.address,m.bytes);
-    uint32_t seq=++fences.issued;if(!seq)seq=++fences.issued;
+    uint32_t seq=__atomic_add_fetch(&fences.issued,1,__ATOMIC_RELAXED);if(!seq)seq=__atomic_add_fetch(&fences.issued,1,__ATOMIC_RELAXED);
     ps5_gpu_completion_packet((uint32_t *)((uint8_t *)staging.cpu+m.bytes),(uint64_t)fences.page.cpu,seq);
     const uint64_t t2=radv_ps5_now_ns();c.time_stage+=t2-t1;
     int status=0;
@@ -939,23 +950,38 @@ int ps5_gpu_broker_game_mode()
 {
     return broker_state.direct_published.load(std::memory_order_acquire);
 }
+// The application's loop calls these: neither may wait on display_lock for good, as a display that stops would stop
+// the loop with it. flips needs no lock (Ps5GpuDisplay::flips is bumped atomically, display.cpp); a capture tries the
+// lock for up to 100 ms, since the compositor holds it for most of every frame it shows.
 unsigned long long ps5_gpu_broker_flips()
 {
-    auto &b=broker_state;
-    pthread_mutex_lock(&b.display_lock);
-    const unsigned long long flips=b.display.flips;
-    pthread_mutex_unlock(&b.display_lock);
-    return flips;
+    return __atomic_load_n(&broker_state.display.flips,__ATOMIC_RELAXED);
 }
 bool ps5_gpu_broker_capture_next(const char *path)
 {
     auto &b=broker_state;
     if(!path || !*path)return false;
-    pthread_mutex_lock(&b.display_lock);
+    for(unsigned tries=0;pthread_mutex_trylock(&b.display_lock);++tries) {
+        if(tries==200)return false;
+        sceKernelUsleep(500);
+    }
     const bool asked=b.started && b.capture_next.empty();
     if(asked)b.capture_next=path;
     pthread_mutex_unlock(&b.display_lock);
     return asked;
+}
+void ps5_gpu_broker_health(Ps5GpuBrokerHealth *health)
+{
+    auto &b=broker_state;
+    *health=Ps5GpuBrokerHealth{};
+    health->lock_busy=pthread_mutex_trylock(&b.lock)!=0;
+    if(!health->lock_busy)pthread_mutex_unlock(&b.lock);
+    health->display_busy=pthread_mutex_trylock(&b.display_lock)!=0;
+    if(!health->display_busy)pthread_mutex_unlock(&b.display_lock);
+    health->fences_issued=__atomic_load_n(&fences.issued,__ATOMIC_RELAXED);
+    pthread_mutex_lock(&fence_page_lock);
+    if(fences.page.cpu)health->fences_completed=completed();
+    pthread_mutex_unlock(&fence_page_lock);
 }
 void ps5_gpu_broker_set_dmem_memory(int (*alloc)(size_t,int,int64_t *),int (*release)(int64_t,size_t))
 {

@@ -121,7 +121,7 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
     if(cursor_x>=0 && cursor_y>=0)draw_cursor(buffer,cursor_x,cursor_y);
     __asm__ volatile("sfence":::"memory");
     last_copy_ns=now_ns()-copy_start;
-    const uint64_t serial=++flips;
+    const uint64_t serial=__atomic_add_fetch(&flips,1,__ATOMIC_RELAXED);   // read without display_lock (ps5_gpu_broker_flips)
     int status=sceVideoOutSubmitFlip(handle,back,PS5_VIDEO_OUT_FLIP_VSYNC,serial);
     // A capture (the probes') waits for this flip to be shown and reads that buffer back: proof of what was flipped.
     if(!status && capture) {
