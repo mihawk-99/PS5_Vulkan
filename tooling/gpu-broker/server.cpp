@@ -1375,7 +1375,9 @@ bool ps5_gpu_broker_set_overlay(const void *pixels,unsigned x,unsigned y,unsigne
                                              (unsigned long long)b.display.flips);
     timespec now{};clock_gettime(CLOCK_MONOTONIC,&now);   // the display's own clock (display.cpp now_ns)
     const auto ns=[](const timespec &t) { return uint64_t(t.tv_sec)*1000000000u+uint64_t(t.tv_nsec); };
-    const bool idle=copy && b.display.registered && b.display.flips && ns(now)-b.display.last_present_ns>50000000ull;
+    // a panel change is shown at once when the application presented no frame in the last 50 ms (the bubbles' re-shows
+    // at 30 Hz do not count: a change waited up to 33 ms for the next one, osk-lag-desktop-base-2026-11-01-03)
+    const bool idle=copy && b.display.registered && b.display.flips && ns(now)-b.display.last_frame_ns>50000000ull;
     int reshown=-1;
     if(idle && !(reshown=b.display.reshow(b.log)) && capture_pending(b)) {
         const std::string capture=take_capture(b);
@@ -1396,8 +1398,9 @@ void ps5_gpu_broker_overlay_refresh()
     auto &b=broker_state;
     if(!b.started || pthread_mutex_trylock(&b.display_lock))return;
     timespec now{};clock_gettime(CLOCK_MONOTONIC,&now);
-    if(b.display.overlay && b.display.registered && b.display.flips &&
-       uint64_t(now.tv_sec)*1000000000u+uint64_t(now.tv_nsec)-b.display.last_present_ns>30000000ull)
+    const uint64_t at=uint64_t(now.tv_sec)*1000000000u+uint64_t(now.tv_nsec);
+    if(b.display.overlay && b.display.registered && b.display.flips && at-b.display.last_frame_ns>30000000ull &&
+       at-b.display.last_present_ns>30000000ull)
         (void)b.display.reshow(b.log);
     pthread_mutex_unlock(&b.display_lock);
 }

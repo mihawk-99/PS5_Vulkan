@@ -18,7 +18,8 @@ struct Ps5GpuDisplay {
      * under the broker's display lock (ps5_gpu_broker_set_overlay). */
     uint32_t *overlay=nullptr;
     unsigned overlay_x=0,overlay_y=0,overlay_w=0,overlay_h=0;
-    uint64_t last_present_ns=0;
+    uint64_t last_present_ns=0;   /* the last flip, a frame's or a re-show's */
+    uint64_t last_frame_ns=0;     /* the last frame the application presented (a re-show is none) */
     /* While a panel is up: the last frame, tiled, without the panel or the pointer, in cached memory (the broker allocates
      * it with the panel). A re-show streams it out instead of reading the display back: 137 ms a panel change in a
      * waiting game before (osk-lag-desktop-base-2026-11-01-01, the owner: "insane input lag"). shadow_valid: it holds

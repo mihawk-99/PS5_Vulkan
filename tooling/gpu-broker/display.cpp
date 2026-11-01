@@ -191,6 +191,7 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
     };
     const auto fill=[&](uint8_t *target) { frame(target);decorate(target,target); };
     last_cursor_x=cursor_x,last_cursor_y=cursor_y;
+    last_frame_ns=now_ns();
     if(overlay && shadow) {   // the frame kept for the panel's re-shows, then streamed out with the panel over it
         frame(shadow);shadow_valid=true;
         pw_display_stream_copy(buffer,shadow,frame_bytes);decorate(buffer,shadow);
