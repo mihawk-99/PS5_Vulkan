@@ -28,6 +28,7 @@ int sceKernelUsleep(unsigned);
 }
 #include <cerrno>
 #include <string>
+#include <vector>
 #include <sched.h>
 #include <cstdlib>
 
@@ -186,8 +187,10 @@ constexpr uint64_t kLocalOffer=UINT64_C(8)<<30,kLocalFloor=UINT64_C(1)<<30;
 /* The host-visible bytes each client may hold: the application's choice (ps5_gpu_broker_set_host_limit). */
 static uint64_t host_limit=PW_GPU_LIMIT;
 constexpr unsigned kClientBuffers=1024;
-// A client's sparse ranges (patch 0041): reserved in the owner's device-memory region, as the owner's own are.
-constexpr unsigned kClientRanges=256;
+// A client's sparse ranges (patch 0041): reserved in the owner's device-memory region, as the owner's own are. A
+// Direct3D 12 game makes one per reserved resource: 256 was too few (a big racing game was refused a 1.4 MiB range and
+// crashed on the null it got back, 2026-10-31), so a client may hold 4096, kept as they come (not 4096 per client).
+constexpr unsigned kClientRanges=4096;
 struct Range { uint64_t address=0,bytes=0;radv_ps5_memory memory{}; };
 struct Client {
     int socket=-1,service=-1,pid=-1,expected_pid=0;uint32_t sequence=0,next_token=0;
@@ -196,7 +199,7 @@ struct Client {
     int present_socket=-1;uint32_t present_sequence=0;uint64_t pin_address=0,pin_bytes=0;
     bool present_serving=false;pthread_t presenter{};
     Buffer buffers[kClientBuffers];unsigned submissions=0;
-    Range ranges[kClientRanges];unsigned range_count=0;
+    std::vector<Range> ranges;unsigned range_count=0;
     uint64_t allocated=0,local=0,local_peak=0,tess=0;uint32_t tess_bytes=0,granularity=0,buffering=0;
     // Where submission time goes, in nanoseconds: staging allocation and copy, the native submit, the completion wait
     // and the staging release.
@@ -603,20 +606,27 @@ bool fences_ready(FILE *out)
 // submission so far.
 // A client's sparse range (patch 0041): the owner reserves it as it does its own (radv_ps5_vrange_reserve), so the
 // GPU, which works in the owner's address space, finds it; unbound pieces read the shared zero block.
+// Each refusal is logged with its reason, and the client is told which: EINVAL a size it does not take, ENOSPC the
+// client holds kClientRanges already, ENOMEM no room in the owner's device-memory region.
 int vrange_reserve(Client &c,PwGpuMessage &m,FILE *log)
 {
-    if(!m.bytes || m.bytes>(UINT64_C(64)<<30) || c.range_count>=kClientRanges)return EINVAL;
-    for(auto &r:c.ranges)if(!r.address) {
-        radv_ps5_memory memory{};
-        if(!radv_ps5_vrange_reserve(m.bytes,m.argument[0]!=0,m.argument[1]!=0,m.argument[2],&memory)) {
-            fprintf(log,"gpu-wine vrange_refused=1 cookie=%d pid=%d bytes=%llu window32=%d\n",c.cookie,c.pid,
-                (unsigned long long)m.bytes,int(m.argument[0]!=0));
-            return ENOMEM;
-        }
-        r.address=(uint64_t)(uintptr_t)memory.cpu;r.bytes=memory.bytes;r.memory=memory;++c.range_count;
-        m.address=r.address;m.bytes=r.bytes;return 0;
+    const char *why=!m.bytes || m.bytes>(UINT64_C(64)<<30) ? "size" : c.range_count>=kClientRanges ? "count" : nullptr;
+    if(why) {
+        fprintf(log,"gpu-wine vrange_refused=1 cookie=%d pid=%d bytes=%llu ranges=%u reason=%s\n",c.cookie,c.pid,
+            (unsigned long long)m.bytes,c.range_count,why);
+        return *why=='s' ? EINVAL : ENOSPC;
     }
-    return ENOSPC;
+    Range *slot=nullptr;
+    for(auto &r:c.ranges)if(!r.address) { slot=&r;break; }
+    radv_ps5_memory memory{};
+    if(!radv_ps5_vrange_reserve(m.bytes,m.argument[0]!=0,m.argument[1]!=0,m.argument[2],&memory)) {
+        fprintf(log,"gpu-wine vrange_refused=1 cookie=%d pid=%d bytes=%llu ranges=%u window32=%d reason=region\n",c.cookie,
+            c.pid,(unsigned long long)m.bytes,c.range_count,int(m.argument[0]!=0));
+        return ENOMEM;
+    }
+    if(!slot) { c.ranges.emplace_back();slot=&c.ranges.back(); }
+    slot->address=(uint64_t)(uintptr_t)memory.cpu;slot->bytes=memory.bytes;slot->memory=memory;++c.range_count;
+    m.address=slot->address;m.bytes=slot->bytes;return 0;
 }
 Range *vrange_of(Client &c,uint64_t address,uint64_t bytes)
 {

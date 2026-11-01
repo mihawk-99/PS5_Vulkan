@@ -527,9 +527,14 @@ bool radv_ps5_vrange_reserve(uint64_t b,bool w,bool r,uint64_t v,struct radv_ps5
 {
     *m=(struct radv_ps5_memory){.physical=-1};
     PwGpuMessage message={.operation=PW_GPU_VRANGE_RESERVE,.bytes=b,.argument={w,r,v}};
-    if(rpc(&message,NULL) || message.bytes<b || (message.address&16383) || message.address<RADV_PS5_WINDOW_BASE ||
+    const int status=rpc(&message,NULL);
+    if(status || message.bytes<b || (message.address&16383) || message.address<RADV_PS5_WINDOW_BASE ||
        message.address>RADV_PS5_GPU_ADDRESS_LIMIT-message.bytes) {
-        refused("sparse range","the broker said no",b,0,0);
+        /* The broker's reason (patch 0043): its log has the counts. */
+        refused("sparse range", status==ENOSPC ? "the broker said no: this client holds the most ranges it may" :
+                status==ENOMEM ? "the broker said no: its device-memory region has no room" :
+                status==EINVAL ? "the broker said no: a size it does not take" :
+                status ? "the broker said no" : "the broker's answer was out of bounds",b,0,0);
         return false;
     }
     *m=(struct radv_ps5_memory){.cpu=(void *)(uintptr_t)message.address,.bytes=message.bytes,.physical=-1};
