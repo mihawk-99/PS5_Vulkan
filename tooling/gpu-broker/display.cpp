@@ -54,6 +54,22 @@ bool settled(int handle)
     }
     return false;
 }
+// The refresh period: the median of six intervals between vblank waits, the first wait finding the phase; 0 when a
+// wait fails (PS5_Mesa's wsi_common_videoout.c, videoout_vblank_period_ns).
+uint64_t vblank_period_ns(int handle)
+{
+    uint64_t intervals[6];
+    if(sceVideoOutWaitVblank(handle))return 0;
+    uint64_t previous=now_ns();
+    for(auto &interval:intervals) {
+        if(sceVideoOutWaitVblank(handle))return 0;
+        const uint64_t now=now_ns();interval=now-previous;previous=now;
+    }
+    for(unsigned i=1;i<6;++i)for(unsigned j=i;j>0 && intervals[j-1]>intervals[j];--j) {
+        const uint64_t swap=intervals[j];intervals[j]=intervals[j-1];intervals[j-1]=swap;
+    }
+    return intervals[3];
+}
 bool capture_buffer(const uint8_t *buffer,const char *path)
 {
     FILE *f=fopen(path,"wb");if(!f)return false;
@@ -76,6 +92,29 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
     if(handle<0) {
         handle=sceVideoOutOpen(PS5_VIDEO_OUT_USER_SYSTEM,0,0,nullptr);
         if(handle<0)return handle;
+        // PS5_Proton's PROTON_120HZ=1, for a title that declares high frame rate (param.json attribute3 0x40): the
+        // output is asked for 119.88 Hz as RADV's VideoOut asks (wsi_common_videoout.c, videoout_open_locked), and
+        // kept only if the vblanks then come within 12.5 ms; otherwise 59.94 Hz is restored. Without it the broker's
+        // display stayed at 59.94 Hz whatever the game asked, and three buffers flipped at each vblank held every
+        // present to 60 a second. First the rate this process finds, before it changes anything: 119.88 Hz that an
+        // earlier process left (a crash, or any end that skipped close()) is put back unless this one asks for it,
+        // so no later run inherits it unasked. About seven vblanks, once a display.
+        const char *high=getenv("PROTON_120HZ");const bool asked=high && !strcmp(high,"1");
+        const uint64_t found=vblank_period_ns(handle);
+        int restored=-1,supported=0,configured=-1;uint64_t period=0;
+        if(!asked && found && found<=12500000)
+            restored=sceVideoOutConfigureOutput(handle,PS5_VIDEO_OUT_MODE_RESTORE,nullptr,nullptr,nullptr);
+        if(asked) {
+            supported=sceVideoOutIsOutputSupported(handle,PS5_VIDEO_OUT_MODE_HIGH_FRAME_RATE,nullptr,nullptr,nullptr);
+            configured=supported>0 ? sceVideoOutConfigureOutput(handle,PS5_VIDEO_OUT_MODE_HIGH_FRAME_RATE,nullptr,nullptr,nullptr) : -1;
+            period=supported>0 && !configured ? vblank_period_ns(handle) : 0;
+            high_frame_rate=period && period<=12500000;
+            if(supported>0 && !configured && !high_frame_rate)
+                sceVideoOutConfigureOutput(handle,PS5_VIDEO_OUT_MODE_RESTORE,nullptr,nullptr,nullptr);
+        }
+        fprintf(log,"gpu-display rate found_us=%llu restored=%d asked_120hz=%d supported=%d configured=%d period_us=%llu "
+            "high_frame_rate=%d\n",(unsigned long long)found/1000,restored,asked,supported,configured,
+            (unsigned long long)period/1000,high_frame_rate);
         int status=sceKernelAllocateDirectMemory(0,sceKernelGetDirectMemorySize(),memory_bytes,alignment,3,&physical);
         if(!status)status=sceKernelMapDirectMemory(&mapped,memory_bytes,0x33,0,physical,alignment);
         if(status)return status;
@@ -173,6 +212,8 @@ bool Ps5GpuDisplay::close(FILE *log)
                 sceKernelUsleep(10000);unregistered=sceVideoOutUnregisterBuffers(handle,0);
             }
         }
+        if(high_frame_rate)sceVideoOutConfigureOutput(handle,PS5_VIDEO_OUT_MODE_RESTORE,nullptr,nullptr,nullptr);
+        high_frame_rate=false;
         closed=sceVideoOutClose(handle);
         if(registered && unregistered && closed)return false;
         handle=-1;registered=false;
