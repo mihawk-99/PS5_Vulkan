@@ -31,6 +31,11 @@ unsigned ps5_gpu_broker_display_hz(void);
 /* The next frame the display shows is also written to path, a PPM picture, once: false when the broker is not running,
  * a picture is already waiting for its frame, or the display stayed busy for 100 ms (it waits no longer than that). */
 bool ps5_gpu_broker_capture_next(const char *path);
+/* The application's cover, shown instead of the desktop until it is set again or cleared (nullptr): 1920x1080 pixels in
+ * the display's channel order (B, G, R, A bytes), without the pointer, kept by the caller until the next call returns
+ * true. While one is set, ps5_gpu_broker_flips stays where it was. False, and nothing changed, when display_lock could
+ * not be had within 100 ms. */
+bool ps5_gpu_broker_set_cover(const void *pixels);
 /* The broker as of now, for an application's watchdog, without waiting on anything the broker holds: whether its
  * client lock and its display lock are held this instant (a trylock, released at once), the GPU submissions it made
  * and the last one the GPU completed (its fence page's value; 0 before the first submission). phase is the call the

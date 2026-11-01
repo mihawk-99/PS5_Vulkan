@@ -715,6 +715,10 @@ struct Broker {
     // captures in a gate case were declined (v3-jit-gatecases-2026-10-14 gpu-window64).
     pthread_mutex_t capture_lock=PTHREAD_MUTEX_INITIALIZER;
     std::string capture_next;
+    // The application's cover (ps5_gpu_broker_set_cover), under display_lock: shown instead of the desktop while set.
+    // Its flips are not the program's: while it lasts, ps5_gpu_broker_flips stays at the count it began with.
+    const void *cover=nullptr;uint64_t cover_serial=0,cover_shown=0,cover_flips=0;int cover_error=0;
+    std::atomic<bool> cover_held{false};std::atomic<unsigned long long> cover_frozen_flips{0};
 } broker_state;
 static std::string take_capture(decltype(broker_state) &b)
 {
@@ -1108,6 +1112,20 @@ void *compositor_main(void *)
         sceKernelUsleep(4000);
         pthread_mutex_lock(&b.display_lock);
         if(b.compositor_stop) { pthread_mutex_unlock(&b.display_lock);return nullptr; }
+        // The application's cover: shown when it changes or a capture is asked, without the pointer; the desktop is
+        // composed again once it ends. A game's own full-screen presents (game mode) still go to the display.
+        if(b.cover) {
+            if(b.cover_serial!=b.cover_shown || capture_pending(b)) {
+                const std::string asked=take_capture(b);
+                const uint64_t before=b.display.flips;
+                const int status=b.display.present(b.cover,1920,1080,1920*4,b.log,asked.empty() ? nullptr : asked.c_str(),true);
+                __atomic_add_fetch(&b.cover_flips,b.display.flips-before,__ATOMIC_RELAXED);b.cover_shown=b.cover_serial;
+                if(status!=b.cover_error)fprintf(b.log,"gpu-cover status=%d flips=%llu\n",status,(unsigned long long)b.cover_flips);
+                b.cover_error=status;
+            }
+            b.window_dirty=true;
+            pthread_mutex_unlock(&b.display_lock);continue;
+        }
         int cx=INT32_MIN,cy=INT32_MIN;if(desktop_cursor)desktop_cursor(&cx,&cy);
         const bool cursor_moved=cx!=b.cursor_x || cy!=b.cursor_y;
         if(desktop_windows) {
@@ -1184,7 +1202,29 @@ int ps5_gpu_broker_game_mode()
 // lock for up to 100 ms, since the compositor holds it for most of every frame it shows.
 unsigned long long ps5_gpu_broker_flips()
 {
-    return __atomic_load_n(&broker_state.display.flips,__ATOMIC_RELAXED);
+    auto &b=broker_state;
+    if(b.cover_held.load(std::memory_order_acquire))return b.cover_frozen_flips.load(std::memory_order_relaxed);
+    return __atomic_load_n(&b.display.flips,__ATOMIC_RELAXED)-__atomic_load_n(&b.cover_flips,__ATOMIC_RELAXED);
+}
+// Like a capture, tried for up to 100 ms; once it returns, no present reads the picture it replaced.
+bool ps5_gpu_broker_set_cover(const void *pixels)
+{
+    auto &b=broker_state;
+    for(unsigned waited=0;pthread_mutex_trylock(&b.display_lock);++waited) {
+        if(waited>=100)return false;
+        sceKernelUsleep(1000);
+    }
+    if(pixels && !b.cover) {
+        b.cover_frozen_flips.store(b.display.flips-b.cover_flips,std::memory_order_relaxed);
+        b.cover_held.store(true,std::memory_order_release);
+    }
+    if(!pixels && b.cover) {
+        if(b.log)fprintf(b.log,"gpu-cover ended flips=%llu\n",(unsigned long long)b.cover_flips);
+        b.cover_held.store(false,std::memory_order_release);
+    }
+    b.cover=pixels;++b.cover_serial;
+    pthread_mutex_unlock(&b.display_lock);
+    return true;
 }
 unsigned ps5_gpu_broker_display_hz()
 {
