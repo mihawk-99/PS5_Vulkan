@@ -17,5 +17,8 @@ struct Ps5GpuDisplay {
     bool close(FILE *log);
     /* A picture of the buffer the last present flipped to, written to path. */
     bool capture_last(const char *path);
+    /* The buffer the last present flipped to, as linear 1920x1080 pixels in the display's channel order (the pointer
+     * included, if one was drawn). Does not wait. */
+    bool read_last(uint32_t *pixels) const;
 };
 #endif

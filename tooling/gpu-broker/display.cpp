@@ -144,6 +144,14 @@ bool Ps5GpuDisplay::capture_last(const char *path)
     if(sceVideoOutGetFlipStatus(handle,shown) || shown[PS5_VIDEO_OUT_FLIP_STATUS_SHOWN_ARGUMENT]!=flips)return false;
     return capture_buffer((const uint8_t *)mapped+((back+buffer_count-1)%buffer_count)*buffer_bytes,path);
 }
+bool Ps5GpuDisplay::read_last(uint32_t *pixels) const
+{
+    if(!registered || !flips || !mapped || !pixels)return false;
+    const uint8_t *buffer=(const uint8_t *)mapped+((back+buffer_count-1)%buffer_count)*buffer_bytes;
+    for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x)
+        pixels[size_t(y)*width+x]=*(const uint32_t *)(buffer+tiled(x,y));
+    return true;
+}
 bool Ps5GpuDisplay::close(FILE *log)
 {
     int blank=0,unregistered=0,closed=0;

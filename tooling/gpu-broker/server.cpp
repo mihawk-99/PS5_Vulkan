@@ -15,6 +15,7 @@ extern "C" {
 #include "pw_window_scene.h"
 #include "pw_window_effects.h"
 #include "pw_frame_pacing.h"
+#include "pw_window_direct.h"
 #include "packet_io.h"
 #include <ps5platform/kernel.h>
 #include <ps5platform/agc.h>
@@ -179,6 +180,9 @@ struct Client {
     unsigned images=0,presentations=0,coherence=0,coherent=0,timings=0;
     // When its frames reached the screen (src/pw_frame_pacing.h): direct flips of its own buffer, or composed.
     PwFramePacing pacing{};const char *route="none";
+    // Game mode (src/pw_window_direct.h): its window frames shown directly or composed in the current pacing window,
+    // and why the last composed one could not go directly.
+    uint64_t direct_frames=0,composed_frames=0;int direct_reason=-1;
     int cookie=0;
     const char *allocation_stage="none";
     bool ended=false,offchip=false,done=false,passed=false,serving=false;
@@ -202,7 +206,10 @@ void pacing_report(FILE *log,Client &c,uint64_t now,bool final)
     if(!c.pacing.frames && !c.pacing.hidden)return;
     char fields[320],line[400];
     pw_frame_pacing_format(&c.pacing,now,fields,sizeof(fields));
-    snprintf(line,sizeof(line),"gpu-pacing cookie=%d pid=%d route=%s final=%d %s\n",c.cookie,c.pid,c.route,final,fields);
+    snprintf(line,sizeof(line),"gpu-pacing cookie=%d pid=%d route=%s final=%d direct=%llu composed=%llu refused=%s %s\n",
+        c.cookie,c.pid,c.route,final,(unsigned long long)c.direct_frames,(unsigned long long)c.composed_frames,
+        c.direct_reason<0 ? "none" : pw_window_direct_reason(c.direct_reason),fields);
+    c.direct_frames=c.composed_frames=0;c.direct_reason=-1;
     if(log)fputs(line,log);
     fputs(line,stderr);
     pw_frame_pacing_next(&c.pacing,now);
@@ -516,6 +523,11 @@ struct Broker {
     uint64_t window_sequence=0,window_frames=0;
     int window_error=0;
     bool window_dirty=false;
+    // Game mode, step 1 (src/pw_window_direct.h): a full-screen GPU window's frames go to the display themselves
+    // and the compositor looks at nothing while they keep coming. Under display_lock.
+    bool direct=false;int32_t direct_pid=0;uint32_t direct_hwnd=0,direct_width=0,direct_height=0;
+    uint64_t direct_generation=0,direct_ns=0,direct_checked_ns=0;
+    uint64_t direct_entries=0,direct_exits=0,direct_restores=0,direct_flips=0;
     pthread_t compositor{};bool compositing=false,compositor_stop=false;
     // Under display_lock: a picture the application asked for (ps5_gpu_broker_capture_next), of the next frame shown.
     std::string capture_next;
@@ -560,6 +572,27 @@ void note_peaks(Broker &b)
     for(const auto &c:b.clients)if(c.socket>=0) { host+=c.allocated;local+=c.local; }
     if(host>b.host_peak)b.host_peak=host;
     if(local>b.local_peak)b.local_peak=local;
+}
+// A game that stops presenting for this long while it owns the screen is looked at again, at this interval.
+constexpr uint64_t kDirectHoldNs=100000000ull;
+/* Under display_lock: game mode ends. With restore, the window's image in the scene becomes the last frame the
+ * display showed of it, so composing never brings back the frame it had before game mode began; without, the caller
+ * is about to copy the window's newest frame itself. */
+void leave_direct(Broker &b,const PwWindowSnapshot *snapshot,int reason,bool restore)
+{
+    if(!b.direct)return;
+    int restored=0;
+    if(restore && snapshot && b.frame_copy && b.display.read_last(reinterpret_cast<uint32_t *>(b.frame_copy)) &&
+       !pw_window_scene_gpu(&b.window_scene,b.direct_pid,b.direct_hwnd,b.direct_generation,b.frame_copy,1920,1080,1920*4,1,
+                            snapshot))
+        { restored=1;++b.direct_restores; }
+    b.direct=false;++b.direct_exits;b.window_composed=false;b.window_dirty=true;
+    if(b.direct_exits<=64) {
+        char line[200];
+        snprintf(line,sizeof(line),"gpu-direct leave pid=%d hwnd=%#x reason=%s restored=%d flips=%llu\n",b.direct_pid,
+            b.direct_hwnd,pw_window_direct_reason(reason),restored,(unsigned long long)b.direct_flips);
+        fputs(line,b.log);fputs(line,stderr);
+    }
 }
 /* Under display_lock: show one complete copied scene and wait for its flip.
  * GPU RPC replies retain FIFO pacing; no live GPU/shared pointer is painted. */
@@ -657,7 +690,39 @@ void *client_main(void *argument)
                     pthread_mutex_lock(&b.display_lock);
                     PwWindowSnapshot snapshot{};
                     m.status=desktop_windows(&snapshot,sizeof(snapshot)) ? errno : 0;
-                    if(!m.status && pw_window_scene_gpu(&b.window_scene,c.pid,hwnd,m.argument[2],(void *)m.address,
+                    const int verdict=m.status ? -1 : pw_window_direct_flip(&snapshot,c.pid,hwnd,m.argument[2],width,height,1920,1080);
+                    const bool mine=b.direct && b.direct_pid==c.pid && b.direct_hwnd==hwnd;
+                    // Another window owns the screen in game mode: this one is behind it. Its frame still updates the
+                    // scene, but nothing is composed while that window remains the whole screen.
+                    bool behind=false;
+                    if(!m.status && b.direct && !mine) {
+                        const int held=pw_window_direct_flip(&snapshot,b.direct_pid,b.direct_hwnd,b.direct_generation,
+                                                             b.direct_width,b.direct_height,1920,1080);
+                        if(held==PW_DIRECT_YES)behind=true;
+                        else leave_direct(b,&snapshot,held,true);
+                    }
+                    const bool direct=verdict==PW_DIRECT_YES && m.argument[3]<=1;
+                    if(direct) {
+                        // Game mode: the frame is the whole screen. Nothing is copied into the scene or composed.
+                        int cx=INT32_MIN,cy=INT32_MIN;if(desktop_cursor)desktop_cursor(&cx,&cy);
+                        std::string asked;asked.swap(b.capture_next);
+                        m.status=b.display.present((void *)m.address,width,height,stride,b.log,
+                                                   asked.empty() ? nullptr : asked.c_str(),m.argument[3]!=0,cx,cy);
+                        if(!m.status) {
+                            if(!b.direct) {
+                                ++b.direct_entries;
+                                if(b.direct_entries<=64) {
+                                    char line[160];
+                                    snprintf(line,sizeof(line),"gpu-direct enter pid=%d hwnd=%#x frame=%ux%u\n",c.pid,hwnd,width,height);
+                                    fputs(line,b.log);fputs(line,stderr);
+                                }
+                            }
+                            b.direct=true;b.direct_pid=c.pid;b.direct_hwnd=hwnd;b.direct_generation=m.argument[2];
+                            b.direct_width=width;b.direct_height=height;b.direct_ns=b.direct_checked_ns=radv_ps5_now_ns();
+                            ++b.direct_flips;b.window_composed=false;b.window_dirty=true;b.cursor_x=cx;b.cursor_y=cy;
+                        }
+                    } else if(mine) leave_direct(b,&snapshot,verdict,false);
+                    if(!m.status && !direct && pw_window_scene_gpu(&b.window_scene,c.pid,hwnd,m.argument[2],(void *)m.address,
                                                       width,height,stride,(unsigned)m.argument[3],&snapshot))m.status=errno;
                     if(!m.status && (trace || c.presentations<8)) {
                         const PwWindowRow *row=nullptr;
@@ -673,15 +738,23 @@ void *client_main(void *argument)
                         fprintf(b.log,"gpu-window-backing cookie=%d frame=%u flags=%#x clips=%u coloured_samples=%u/9\n",
                                 c.cookie,c.presentations+1,row?row->flags:0,row?row->clip_count:0,coloured);
                     }
-                    if(!m.status) {
+                    if(!m.status && !direct && !behind) {
                         int cx=INT32_MIN,cy=INT32_MIN;if(desktop_cursor)desktop_cursor(&cx,&cy);
                         m.status=show_windows(b,snapshot,cx,cy);
                     }
+                    if(!m.status && behind)b.window_dirty=true;
                     const uint64_t end=radv_ps5_now_ns();
                     pthread_mutex_unlock(&b.display_lock);
                     pthread_mutex_lock(&b.lock);
                     if(!m.status) {
-                        ++c.presentations;c.route="composed";pw_frame_pacing_shown(&c.pacing,begin,end);
+                        ++c.presentations;
+                        if(behind)pw_frame_pacing_hidden(&c.pacing);
+                        else {
+                            c.route=direct ? "independent" : "composed";
+                            if(direct)++c.direct_frames;
+                            else { ++c.composed_frames;c.direct_reason=verdict; }
+                            pw_frame_pacing_shown(&c.pacing,begin,end);
+                        }
                         if(pw_frame_pacing_due(&c.pacing,end))pacing_report(b.log,c,end,false);
                     }
                     if(trace || m.status || c.presentations<=8 || !(c.presentations%600))
@@ -760,6 +833,22 @@ void *compositor_main(void *)
         int cx=INT32_MIN,cy=INT32_MIN;if(desktop_cursor)desktop_cursor(&cx,&cy);
         const bool cursor_moved=cx!=b.cursor_x || cy!=b.cursor_y;
         if(desktop_windows) {
+            if(b.direct) {
+                // Game mode: the game's own presents show it, the pointer included; the desktop is not looked at while
+                // they keep coming. A quiet game is looked at again every kDirectHoldNs: still the whole screen, it
+                // stays as it is; otherwise game mode ends and the desktop is composed again.
+                const uint64_t now=radv_ps5_now_ns();
+                if(now-b.direct_ns<kDirectHoldNs || now-b.direct_checked_ns<kDirectHoldNs) {
+                    pthread_mutex_unlock(&b.display_lock);continue;
+                }
+                b.direct_checked_ns=now;
+                PwWindowSnapshot held{};
+                const int verdict=desktop_windows(&held,sizeof(held)) ? PW_DIRECT_INCOMPLETE :
+                    pw_window_direct_flip(&held,b.direct_pid,b.direct_hwnd,b.direct_generation,b.direct_width,
+                                          b.direct_height,1920,1080);
+                if(verdict==PW_DIRECT_YES) { pthread_mutex_unlock(&b.display_lock);continue; }
+                leave_direct(b,&held,verdict,true);
+            }
             PwWindowSnapshot snapshot{};
             int error=desktop_windows(&snapshot,sizeof(snapshot)) ? errno : 0;
             const int changes=error ? -1 : pw_window_scene_update(&b.window_scene,&snapshot);
@@ -991,6 +1080,10 @@ bool ps5_gpu_broker_stop()
             (unsigned long long)b.window_effects.mica_builds,(unsigned long long)b.window_effects.thumbnail_builds,
             (unsigned long long)b.compose_count,(unsigned long long)(b.compose_count ? b.compose_ns/b.compose_count/1000 : 0),
             (unsigned long long)(b.compose_max_ns/1000));
+        fputs(line,b.log);fputs(line,stderr);
+        snprintf(line,sizeof(line),"gpu-direct stopped entries=%llu exits=%llu restores=%llu flips=%llu\n",
+            (unsigned long long)b.direct_entries,(unsigned long long)b.direct_exits,(unsigned long long)b.direct_restores,
+            (unsigned long long)b.direct_flips);
         fputs(line,b.log);fputs(line,stderr);
     }
     pw_window_scene_release(&b.window_scene);
