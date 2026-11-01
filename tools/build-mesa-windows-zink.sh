@@ -54,7 +54,8 @@ meson setup "${reconfigure[@]}" "$work/build" "$work/source" --cross-file "$work
     -Degl=disabled -Dgbm=disabled -Dglx=disabled -Dgles1=disabled -Dgles2=disabled \
     -Dllvm=disabled -Dzlib=disabled -Dzstd=disabled -Dshader-cache=disabled \
     -Dxmlconfig=disabled -Dexpat=disabled -Dlibunwind=disabled -Dvalgrind=disabled \
-    -Dvideo-codecs= -Dbuild-tests=false -Dtools= -Dgallium-va=disabled -Dgallium-rusticl=false
+    -Dvideo-codecs= -Dbuild-tests=false -Dtools= -Dgallium-va=disabled -Dgallium-rusticl=false \
+    -Dc_link_args=-Wl,--no-insert-timestamp -Dcpp_link_args=-Wl,--no-insert-timestamp
 ninja -C "$work/build" -j "${JOBS:-12}" \
     src/gallium/targets/libgl-gdi/opengl32.dll src/gallium/targets/wgl/libgallium_wgl.dll
 python3 - "$root" "$work" <<'PY'
