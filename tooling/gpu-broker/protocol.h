@@ -32,7 +32,13 @@
 #define PW_GPU_RESERVE_NO_OVERWRITE 0x80
 enum { PW_GPU_INIT=1, PW_GPU_ALLOC, PW_GPU_FREE, PW_GPU_SUBMIT,
        PW_GPU_TESS, PW_GPU_OFFCHIP, PW_GPU_DONE, PW_GPU_IMAGE, PW_GPU_PRESENT, PW_GPU_SWAPCHAIN, PW_GPU_WINDOW_SWAPCHAIN,
-       PW_GPU_TIMING, PW_GPU_PRESENT_LINK };
+       PW_GPU_TIMING, PW_GPU_PRESENT_LINK,
+       PW_GPU_VRANGE_RESERVE, PW_GPU_VRANGE_RELEASE, PW_GPU_VRANGE_BIND, PW_GPU_VRANGE_UNBIND };
+/* Sparse ranges for a client (PS5_Proton patch 0041), made in the owner, whose address space the GPU uses:
+ * RESERVE bytes, argument[0] the 32-bit window, [1] replayable, [2] a replay address; the reply's address and bytes
+ * are the range. RELEASE address. BIND address bytes, argument[0] the token of one of the client's device-local
+ * buffers, [1] the offset in it. UNBIND address bytes. A bind or unbind must lie in one of the client's own ranges.
+ * A client keeps at most kClientRanges; the owner releases what is left when the client ends. */
 /* PW_GPU_PRESENT_LINK: a second connection for this client's presents (SWAPCHAIN, WINDOW_SWAPCHAIN and TIMING, nothing
  * else), its socket in the reply. Each connection is one call at a time, so on a single one a present the display took
  * 6.4 ms to copy held the client's submissions behind it: 8.05 ms of round trips a frame for a Direct3D 12 game with the

@@ -186,6 +186,9 @@ constexpr uint64_t kLocalOffer=UINT64_C(8)<<30,kLocalFloor=UINT64_C(1)<<30;
 /* The host-visible bytes each client may hold: the application's choice (ps5_gpu_broker_set_host_limit). */
 static uint64_t host_limit=PW_GPU_LIMIT;
 constexpr unsigned kClientBuffers=1024;
+// A client's sparse ranges (patch 0041): reserved in the owner's device-memory region, as the owner's own are.
+constexpr unsigned kClientRanges=256;
+struct Range { uint64_t address=0,bytes=0;radv_ps5_memory memory{}; };
 struct Client {
     int socket=-1,service=-1,pid=-1,expected_pid=0;uint32_t sequence=0,next_token=0;
     // Its present link (PW_GPU_PRESENT_LINK): a second socket and thread for its presents, so its submissions go on
@@ -193,6 +196,7 @@ struct Client {
     int present_socket=-1;uint32_t present_sequence=0;uint64_t pin_address=0,pin_bytes=0;
     bool present_serving=false;pthread_t presenter{};
     Buffer buffers[kClientBuffers];unsigned submissions=0;
+    Range ranges[kClientRanges];unsigned range_count=0;
     uint64_t allocated=0,local=0,local_peak=0,tess=0;uint32_t tess_bytes=0,granularity=0,buffering=0;
     // Where submission time goes, in nanoseconds: staging allocation and copy, the native submit, the completion wait
     // and the staging release.
@@ -587,6 +591,51 @@ bool fences_ready(FILE *out)
 }
 // A buffer the client let go of: released now if no work is in flight, otherwise once the fence passes the last
 // submission so far.
+// A client's sparse range (patch 0041): the owner reserves it as it does its own (radv_ps5_vrange_reserve), so the
+// GPU, which works in the owner's address space, finds it; unbound pieces read the shared zero block.
+int vrange_reserve(Client &c,PwGpuMessage &m,FILE *log)
+{
+    if(!m.bytes || m.bytes>(UINT64_C(64)<<30) || c.range_count>=kClientRanges)return EINVAL;
+    for(auto &r:c.ranges)if(!r.address) {
+        radv_ps5_memory memory{};
+        if(!radv_ps5_vrange_reserve(m.bytes,m.argument[0]!=0,m.argument[1]!=0,m.argument[2],&memory)) {
+            fprintf(log,"gpu-wine vrange_refused=1 cookie=%d pid=%d bytes=%llu window32=%d\n",c.cookie,c.pid,
+                (unsigned long long)m.bytes,int(m.argument[0]!=0));
+            return ENOMEM;
+        }
+        r.address=(uint64_t)(uintptr_t)memory.cpu;r.bytes=memory.bytes;r.memory=memory;++c.range_count;
+        m.address=r.address;m.bytes=r.bytes;return 0;
+    }
+    return ENOSPC;
+}
+Range *vrange_of(Client &c,uint64_t address,uint64_t bytes)
+{
+    for(auto &r:c.ranges)if(r.address && pw_gpu_contains(r.address,r.bytes,address,bytes))return &r;
+    return nullptr;
+}
+int vrange_release(Client &c,PwGpuMessage &m)
+{
+    for(auto &r:c.ranges)if(r.address && r.address==m.address) {
+        // Work in flight may still read through it: it is unmapped once nothing is.
+        if(!drain(5000000000ull))return EBUSY;
+        radv_ps5_vrange_release(&r.memory);r=Range{};--c.range_count;return 0;
+    }
+    return EINVAL;
+}
+int vrange_bind(Client &c,PwGpuMessage &m,bool bind,FILE *log)
+{
+    if(!m.bytes || (m.address|m.bytes)&16383 || !vrange_of(c,m.address,m.bytes))return EINVAL;
+    void *at=(void *)(uintptr_t)m.address;
+    if(!bind)return radv_ps5_vrange_unbind(at,m.bytes) ? 0 : EIO;
+    // Only one of this client's own device-local buffers, whose direct memory the owner holds.
+    for(auto &a:c.buffers)if(a.token && a.token==m.argument[0] && a.local && a.memory.physical>=0) {
+        if(m.argument[1]>a.memory.bytes || m.bytes>a.memory.bytes-m.argument[1] || (m.argument[1]&16383))return EINVAL;
+        if(radv_ps5_vrange_bind(at,m.bytes,&a.memory,m.argument[1]))return 0;
+        fprintf(log,"gpu-wine vrange_bind_failed=1 cookie=%d pid=%d bytes=%llu\n",c.cookie,c.pid,(unsigned long long)m.bytes);
+        return EIO;
+    }
+    return EINVAL;
+}
 void free_buffer(Client &c,Buffer &b,FILE *out)
 {
     (b.local ? c.local : c.allocated)-=b.bytes;
@@ -918,6 +967,13 @@ static void *serve(Client &c,bool present)
                     fprintf(b.log,"gpu-wine allocation_failed=1 cookie=%d pid=%d stage=%s bytes=%llu flexible_status=%#x flexible_available=%llu\n",
                         c.cookie,c.pid,c.allocation_stage,(unsigned long long)m.bytes,unsigned(status),(unsigned long long)available);
                 }break;
+            case PW_GPU_VRANGE_RESERVE:
+                m.status=wedged ? EIO : vrange_reserve(c,m,b.log);break;
+            case PW_GPU_VRANGE_RELEASE:
+                m.status=wedged ? EIO : vrange_release(c,m);break;
+            case PW_GPU_VRANGE_BIND:
+            case PW_GPU_VRANGE_UNBIND:
+                m.status=wedged ? EIO : vrange_bind(c,m,m.operation==PW_GPU_VRANGE_BIND,b.log);break;
             case PW_GPU_FREE:
                 for(auto &a:c.buffers)if(a.token && a.token==m.argument[0] && a.address==m.address && a.bytes==m.bytes) {
                     // Its present link may be reading this buffer outside b.lock: the free waits for that present.
@@ -1446,6 +1502,8 @@ void ps5_gpu_broker_close(int cookie,int service)
         fprintf(b.log,"gpu-wine cookie=%d pid=%d closed=1 absent=1 frames=%u submissions=%u backing_released=%llu "
             "local_released=%llu local_peak=%llu flexible=%zu\n",cookie,c.pid,c.presentations,c.submissions,(unsigned long long)c.allocated,
             (unsigned long long)c.local,(unsigned long long)c.local_peak,flexible_now());fsync(fileno(b.log));
+        // Its sparse ranges first: they may still map buffers' memory, which the release below gives back.
+        if(!wedged)for(auto &r:c.ranges)if(r.address)radv_ps5_vrange_release(&r.memory);
         if(!wedged)for(auto &a:c.buffers)if(a.token)release(a);
         close(c.socket);if(c.present_socket>=0)close(c.present_socket);reset(c);break;
     }

@@ -1,0 +1,21 @@
+--- a/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.c
++++ b/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.c
+@@ -372,7 +372,8 @@
+     * page table's PRT bits, so an unbound page is not known to read zero or
+     * to report itself non-resident; and a bind is a mapping change made at
+     * once, after the submission's waits. */
+-   info->has_sparse = false;
++   /* A broker client's sparse ranges are the owner's (PS5_Proton patch 0041), bound on the CPU through it. */
++   info->has_sparse = radv_ps5_vrange_space_bytes() != 0;
+    /* A compute and transfer queue family, as upstream offers on this family
+     * of GPUs, whose queues submit to the graphics ring through the same
+     * sceAgcDriverSubmitDcb: their work runs in turn with graphics rather than
+@@ -380,7 +381,7 @@
+     * would run it alongside; they are not used yet. */
+    info->num_compute_queues_on_gfx = 4;
+    info->has_sparse_prt = false;
+-   info->has_sparse_cpu_binds = false;
++   info->has_sparse_cpu_binds = info->has_sparse;
+    info->max_sparse_va_bytes = radv_ps5_vrange_space_bytes();
+    /* A captured buffer can be placed at its address again
+     * (radv_ps5_memory_alloc_replayable); before that, every replay case of

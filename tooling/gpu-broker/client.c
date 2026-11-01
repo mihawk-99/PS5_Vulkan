@@ -318,7 +318,8 @@ uint64_t radv_ps5_memory_available_bytes(void)
     const uint64_t used=__atomic_load_n(&allocated,__ATOMIC_RELAXED);
     return used<host_limit ? host_limit-used : 0;
 }
-uint64_t radv_ps5_vrange_space_bytes(void) { return 0; }
+/* Sparse ranges come from the owner's device-memory region (patch 0041), 256 GiB shared with the owner's own. */
+uint64_t radv_ps5_vrange_space_bytes(void) { return UINT64_C(256)<<30; }
 uint64_t radv_ps5_now_ns(void)
 {
     struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);
@@ -499,16 +500,36 @@ void radv_ps5_memory_unmap_at(void *a,uint64_t b,bool r)
     }
     sceKernelMunmap(a,b);
 }
+/* Sparse ranges (patch 0041): the owner reserves, binds and releases them in its address space, which the GPU uses;
+ * this process keeps their addresses only, as it does for device-local buffers. Only device-local memory binds. */
 bool radv_ps5_vrange_reserve(uint64_t b,bool w,bool r,uint64_t v,struct radv_ps5_memory *m)
 {
-    (void)m;
-    /* Who asked, for the diagnostic: the 32-bit window, a replay at an address, and the caller in RADV. */
-    fprintf(stderr,"gpu-client sparse range asked: bytes=%llu window32=%d replayable=%d replay_va=%#llx caller=%p\n",
-            (unsigned long long)b,(int)w,(int)r,(unsigned long long)v,__builtin_return_address(0));
-    refused("sparse range","no sparse address space in a client",b,0,0);
-    return false;
+    *m=(struct radv_ps5_memory){.physical=-1};
+    PwGpuMessage message={.operation=PW_GPU_VRANGE_RESERVE,.bytes=b,.argument={w,r,v}};
+    if(rpc(&message,NULL) || message.bytes<b || (message.address&16383) || message.address<RADV_PS5_WINDOW_BASE ||
+       message.address>RADV_PS5_GPU_ADDRESS_LIMIT-message.bytes) {
+        refused("sparse range","the broker said no",b,0,0);
+        return false;
+    }
+    *m=(struct radv_ps5_memory){.cpu=(void *)(uintptr_t)message.address,.bytes=message.bytes,.physical=-1};
+    return true;
 }
-void radv_ps5_vrange_release(struct radv_ps5_memory *m) { (void)m; }
+void radv_ps5_vrange_release(struct radv_ps5_memory *m)
+{
+    if(!m->cpu)return;
+    PwGpuMessage message={.operation=PW_GPU_VRANGE_RELEASE,.address=(uint64_t)(uintptr_t)m->cpu};
+    rpc(&message,NULL);
+    *m=(struct radv_ps5_memory){.physical=-1};
+}
 bool radv_ps5_vrange_bind(void *a,uint64_t b,const struct radv_ps5_memory *m,uint64_t o)
-{ (void)a;(void)b;(void)m;(void)o;return false; }
-bool radv_ps5_vrange_unbind(void *a,uint64_t b) { (void)a;(void)b;return false; }
+{
+    if(m->physical!=PS5_GPU_LOCAL_MEMORY) { refused("sparse bind","not device-local memory",b,0,0);return false; }
+    PwGpuMessage message={.operation=PW_GPU_VRANGE_BIND,.address=(uint64_t)(uintptr_t)a,.bytes=b,.argument={m->granule,o}};
+    if(rpc(&message,NULL)) { refused("sparse bind","the broker said no",b,0,0);return false; }
+    return true;
+}
+bool radv_ps5_vrange_unbind(void *a,uint64_t b)
+{
+    PwGpuMessage message={.operation=PW_GPU_VRANGE_UNBIND,.address=(uint64_t)(uintptr_t)a,.bytes=b};
+    return !rpc(&message,NULL);
+}

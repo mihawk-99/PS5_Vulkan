@@ -37,6 +37,9 @@ patch --batch -p1 -d "$out/source" < "$out/patches/radv-gpu-broker-features.patc
 patch --batch -p1 -d "$out/source" < "$out/patches/radv-gpu-broker-local-memory.patch"
 # Short GPU waits: a client spins briefly and sleeps in short steps (the patch's comment has what was measured).
 patch --batch -p1 -d "$out/source" < "$out/patches/radv-gpu-broker-client-wait.patch"
+# Sparse ranges through the owner (PS5_Proton patch 0041): the client advertises sparse resources again.
+cp "$root/tooling/gpu-broker/client-sparse-ranges-winsys.patch" "$out/patches/"
+patch --batch -p1 -d "$out/source" < "$out/patches/client-sparse-ranges-winsys.patch"
 # Reuse Mesa's generated header/include flags. Strip every output/dependency
 # option before compilation, so the sibling build remains read-only.
 python3 - "$radv" "$out" <<'PY'
