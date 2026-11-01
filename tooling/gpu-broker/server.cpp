@@ -7,6 +7,7 @@
 #include "display.h"
 
 #include <pthread.h>
+#include <pthread_np.h>
 
 extern "C" {
 #include "radv_ps5_platform.h"
@@ -238,6 +239,33 @@ bool give_up(FILE *out,const char *reason)
 // PROTON_GPU_TEST_FAIL_SUBMIT=n (Wine broker): the submission after n succeeds is refused before it reaches the GPU,
 // as a failed one would be, to show the title surviving a broker failure. 0: off.
 unsigned test_fail_submit=0,test_submissions=0;
+// The call the client lock's holder waits in, for an application's watchdog (ps5_gpu_broker_health), which reads these
+// with atomics and never the lock. A 2026-10-15 run held b.lock from flight-recorder t=40 to t=278 with every
+// fence completed, and nothing said in which call. Set around each call that can wait while b.lock is held and the
+// outer one restored after, always within one stretch of holding it (never across the unlock a present makes), so the
+// outermost restores none.
+std::atomic<const char *> held_phase{nullptr};
+std::atomic<uint64_t> held_since_ns{0};
+std::atomic<int> held_tid{0};
+struct Phase {
+    const char *outer;uint64_t outer_since;int outer_tid;
+    explicit Phase(const char *name):outer(held_phase.load(std::memory_order_relaxed)),
+        outer_since(held_since_ns.load(std::memory_order_relaxed)),outer_tid(held_tid.load(std::memory_order_relaxed))
+    {
+        held_tid.store(pthread_getthreadid_np(),std::memory_order_relaxed);
+        held_since_ns.store(radv_ps5_now_ns(),std::memory_order_relaxed);
+        held_phase.store(name,std::memory_order_release);
+    }
+    ~Phase()
+    {
+        held_tid.store(outer_tid,std::memory_order_relaxed);held_since_ns.store(outer_since,std::memory_order_relaxed);
+        held_phase.store(outer,std::memory_order_release);
+    }
+};
+// PROTON_TEST_BROKER_HOLD_S=n (Wine broker): once, the first submission 10 s after the first one keeps the client lock
+// n s longer, in phase test-hold, as a broker stuck in a kernel call would: the title's wedge rule ends the game
+// (src/pw_hang_breaker.h). Under b.lock. 0: off.
+unsigned test_hold_s=0;uint64_t test_hold_first_ns=0;bool test_held=false;
 bool owned(const Client &c,uint64_t address,uint64_t bytes)
 {
     for(const auto &b:c.buffers)if(b.token && pw_gpu_contains(b.address,b.bytes,address,bytes))return true;
@@ -252,6 +280,7 @@ int (*dmem_release)(int64_t offset,size_t bytes)=nullptr;
 unsigned long long dmem_made=0,dmem_freed=0,dmem_refused=0,dmem_free_failed=0,dmem_bytes_made=0;
 void dmem_give_back(int64_t offset,uint64_t bytes)
 {
+    Phase phase("give-back");
     if(dmem_release && !dmem_release(offset,(size_t)bytes))++dmem_freed;
     else ++dmem_free_failed;
 }
@@ -260,6 +289,7 @@ void dmem_give_back(int64_t offset,uint64_t bytes)
 int shared_object(uint64_t bytes);
 void *map_host(const Client &c,void *at,uint64_t bytes,int &fd,int64_t &dmem)
 {
+    Phase phase("map");
     fd=-1;dmem=-1;
     // Direct memory first; a range the helper refuses (the pool is full, a grant failed) or this process cannot map is made as a
     // shared-memory object instead, which the client maps by descriptor as before.
@@ -279,6 +309,7 @@ void *map_host(const Client &c,void *at,uint64_t bytes,int &fd,int64_t &dmem)
 }
 void release(Buffer &b)
 {
+    Phase phase("munmap");
     if(b.local)radv_ps5_memory_free(&b.memory);
     else if(b.ranged) {
         // Back to a reservation laid over the mapping (it replaces it), and the range back to the free list.
@@ -325,8 +356,11 @@ int allocate_local(Client &c,PwGpuMessage &m,Buffer &b,uint64_t bytes,uint64_t a
     if(radv_ps5_memory_available_bytes()<kLocalFloor+bytes)return ENOMEM;
     c.allocation_stage="local_direct";
     radv_ps5_memory memory{};
-    if(!radv_ps5_memory_alloc(bytes,alignment,m.argument[1]!=0,&memory))return ENOMEM;
-    if(m.argument[2]&PW_GPU_ALLOC_ZERO) { memset(memory.cpu,0,memory.bytes);radv_ps5_cpu_flush(memory.cpu,memory.bytes); }
+    {
+        Phase phase("alloc");
+        if(!radv_ps5_memory_alloc(bytes,alignment,m.argument[1]!=0,&memory))return ENOMEM;
+        if(m.argument[2]&PW_GPU_ALLOC_ZERO) { memset(memory.cpu,0,memory.bytes);radv_ps5_cpu_flush(memory.cpu,memory.bytes); }
+    }
     b=Buffer{(uint64_t)memory.cpu,memory.bytes,++c.next_token,-1,true,false,memory};
     c.local+=memory.bytes;if(c.local>c.local_peak)c.local_peak=c.local;
     m.address=b.address;m.bytes=b.bytes;m.argument[0]=b.token;
@@ -355,8 +389,9 @@ int allocate(Client &c,PwGpuMessage &m,uint64_t &next_window,uint64_t &next_high
         int shared=-1;int64_t dmem=-1;
         void *mapped=map_host(c,(void *)address,bytes,shared,dmem);
         bool granted=mapped==(void *)address;
-        if(granted) { c.allocation_stage="gpu_permissions";granted=radv_ps5_memory_grant_gpu(mapped,bytes); }
+        if(granted) { c.allocation_stage="gpu_permissions";Phase phase("grant");granted=radv_ps5_memory_grant_gpu(mapped,bytes); }
         if(!granted) {
+            Phase phase("munmap");
             void *at=(void *)address;
             if(!sceKernelReserveVirtualRange(&at,bytes,PW_GPU_RESERVE_FIXED,16384) && at==(void *)address)range.give(address,bytes);
             if(shared>=0)close(shared);
@@ -387,8 +422,9 @@ int allocate(Client &c,PwGpuMessage &m,uint64_t &next_window,uint64_t &next_high
     int shared=-1;int64_t dmem=-1;
     void *mapped=map_host(c,reserved,bytes,shared,dmem);
     bool granted=false;
-    if(mapped==reserved) { c.allocation_stage="gpu_permissions";granted=radv_ps5_memory_grant_gpu(mapped,bytes); }
+    if(mapped==reserved) { c.allocation_stage="gpu_permissions";Phase phase("grant");granted=radv_ps5_memory_grant_gpu(mapped,bytes); }
     if(!granted) {
+        Phase phase("munmap");
         sceKernelMunmap(reserved,bytes);if(shared>=0)close(shared);if(dmem>=0)dmem_give_back(dmem,bytes);return ENOMEM;
     }
     *b=Buffer{address,bytes,++c.next_token,shared};b->dmem=dmem;b->pid=c.pid;c.allocated+=bytes;cursor=address+bytes;
@@ -428,6 +464,7 @@ int broker_submit(void *words,uint32_t count)
 void kick()
 {
     if(!fences.kick)return;
+    Phase phase("suspend");
     const uint64_t start=radv_ps5_now_ns();
     sceAgcSuspendPoint();
     fences.kick_ns+=radv_ps5_now_ns()-start;++fences.kicks;fences.kick=false;
@@ -444,6 +481,7 @@ void reap()
     if(!fences.page.cpu)return;
     const uint32_t now=completed();
     while(fences.count && done(fences.ring[fences.head].seq,now)) {
+        Phase phase("reap-free");
         radv_ps5_memory_free(&fences.ring[fences.head].staging);
         fences.ring[fences.head]=Inflight{};fences.head=(fences.head+1)%Fences::kRing;--fences.count;
     }
@@ -457,6 +495,7 @@ bool drain(uint64_t timeout_ns)
 {
     reap();
     if(!fences.count && !fences.deferred_count)return true;
+    Phase phase("drain");
     ++fences.drains;
     const uint64_t end=radv_ps5_now_ns()+timeout_ns;
     while((fences.count || fences.deferred_count) && radv_ps5_now_ns()<end) { sceKernelUsleep(50);reap(); }
@@ -513,12 +552,20 @@ int submit(Client &c,const PwGpuMessage &m,FILE *out,unsigned client)
     }
     const uint64_t t1=radv_ps5_now_ns();c.time_wait+=t1-t0;
     radv_ps5_memory staging{};
-    if(!radv_ps5_memory_alloc(m.bytes+32,16384,false,&staging))return ENOMEM;
-    memcpy(staging.cpu,(void *)m.address,m.bytes);
+    {
+        Phase phase("stage-alloc");
+        if(!radv_ps5_memory_alloc(m.bytes+32,16384,false,&staging))return ENOMEM;
+    }
+    {
+        // The client's command words, in memory it shares with this process.
+        Phase phase("copy");
+        memcpy(staging.cpu,(void *)m.address,m.bytes);
+    }
     uint32_t seq=__atomic_add_fetch(&fences.issued,1,__ATOMIC_RELAXED);if(!seq)seq=__atomic_add_fetch(&fences.issued,1,__ATOMIC_RELAXED);
     ps5_gpu_completion_packet((uint32_t *)((uint8_t *)staging.cpu+m.bytes),(uint64_t)fences.page.cpu,seq);
     const uint64_t t2=radv_ps5_now_ns();c.time_stage+=t2-t1;
     int status=0;
+    Phase phase("submit");
     if(tess_changes && !(status=radv_ps5_set_tess_factor_ring(c.tess,c.tess_bytes))) { fences.tess=c.tess;fences.tess_bytes=c.tess_bytes; }
     if(!status && offchip_changes && !(status=radv_ps5_set_hs_offchip_param(c.granularity,c.buffering))) {
         fences.offchip=true;fences.granularity=c.granularity;fences.buffering=c.buffering;
@@ -730,7 +777,19 @@ void *client_main(void *argument)
                     free_buffer(c,a,b.log);m.status=0;break;
                 }
                 break;
-            case PW_GPU_SUBMIT: m.status=submit(c,m,b.log,c.cookie);break;
+            case PW_GPU_SUBMIT:
+                m.status=submit(c,m,b.log,c.cookie);
+                if(test_hold_s && !test_held) {
+                    const uint64_t now=radv_ps5_now_ns();
+                    if(!test_hold_first_ns)test_hold_first_ns=now;
+                    else if(now-test_hold_first_ns>=10000000000ull) {
+                        test_held=true;
+                        fprintf(b.log,"gpu-broker test_hold=%u s pid=%d\n",test_hold_s,c.pid);
+                        Phase hold("test-hold");
+                        for(unsigned second=0;second<test_hold_s;++second)sceKernelUsleep(1000000);
+                    }
+                }
+                break;
             case PW_GPU_TESS:
                 if(m.bytes<=UINT32_MAX && owned(c,m.address,m.bytes)) { c.tess=m.address;c.tess_bytes=(uint32_t)m.bytes;m.status=0; }break;
             case PW_GPU_OFFCHIP:
@@ -990,6 +1049,11 @@ void ps5_gpu_broker_health(Ps5GpuBrokerHealth *health)
     health->display_busy=pthread_mutex_trylock(&b.display_lock)!=0;
     if(!health->display_busy)pthread_mutex_unlock(&b.display_lock);
     health->fences_issued=__atomic_load_n(&fences.issued,__ATOMIC_RELAXED);
+    if((health->phase=held_phase.load(std::memory_order_acquire))) {
+        const uint64_t since=held_since_ns.load(std::memory_order_relaxed),now=radv_ps5_now_ns();
+        health->phase_ms=now>since ? (now-since)/1000000 : 0;
+        health->holder_tid=held_tid.load(std::memory_order_relaxed);
+    }
     pthread_mutex_lock(&fence_page_lock);
     if(fences.page.cpu)health->fences_completed=completed();
     pthread_mutex_unlock(&fence_page_lock);
@@ -1059,8 +1123,9 @@ bool ps5_gpu_broker_start(const char *directory,bool capture,bool local,bool (*i
     b.local_memory=local;
     retain_on_failure=false;wedged=false;test_submissions=0;
     {
-        const char *fail=getenv("PROTON_GPU_TEST_FAIL_SUBMIT");
+        const char *fail=getenv("PROTON_GPU_TEST_FAIL_SUBMIT"),*hold=getenv("PROTON_TEST_BROKER_HOLD_S");
         test_fail_submit=fail ? (unsigned)strtoul(fail,nullptr,10) : 0;
+        test_hold_s=hold ? (unsigned)strtoul(hold,nullptr,10) : 0;test_hold_first_ns=0;test_held=false;
     }
     b.log_file=fopen(output_path("/app0/gpu-broker-results.txt").c_str(),"w");
     if(!b.log_file) { fprintf(stderr,"gpu-wine startup stage=open errno=%d\n",errno);return false; }
@@ -1074,7 +1139,7 @@ bool ps5_gpu_broker_start(const char *directory,bool capture,bool local,bool (*i
         b.capture_every=every ? (unsigned)strtoul(every,nullptr,10) : 0;
     }
     host_ranges_reserve(b.log);
-    fprintf(b.log,"gpu-wine broker test_fail_submit=%u capture_every=%u\n",test_fail_submit,b.capture_every);
+    fprintf(b.log,"gpu-wine broker test_fail_submit=%u capture_every=%u test_hold_s=%u\n",test_fail_submit,b.capture_every,test_hold_s);
     fprintf(b.log,"gpu-wine broker local_memory=%d local_offer=%llu local_floor=%llu host_limit=%llu\n",local,
         (unsigned long long)(local ? local_offer() : 0),(unsigned long long)kLocalFloor,(unsigned long long)host_limit);
     b.holder=b.holder_pid=0;b.switches=b.hidden=0;b.compositor_stop=false;

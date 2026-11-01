@@ -29,8 +29,11 @@ unsigned long long ps5_gpu_broker_flips(void);
 bool ps5_gpu_broker_capture_next(const char *path);
 /* The broker as of now, for an application's watchdog, without waiting on anything the broker holds: whether its
  * client lock and its display lock are held this instant (a trylock, released at once), the GPU submissions it made
- * and the last one the GPU completed (its fence page's value; 0 before the first submission). Any thread. */
-struct Ps5GpuBrokerHealth { unsigned lock_busy,display_busy,fences_issued,fences_completed; };
+ * and the last one the GPU completed (its fence page's value; 0 before the first submission). phase is the call the
+ * client lock's holder waits in (drain, reap-free, stage-alloc, copy, submit, suspend, alloc, map, grant, munmap,
+ * give-back, test-hold; null when in none of them), since phase_ms ago, on thread holder_tid: read with atomics alone.
+ * Any thread. */
+struct Ps5GpuBrokerHealth { unsigned lock_busy,display_busy,fences_issued,fences_completed;const char *phase;unsigned long long phase_ms;int holder_tid; };
 void ps5_gpu_broker_health(Ps5GpuBrokerHealth *health);
 /* Where the memory a client maps comes from: alloc gives a new object of bytes (or -1), touch writes through
  * [from, to) of one in another process before the broker maps it for the GPU (0, or -1). An application whose clients

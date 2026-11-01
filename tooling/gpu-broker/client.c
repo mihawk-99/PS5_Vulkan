@@ -72,6 +72,27 @@ int ps5_gpu_client_done(int result,uint64_t images,uint64_t hash);
 int ps5_gpu_client_image(unsigned cycle,unsigned pixels,uint64_t hash);
 int ps5_gpu_client_coherence(unsigned slot,unsigned words,uint64_t hash);
 int ps5_gpu_client_timing(unsigned slot,unsigned count,uint64_t ns);
+void pw_module_lookup(void *(*lookup)(void *,const char *));
+/* PS5_Proton's helper loader ends the process 5 s after its GPU reason is stamped (ntdll's pw_ps5_child_doomed(1),
+ * PW_CHILD_DOOM_GPU). The module loader that opens this module in a helper hands it its own symbol lookup: this
+ * module's dlsym is libkernel's, and the firmware's lookup finds no application module's export (sceKernelDlsym on
+ * 12.02). bind resolves the stamp with it, outside the rpc lock. None (a title's process, a host build): no stamp. */
+static void *(*module_lookup)(void *,const char *);
+static void (*doomed)(unsigned);
+void pw_module_lookup(void *(*lookup)(void *,const char *)) { module_lookup=lookup; }
+/* The client gives the broker up for good: from here every call fails at once and the program sees its device lost.
+ * Only a loss does this: no answer in 15 s (the broker stuck under its lock, as when a 2026-10-15 run froze the
+ * console), the connection gone, a reply that is not the answer, or a free the broker did not take back. A call the
+ * broker answered with a refusal is none: in gate-hang-a-2026-10-15-01 it answered a helper's first two window presents
+ * with status 70 (ESTALE), the program presented on (39 frames in 2.1 s) and ended by itself, and a game that rebuilds
+ * its window, swapchain or device goes on the same way. The first transition alone says why and stamps
+ * the GPU reason (one compare-exchange, safe under the rpc lock). */
+static void broker_lost(const char *why,unsigned operation,unsigned sequence)
+{
+    if(__atomic_exchange_n(&broken,1,__ATOMIC_RELAXED))return;
+    fprintf(stderr,"gpu-client: the broker is given up on: %s (operation %u sequence %u)\n",why,operation,sequence);
+    if(doomed)doomed(1 /* PW_CHILD_DOOM_GPU */);
+}
 /* For SUBMIT round trips: the time spent taking the lock, sending, and waiting for the reply to be readable. */
 static uint64_t rpc_lock_ns,rpc_send_ns,rpc_wait_ns;
 void ps5_gpu_client_rpc_split(uint64_t split[3])
@@ -94,16 +115,18 @@ static int rpc(PwGpuMessage *message,int *descriptor)
     /* The owner answers in tens of microseconds, so the reply is looked for by peeking: continuously for 2 ms, then
      * after short polls, which bound the wait for one that takes longer. Adopted while poll was suspected of waking
      * late (graphics-child-gpu-async-07 to -13); those stalls were the owner's disk writes under its lock (async-18). */
-    int readable=0;
+    int readable=0;const char *lost=sent ? "a reply that is not the answer" : "the send failed";
     if(sent) {
         const uint64_t start=radv_ps5_now_ns(),spin_until=start+2000000,give_up=start+15000000000ull;
         char peek=0;
         for(;;) {
             const ssize_t found=recv(broker,&peek,1,MSG_PEEK|MSG_DONTWAIT);
             if(found==1) { readable=1;break; }
-            if(found==0 || (found<0 && errno!=EAGAIN && errno!=EWOULDBLOCK && errno!=EINTR))break;
+            if(found==0 || (found<0 && errno!=EAGAIN && errno!=EWOULDBLOCK && errno!=EINTR)) {
+                lost=found ? "the connection failed" : "the connection closed";break;
+            }
             const uint64_t now=radv_ps5_now_ns();
-            if(now>=give_up)break;
+            if(now>=give_up) { lost="no answer in 15 s";break; }
             /* Yield, not pause: the owner's thread serving this client may share its CPU. */
             if(now<spin_until)sched_yield();
             else poll(&p,1,1);
@@ -121,13 +144,15 @@ static int rpc(PwGpuMessage *message,int *descriptor)
          (operation==PW_GPU_ALLOC && descriptor && !message->status && !count && message->argument[2]));
     if(okay && descriptor) *descriptor=count ? fds[0] : -1;
     else for(unsigned i=0;i<count;++i)close(fds[i]);
-    if(!okay)__atomic_store_n(&broken,1,__ATOMIC_RELAXED);
+    if(!okay)broker_lost(lost,operation,expected);
     pthread_mutex_unlock(&lock);
     return okay ? message->status : EIO;
 }
 int ps5_gpu_client_bind(int fd, bool reserved)
 {
     if(broker>=0 || fd<0)return -1;
+    /* NULL: every module loaded, as Wine's dlsym(RTLD_DEFAULT). */
+    if(module_lookup)doomed=(void (*)(unsigned))module_lookup(NULL,"pw_ps5_child_doomed");
     broker=fd;
     ranges_reserved=reserved;
     /* argument[2]: whether this process reserved the host ranges, for the owner's log. */
@@ -331,7 +356,7 @@ void radv_ps5_memory_free(struct radv_ps5_memory *memory)
         if(source_find((uintptr_t)memory->cpu,true,&source) && source.fd>=0)close(source.fd);
     }
     /* Broker submissions complete before acknowledgment; no GPU references remain. */
-    if(rpc(&message,NULL)) { __atomic_store_n(&broken,1,__ATOMIC_RELAXED);return; }
+    if(rpc(&message,NULL)) { broker_lost("a free it did not take back",PW_GPU_FREE,message.sequence);return; }
     if(memory->physical==PS5_GPU_LOCAL_MEMORY)__atomic_sub_fetch(&local_allocated,memory->bytes,__ATOMIC_RELAXED);
     else __atomic_sub_fetch(&allocated,memory->bytes,__ATOMIC_RELAXED);
     memset(memory,0,sizeof(*memory));
