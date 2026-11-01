@@ -77,6 +77,10 @@ struct LogPipe {
         front=fdopen(ends[1],"w");
         if(!front) { ::close(ends[0]);::close(ends[1]);return false; }
         setvbuf(front,nullptr,_IOLBF,0);back=file;reader=ends[0];
+        // The kernel makes a pipe's buffer on its first write, and refuses (ENOMEM) when the system's pipe memory is
+        // used up: the writes then vanished and the file stayed empty. One line now shows whether the pipe takes writes.
+        static const char ready[]="gpu-broker log=pipe\n";
+        if(write(ends[1],ready,sizeof(ready)-1)!=ssize_t(sizeof(ready)-1)) { fclose(front);::close(reader);front=nullptr;reader=-1;return false; }
         running=!pthread_create(&writer,nullptr,[](void *argument) -> void * {
             auto *self=static_cast<LogPipe *>(argument);char buffer[4096];
             for(;;) {
@@ -1024,7 +1028,8 @@ bool ps5_gpu_broker_start(const char *directory,bool capture,bool local,bool (*i
     b.log_file=fopen(output_path("/app0/gpu-broker-results.txt").c_str(),"w");
     if(!b.log_file) { fprintf(stderr,"gpu-wine startup stage=open errno=%d\n",errno);return false; }
     setvbuf(b.log_file,nullptr,_IONBF,0);
-    b.log=b.log_pipe.open(b.log_file) ? b.log_pipe.front : b.log_file;
+    if(b.log_pipe.open(b.log_file))b.log=b.log_pipe.front;
+    else { b.log=b.log_file;fprintf(b.log_file,"gpu-broker log=file errno=%d\n",errno); }
     if(!radv_ps5_platform_init() || !ps5_gpu_broker_warm(b.log)) { b.log_pipe.close();fclose(b.log_file);b.log=b.log_file=nullptr;return false; }
     b.capture=capture;b.stopping=false;
     {
