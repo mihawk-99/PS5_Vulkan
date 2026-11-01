@@ -63,6 +63,8 @@ if [[ $wsi == 1 ]]; then
     mkdir -p "$out/source/src/vulkan/wsi"
     git -C "$mesa_fork" show "$revision:src/vulkan/wsi/wsi_common_videoout.c" > "$out/source/src/vulkan/wsi/wsi_common_videoout.c"
     patch --batch -p1 -d "$out/source" < "$out/patches/radv-gpu-broker-wsi.patch"
+    cp "$root/tooling/gpu-broker/window-surfaces-wsi.patch" "$out/patches/"
+    patch --batch -p1 -d "$out/source" < "$out/patches/window-surfaces-wsi.patch"
     python3 - "$radv" "$out" <<'PYWSI'
 import json,shlex,subprocess,sys
 from pathlib import Path

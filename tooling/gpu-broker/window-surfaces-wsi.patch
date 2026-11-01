@@ -1,0 +1,63 @@
+--- a/src/vulkan/wsi/wsi_common_videoout.c
++++ b/src/vulkan/wsi/wsi_common_videoout.c
+@@ -22,6 +22,21 @@
+ #include "wsi_common_private.h"
+ extern int wsi_videoout_set_flip_rate(int);
+ extern int ps5_gpu_client_swapchain(const void *,unsigned,unsigned,unsigned,unsigned);
++extern int ps5_gpu_client_window_swapchain(const void *,unsigned,unsigned,unsigned,unsigned,uint32_t,uint64_t);
++/* Wine binds the actual HWND lifetime to this native surface. Standalone
++ * display surfaces remain unbound and retain their normal presentation path. */
++struct broker_surface {
++   VkIcdSurfaceDisplay display;
++   uint32_t hwnd;
++   uint64_t generation;
++};
++int wsi_videoout_bind_window(VkSurfaceKHR handle,uint32_t hwnd,uint64_t generation);
++int wsi_videoout_bind_window(VkSurfaceKHR handle,uint32_t hwnd,uint64_t generation)
++{
++   struct broker_surface *surface=(void *)(uintptr_t)handle;
++   if(!surface || surface->display.base.platform!=VK_ICD_WSI_PLATFORM_DISPLAY || !hwnd || !generation)return -1;
++   surface->hwnd=hwnd;surface->generation=generation;return 0;
++}
+ #define VIDEOOUT_BUFFERS 3
+ #define VIDEOOUT_SIZES 1
+ struct wsi_videoout_size { VkExtent2D extent; };
+@@ -208,7 +223,7 @@
+    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_INFO_KHR);
+ 
+    VkIcdSurfaceDisplay *surface =
+-      vk_zalloc2(&instance->alloc, pAllocator, sizeof(*surface), 8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
++      vk_zalloc2(&instance->alloc, pAllocator, sizeof(struct broker_surface), 8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+    if (surface == NULL)
+       return VK_ERROR_OUT_OF_HOST_MEMORY;
+ 
+@@ -359,6 +374,7 @@
+    struct wsi_swapchain base;
+    mtx_t lock;
+    bool retired,busy[VIDEOOUT_BUFFERS];
++   uint32_t hwnd;uint64_t generation;
+    struct wsi_image images[];
+ };
+ static struct wsi_image *broker_image(struct wsi_swapchain *b,uint32_t i)
+@@ -391,8 +407,10 @@
+    VkResult result=b->wsi->WaitForFences(b->device,1,&b->fences[i],true,5000000000ull);
+    if(result!=VK_SUCCESS)return result;
+    struct wsi_image *image=&c->images[i];
+-   if(result==VK_SUCCESS && ps5_gpu_client_swapchain(image->cpu_map,b->image_info.create.extent.width,
+-      b->image_info.create.extent.height,image->row_pitches[0],1))result=VK_ERROR_DEVICE_LOST;
++   const unsigned width=b->image_info.create.extent.width,height=b->image_info.create.extent.height;
++   int status=c->hwnd ? ps5_gpu_client_window_swapchain(image->cpu_map,width,height,image->row_pitches[0],1,c->hwnd,c->generation)
++                      : ps5_gpu_client_swapchain(image->cpu_map,width,height,image->row_pitches[0],1);
++   if(status)result=VK_ERROR_DEVICE_LOST;
+    mtx_lock(&c->lock);c->busy[i]=false;mtx_unlock(&c->lock);
+    return result;
+ }
+@@ -422,6 +440,8 @@
+    const struct wsi_cpu_image_params params={.base.image_type=WSI_IMAGE_TYPE_CPU};
+    VkResult result=wsi_swapchain_init(w,&c->base,device,info,&params.base,a);
+    if(result!=VK_SUCCESS) { mtx_destroy(&c->lock);vk_free(a,c);return result; }
++   const struct broker_surface *surface=(const void *)s;
++   c->hwnd=surface->hwnd;c->generation=surface->generation;
+    c->base.destroy=broker_destroy;c->base.get_wsi_image=broker_image;c->base.acquire_next_image=broker_acquire;
+    c->base.release_images=broker_release;c->base.queue_present=broker_present;c->base.wait_for_present=broker_wait;
+    c->base.present_mode=VK_PRESENT_MODE_FIFO_KHR;c->base.image_count=count;

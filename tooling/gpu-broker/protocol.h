@@ -4,7 +4,7 @@
 #define PW_GPU_BROKER_H
 #include <stddef.h>
 #include <stdint.h>
-#define PW_GPU_MAGIC 0x47505232u
+#define PW_GPU_MAGIC 0x47505233u
 #define PW_GPU_LIMIT (UINT64_C(128)<<20)
 /* The most host-visible memory an owner may grant a client (ps5_gpu_broker_set_host_limit); PW_GPU_LIMIT is the default.
  * An application chooses: a program that uploads large textures through staging memory needs more than the default
@@ -31,11 +31,29 @@
 #define PW_GPU_RESERVE_FIXED 0x10
 #define PW_GPU_RESERVE_NO_OVERWRITE 0x80
 enum { PW_GPU_INIT=1, PW_GPU_ALLOC, PW_GPU_FREE, PW_GPU_SUBMIT,
-       PW_GPU_TESS, PW_GPU_OFFCHIP, PW_GPU_DONE, PW_GPU_IMAGE, PW_GPU_PRESENT, PW_GPU_SWAPCHAIN };
+       PW_GPU_TESS, PW_GPU_OFFCHIP, PW_GPU_DONE, PW_GPU_IMAGE, PW_GPU_PRESENT, PW_GPU_SWAPCHAIN, PW_GPU_WINDOW_SWAPCHAIN };
 typedef struct PwGpuMessage {
     uint32_t magic, operation, sequence; int32_t status;
     uint64_t address, bytes, argument[4];
 } PwGpuMessage;
+/* expected=0 is the standalone legacy route. Owned helpers bind their actual
+ * spawn result before bootstrap; a client cannot replace that declaration. */
+static inline int pw_gpu_client_pid(int expected,uint64_t requested,int owner)
+{
+    return expected>=0 && requested>0 && requested<=INT32_MAX && requested!=(uint64_t)owner &&
+           (!expected || requested==(uint64_t)expected);
+}
+/* Window swapchain: width/height packed in argument[0], stride/full HWND in
+ * argument[1], generation in argument[2], BGRA in argument[3]. Native PID comes
+ * from the owner-managed client slot established by the native helper. No process guessing. */
+static inline int pw_gpu_window_image(const PwGpuMessage *m)
+{
+    const uint32_t width=(uint32_t)m->argument[0],height=(uint32_t)(m->argument[0]>>32);
+    const uint32_t stride=(uint32_t)m->argument[1],hwnd=(uint32_t)(m->argument[1]>>32);
+    return width && width<=1920 && height && height<=1080 && stride>=width*4 && stride<=1920*4 &&
+           !(stride&3) && hwnd && m->argument[2] && m->argument[3]<=1 &&
+           m->bytes==(uint64_t)height*stride && m->address && !(m->address&3);
+}
 /* Reject wrapped resources; subtraction bounds the requested range. */
 static inline int pw_gpu_contains(uint64_t base,uint64_t length,uint64_t address,uint64_t bytes)
 {

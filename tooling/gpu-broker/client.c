@@ -29,6 +29,7 @@ static int ranges_reserved;
 #define PS5_GPU_LOCAL_MEMORY (-2)
 
 int ps5_gpu_client_bind(int fd, bool reserved);
+int ps5_gpu_client_window_swapchain(const void *,unsigned,unsigned,unsigned,unsigned,uint32_t,uint64_t);
 int ps5_gpu_client_done(int result,uint64_t images,uint64_t hash);
 int ps5_gpu_client_image(unsigned cycle,unsigned pixels,uint64_t hash);
 int ps5_gpu_client_coherence(unsigned slot,unsigned words,uint64_t hash);
@@ -159,6 +160,16 @@ int ps5_gpu_client_swapchain(const void *pixels,unsigned width,unsigned height,u
     radv_ps5_cpu_flush(pixels,(size_t)pitch*height);
     PwGpuMessage message={.operation=PW_GPU_SWAPCHAIN,.address=(uint64_t)pixels,.bytes=(uint64_t)pitch*height,
                          .argument={width,height,pitch,bgra}};
+    return rpc(&message,NULL);
+}
+int ps5_gpu_client_window_swapchain(const void *pixels,unsigned width,unsigned height,unsigned stride,unsigned bgra,
+                                  uint32_t hwnd,uint64_t generation)
+{
+    PwGpuMessage message={.operation=PW_GPU_WINDOW_SWAPCHAIN,.address=(uint64_t)pixels,.bytes=(uint64_t)stride*height,
+                         .argument={(uint64_t)width|((uint64_t)height<<32),
+                                    (uint64_t)stride|((uint64_t)hwnd<<32),generation,bgra}};
+    if(!pw_gpu_window_image(&message))return EINVAL;
+    radv_ps5_cpu_flush(pixels,(size_t)stride*height);
     return rpc(&message,NULL);
 }
 int ps5_gpu_client_done(int result,uint64_t images,uint64_t hash)

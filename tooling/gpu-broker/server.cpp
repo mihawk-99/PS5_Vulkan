@@ -167,7 +167,7 @@ constexpr uint64_t kLocalOffer=UINT64_C(8)<<30,kLocalFloor=UINT64_C(1)<<30;
 static uint64_t host_limit=PW_GPU_LIMIT;
 constexpr unsigned kClientBuffers=1024;
 struct Client {
-    int socket=-1,service=-1,pid=-1;uint32_t sequence=0,next_token=0;
+    int socket=-1,service=-1,pid=-1,expected_pid=0;uint32_t sequence=0,next_token=0;
     Buffer buffers[kClientBuffers];unsigned submissions=0;
     uint64_t allocated=0,local=0,local_peak=0,tess=0;uint32_t tess_bytes=0,granularity=0,buffering=0;
     // Where submission time goes, in nanoseconds: staging allocation and copy, the native submit, the completion wait
@@ -543,6 +543,19 @@ void note_peaks(Broker &b)
     if(host>b.host_peak)b.host_peak=host;
     if(local>b.local_peak)b.local_peak=local;
 }
+/* Under display_lock: show one complete copied scene and wait for its flip.
+ * GPU RPC replies retain FIFO pacing; no live GPU/shared pointer is painted. */
+int show_windows(Broker &b,const PwWindowSnapshot &snapshot,int cx,int cy)
+{
+    if(pw_window_scene_update(&b.window_scene,&snapshot)<0)return errno;
+    PwWindowImage images[PW_WINDOW_IMAGE_LIMIT];
+    const size_t count=pw_window_scene_images(&b.window_scene,images,PW_WINDOW_IMAGE_LIMIT);
+    if(pw_windows_compose(reinterpret_cast<uint32_t *>(b.frame_copy),1920,1080,&snapshot,images,count))return errno;
+    std::string asked;asked.swap(b.capture_next);
+    if(b.display.present(b.frame_copy,1920,1080,1920*4,b.log,asked.empty() ? nullptr : asked.c_str(),true,cx,cy))return EIO;
+    b.window_sequence=snapshot.sequence;b.window_dirty=false;++b.window_frames;
+    b.cursor_x=cx;b.cursor_y=cy;return 0;
+}
 // One thread per client, started with its slot, waiting on that client's socket alone (await_message); the broker's
 // work is serialized by its lock, taken only while a message is handled. The single worker this replaces held the
 // lock across a 20 ms poll of every socket, so opening or closing a slot, and every other client, waited on it.
@@ -567,7 +580,7 @@ void *client_main(void *argument)
                 c.ended=true;break;
             }
             c.sequence=m.sequence;m.status=EINVAL;int fd=-1;
-            if(m.operation==PW_GPU_INIT && c.pid<0 && m.argument[0]>0 && m.argument[0]<=INT32_MAX && m.argument[0]!=uint64_t(getpid())) {
+            if(m.operation==PW_GPU_INIT && c.pid<0 && pw_gpu_client_pid(c.expected_pid,m.argument[0],getpid())) {
                 c.pid=(int)m.argument[0];m.status=0;
                 const uint64_t ranges_reserved_reported=m.argument[2];m.argument[2]=m.argument[3]=0;
                 /* The host-visible budget always: a client keeps PW_GPU_LIMIT without it. */
@@ -600,6 +613,48 @@ void *client_main(void *argument)
             case PW_GPU_OFFCHIP:
                 if(m.argument[0]<=3 && m.argument[1]<=511) {
                     c.granularity=(uint32_t)m.argument[0];c.buffering=(uint32_t)m.argument[1];c.offchip=true;m.status=0;
+                }break;
+            case PW_GPU_WINDOW_SWAPCHAIN:
+                if(wedged) {m.status=EIO;break;}
+                if(!desktop_windows) {m.status=ENOTSUP;break;}
+                if(!c.expected_pid || c.pid!=c.expected_pid) {m.status=EPROTO;break;}
+                if(!pw_gpu_window_image(&m) || !owned(c,m.address,m.bytes))break;
+                {
+                    const uint32_t width=(uint32_t)m.argument[0],height=(uint32_t)(m.argument[0]>>32);
+                    const uint32_t stride=(uint32_t)m.argument[1],hwnd=(uint32_t)(m.argument[1]>>32);
+                    // The client's fence has completed. Its allocation stays owned
+                    // until this synchronous reply or native worker teardown.
+                    pthread_mutex_unlock(&b.lock);
+                    pthread_mutex_lock(&b.display_lock);
+                    PwWindowSnapshot snapshot{};
+                    m.status=desktop_windows(&snapshot,sizeof(snapshot)) ? errno : 0;
+                    if(!m.status && pw_window_scene_gpu(&b.window_scene,c.pid,hwnd,m.argument[2],(void *)m.address,
+                                                      width,height,stride,(unsigned)m.argument[3],&snapshot))m.status=errno;
+                    if(!m.status && (trace || c.presentations<8)) {
+                        const PwWindowRow *row=nullptr;
+                        for(unsigned n=0;n<snapshot.count;++n)
+                            if(snapshot.windows[n].pid==c.pid && snapshot.windows[n].hwnd==hwnd &&
+                               snapshot.windows[n].generation==m.argument[2])row=&snapshot.windows[n];
+                        unsigned coloured=0;
+                        for(unsigned y=1;y<=3;++y)for(unsigned x=1;x<=3;++x) {
+                            const uint32_t *pixel=reinterpret_cast<const uint32_t *>(
+                                m.address+uint64_t((height-1)*y/4)*stride+uint64_t((width-1)*x/4)*4);
+                            if(*pixel&0x00ffffff)++coloured;
+                        }
+                        fprintf(b.log,"gpu-window-backing cookie=%d frame=%u flags=%#x clips=%u coloured_samples=%u/9\n",
+                                c.cookie,c.presentations+1,row?row->flags:0,row?row->clip_count:0,coloured);
+                    }
+                    if(!m.status) {
+                        int cx=INT32_MIN,cy=INT32_MIN;if(desktop_cursor)desktop_cursor(&cx,&cy);
+                        m.status=show_windows(b,snapshot,cx,cy);
+                    }
+                    pthread_mutex_unlock(&b.display_lock);
+                    pthread_mutex_lock(&b.lock);
+                    if(!m.status)++c.presentations;
+                    if(trace || m.status || c.presentations<=8 || !(c.presentations%600))
+                        fprintf(b.log,"gpu-window cookie=%d pid=%d hwnd=%#x generation=%llu frame=%u extent=%ux%u flip=%llu status=%d\n",
+                                c.cookie,c.pid,hwnd,(unsigned long long)m.argument[2],c.presentations,width,height,
+                                (unsigned long long)b.display.flips,m.status);
                 }break;
             case PW_GPU_SWAPCHAIN:
                 if(wedged) { m.status=EIO;break; }
@@ -670,16 +725,7 @@ void *compositor_main(void *)
             if(changes<0 && !error)error=errno;
             if(!error && (changes || b.window_dirty || snapshot.sequence!=b.window_sequence ||
                           cursor_moved || !b.capture_next.empty())) {
-                PwWindowImage images[PW_WINDOW_LIMIT];
-                const size_t count=pw_window_scene_images(&b.window_scene,images,PW_WINDOW_LIMIT);
-                if(pw_windows_compose(reinterpret_cast<uint32_t *>(b.frame_copy),1920,1080,&snapshot,images,count))error=errno;
-                else {
-                    std::string asked;asked.swap(b.capture_next);
-                    const int status=b.display.present(b.frame_copy,1920,1080,1920*4,b.log,
-                        asked.empty() ? nullptr : asked.c_str(),true,cx,cy);
-                    if(status)error=EIO;
-                    else { b.window_sequence=snapshot.sequence;b.window_dirty=false;++b.window_frames; }
-                }
+                error=show_windows(b,snapshot,cx,cy);
             }
             if(error!=b.window_error) {
                 fprintf(b.log,"gpu-windows status=%d frames=%llu shared_bytes=%zu retained_bytes=%zu\n",error,
@@ -824,14 +870,14 @@ bool ps5_gpu_broker_start(const char *directory,bool capture,bool local,bool (*i
     fprintf(b.log,"gpu-desktop compositor=%d\n",b.compositing);
     b.started=true;return true;
 }
-int ps5_gpu_broker_open(int *cookie)
+static int open_client(int *cookie,int expected_pid)
 {
     auto &b=broker_state;if(!b.started || !cookie) { errno=EINVAL;return -1; }
     pthread_mutex_lock(&b.lock);
     Client *c=nullptr;for(auto &slot:b.clients)if(slot.socket<0) { c=&slot;break; }
     int pair[2],fd=-1;
     if(c && b.next_cookie<INT32_MAX && !ps5_gpu_packet_socketpair(pair,sizeof(PwGpuMessage))) {
-        reset(*c);c->socket=pair[0];c->cookie=++b.next_cookie;*cookie=c->cookie;fd=pair[1];
+        reset(*c);c->expected_pid=expected_pid;c->socket=pair[0];c->cookie=++b.next_cookie;*cookie=c->cookie;fd=pair[1];
         pthread_attr_t attributes;pthread_attr_init(&attributes);pthread_attr_setstacksize(&attributes,512u<<10);
         c->serving=!pthread_create(&c->server,&attributes,client_main,c);
         pthread_attr_destroy(&attributes);
@@ -840,6 +886,12 @@ int ps5_gpu_broker_open(int *cookie)
         else fprintf(b.log,"gpu-wine open cookie=%d flexible=%zu\n",c->cookie,flexible_now());
     } else errno=EAGAIN;
     pthread_mutex_unlock(&b.lock);return fd;
+}
+int ps5_gpu_broker_open(int *cookie) {return open_client(cookie,0);}
+int ps5_gpu_broker_open_for_pid(int *cookie,int pid)
+{
+    if(pid<=0 || pid==getpid()) {errno=EINVAL;return -1;}
+    return open_client(cookie,pid);
 }
 void ps5_gpu_broker_close(int cookie,int service)
 {

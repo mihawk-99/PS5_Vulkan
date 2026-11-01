@@ -12,6 +12,9 @@ bool ps5_gpu_broker_start(const char *directory,bool capture,bool local,bool (*i
  * PW_GPU_LIMIT when not called. False, and nothing changed, for any other value or once the broker is running. */
 bool ps5_gpu_broker_set_host_limit(unsigned long long bytes);
 int ps5_gpu_broker_open(int *cookie);
+/* Bind to the owner's acknowledged payload PID before bootstrap gives the
+ * helper its broker descriptor. INIT must match; window packets require it. */
+int ps5_gpu_broker_open_for_pid(int *cookie,int pid);
 void ps5_gpu_broker_close(int cookie,int lifecycle_token);
 bool ps5_gpu_broker_stop();
 bool ps5_gpu_broker_warm(FILE *output);
