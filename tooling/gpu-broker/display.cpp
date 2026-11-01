@@ -176,8 +176,11 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
     // capture thread, so the present does not wait for the picture (pw_display_capture.h). Never read back from the
     // display's buffer: that reads at about 105 MB/s, 80 ms for a frame inside the present (2026-10-17).
     // Without memory for the copy or a thread, it is read back and written here once the flip is shown, as before.
+    // With the fast copy the capture reads what was scanned out instead (below, once the flip is shown): its own copy
+    // came out black on the console while the screen showed the frame (w3-ab-b-pro-2026-11-01, the owner watching),
+    // and the same copy into the same kind of buffer is exact on a host. A capture then costs about 80 ms in that present.
     uint8_t *picture=nullptr;uint64_t picture_ns=0;
-    if(capture) {
+    if(capture && !fast_copy) {
         const uint64_t start=now_ns();
         picture=(uint8_t *)aligned_alloc(64,frame_bytes);   // the line copy's streaming stores want 16-byte lines
         if(picture)fill(picture);
