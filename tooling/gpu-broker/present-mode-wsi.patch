@@ -1,0 +1,14 @@
+--- a/src/vulkan/wsi/wsi_common_videoout.c
++++ b/src/vulkan/wsi/wsi_common_videoout.c
+@@ -512,8 +512,10 @@
+ static VkResult broker_create(VkIcdSurfaceBase *s,VkDevice device,struct wsi_device *w,
+    const VkSwapchainCreateInfoKHR *info,const VkAllocationCallbacks *a,struct wsi_swapchain **out)
+ {
++   /* Any present mode is presented as FIFO (c->base.present_mode): Windows drivers offer IMMEDIATE and MAILBOX, and a
++    * program that names one without checking the list got no swapchain at all (Wine's vulkan-1, vulkan.c:975). */
+    if(!info->imageExtent.width || info->imageExtent.width>1920 || !info->imageExtent.height || info->imageExtent.height>1080 ||
+-      info->minImageCount>VIDEOOUT_BUFFERS || info->presentMode!=VK_PRESENT_MODE_FIFO_KHR ||
++      info->minImageCount>VIDEOOUT_BUFFERS ||
+       (info->imageFormat!=VK_FORMAT_B8G8R8A8_UNORM && info->imageFormat!=VK_FORMAT_B8G8R8A8_SRGB)) {
+       fprintf(stderr,"gpu-wsi rejected extent=%ux%u count=%u format=%d mode=%d flags=%u usage=%u\n",
+               info->imageExtent.width,info->imageExtent.height,info->minImageCount,
