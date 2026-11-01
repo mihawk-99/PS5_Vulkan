@@ -824,7 +824,8 @@ int show_windows(Broker &b,const PwWindowSnapshot &snapshot,int cx,int cy,bool r
     }
     const uint64_t present_begin=radv_ps5_now_ns();
     if(b.display.present(b.frame_copy,1920,1080,1920*4,b.log,asked.empty() ? nullptr : asked.c_str(),true,cx,cy))return EIO;
-    // A capture's present writes its picture before the flip: the probe's time, not the desktop's pacing.
+    // A capture's present also copies the whole frame for its picture (pw_display_capture.h): the probe's time, not
+    // the desktop's pacing.
     const uint64_t present_end=radv_ps5_now_ns(),previous=b.desktop_pacing.last_ns;
     if(asked.empty()) {
         pw_frame_pacing_shown(&b.desktop_pacing,present_begin,present_end);

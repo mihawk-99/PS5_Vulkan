@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 Mihawk-99 */
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "display.h"
-#include "pw_display_copy.h"
+#include "pw_display_capture.h"
 #include <ps5platform/kernel.h>
 #include <ps5platform/videoout.h>
 #include <cerrno>
@@ -70,20 +70,9 @@ uint64_t vblank_period_ns(int handle)
     }
     return intervals[3];
 }
-bool capture_buffer(const uint8_t *buffer,const char *path)
-{
-    FILE *f=fopen(path,"wb");if(!f)return false;
-    bool okay=fprintf(f,"P6\n%u %u\n255\n",width,height)>0;
-    uint8_t row[width*3];
-    for(unsigned y=0;y<height && okay;++y) {
-        for(unsigned x=0;x<width;++x) {
-            const uint32_t p=*(const uint32_t *)(buffer+tiled(x,y));
-            row[x*3]=p>>16;row[x*3+1]=p>>8;row[x*3+2]=p;
-        }
-        okay=fwrite(row,1,sizeof(row),f)==sizeof(row);
-    }
-    okay &= !fflush(f);okay &= !fsync(fileno(f));okay &= !fclose(f);return okay;
-}
+// The display's captures, written on their own thread (pw_display_capture.h); one display per title.
+PwDisplayCaptures captures=PW_DISPLAY_CAPTURES_INIT;
+static_assert(frame_bytes==PW_DISPLAY_TILED_BYTES,"the capture copies the whole tiled frame");
 }
 int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pitch,FILE *log,const char *capture,bool bgra,
     int cursor_x,int cursor_y)
@@ -148,36 +137,54 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
     }
     const uint64_t copy_start=now_ns();
     auto *buffer=(uint8_t *)mapped+back*buffer_bytes;
-    if(fast_copy && w==width && h==height)pw_display_copy_lines(buffer,(const uint8_t *)pixels,pitch,bgra);
-    else {
-    // Scaling, nearest neighbour, as tables; then each tile in memory order, flushed as it is finished.
-    static uint16_t source_x[width],source_y[height];
-    for(unsigned x=0;x<width;++x)source_x[x]=uint16_t(x*w/width);
-    for(unsigned y=0;y<height;++y)source_y[y]=uint16_t(y*h/height);
-    const auto &order=tile_order();
-    for(unsigned by=0;by<block_rows;++by)for(unsigned bx=0;bx<blocks;++bx) {
-        auto *tile=(uint32_t *)(buffer+(size_t(by*blocks+bx)<<16));
-        for(unsigned k=0;k<16384;++k) {
-            const unsigned at=order.pixel[k],x=bx*128+(at&127),y=by*128+(at>>7);
-            if(y>=height)continue;
-            uint32_t rgba;memcpy(&rgba,(const uint8_t *)pixels+size_t(source_y[y])*pitch+size_t(source_x[x])*4,4);
-            tile[k]=bgra ? rgba : (rgba&0xff00ff00)|((rgba&0xff)<<16)|((rgba>>16)&0xff);
+    // The frame into a tiled buffer, the pointer over it: the display's buffer, and a capture's own copy below.
+    const auto fill=[&](uint8_t *target) {
+        if(fast_copy && w==width && h==height)pw_display_copy_lines(target,(const uint8_t *)pixels,pitch,bgra);
+        else {
+        // Scaling, nearest neighbour, as tables; then each tile in memory order, flushed as it is finished.
+        static uint16_t source_x[width],source_y[height];
+        for(unsigned x=0;x<width;++x)source_x[x]=uint16_t(x*w/width);
+        for(unsigned y=0;y<height;++y)source_y[y]=uint16_t(y*h/height);
+        const auto &order=tile_order();
+        for(unsigned by=0;by<block_rows;++by)for(unsigned bx=0;bx<blocks;++bx) {
+            auto *tile=(uint32_t *)(target+(size_t(by*blocks+bx)<<16));
+            for(unsigned k=0;k<16384;++k) {
+                const unsigned at=order.pixel[k],x=bx*128+(at&127),y=by*128+(at>>7);
+                if(y>=height)continue;
+                uint32_t rgba;memcpy(&rgba,(const uint8_t *)pixels+size_t(source_y[y])*pitch+size_t(source_x[x])*4,4);
+                tile[k]=bgra ? rgba : (rgba&0xff00ff00)|((rgba&0xff)<<16)|((rgba>>16)&0xff);
+            }
+            for(size_t at=0;at<65536;at+=64)__asm__ volatile("clflushopt (%0)"::"r"((uint8_t *)tile+at):"memory");
         }
-        for(size_t at=0;at<65536;at+=64)__asm__ volatile("clflushopt (%0)"::"r"((uint8_t *)tile+at):"memory");
-    }
-    }
-    if(cursor_x>=0 && cursor_y>=0)draw_cursor(buffer,cursor_x,cursor_y);
+        }
+        if(cursor_x>=0 && cursor_y>=0)draw_cursor(target,cursor_x,cursor_y);
+    };
+    fill(buffer);
     __asm__ volatile("sfence":::"memory");
     last_copy_ns=now_ns()-copy_start;
+    // A capture (a probe's or a pad script's): the same frame filled again into memory of its own and written by the
+    // capture thread, so the present does not wait for the picture (pw_display_capture.h). Never read back from the
+    // display's buffer: that reads at about 105 MB/s, 80 ms for a frame inside the present (2026-10-17).
+    // Without memory for the copy or a thread, it is read back and written here once the flip is shown, as before.
+    uint8_t *picture=nullptr;uint64_t picture_ns=0;
+    if(capture) {
+        const uint64_t start=now_ns();
+        picture=(uint8_t *)aligned_alloc(64,frame_bytes);   // the line copy's streaming stores want 16-byte lines
+        if(picture)fill(picture);
+        picture_ns=now_ns()-start;
+    }
     const uint64_t serial=__atomic_add_fetch(&flips,1,__ATOMIC_RELAXED);   // read without display_lock (ps5_gpu_broker_flips)
     int status=sceVideoOutSubmitFlip(handle,back,PS5_VIDEO_OUT_FLIP_VSYNC,serial);
-    // A capture (the probes') waits for this flip to be shown and reads that buffer back: proof of what was flipped.
     if(!status && capture) {
-        if(!settled(handle))status=EBUSY;
-        if(!status)status=sceVideoOutGetFlipStatus(handle,shown);
-        if(!status && shown[PS5_VIDEO_OUT_FLIP_STATUS_SHOWN_ARGUMENT]!=serial)status=EIO;
-        if(!status && !capture_buffer(buffer,capture))status=EIO;
+        if(picture && !pw_display_capture_take(&captures,picture,capture,serial,picture_ns,log))picture=nullptr;
+        else {
+            if(!settled(handle))status=EBUSY;
+            if(!status)status=sceVideoOutGetFlipStatus(handle,shown);
+            if(!status && shown[PS5_VIDEO_OUT_FLIP_STATUS_SHOWN_ARGUMENT]!=serial)status=EIO;
+            if(!status && pw_display_capture_write(buffer,capture))status=EIO;
+        }
     }
+    free(picture);   // not handed over: the flip failed, or it was written here
     if(status || serial<=8 || !(serial%600))
         fprintf(log,"gpu-display flip=%llu shown=%llu source=%ux%u copy_us=%llu status=%#x\n",
             (unsigned long long)serial,(unsigned long long)shown[PS5_VIDEO_OUT_FLIP_STATUS_SHOWN_ARGUMENT],w,h,
@@ -190,7 +197,7 @@ bool Ps5GpuDisplay::capture_last(const char *path)
     if(!registered || !flips || !settled(handle))return false;
     uint64_t shown[PS5_VIDEO_OUT_FLIP_STATUS_WORDS]{};
     if(sceVideoOutGetFlipStatus(handle,shown) || shown[PS5_VIDEO_OUT_FLIP_STATUS_SHOWN_ARGUMENT]!=flips)return false;
-    return capture_buffer((const uint8_t *)mapped+((back+buffer_count-1)%buffer_count)*buffer_bytes,path);
+    return !pw_display_capture_write((const uint8_t *)mapped+((back+buffer_count-1)%buffer_count)*buffer_bytes,path);
 }
 bool Ps5GpuDisplay::read_last(uint32_t *pixels) const
 {
@@ -202,6 +209,7 @@ bool Ps5GpuDisplay::read_last(uint32_t *pixels) const
 }
 bool Ps5GpuDisplay::close(FILE *log)
 {
+    pw_display_capture_drain(&captures);   // every picture asked for is on disk before the title goes
     int blank=0,unregistered=0,closed=0;
     if(handle>=0) {
         if(registered) {
