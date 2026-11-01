@@ -1347,7 +1347,8 @@ bool ps5_gpu_broker_set_cover(const void *pixels)
     return true;
 }
 // The application's panel over every frame (pw_display_overlay.h), copied here; NULL takes it off. Tried for up to 100 ms as
-// the cover. When no frame came in the last 50 ms (a game that waits), the last one is shown again with the panel.
+// the cover. When no frame came in the last 50 ms (a game that waits), the last one is shown again with the panel, and a
+// capture asked for (ps5_gpu_broker_capture_next) is of that frame: a waiting game would show no next one.
 bool ps5_gpu_broker_set_overlay(const void *pixels,unsigned x,unsigned y,unsigned w,unsigned h)
 {
     auto &b=broker_state;
@@ -1370,8 +1371,12 @@ bool ps5_gpu_broker_set_overlay(const void *pixels,unsigned x,unsigned y,unsigne
                                              (unsigned long long)b.display.flips);
     timespec now{};clock_gettime(CLOCK_MONOTONIC,&now);   // the display's own clock (display.cpp now_ns)
     if(copy && b.display.registered && b.display.flips &&
-       uint64_t(now.tv_sec)*1000000000u+now.tv_nsec-b.display.last_present_ns>50000000ull)
-        (void)b.display.reshow(b.log);
+       uint64_t(now.tv_sec)*1000000000u+now.tv_nsec-b.display.last_present_ns>50000000ull && !b.display.reshow(b.log) &&
+       capture_pending(b)) {
+        const std::string asked=take_capture(b);
+        const bool written=!asked.empty() && b.display.capture_last(asked.c_str());
+        if(b.log)fprintf(b.log,"gpu-overlay capture %s\n",written ? "written" : "failed");
+    }
     pthread_mutex_unlock(&b.display_lock);
     return true;
 }
