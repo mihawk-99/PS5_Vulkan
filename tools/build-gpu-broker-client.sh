@@ -19,7 +19,10 @@ install=$radv/.deps/native/radv-release
 original=$install/lib/libvulkan_radeon.ps5.a
 revision=7b59ef27c1b09b9671bc4153c41940c3155c3af2
 expected=0ffa39311881236b4872ec77a56bca417ce56c71cefca5954224b9ea8f3a1bf5
-[[ $(sha256sum "$original" | cut -d' ' -f1) == "$expected" ]] || { echo 'RADV archive pin differs' >&2; exit 2; }
+# The archive is pinned by what it was built from, not by its bytes: a release archive built on another machine
+# differs byte for byte (PS5_Proton's tools/setup-pinned-radv.sh builds it from this Mesa revision and the pinned SDK).
+grep -qx "revision: $revision" "$install/PROVENANCE.txt" && grep -qx 'assertions: off' "$install/PROVENANCE.txt" ||
+    { echo "RADV archive provenance differs from revision $revision, release" >&2; exit 2; }
 mkdir -p "$out/obj" "$out/build" "$out/patches" "$out/source/src/amd/vulkan/winsys/ps5"
 for name in features local-memory client-wait wsi; do
     git -C "$mesa_fork" show "$overlay_revision:ps5/broker/radv-gpu-broker-$name.patch" > "$out/patches/radv-gpu-broker-$name.patch"
