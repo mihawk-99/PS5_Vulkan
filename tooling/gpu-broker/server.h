@@ -24,6 +24,10 @@ void ps5_gpu_broker_set_desktop(int (*foreground)(),void (*cursor)(int *,int *))
 /* Frames the display has shown since the broker started: an application's mark for a program's first frame (a
  * scripted run's clock, when the program presents through the broker). */
 unsigned long long ps5_gpu_broker_flips(void);
+/* The rate the broker's display kept, 120 or 60, opening the display now if no present has yet (0: the broker is not
+ * running, or the display did not open). The title asks before any helper starts, so Wine offers 120 Hz modes only
+ * when the display really runs at 119.88 Hz (PS5_Proton src/pw_display_rate.h, graphics patch 0029). */
+unsigned ps5_gpu_broker_display_hz(void);
 /* The next frame the display shows is also written to path, a PPM picture, once: false when the broker is not running,
  * a picture is already waiting for its frame, or the display stayed busy for 100 ms (it waits no longer than that). */
 bool ps5_gpu_broker_capture_next(const char *path);

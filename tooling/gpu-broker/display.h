@@ -17,6 +17,11 @@ struct Ps5GpuDisplay {
     int present(const void *pixels,unsigned width,unsigned height,unsigned pitch,FILE *log,const char *capture,bool bgra=false,
                 int cursor_x=-1,int cursor_y=-1);
     bool close(FILE *log);
+    /* Opens the display now, as the first present would (0, or the first failure): the title reads the rate it kept
+     * before any helper starts (graphics patch 0029). */
+    int open(FILE *log);
+    /* 120 or 60 once the display is open and registered, 0 before. */
+    unsigned refresh_hz() const { return registered ? (high_frame_rate ? 120u : 60u) : 0u; }
     /* A picture of the buffer the last present flipped to, written to path. */
     bool capture_last(const char *path);
     /* The buffer the last present flipped to, as linear 1920x1080 pixels in the display's channel order (the pointer

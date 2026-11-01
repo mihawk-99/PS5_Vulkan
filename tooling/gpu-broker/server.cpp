@@ -1186,6 +1186,16 @@ unsigned long long ps5_gpu_broker_flips()
 {
     return __atomic_load_n(&broker_state.display.flips,__ATOMIC_RELAXED);
 }
+unsigned ps5_gpu_broker_display_hz()
+{
+    auto &b=broker_state;if(!b.started)return 0;
+    pthread_mutex_lock(&b.display_lock);
+    const int status=b.display.handle<0 ? b.display.open(b.log) : 0;
+    const unsigned hz=b.display.refresh_hz();
+    pthread_mutex_unlock(&b.display_lock);
+    fprintf(b.log,"gpu-display early hz=%u status=%#x\n",hz,unsigned(status));
+    return hz;
+}
 bool ps5_gpu_broker_capture_next(const char *path)
 {
     auto &b=broker_state;

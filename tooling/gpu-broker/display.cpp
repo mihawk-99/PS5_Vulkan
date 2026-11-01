@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "display.h"
 #include "pw_display_capture.h"
+#include "pw_display_rate.h"
 #include <ps5platform/kernel.h>
 #include <ps5platform/videoout.h>
 #include <cerrno>
@@ -74,52 +75,60 @@ uint64_t vblank_period_ns(int handle)
 PwDisplayCaptures captures=PW_DISPLAY_CAPTURES_INIT;
 static_assert(frame_bytes==PW_DISPLAY_TILED_BYTES,"the capture copies the whole tiled frame");
 }
+// Opens the display: at the first present, or earlier when the title asks the rate it kept (graphics patch 0029,
+// ps5_gpu_broker_display_hz). 0, or the first failure; a display that failed after VideoOut opened stays unregistered.
+int Ps5GpuDisplay::open(FILE *log)
+{
+    handle=sceVideoOutOpen(PS5_VIDEO_OUT_USER_SYSTEM,0,0,nullptr);
+    if(handle<0)return handle;
+    // PS5_Proton's PROTON_120HZ=1, for a title that declares high frame rate (param.json attribute3 0x40): the
+    // output is asked for 119.88 Hz as RADV's VideoOut asks (wsi_common_videoout.c, videoout_open_locked), and
+    // kept only if the vblanks then come within 12.5 ms; otherwise 59.94 Hz is restored. Without it the broker's
+    // display stayed at 59.94 Hz whatever the game asked, and three buffers flipped at each vblank held every
+    // present to 60 a second. First the rate this process finds, before it changes anything: 119.88 Hz that an
+    // earlier process left (a crash, or any end that skipped close()) is put back unless this one asks for it,
+    // so no later run inherits it unasked. About seven vblanks, once a display.
+    const char *high=getenv("PROTON_120HZ");const bool asked=high && !strcmp(high,"1");
+    const uint64_t found=vblank_period_ns(handle);
+    int restored=-1,supported=0,configured=-1;uint64_t period=0;
+    if(!asked && found && found<=12500000)
+        restored=sceVideoOutConfigureOutput(handle,PS5_VIDEO_OUT_MODE_RESTORE,nullptr,nullptr,nullptr);
+    if(asked) {
+        supported=sceVideoOutIsOutputSupported(handle,PS5_VIDEO_OUT_MODE_HIGH_FRAME_RATE,nullptr,nullptr,nullptr);
+        configured=supported>0 ? sceVideoOutConfigureOutput(handle,PS5_VIDEO_OUT_MODE_HIGH_FRAME_RATE,nullptr,nullptr,nullptr) : -1;
+        period=supported>0 && !configured ? vblank_period_ns(handle) : 0;
+        high_frame_rate=pw_display_kept_120(asked,supported,configured,period);   // pw_display_rate.h
+        if(supported>0 && !configured && !high_frame_rate)
+            sceVideoOutConfigureOutput(handle,PS5_VIDEO_OUT_MODE_RESTORE,nullptr,nullptr,nullptr);
+    }
+    fprintf(log,"gpu-display rate found_us=%llu restored=%d asked_120hz=%d supported=%d configured=%d period_us=%llu "
+        "high_frame_rate=%d\n",(unsigned long long)found/1000,restored,asked,supported,configured,
+        (unsigned long long)period/1000,high_frame_rate);
+    int status=sceKernelAllocateDirectMemory(0,sceKernelGetDirectMemorySize(),memory_bytes,alignment,3,&physical);
+    if(!status)status=sceKernelMapDirectMemory(&mapped,memory_bytes,0x33,0,physical,alignment);
+    if(status)return status;
+    memset(mapped,0,memory_bytes);
+    uint8_t attribute[PS5_VIDEO_OUT_ATTRIBUTE_BYTES]{};
+    sceVideoOutSetBufferAttribute2(attribute,PS5_VIDEO_OUT_PIXEL_FORMAT_B8G8R8A8_SDR,PS5_VIDEO_OUT_TILING_64KB_R_X,width,height,0,0,0);
+    ps5_video_out_buffer buffers[buffer_count]{};
+    for(unsigned i=0;i<buffer_count;++i)buffers[i]={(uint8_t *)mapped+i*buffer_bytes,nullptr,{}};
+    status=sceVideoOutSetFlipRate(handle,0);
+    if(!status)status=sceVideoOutRegisterBuffers2(handle,0,0,buffers,buffer_count,attribute,0,nullptr);
+    if(status)return status;
+    registered=true;
+    // PS5_Proton's PROTON_GPU_FAST_COPY=1: an unscaled frame is copied a 64-byte line at a time with streaming
+    // stores (pw_display_copy.h); a scaled one, and every frame without it, pixel by pixel below.
+    const char *fast=getenv("PROTON_GPU_FAST_COPY");fast_copy=fast && !strcmp(fast,"1");
+    fprintf(log,"gpu-display opened fast_copy=%d\n",fast_copy);
+    return 0;
+}
 int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pitch,FILE *log,const char *capture,bool bgra,
     int cursor_x,int cursor_y)
 {
     if(!pixels || !w || w>width || !h || h>height || pitch<w*4 || pitch>width*4)return EINVAL;
     if(handle<0) {
-        handle=sceVideoOutOpen(PS5_VIDEO_OUT_USER_SYSTEM,0,0,nullptr);
-        if(handle<0)return handle;
-        // PS5_Proton's PROTON_120HZ=1, for a title that declares high frame rate (param.json attribute3 0x40): the
-        // output is asked for 119.88 Hz as RADV's VideoOut asks (wsi_common_videoout.c, videoout_open_locked), and
-        // kept only if the vblanks then come within 12.5 ms; otherwise 59.94 Hz is restored. Without it the broker's
-        // display stayed at 59.94 Hz whatever the game asked, and three buffers flipped at each vblank held every
-        // present to 60 a second. First the rate this process finds, before it changes anything: 119.88 Hz that an
-        // earlier process left (a crash, or any end that skipped close()) is put back unless this one asks for it,
-        // so no later run inherits it unasked. About seven vblanks, once a display.
-        const char *high=getenv("PROTON_120HZ");const bool asked=high && !strcmp(high,"1");
-        const uint64_t found=vblank_period_ns(handle);
-        int restored=-1,supported=0,configured=-1;uint64_t period=0;
-        if(!asked && found && found<=12500000)
-            restored=sceVideoOutConfigureOutput(handle,PS5_VIDEO_OUT_MODE_RESTORE,nullptr,nullptr,nullptr);
-        if(asked) {
-            supported=sceVideoOutIsOutputSupported(handle,PS5_VIDEO_OUT_MODE_HIGH_FRAME_RATE,nullptr,nullptr,nullptr);
-            configured=supported>0 ? sceVideoOutConfigureOutput(handle,PS5_VIDEO_OUT_MODE_HIGH_FRAME_RATE,nullptr,nullptr,nullptr) : -1;
-            period=supported>0 && !configured ? vblank_period_ns(handle) : 0;
-            high_frame_rate=period && period<=12500000;
-            if(supported>0 && !configured && !high_frame_rate)
-                sceVideoOutConfigureOutput(handle,PS5_VIDEO_OUT_MODE_RESTORE,nullptr,nullptr,nullptr);
-        }
-        fprintf(log,"gpu-display rate found_us=%llu restored=%d asked_120hz=%d supported=%d configured=%d period_us=%llu "
-            "high_frame_rate=%d\n",(unsigned long long)found/1000,restored,asked,supported,configured,
-            (unsigned long long)period/1000,high_frame_rate);
-        int status=sceKernelAllocateDirectMemory(0,sceKernelGetDirectMemorySize(),memory_bytes,alignment,3,&physical);
-        if(!status)status=sceKernelMapDirectMemory(&mapped,memory_bytes,0x33,0,physical,alignment);
+        const int status=open(log);
         if(status)return status;
-        memset(mapped,0,memory_bytes);
-        uint8_t attribute[PS5_VIDEO_OUT_ATTRIBUTE_BYTES]{};
-        sceVideoOutSetBufferAttribute2(attribute,PS5_VIDEO_OUT_PIXEL_FORMAT_B8G8R8A8_SDR,PS5_VIDEO_OUT_TILING_64KB_R_X,width,height,0,0,0);
-        ps5_video_out_buffer buffers[buffer_count]{};
-        for(unsigned i=0;i<buffer_count;++i)buffers[i]={(uint8_t *)mapped+i*buffer_bytes,nullptr,{}};
-        status=sceVideoOutSetFlipRate(handle,0);
-        if(!status)status=sceVideoOutRegisterBuffers2(handle,0,0,buffers,buffer_count,attribute,0,nullptr);
-        if(status)return status;
-        registered=true;
-        // PS5_Proton's PROTON_GPU_FAST_COPY=1: an unscaled frame is copied a 64-byte line at a time with streaming
-        // stores (pw_display_copy.h); a scaled one, and every frame without it, pixel by pixel below.
-        const char *fast=getenv("PROTON_GPU_FAST_COPY");fast_copy=fast && !strcmp(fast,"1");
-        fprintf(log,"gpu-display opened fast_copy=%d\n",fast_copy);
     }
     if(!registered)return EBUSY;
     // Three buffers: the one written next was last on screen two flips ago, so it is free once the flip after it has
