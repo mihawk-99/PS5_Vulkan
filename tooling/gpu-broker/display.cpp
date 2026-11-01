@@ -123,6 +123,16 @@ int Ps5GpuDisplay::open(FILE *log)
     fprintf(log,"gpu-display opened fast_copy=%d\n",fast_copy);
     return 0;
 }
+// The see-through panel's cost (the blend, the blur and the bubbles), said every 120 composes (PS5_Proton rule 7: measured
+// before it ships): its mean and worst in microseconds
+static void composed(FILE *log,uint64_t ns)
+{
+    static unsigned count;static uint64_t sum,worst;
+    sum+=ns;if(ns>worst)worst=ns;
+    if(++count<120)return;
+    if(log)fprintf(log,"gpu-overlay compose n=%u avg_us=%.0f max_us=%.0f\n",count,double(sum)/count/1e3,double(worst)/1e3);
+    count=0,sum=0,worst=0;
+}
 int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pitch,FILE *log,const char *capture,bool bgra,
     int cursor_x,int cursor_y)
 {
@@ -171,7 +181,11 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
     };
     // clean: the frame without the panel, in cached memory (the shadow, or a capture's own picture)
     const auto decorate=[&](uint8_t *target,const uint8_t *clean) {
-        if(overlay && blur)pw_display_overlay_compose(target,clean,overlay,overlay_x,overlay_y,overlay_w,overlay_h,now_ns()/1e9,blur);
+        if(overlay && blur) {
+            const uint64_t start=now_ns();
+            pw_display_overlay_compose(target,clean,overlay,overlay_x,overlay_y,overlay_w,overlay_h,start/1e9,blur);
+            composed(log,now_ns()-start);
+        }
         else if(overlay)pw_display_overlay_blit(target,overlay,overlay_x,overlay_y,overlay_w,overlay_h);
         if(cursor_x>=0 && cursor_y>=0)draw_cursor(target,cursor_x,cursor_y);
     };
@@ -256,8 +270,11 @@ int Ps5GpuDisplay::reshow(FILE *log)
     }
     if(shadow)pw_display_stream_copy(buffer,shadow,frame_bytes);
     else for(size_t at=0;at<frame_bytes/16;++at)_mm_stream_si128((__m128i *)(void *)buffer+at,_mm_load_si128(last+at));
-    if(overlay && shadow && blur)
-        pw_display_overlay_compose(buffer,shadow,overlay,overlay_x,overlay_y,overlay_w,overlay_h,now_ns()/1e9,blur);
+    if(overlay && shadow && blur) {
+        const uint64_t start=now_ns();
+        pw_display_overlay_compose(buffer,shadow,overlay,overlay_x,overlay_y,overlay_w,overlay_h,start/1e9,blur);
+        composed(log,now_ns()-start);
+    }
     else if(overlay)pw_display_overlay_blit(buffer,overlay,overlay_x,overlay_y,overlay_w,overlay_h);
     if(last_cursor_x>=0 && last_cursor_y>=0)draw_cursor(buffer,last_cursor_x,last_cursor_y);
     _mm_sfence();
