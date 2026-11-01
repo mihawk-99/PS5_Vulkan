@@ -11,6 +11,7 @@
 
 extern "C" {
 #include "radv_ps5_platform.h"
+#include "staging.h"
 #include "protocol.h"
 #include "frame_page.h"
 #include "pw_window_scene.h"
@@ -435,9 +436,9 @@ int allocate(Client &c,PwGpuMessage &m,uint64_t &next_window,uint64_t &next_high
 // Asynchronous submission. The broker copies a client's stream into owner-private staging, appends its own
 // end-of-work packet writing a sequence number to an owner-private fence page, submits, and replies at once: the
 // client waits on its own marker, which the GPU's writes reach coherently (graphics-child-gpu-coherence-*). Every
-// client's work goes to the one GPU ring in submission order, so one fence orders it all. Staging, and the backing of
-// any buffer a client frees while work is in flight, are released only once the fence has passed the last
-// submission that could use them.
+// client's work goes to the one GPU ring in submission order, so one fence orders it all. A submission's staging is
+// kept as a spare once the fence has passed it and taken again by a later one (staging.h); the backing of any buffer a
+// client frees while work is in flight is released only once the fence has passed the last submission that could use it.
 struct Inflight { uint32_t seq;radv_ps5_memory staging; };
 struct Deferred { Buffer buffer;uint32_t seq; };
 struct Fences {
@@ -446,6 +447,7 @@ struct Fences {
     static constexpr unsigned kRing=512,kDeferred=1024;
     Inflight ring[kRing]{};unsigned head=0,count=0;
     Deferred deferred[kDeferred]{};unsigned deferred_count=0;
+    ps5_gpu_staging staging{};
     // The GPU state every client shares, as last set: changing it waits for all work in flight.
     uint64_t tess=0;uint32_t tess_bytes=0,granularity=0,buffering=0;bool offchip=false;
     uint64_t drains=0,state_drains=0;
@@ -453,6 +455,14 @@ struct Fences {
     // replies are out, rather than by the platform's kick thread inside the round trip.
     bool kick=false;uint64_t kicks=0,kick_ns=0;
 } fences;
+static_assert(PS5_GPU_STAGING_SPARES>=Fences::kRing,"the spares' slots hold what the ring held; only the budget refuses");
+// Staging made, freed, taken again, and given back past the spares' budget (each a free during play); the bytes made and
+// not freed, and their peak. Across broker restarts, as dmem_host's.
+unsigned long long staging_allocs=0,staging_frees=0,staging_reuses=0,staging_refused=0,staging_held=0,staging_peak=0;
+void staging_free(radv_ps5_memory &memory)
+{
+    staging_held-=memory.bytes;++staging_frees;radv_ps5_memory_free(&memory);
+}
 int broker_submit(void *words,uint32_t count)
 {
     radv_ps5_cpu_flush(words,size_t(count)*4);
@@ -481,8 +491,11 @@ void reap()
     if(!fences.page.cpu)return;
     const uint32_t now=completed();
     while(fences.count && done(fences.ring[fences.head].seq,now)) {
-        Phase phase("reap-free");
-        radv_ps5_memory_free(&fences.ring[fences.head].staging);
+        // A spare for a later submission, which takes it with no kernel call; freed past the spares' budget (staging.h).
+        if(!ps5_gpu_staging_give(&fences.staging,fences.ring[fences.head].staging)) {
+            Phase phase("reap-free");
+            staging_free(fences.ring[fences.head].staging);++staging_refused;
+        }
         fences.ring[fences.head]=Inflight{};fences.head=(fences.head+1)%Fences::kRing;--fences.count;
     }
     for(unsigned i=0;i<fences.deferred_count;)
@@ -503,9 +516,11 @@ bool drain(uint64_t timeout_ns)
 }
 // Held only to publish or take back the fence page, never across a wait: ps5_gpu_broker_health reads the page under it.
 pthread_mutex_t fence_page_lock=PTHREAD_MUTEX_INITIALIZER;
-// After a drain: the fence page goes back, and the state is as at start. In place, as Fences is about 100 KiB.
+// After a drain: the spare staging and the fence page go back, and the state is as at start. In place, as Fences is
+// about 140 KiB.
 void fences_reset()
 {
+    while(fences.staging.count)staging_free(fences.staging.spare[--fences.staging.count]);
     pthread_mutex_lock(&fence_page_lock);
     radv_ps5_memory page=fences.page;
     fences.~Fences();new (&fences) Fences();
@@ -552,9 +567,11 @@ int submit(Client &c,const PwGpuMessage &m,FILE *out,unsigned client)
     }
     const uint64_t t1=radv_ps5_now_ns();c.time_wait+=t1-t0;
     radv_ps5_memory staging{};
-    {
+    if(ps5_gpu_staging_take(&fences.staging,m.bytes+32,&staging))++staging_reuses;
+    else {
         Phase phase("stage-alloc");
-        if(!radv_ps5_memory_alloc(m.bytes+32,16384,false,&staging))return ENOMEM;
+        if(!radv_ps5_memory_alloc(ps5_gpu_staging_round(m.bytes+32),16384,false,&staging))return ENOMEM;
+        ++staging_allocs;staging_held+=staging.bytes;if(staging_held>staging_peak)staging_peak=staging_held;
     }
     {
         // The client's command words, in memory it shares with this process.
@@ -576,7 +593,10 @@ int submit(Client &c,const PwGpuMessage &m,FILE *out,unsigned client)
         // An error cannot prove that nothing reached the hardware: the staging stays, and nothing else is freed.
         if(status) { give_up(out,refused ? "test_submit_failure" : "vulkan_submit_error");return EIO; }
     }
-    if(status) { radv_ps5_memory_free(&staging);return status; }
+    if(status) {   // never submitted: a spare again, or freed past the budget
+        if(!ps5_gpu_staging_give(&fences.staging,staging)) { Phase freeing("stage-free");staging_free(staging);++staging_refused; }
+        return status;
+    }
     fences.ring[(fences.head+fences.count++)%Fences::kRing]=Inflight{seq,staging};
     c.time_submit+=radv_ps5_now_ns()-t2;++c.submissions;++c.waits;
     const bool final=true;
@@ -1214,6 +1234,9 @@ bool ps5_gpu_broker_stop()
         (unsigned long long)fences.kick_ns/1000,wedged);
     // Wedged, the fence page, staging and the reserved ranges (with whatever is mapped in them) stay as they are.
     if(!wedged) { fences_reset();host_ranges_release(b.log); }
+    // Made and freed equal after a clean stop; reuses near the submissions while allocations stay few.
+    fprintf(b.log,"gpu-broker staging allocs=%llu frees=%llu reuses=%llu refused=%llu peak_bytes=%llu held_bytes=%llu\n",
+        staging_allocs,staging_frees,staging_reuses,staging_refused,staging_peak,staging_held);
     if(dmem_alloc)fprintf(b.log,"gpu-broker dmem_host made=%llu freed=%llu refused=%llu free_failed=%llu made_bytes=%llu\n",dmem_made,dmem_freed,dmem_refused,dmem_free_failed,dmem_bytes_made);
     if(b.compositing) {
         pthread_mutex_lock(&b.display_lock);b.compositor_stop=true;pthread_mutex_unlock(&b.display_lock);
