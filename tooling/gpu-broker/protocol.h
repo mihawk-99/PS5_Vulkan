@@ -31,7 +31,12 @@
 #define PW_GPU_RESERVE_FIXED 0x10
 #define PW_GPU_RESERVE_NO_OVERWRITE 0x80
 enum { PW_GPU_INIT=1, PW_GPU_ALLOC, PW_GPU_FREE, PW_GPU_SUBMIT,
-       PW_GPU_TESS, PW_GPU_OFFCHIP, PW_GPU_DONE, PW_GPU_IMAGE, PW_GPU_PRESENT, PW_GPU_SWAPCHAIN, PW_GPU_WINDOW_SWAPCHAIN };
+       PW_GPU_TESS, PW_GPU_OFFCHIP, PW_GPU_DONE, PW_GPU_IMAGE, PW_GPU_PRESENT, PW_GPU_SWAPCHAIN, PW_GPU_WINDOW_SWAPCHAIN,
+       PW_GPU_TIMING };
+/* PW_GPU_TIMING: the client's share of its frames' time since its last one (PS5_Proton's src/pw_gpu_timing.h), sent
+ * about once a second: argument[0] presents, [1] nanoseconds waiting for their fences, [2] flushing their frames,
+ * [3] in their round trips; bytes its submissions and address their round trips' nanoseconds. Sums only: the owner
+ * adds them to the client's report. */
 typedef struct PwGpuMessage {
     uint32_t magic, operation, sequence; int32_t status;
     uint64_t address, bytes, argument[4];

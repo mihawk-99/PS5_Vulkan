@@ -1,0 +1,21 @@
+--- a/src/vulkan/wsi/wsi_common_videoout.c
++++ b/src/vulkan/wsi/wsi_common_videoout.c
+@@ -23,6 +23,8 @@
+ extern int wsi_videoout_set_flip_rate(int);
+ extern int ps5_gpu_client_swapchain(const void *,unsigned,unsigned,unsigned,unsigned);
+ extern int ps5_gpu_client_window_swapchain(const void *,unsigned,unsigned,unsigned,unsigned,uint32_t,uint64_t);
++/* The time each present waited for its frame's fence (the owner's frame-time split, PS5_Proton's src/pw_gpu_timing.h). */
++extern void ps5_gpu_client_present_waited(uint64_t);
+ /* Wine binds the actual HWND lifetime to this native surface. Standalone
+  * display surfaces remain unbound and retain their normal presentation path. */
+ struct broker_surface {
+@@ -404,7 +406,9 @@
+ {
+    struct broker_chain *c=(void *)b;
+    /* The GPU-to-buffer blit and application's semaphore waits precede this fence. */
++   const uint64_t waiting=os_time_get_nano();
+    VkResult result=b->wsi->WaitForFences(b->device,1,&b->fences[i],true,5000000000ull);
++   ps5_gpu_client_present_waited(os_time_get_nano()-waiting);
+    if(result!=VK_SUCCESS)return result;
+    struct wsi_image *image=&c->images[i];
+    const unsigned width=b->image_info.create.extent.width,height=b->image_info.create.extent.height;

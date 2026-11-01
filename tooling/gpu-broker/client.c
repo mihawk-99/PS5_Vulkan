@@ -218,13 +218,42 @@ int ps5_gpu_client_present(const void *pixels,unsigned width,unsigned height,uns
                          .argument={width,height,pitch,cycle}};
     return rpc(&message,NULL);
 }
+/* The client's share of its frames' time (PS5_Proton's src/pw_gpu_timing.h), sent to the owner about once a second
+ * (PW_GPU_TIMING): the WSI's waits for its frames' fences (ps5_gpu_client_present_waited), the frames' cache flushes
+ * and the presents' round trips, and the submissions' round trips (submit_ns, submit_count). */
+static uint64_t submit_ns,submit_count;   /* every submission's round trip, and how many (radv_ps5_submit) */
+static uint64_t timing_presents,timing_fence_ns,timing_flush_ns,timing_present_ns,timing_sent_ns,timing_submit_ns,timing_submits;
+void ps5_gpu_client_present_waited(uint64_t ns) { __atomic_add_fetch(&timing_fence_ns,ns,__ATOMIC_RELAXED); }
+static int present_timed(PwGpuMessage *message,const void *pixels,size_t bytes)
+{
+    const uint64_t start=radv_ps5_now_ns();
+    radv_ps5_cpu_flush(pixels,bytes);
+    const uint64_t flushed=radv_ps5_now_ns();
+    const int status=rpc(message,NULL);
+    const uint64_t end=radv_ps5_now_ns();
+    __atomic_add_fetch(&timing_presents,1,__ATOMIC_RELAXED);__atomic_add_fetch(&timing_flush_ns,flushed-start,__ATOMIC_RELAXED);
+    __atomic_add_fetch(&timing_present_ns,end-flushed,__ATOMIC_RELAXED);
+    uint64_t sent=__atomic_load_n(&timing_sent_ns,__ATOMIC_RELAXED);
+    if(end-sent>=1000000000ull && __atomic_compare_exchange_n(&timing_sent_ns,&sent,end,false,__ATOMIC_RELAXED,__ATOMIC_RELAXED)) {
+        const uint64_t submit=__atomic_load_n(&submit_ns,__ATOMIC_RELAXED),submits=__atomic_load_n(&submit_count,__ATOMIC_RELAXED);
+        const uint64_t submit_before=__atomic_exchange_n(&timing_submit_ns,submit,__ATOMIC_RELAXED);
+        const uint64_t submits_before=__atomic_exchange_n(&timing_submits,submits,__ATOMIC_RELAXED);
+        PwGpuMessage timing={.operation=PW_GPU_TIMING,.address=submit-submit_before,.bytes=submits-submits_before,
+                            .argument={__atomic_exchange_n(&timing_presents,0,__ATOMIC_RELAXED),
+                                       __atomic_exchange_n(&timing_fence_ns,0,__ATOMIC_RELAXED),
+                                       __atomic_exchange_n(&timing_flush_ns,0,__ATOMIC_RELAXED),
+                                       __atomic_exchange_n(&timing_present_ns,0,__ATOMIC_RELAXED)}};
+        /* Its status is not the present's: an owner without the operation refuses it, and nothing is lost but the line. */
+        (void)rpc(&timing,NULL);
+    }
+    return status;
+}
 int ps5_gpu_client_swapchain(const void *pixels,unsigned width,unsigned height,unsigned pitch,unsigned bgra)
 {
     if(!width || width>1920 || !height || height>1080 || pitch<width*4 || pitch>1920*4 || bgra>1)return EINVAL;
-    radv_ps5_cpu_flush(pixels,(size_t)pitch*height);
     PwGpuMessage message={.operation=PW_GPU_SWAPCHAIN,.address=(uint64_t)pixels,.bytes=(uint64_t)pitch*height,
                          .argument={width,height,pitch,bgra}};
-    return rpc(&message,NULL);
+    return present_timed(&message,pixels,(size_t)pitch*height);
 }
 int ps5_gpu_client_window_swapchain(const void *pixels,unsigned width,unsigned height,unsigned stride,unsigned bgra,
                                   uint32_t hwnd,uint64_t generation)
@@ -233,8 +262,7 @@ int ps5_gpu_client_window_swapchain(const void *pixels,unsigned width,unsigned h
                          .argument={(uint64_t)width|((uint64_t)height<<32),
                                     (uint64_t)stride|((uint64_t)hwnd<<32),generation,bgra}};
     if(!pw_gpu_window_image(&message))return EINVAL;
-    radv_ps5_cpu_flush(pixels,(size_t)stride*height);
-    return rpc(&message,NULL);
+    return present_timed(&message,pixels,(size_t)stride*height);
 }
 int ps5_gpu_client_done(int result,uint64_t images,uint64_t hash)
 {
@@ -361,7 +389,7 @@ void radv_ps5_memory_free(struct radv_ps5_memory *memory)
     else __atomic_sub_fetch(&allocated,memory->bytes,__ATOMIC_RELAXED);
     memset(memory,0,sizeof(*memory));
 }
-static uint64_t submit_ns,submit_count,reply_transit_ns;
+static uint64_t reply_transit_ns;
 /* The round trips radv_ps5_submit has made and the time they took: what submission costs this process. */
 void ps5_gpu_client_submit_stats(uint64_t *ns,uint64_t *count)
 {

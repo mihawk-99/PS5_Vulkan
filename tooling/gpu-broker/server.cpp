@@ -17,6 +17,7 @@ extern "C" {
 #include "pw_window_scene.h"
 #include "pw_window_effects.h"
 #include "pw_frame_pacing.h"
+#include "pw_gpu_timing.h"
 #include "pw_window_direct.h"
 #include "packet_io.h"
 #include <ps5platform/kernel.h>
@@ -43,6 +44,10 @@ namespace {
 // errors, the first frames, closes): each line is written straight to the console's disk, and when every operation
 // was logged and flushed, a submission's round trip took 160-197 ms.
 const bool trace=[] { const char *v=getenv("PROTON_GPU_TRACE");return v && !strcmp(v,"1"); }();
+// PROTON_GPU_TIMESTAMPS=1 (read at start): every submission is wrapped in two GPU timestamps, and each client's
+// "gpu-split" line says how long the GPU worked on its frames (src/pw_gpu_timing.h). The clock's rate, measured.
+bool gpu_timestamps=false;
+PwGpuClock gpu_clock{};
 // Waits for a message on one client's socket: 1 if one is there, 0 if not yet, -1 at the socket's end. A message is
 // looked for by peeking: continuously until spin_until (the broker has just served this client, which is likely to ask
 // again at once), then after a short poll that bounds the wait when idle. Adopted while poll was suspected of missing
@@ -190,6 +195,8 @@ struct Client {
     // Game mode (src/pw_window_direct.h): its window frames shown directly or composed in the current pacing window,
     // and why the last composed one could not go directly.
     uint64_t direct_frames=0,composed_frames=0;int direct_reason=-1;
+    // Where its frames' time went over the same window (src/pw_gpu_timing.h); the submission totals at its start.
+    PwGpuTiming timing{};uint64_t timing_submit_ns=0;unsigned timing_submissions=0;
     int cookie=0;
     const char *allocation_stage="none";
     bool ended=false,offchip=false,done=false,passed=false,serving=false;
@@ -217,6 +224,16 @@ void pacing_report(FILE *log,Client &c,uint64_t now,bool final)
         c.cookie,c.pid,c.route,final,(unsigned long long)c.direct_frames,(unsigned long long)c.composed_frames,
         c.direct_reason<0 ? "none" : pw_window_direct_reason(c.direct_reason),fields);
     c.direct_frames=c.composed_frames=0;c.direct_reason=-1;
+    if(log)fputs(line,log);
+    fputs(line,stderr);
+    // The same window's split: the GPU's work, the presents' parts, the submissions' handling.
+    const uint64_t submit_ns=c.time_wait+c.time_stage+c.time_submit;
+    c.timing.broker_submit_ns=submit_ns-c.timing_submit_ns;c.timing_submit_ns=submit_ns;
+    c.timing.submissions=c.submissions-c.timing_submissions;c.timing_submissions=c.submissions;
+    pw_gpu_timing_format(&c.timing,c.pacing.frames,now>c.pacing.window_ns ? now-c.pacing.window_ns : 0,c.pacing.present_ns,
+                         pw_gpu_clock_rate(&gpu_clock),fields,sizeof(fields));
+    snprintf(line,sizeof(line),"gpu-split cookie=%d pid=%d %s\n",c.cookie,c.pid,fields);
+    c.timing=PwGpuTiming{};
     if(log)fputs(line,log);
     fputs(line,stderr);
     pw_frame_pacing_next(&c.pacing,now);
@@ -439,7 +456,7 @@ int allocate(Client &c,PwGpuMessage &m,uint64_t &next_window,uint64_t &next_high
 // client's work goes to the one GPU ring in submission order, so one fence orders it all. A submission's staging is
 // kept as a spare once the fence has passed it and taken again by a later one (staging.h); the backing of any buffer a
 // client frees while work is in flight is released only once the fence has passed the last submission that could use it.
-struct Inflight { uint32_t seq;radv_ps5_memory staging; };
+struct Inflight { uint32_t seq;radv_ps5_memory staging;Client *client=nullptr; };
 struct Deferred { Buffer buffer;uint32_t seq; };
 struct Fences {
     radv_ps5_memory page{};
@@ -454,6 +471,9 @@ struct Fences {
     // The suspend point that starts a submission promptly (ps5platform/agc.h), made by the broker's own thread once its
     // replies are out, rather than by the platform's kick thread inside the round trip.
     bool kick=false;uint64_t kicks=0,kick_ns=0;
+    // With PROTON_GPU_TIMESTAMPS: each ring slot's GPU clock at its submission's start and end (src/pw_gpu_timing.h),
+    // and the newest end read back, so overlapping submissions are not counted twice.
+    radv_ps5_memory stamps{};uint64_t stamp_last_end=0;
 } fences;
 static_assert(PS5_GPU_STAGING_SPARES>=Fences::kRing,"the spares' slots hold what the ring held; only the budget refuses");
 // Staging made, freed, taken again, and given back past the spares' budget (each a free during play); the bytes made and
@@ -485,12 +505,23 @@ uint32_t completed()
     auto *value=(volatile uint32_t *)fences.page.cpu;
     radv_ps5_cpu_flush((const void *)value,4);return *value;
 }
+// A completed submission's timestamps (ring slot `slot`): the GPU's busy time goes to its client.
+void stamped(unsigned slot,Client *client)
+{
+    auto *at=(volatile uint64_t *)((uint8_t *)fences.stamps.cpu+size_t(slot)*PW_GPU_TS_SLOT_BYTES);
+    radv_ps5_cpu_flush((const void *)at,PW_GPU_TS_SLOT_BYTES);
+    const uint64_t start=at[0],end=at[1];
+    const uint64_t busy=pw_gpu_busy(&fences.stamp_last_end,start,end);
+    if(start && end)pw_gpu_clock_note(&gpu_clock,radv_ps5_now_ns(),end);
+    if(client)client->timing.gpu_ticks+=busy;
+}
 // Releases whatever the fence has passed.
 void reap()
 {
     if(!fences.page.cpu)return;
     const uint32_t now=completed();
     while(fences.count && done(fences.ring[fences.head].seq,now)) {
+        if(fences.stamps.cpu)stamped(fences.head,fences.ring[fences.head].client);
         // A spare for a later submission, which takes it with no kernel call; freed past the spares' budget (staging.h).
         if(!ps5_gpu_staging_give(&fences.staging,fences.ring[fences.head].staging)) {
             Phase phase("reap-free");
@@ -522,10 +553,11 @@ void fences_reset()
 {
     while(fences.staging.count)staging_free(fences.staging.spare[--fences.staging.count]);
     pthread_mutex_lock(&fence_page_lock);
-    radv_ps5_memory page=fences.page;
+    radv_ps5_memory page=fences.page,stamps=fences.stamps;
     fences.~Fences();new (&fences) Fences();
     pthread_mutex_unlock(&fence_page_lock);
     if(page.cpu)radv_ps5_memory_free(&page);
+    if(stamps.cpu)radv_ps5_memory_free(&stamps);
 }
 bool fences_ready(FILE *out)
 {
@@ -535,6 +567,13 @@ bool fences_ready(FILE *out)
     *(volatile uint32_t *)page.cpu=fences.issued;radv_ps5_cpu_flush(page.cpu,64);
     pthread_mutex_lock(&fence_page_lock);fences.page=page;pthread_mutex_unlock(&fence_page_lock);
     fprintf(out,"gpu-broker fences address=%#llx\n",(unsigned long long)(uint64_t)fences.page.cpu);
+    // Without its page, no submission is stamped and the split's GPU fields stay 0.
+    static_assert(Fences::kRing*PW_GPU_TS_SLOT_BYTES<=16384,"a slot per ring entry");
+    if(gpu_timestamps) {
+        const bool made=radv_ps5_memory_alloc(16384,16384,false,&fences.stamps);
+        fprintf(out,"gpu-broker timestamps=%d address=%#llx\n",made,(unsigned long long)(uint64_t)fences.stamps.cpu);
+        if(!made)fences.stamps=radv_ps5_memory{};
+    }
     return true;
 }
 // A buffer the client let go of: released now if no work is in flight, otherwise once the fence passes the last
@@ -566,20 +605,29 @@ int submit(Client &c,const PwGpuMessage &m,FILE *out,unsigned client)
         if(!drain(5000000000ull))return give_up(out,"vulkan_state_drain_stalled"),EIO;
     }
     const uint64_t t1=radv_ps5_now_ns();c.time_wait+=t1-t0;
+    // Timestamps: one before the client's words and one after them, into this submission's ring slot.
+    const unsigned slot=(fences.head+fences.count)%Fences::kRing;
+    const uint64_t before=fences.stamps.cpu ? 4*PW_GPU_TS_START_WORDS : 0,after=fences.stamps.cpu ? 4*PW_GPU_TS_END_WORDS : 0;
     radv_ps5_memory staging{};
-    if(ps5_gpu_staging_take(&fences.staging,m.bytes+32,&staging))++staging_reuses;
+    if(ps5_gpu_staging_take(&fences.staging,before+m.bytes+after+32,&staging))++staging_reuses;
     else {
         Phase phase("stage-alloc");
-        if(!radv_ps5_memory_alloc(ps5_gpu_staging_round(m.bytes+32),16384,false,&staging))return ENOMEM;
+        if(!radv_ps5_memory_alloc(ps5_gpu_staging_round(before+m.bytes+after+32),16384,false,&staging))return ENOMEM;
         ++staging_allocs;staging_held+=staging.bytes;if(staging_held>staging_peak)staging_peak=staging_held;
     }
     {
         // The client's command words, in memory it shares with this process.
         Phase phase("copy");
-        memcpy(staging.cpu,(void *)m.address,m.bytes);
+        memcpy((uint8_t *)staging.cpu+before,(void *)m.address,m.bytes);
+    }
+    if(fences.stamps.cpu) {
+        auto *at=(uint8_t *)fences.stamps.cpu+size_t(slot)*PW_GPU_TS_SLOT_BYTES;
+        memset(at,0,PW_GPU_TS_SLOT_BYTES);radv_ps5_cpu_flush(at,PW_GPU_TS_SLOT_BYTES);
+        pw_gpu_ts_start((uint32_t *)staging.cpu,uint64_t(at));
+        pw_gpu_ts_end((uint32_t *)((uint8_t *)staging.cpu+before+m.bytes),uint64_t(at)+8);
     }
     uint32_t seq=__atomic_add_fetch(&fences.issued,1,__ATOMIC_RELAXED);if(!seq)seq=__atomic_add_fetch(&fences.issued,1,__ATOMIC_RELAXED);
-    ps5_gpu_completion_packet((uint32_t *)((uint8_t *)staging.cpu+m.bytes),(uint64_t)fences.page.cpu,seq);
+    ps5_gpu_completion_packet((uint32_t *)((uint8_t *)staging.cpu+before+m.bytes+after),(uint64_t)fences.page.cpu,seq);
     const uint64_t t2=radv_ps5_now_ns();c.time_stage+=t2-t1;
     int status=0;
     Phase phase("submit");
@@ -589,7 +637,7 @@ int submit(Client &c,const PwGpuMessage &m,FILE *out,unsigned client)
     }
     if(!status) {
         const bool refused=test_fail_submit && ++test_submissions>test_fail_submit;
-        status=refused ? EIO : broker_submit(staging.cpu,(uint32_t)(m.bytes/4)+8);
+        status=refused ? EIO : broker_submit(staging.cpu,(uint32_t)((before+m.bytes+after)/4)+8);
         // An error cannot prove that nothing reached the hardware: the staging stays, and nothing else is freed.
         if(status) { give_up(out,refused ? "test_submit_failure" : "vulkan_submit_error");return EIO; }
     }
@@ -597,7 +645,7 @@ int submit(Client &c,const PwGpuMessage &m,FILE *out,unsigned client)
         if(!ps5_gpu_staging_give(&fences.staging,staging)) { Phase freeing("stage-free");staging_free(staging);++staging_refused; }
         return status;
     }
-    fences.ring[(fences.head+fences.count++)%Fences::kRing]=Inflight{seq,staging};
+    fences.ring[(fences.head+fences.count++)%Fences::kRing]=Inflight{seq,staging,&c};
     c.time_submit+=radv_ps5_now_ns()-t2;++c.submissions;++c.waits;
     const bool final=true;
     // Tracing only: a line per submission, flushed to disk, cost 90-190 ms each (graphics-child-gpu-sync-timing-03).
@@ -856,6 +904,9 @@ void *client_main(void *argument)
                 break;
             case PW_GPU_TESS:
                 if(m.bytes<=UINT32_MAX && owned(c,m.address,m.bytes)) { c.tess=m.address;c.tess_bytes=(uint32_t)m.bytes;m.status=0; }break;
+            case PW_GPU_TIMING:   // the client's share of its frames' time, sums only (protocol.h)
+                c.timing.client_presents+=m.argument[0];c.timing.fence_ns+=m.argument[1];c.timing.flush_ns+=m.argument[2];
+                c.timing.present_rpc_ns+=m.argument[3];c.timing.submit_rpc_ns+=m.address;m.status=0;break;
             case PW_GPU_OFFCHIP:
                 if(m.argument[0]<=3 && m.argument[1]<=511) {
                     c.granularity=(uint32_t)m.argument[0];c.buffering=(uint32_t)m.argument[1];c.offchip=true;m.status=0;
@@ -873,6 +924,7 @@ void *client_main(void *argument)
                     const uint64_t begin=radv_ps5_now_ns();
                     pthread_mutex_unlock(&b.lock);
                     pthread_mutex_lock(&b.display_lock);
+                    const uint64_t flips_before=b.display.flips;
                     PwWindowSnapshot snapshot{};
                     m.status=desktop_windows(&snapshot,sizeof(snapshot)) ? errno : 0;
                     const int verdict=m.status ? -1 : pw_window_direct_flip(&snapshot,c.pid,hwnd,m.argument[2],width,height,1920,1080);
@@ -929,9 +981,10 @@ void *client_main(void *argument)
                         m.status=show_windows(b,snapshot,cx,cy);
                     }
                     if(!m.status && behind)b.window_dirty=true;
-                    const uint64_t end=radv_ps5_now_ns();
+                    const uint64_t end=radv_ps5_now_ns(),copied=b.display.flips!=flips_before ? b.display.last_copy_ns : 0;
                     pthread_mutex_unlock(&b.display_lock);
                     pthread_mutex_lock(&b.lock);
+                    c.timing.copy_ns+=copied;
                     if(!m.status) {
                         ++c.presentations;
                         if(behind)pw_frame_pacing_hidden(&c.pacing);
@@ -975,10 +1028,11 @@ void *client_main(void *argument)
                             (unsigned)m.argument[2],b.log,picture.empty() ? nullptr : picture.c_str(),m.argument[3]!=0,
                             cursor_x,cursor_y);
                     } else m.status=0;
-                    const uint64_t end=radv_ps5_now_ns();
+                    const uint64_t end=radv_ps5_now_ns(),copied=shown && !m.status ? b.display.last_copy_ns : 0;
                     pthread_mutex_unlock(&b.display_lock);
                     if(!shown)sceKernelUsleep(16000);
                     pthread_mutex_lock(&b.lock);
+                    c.timing.copy_ns+=copied;
                     if(!m.status)++c.presentations;
                     if(!m.status) {
                         c.route="direct";
@@ -1201,9 +1255,12 @@ bool ps5_gpu_broker_start(const char *directory,bool capture,bool local,bool (*i
     {
         const char *every=getenv("PROTON_GPU_CAPTURE_EVERY");
         b.capture_every=every ? (unsigned)strtoul(every,nullptr,10) : 0;
+        const char *stamps=getenv("PROTON_GPU_TIMESTAMPS");
+        gpu_timestamps=stamps && !strcmp(stamps,"1");gpu_clock=PwGpuClock{};
     }
     host_ranges_reserve(b.log);
-    fprintf(b.log,"gpu-wine broker test_fail_submit=%u capture_every=%u test_hold_s=%u\n",test_fail_submit,b.capture_every,test_hold_s);
+    fprintf(b.log,"gpu-wine broker test_fail_submit=%u capture_every=%u test_hold_s=%u timestamps=%d\n",test_fail_submit,
+        b.capture_every,test_hold_s,gpu_timestamps);
     fprintf(b.log,"gpu-wine broker local_memory=%d local_offer=%llu local_floor=%llu host_limit=%llu\n",local,
         (unsigned long long)(local ? local_offer() : 0),(unsigned long long)kLocalFloor,(unsigned long long)host_limit);
     b.holder=b.holder_pid=0;b.switches=b.hidden=0;b.compositor_stop=false;
