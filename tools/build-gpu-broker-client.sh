@@ -14,7 +14,7 @@ draw_flags=()
 [[ ${4:-0} == 1 ]] && draw_flags=(-DPS5_GPU_DRAW)
 wsi=${3:-1}
 mesa_fork=${PS5_MESA_FORK:-$radv/../PS5_Mesa}
-overlay_revision=d62271ca8006042ad675f8f9b14841e85bba7ecb
+overlay_revision=2a53a8e29f20606ede9155ed5f31b6249d63e23c
 install=$radv/.deps/native/radv-release
 original=$install/lib/libvulkan_radeon.ps5.a
 revision=1ba9874f478657ccf6da72ce55f0260164cc0bd0
@@ -47,6 +47,9 @@ patch --batch -p1 -d "$out/source" < "$out/patches/client-budget-winsys.patch"
 git -C "$mesa_fork" show "$overlay_revision:ps5/broker/client-identity-winsys.patch" > "$out/patches/client-identity-winsys.patch"
 patch --batch -p1 -d "$out/source" < "$out/patches/client-identity-winsys.patch"
 cp "$root/tooling/gpu-broker/pw_gpu_identity.h" "$out/source/src/amd/vulkan/winsys/ps5/"   # PS5_Proton's, beside the winsys
+# Host memory the GPU reaches, for a client in the owner's process only (Direct3D 12's existing heaps).
+git -C "$mesa_fork" show "$overlay_revision:ps5/broker/client-host-memory-winsys.patch" > "$out/patches/client-host-memory-winsys.patch"
+patch --batch -p1 -d "$out/source" < "$out/patches/client-host-memory-winsys.patch"
 # Reuse Mesa's generated header/include flags. Strip every output/dependency
 # option before compilation, so the sibling build remains read-only.
 python3 - "$radv" "$out" <<'PY'
@@ -116,7 +119,7 @@ root,radv,sdk,out=map(Path,sys.argv[1:5]);digest=lambda p:hashlib.sha256(p.read_
 files=[p for p in (root/'tooling/gpu-broker').glob('*') if p.is_file()]
 manifest={'wsi':sys.argv[5]=='1','sha256':digest(out/'client.a'),
  'mesa_base_revision':'1ba9874f478657ccf6da72ce55f0260164cc0bd0',
- 'mesa_overlay_revision':'d62271ca8006042ad675f8f9b14841e85bba7ecb',
+ 'mesa_overlay_revision':'2a53a8e29f20606ede9155ed5f31b6249d63e23c',
  'sdk_revision':(sdk/'.ps5-sdk-revision').read_text().strip(),
  'recipe_sha256':digest(radv/'tools/radv-link.sh'),
  'build_script_sha256':digest(root/'tools/build-gpu-broker-client.sh'),

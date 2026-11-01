@@ -501,10 +501,21 @@ int radv_ps5_set_hs_offchip_param(uint32_t granularity,uint32_t buffering)
 {
     PwGpuMessage message={.operation=PW_GPU_OFFCHIP,.argument={granularity,buffering}};return rpc(&message,NULL);
 }
-/* These features are disabled in the experimental winsys overlay. */
+/* Disabled in the experimental winsys overlay. */
 bool radv_ps5_memory_alloc_replayable(uint64_t b,uint64_t a,bool w,uint64_t v,struct radv_ps5_memory *m)
 { (void)b;(void)a;(void)w;(void)v;(void)m;return false; }
-bool radv_ps5_memory_grant_gpu(void *a,uint64_t b) { (void)a;(void)b;return false; }
+/* The application's host memory (VK_EXT_external_memory_host): the GPU runs in the owner's address space, so only a
+ * client in the owner's own process (a Windows program run inside the title) has memory the GPU can reach. */
+bool ps5_gpu_client_host_memory(void) { return __atomic_load_n(&in_owner,__ATOMIC_ACQUIRE); }
+/* Given GPU access where the CPU keeps read and write, as the owner's own platform does, over whole pages. The
+ * application keeps the memory mapped while the GPU uses it; PS5_Proton's Wine keeps that access through the program's
+ * later protection changes and takes it away before the memory is freed (its wine/ps5/pw_wine_gpu_keep.h). */
+bool radv_ps5_memory_grant_gpu(void *a,uint64_t b)
+{
+    if(!ps5_gpu_client_host_memory() || !b || ((uintptr_t)a&16383) || (b&16383))return false;
+    return !sceKernelMprotect(a,b,PS5_KERNEL_PROT_CPU_READ|PS5_KERNEL_PROT_CPU_WRITE|PS5_KERNEL_PROT_GPU_READ|
+                              PS5_KERNEL_PROT_GPU_WRITE);
+}
 /* A placed mapping (VK_EXT_map_memory_placed): the same memory mapped again for the CPU at the address the application
  * chose, over its reservation there; the GPU keeps the first mapping's address. Device-local memory has no CPU mapping
  * in this process, and so no source. */
