@@ -149,7 +149,7 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
     const uint64_t copy_start=now_ns();
     auto *buffer=(uint8_t *)mapped+back*buffer_bytes;
     // The frame into a tiled buffer, the pointer over it: the display's buffer, and a capture's own copy below.
-    const auto fill=[&](uint8_t *target) {
+    const auto frame=[&](uint8_t *target) {
         if(fast_copy && w==width && h==height)pw_display_copy_lines(target,(const uint8_t *)pixels,pitch,bgra);
         else {
         // Scaling, nearest neighbour, as tables; then each tile in memory order, flushed as it is finished.
@@ -168,10 +168,17 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
             for(size_t at=0;at<65536;at+=64)__asm__ volatile("clflushopt (%0)"::"r"((uint8_t *)tile+at):"memory");
         }
         }
+    };
+    const auto decorate=[&](uint8_t *target) {
         if(overlay)pw_display_overlay_blit(target,overlay,overlay_x,overlay_y,overlay_w,overlay_h);
         if(cursor_x>=0 && cursor_y>=0)draw_cursor(target,cursor_x,cursor_y);
     };
-    fill(buffer);
+    const auto fill=[&](uint8_t *target) { frame(target);decorate(target); };
+    last_cursor_x=cursor_x,last_cursor_y=cursor_y;
+    if(overlay && shadow) {   // the frame kept for the panel's re-shows, then streamed out with the panel over it
+        frame(shadow);shadow_valid=true;
+        pw_display_stream_copy(buffer,shadow,frame_bytes);decorate(buffer);
+    } else fill(buffer);
     __asm__ volatile("sfence":::"memory");
     last_copy_ns=now_ns()-copy_start;
     // A capture (a probe's or a pad script's): the same frame filled again into memory of its own and written by the
@@ -237,11 +244,18 @@ int Ps5GpuDisplay::reshow(FILE *log)
         if(status)return status;
         if(shown[PS5_VIDEO_OUT_FLIP_STATUS_SHOWN_ARGUMENT]+1<flips)return EBUSY;
     }
-    // The last frame, read back (slow: about 80 ms, only when the panel changed while no frame came) and streamed out
+    // The last frame from the shadow (cached; streamed out in a few ms). Without one, or before it holds a frame, the
+    // last frame is read back from the display (slow: 137 ms on a standard PS5), into the shadow when there is one.
     const auto *last=(const __m128i *)((const uint8_t *)mapped+((back+buffer_count-1)%buffer_count)*buffer_bytes);
     auto *buffer=(uint8_t *)mapped+back*buffer_bytes;
-    for(size_t at=0;at<frame_bytes/16;++at)_mm_stream_si128((__m128i *)(void *)buffer+at,_mm_load_si128(last+at));
+    if(shadow && !shadow_valid) {
+        for(size_t at=0;at<frame_bytes/16;++at)_mm_store_si128((__m128i *)(void *)shadow+at,_mm_load_si128(last+at));
+        shadow_valid=true;
+    }
+    if(shadow)pw_display_stream_copy(buffer,shadow,frame_bytes);
+    else for(size_t at=0;at<frame_bytes/16;++at)_mm_stream_si128((__m128i *)(void *)buffer+at,_mm_load_si128(last+at));
     if(overlay)pw_display_overlay_blit(buffer,overlay,overlay_x,overlay_y,overlay_w,overlay_h);
+    if(last_cursor_x>=0 && last_cursor_y>=0)draw_cursor(buffer,last_cursor_x,last_cursor_y);
     _mm_sfence();
     const uint64_t serial=__atomic_add_fetch(&flips,1,__ATOMIC_RELAXED);
     const int status=sceVideoOutSubmitFlip(handle,back,PS5_VIDEO_OUT_FLIP_VSYNC,serial);
@@ -250,10 +264,16 @@ int Ps5GpuDisplay::reshow(FILE *log)
     back=(back+1)%buffer_count;
     return status;
 }
+void Ps5GpuDisplay::keep_shadow(bool on)
+{
+    if(on && !shadow)shadow=(uint8_t *)aligned_alloc(64,frame_bytes),shadow_valid=false;
+    else if(!on)free(shadow),shadow=nullptr,shadow_valid=false;
+}
 bool Ps5GpuDisplay::close(FILE *log)
 {
     pw_display_capture_drain(&captures);   // every picture asked for is on disk before the title goes
     free(overlay);overlay=nullptr;overlay_w=overlay_h=0;
+    free(shadow);shadow=nullptr;shadow_valid=false;
     int blank=0,unregistered=0,closed=0;
     if(handle>=0) {
         if(registered) {

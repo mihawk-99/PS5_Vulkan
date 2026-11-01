@@ -7,6 +7,15 @@
  * copied there, inside the rectangle only. A rectangle whose corners are on multiples of 4 is written a 4x4 block (one
  * 64-byte line) at a time with streaming stores, as the fast copy does; any other a pixel at a time. Clipped to the
  * screen. Host test: PS5_Proton's tests/test_pw_display_overlay.c (nothing outside the rectangle changes). */
+/* A whole tiled frame from cached memory into the display's buffer, a 64-byte line at a time with streaming stores (both
+ * 64-byte aligned); the caller fences. */
+static inline void pw_display_stream_copy(uint8_t *buffer, const uint8_t *frame, size_t bytes)
+{
+    for (size_t at = 0; at < bytes; at += 64)
+        for (unsigned r = 0; r < 4; ++r)
+            _mm_stream_si128((__m128i *)(void *)(buffer + at) + r, _mm_load_si128((const __m128i *)(const void *)(frame + at) + r));
+}
+
 static inline void pw_display_overlay_blit(uint8_t *buffer, const uint32_t *pixels, unsigned x, unsigned y, unsigned w,
                                            unsigned h)
 {

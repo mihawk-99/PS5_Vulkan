@@ -18,6 +18,15 @@ struct Ps5GpuDisplay {
     uint32_t *overlay=nullptr;
     unsigned overlay_x=0,overlay_y=0,overlay_w=0,overlay_h=0;
     uint64_t last_present_ns=0;
+    /* While a panel is up: the last frame, tiled, without the panel or the pointer, in cached memory (the broker allocates
+     * it with the panel). A re-show streams it out instead of reading the display back: 137 ms a panel change in a
+     * waiting game before (osk-lag-desktop-base-2026-11-01-01, the owner: "insane input lag"). shadow_valid: it holds
+     * the last frame; the first re-show after the panel came reads that frame back once. */
+    uint8_t *shadow=nullptr;
+    bool shadow_valid=false;
+    int last_cursor_x=-1,last_cursor_y=-1;
+    /* Makes the shadow (on) or drops it (off), with the panel. */
+    void keep_shadow(bool on);
     /* cursor_x, cursor_y: where to draw the pointer on the 1920x1080 screen, or -1 for none. */
     int present(const void *pixels,unsigned width,unsigned height,unsigned pitch,FILE *log,const char *capture,bool bgra=false,
                 int cursor_x=-1,int cursor_y=-1);
