@@ -14,7 +14,7 @@ draw_flags=()
 [[ ${4:-0} == 1 ]] && draw_flags=(-DPS5_GPU_DRAW)
 wsi=${3:-1}
 mesa_fork=${PS5_MESA_FORK:-$radv/../PS5_Mesa}
-overlay_revision=f7ce91ac4c3697990bf89d79fdc61ae7cb98570b
+overlay_revision=d62271ca8006042ad675f8f9b14841e85bba7ecb
 install=$radv/.deps/native/radv-release
 original=$install/lib/libvulkan_radeon.ps5.a
 revision=1ba9874f478657ccf6da72ce55f0260164cc0bd0
@@ -38,13 +38,13 @@ patch --batch -p1 -d "$out/source" < "$out/patches/radv-gpu-broker-local-memory.
 # Short GPU waits: a client spins briefly and sleeps in short steps (the patch's comment has what was measured).
 patch --batch -p1 -d "$out/source" < "$out/patches/radv-gpu-broker-client-wait.patch"
 # Sparse ranges through the owner (PS5_Proton patch 0041): the client advertises sparse resources again.
-cp "$root/tooling/gpu-broker/client-sparse-ranges-winsys.patch" "$out/patches/"
+git -C "$mesa_fork" show "$overlay_revision:ps5/broker/client-sparse-ranges-winsys.patch" > "$out/patches/client-sparse-ranges-winsys.patch"
 patch --batch -p1 -d "$out/source" < "$out/patches/client-sparse-ranges-winsys.patch"
 # The device-local budget follows the owner's room (PS5_Proton patch 0042).
-cp "$root/tooling/gpu-broker/client-budget-winsys.patch" "$out/patches/"
+git -C "$mesa_fork" show "$overlay_revision:ps5/broker/client-budget-winsys.patch" > "$out/patches/client-budget-winsys.patch"
 patch --batch -p1 -d "$out/source" < "$out/patches/client-budget-winsys.patch"
 # The GPU a Windows game is told it is, for the console model the owner says (PS5_Proton patch 0045).
-cp "$root/tooling/gpu-broker/client-identity-winsys.patch" "$out/patches/"
+git -C "$mesa_fork" show "$overlay_revision:ps5/broker/client-identity-winsys.patch" > "$out/patches/client-identity-winsys.patch"
 patch --batch -p1 -d "$out/source" < "$out/patches/client-identity-winsys.patch"
 cp "$root/tooling/gpu-broker/pw_gpu_identity.h" "$out/source/src/amd/vulkan/winsys/ps5/"   # PS5_Proton's, beside the winsys
 # Reuse Mesa's generated header/include flags. Strip every output/dependency
@@ -78,17 +78,17 @@ if [[ $wsi == 1 ]]; then
     mkdir -p "$out/source/src/vulkan/wsi"
     git -C "$mesa_fork" show "$wsi_revision:src/vulkan/wsi/wsi_common_videoout.c" > "$out/source/src/vulkan/wsi/wsi_common_videoout.c"
     patch --batch -p1 -d "$out/source" < "$out/patches/radv-gpu-broker-wsi.patch"
-    cp "$root/tooling/gpu-broker/window-surfaces-wsi.patch" "$out/patches/"
+    git -C "$mesa_fork" show "$overlay_revision:ps5/broker/window-surfaces-wsi.patch" > "$out/patches/window-surfaces-wsi.patch"
     patch --batch -p1 -d "$out/source" < "$out/patches/window-surfaces-wsi.patch"
-    cp "$root/tooling/gpu-broker/present-times-wsi.patch" "$out/patches/"
+    git -C "$mesa_fork" show "$overlay_revision:ps5/broker/present-times-wsi.patch" > "$out/patches/present-times-wsi.patch"
     patch --batch -p1 -d "$out/source" < "$out/patches/present-times-wsi.patch"
-    cp "$root/tooling/gpu-broker/async-present-wsi.patch" "$out/patches/"
+    git -C "$mesa_fork" show "$overlay_revision:ps5/broker/async-present-wsi.patch" > "$out/patches/async-present-wsi.patch"
     patch --batch -p1 -d "$out/source" < "$out/patches/async-present-wsi.patch"
-    cp "$root/tooling/gpu-broker/present-mode-wsi.patch" "$out/patches/"   # any present mode, presented as FIFO
+    git -C "$mesa_fork" show "$overlay_revision:ps5/broker/present-mode-wsi.patch" > "$out/patches/present-mode-wsi.patch"   # any present mode, presented as FIFO
     patch --batch -p1 -d "$out/source" < "$out/patches/present-mode-wsi.patch"
-    cp "$root/tooling/gpu-broker/window-extent-wsi.patch" "$out/patches/"   # a window larger than the screen, clipped
+    git -C "$mesa_fork" show "$overlay_revision:ps5/broker/window-extent-wsi.patch" > "$out/patches/window-extent-wsi.patch"   # a window larger than the screen, clipped
     patch --batch -p1 -d "$out/source" < "$out/patches/window-extent-wsi.patch"
-    cp "$root/tooling/gpu-broker/display-extent-wsi.patch" "$out/patches/"   # a display swapchain larger than the screen too
+    git -C "$mesa_fork" show "$overlay_revision:ps5/broker/display-extent-wsi.patch" > "$out/patches/display-extent-wsi.patch"   # a display swapchain larger than the screen too
     patch --batch -p1 -d "$out/source" < "$out/patches/display-extent-wsi.patch"
     cp "$root/tooling/gpu-broker/pw_present_retry.h" "$out/source/src/vulkan/wsi/"   # PS5_Proton's, beside the WSI
     python3 - "$radv" "$out" <<'PYWSI'
@@ -116,7 +116,7 @@ root,radv,sdk,out=map(Path,sys.argv[1:5]);digest=lambda p:hashlib.sha256(p.read_
 files=[p for p in (root/'tooling/gpu-broker').glob('*') if p.is_file()]
 manifest={'wsi':sys.argv[5]=='1','sha256':digest(out/'client.a'),
  'mesa_base_revision':'1ba9874f478657ccf6da72ce55f0260164cc0bd0',
- 'mesa_overlay_revision':'f7ce91ac4c3697990bf89d79fdc61ae7cb98570b',
+ 'mesa_overlay_revision':'d62271ca8006042ad675f8f9b14841e85bba7ecb',
  'sdk_revision':(sdk/'.ps5-sdk-revision').read_text().strip(),
  'recipe_sha256':digest(radv/'tools/radv-link.sh'),
  'build_script_sha256':digest(root/'tools/build-gpu-broker-client.sh'),
