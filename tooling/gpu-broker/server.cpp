@@ -1359,10 +1359,12 @@ bool ps5_gpu_broker_set_overlay(const void *pixels,unsigned x,unsigned y,unsigne
         if(!copy)return false;
         memcpy(copy,pixels,size_t(w)*h*4);
     }
+    timespec asked{};clock_gettime(CLOCK_MONOTONIC,&asked);
     for(unsigned waited=0;pthread_mutex_trylock(&b.display_lock);++waited) {
         if(waited>=100) { free(copy);return false; }
         sceKernelUsleep(1000);
     }
+    timespec locked{};clock_gettime(CLOCK_MONOTONIC,&locked);
     const bool was=b.display.overlay!=nullptr;
     free(b.display.overlay);
     b.display.overlay=copy;
@@ -1370,13 +1372,20 @@ bool ps5_gpu_broker_set_overlay(const void *pixels,unsigned x,unsigned y,unsigne
     if(b.log && was!=(copy!=nullptr))fprintf(b.log,"gpu-overlay %s x=%u y=%u w=%u h=%u flips=%llu\n",copy ? "on" : "off",x,y,w,h,
                                              (unsigned long long)b.display.flips);
     timespec now{};clock_gettime(CLOCK_MONOTONIC,&now);   // the display's own clock (display.cpp now_ns)
-    if(copy && b.display.registered && b.display.flips &&
-       uint64_t(now.tv_sec)*1000000000u+now.tv_nsec-b.display.last_present_ns>50000000ull && !b.display.reshow(b.log) &&
-       capture_pending(b)) {
-        const std::string asked=take_capture(b);
-        const bool written=!asked.empty() && b.display.capture_last(asked.c_str());
+    const auto ns=[](const timespec &t) { return uint64_t(t.tv_sec)*1000000000u+uint64_t(t.tv_nsec); };
+    const bool idle=copy && b.display.registered && b.display.flips && ns(now)-b.display.last_present_ns>50000000ull;
+    int reshown=-1;
+    if(idle && !(reshown=b.display.reshow(b.log)) && capture_pending(b)) {
+        const std::string capture=take_capture(b);
+        const bool written=!capture.empty() && b.display.capture_last(capture.c_str());
         if(b.log)fprintf(b.log,"gpu-overlay capture %s\n",written ? "written" : "failed");
     }
+    // The keyboard's input lag (the owner, 2026-11-01): the lock's wait and the re-show of a waiting game's frame
+    static unsigned sets=0;
+    timespec done{};clock_gettime(CLOCK_MONOTONIC,&done);
+    if(b.log && copy && (++sets<=40 || sets%50==0))
+        fprintf(b.log,"gpu-overlay set %u lock_wait_ms=%.1f reshow=%d ms=%.1f\n",sets,double(ns(locked)-ns(asked))/1e6,reshown,
+                double(ns(done)-ns(locked))/1e6);
     pthread_mutex_unlock(&b.display_lock);
     return true;
 }
