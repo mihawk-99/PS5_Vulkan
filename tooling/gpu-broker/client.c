@@ -24,6 +24,8 @@ static uint64_t allocated,local_allocated;
 /* The broker's answer to INIT: device-local bytes (the owner's direct memory, never mapped here) and host-visible
  * bytes (shared memory). No local bytes: one unified host-visible pool, as before. */
 static uint64_t local_limit,host_limit=PW_GPU_LIMIT;
+/* The console's model the owner said at INIT (PS5_Proton patch 0045): 0 none. */
+static unsigned console_model;
 /* This process reserved the broker's host ranges before anything else could map there (set by the application before binding): buffers are mapped over that reservation, and freed back to it. Without them no host-visible buffer is mapped. */
 static int ranges_reserved;
 /* A host-visible buffer at `at`: the broker's direct memory when it names an offset (dmem_plus_one, the offset and one), else its
@@ -187,10 +189,12 @@ int ps5_gpu_client_bind(int fd, bool reserved)
     if(!status) {
         if(request.argument[2]<=PW_GPU_LOCAL_MAX && !(request.argument[2]&16383))local_limit=request.argument[2];
         if(request.argument[3] && request.argument[3]<=PW_GPU_HOST_LIMIT_MAX && !(request.argument[3]&16383))host_limit=request.argument[3];
+        if(request.argument[1]<=2)console_model=(unsigned)request.argument[1];
     }
     return status;
 }
 uint64_t ps5_gpu_client_local_limit(void) { return local_limit; }
+unsigned ps5_gpu_client_console_model(void) { return console_model; }
 uint64_t ps5_gpu_client_local_allocated(void) { return __atomic_load_n(&local_allocated,__ATOMIC_RELAXED); }
 /* The owner's device-local room at its last ALLOC or FREE reply, plus one (patch 0042; 0: not said yet). */
 static uint64_t local_room_plus_one;

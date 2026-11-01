@@ -14,6 +14,10 @@ void ps5_gpu_broker_set_local_refused(void (*hook)(int pid,unsigned long long by
 /* Before start: the host-visible bytes each client may hold, a multiple of 16 KiB up to PW_GPU_HOST_LIMIT_MAX;
  * PW_GPU_LIMIT when not called. False, and nothing changed, for any other value or once the broker is running. */
 bool ps5_gpu_broker_set_host_limit(unsigned long long bytes);
+/* Before start: the console's model each client is told at INIT (PS5_Proton patch 0045, src/pw_gpu_identity.h: 1 the
+ * standard PS5, 2 the Pro), so its RADV gives games the GPU identity of that model. 0, the default, says none, and a
+ * client keeps RADV's own. False, and nothing changed, for a model not known or once the broker is running. */
+bool ps5_gpu_broker_set_console_model(unsigned model);
 int ps5_gpu_broker_open(int *cookie);
 /* Bind to the owner's acknowledged payload PID before bootstrap gives the
  * helper its broker descriptor. INIT must match; window packets require it. */

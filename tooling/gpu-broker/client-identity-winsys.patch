@@ -1,0 +1,39 @@
+--- a/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.c
++++ b/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.c
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include "radv_ps5_winsys.h"
++#include "pw_gpu_identity.h"   /* PS5_Proton src/pw_gpu_identity.h, copied beside this file */
+ 
+ #include <assert.h>
+ #include <stdio.h>
+@@ -312,6 +313,17 @@
+    radv_ps5_fill_info(info, compiler_compat_mode, 3, 0xa0300, RADV_PS5_EXTERNAL_REV);
+    snprintf(info->marketing_name, sizeof(info->marketing_name), "PlayStation 5 GPU");
+    radv_ps5_take_gc_10_1_3_traits(info, compiler_compat_mode);
++   /* What a Windows game is told the GPU is (PS5_Proton patch 0045, pw_gpu_identity.h): the PCI ID of the retail RDNA2
++    * Radeon of the console model's class, and the console's own name. Only Vulkan's deviceID and two metadata keys of
++    * images shared with other drivers read pci_id here; the chip is still known by its revision. With no model said,
++    * RADV's own stays: 0, which a survival-horror demo refused as an "Unsupported graphics card" (2026-11-01). */
++   {
++      const PwGpuIdentity *identity = pw_gpu_identity_of_model(ps5_gpu_client_console_model());
++      if (identity) {
++         info->pci_id = identity->device_id;
++         snprintf(info->marketing_name, sizeof(info->marketing_name), "%s", identity->name);
++      }
++   }
+ 
+    /* This GPU's parameter cache rotates per-vertex fragment inputs and tells the shader nothing about it: the compiler
+     * restores the order itself (docs/BARYCENTRIC_GFX101.md), so VK_KHR_fragment_shader_barycentric is reported. */
+--- a/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.h
++++ b/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.h
+@@ -187,6 +187,8 @@
+  * buffer is shared host-visible memory, one pool, as before. */
+ #define RADV_PS5_MEMORY_BROKER_LOCAL (-2)
+ uint64_t ps5_gpu_client_local_limit(void);
++/* The console's model the owner said at INIT (PS5_Proton patch 0045, its src/pw_gpu_identity.h): 0 none. */
++unsigned ps5_gpu_client_console_model(void);
+ uint64_t ps5_gpu_client_local_allocated(void);
+ /* The device-local budget left: the heap less what is held, at most the owner's room (PS5_Proton patch 0042). */
+ uint64_t ps5_gpu_client_local_available(void);

@@ -43,6 +43,10 @@ patch --batch -p1 -d "$out/source" < "$out/patches/client-sparse-ranges-winsys.p
 # The device-local budget follows the owner's room (PS5_Proton patch 0042).
 cp "$root/tooling/gpu-broker/client-budget-winsys.patch" "$out/patches/"
 patch --batch -p1 -d "$out/source" < "$out/patches/client-budget-winsys.patch"
+# The GPU a Windows game is told it is, for the console model the owner says (PS5_Proton patch 0045).
+cp "$root/tooling/gpu-broker/client-identity-winsys.patch" "$out/patches/"
+patch --batch -p1 -d "$out/source" < "$out/patches/client-identity-winsys.patch"
+cp "$root/tooling/gpu-broker/pw_gpu_identity.h" "$out/source/src/amd/vulkan/winsys/ps5/"   # PS5_Proton's, beside the winsys
 # Reuse Mesa's generated header/include flags. Strip every output/dependency
 # option before compilation, so the sibling build remains read-only.
 python3 - "$radv" "$out" <<'PY'

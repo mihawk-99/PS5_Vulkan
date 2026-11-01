@@ -14,7 +14,9 @@
 #define PW_GPU_LOCAL_MAX (UINT64_C(16)<<30)
 #define PW_GPU_ALIGNMENT_MAX (UINT64_C(2)<<20)
 /* PW_GPU_ALLOC argument[2]: the owner's direct memory with no CPU mapping in the client, zeroed when asked. The INIT
- * reply carries the client's device-local and host-visible limits in argument[2] and argument[3]. */
+ * reply carries the client's device-local and host-visible limits in argument[2] and argument[3], and in argument[1]
+ * the console's model (PS5_Proton patch 0045, its src/pw_gpu_identity.h: 0 not said, 1 the standard PS5, 2 the Pro), from
+ * which the client's RADV names its GPU to games. */
 #define PW_GPU_ALLOC_LOCAL UINT64_C(1)
 #define PW_GPU_ALLOC_ZERO UINT64_C(2)
 /* The address ranges host-visible client buffers come from: one in RADV's 32-bit shader window, one high, outside the

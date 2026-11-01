@@ -188,6 +188,8 @@ void host_ranges_release(FILE *log)
 constexpr uint64_t kLocalOffer=UINT64_C(8)<<30,kLocalFloor=UINT64_C(1)<<30;
 /* The host-visible bytes each client may hold: the application's choice (ps5_gpu_broker_set_host_limit). */
 static uint64_t host_limit=PW_GPU_LIMIT;
+/* The console's model, told each client at INIT (ps5_gpu_broker_set_console_model): 0 says none. */
+static unsigned console_model;
 constexpr unsigned kClientBuffers=1024;
 // A client's sparse ranges (patch 0041): reserved in the owner's device-memory region, as the owner's own are. A
 // Direct3D 12 game makes one per reserved resource: 256 was too few (a big racing game was refused a 1.4 MiB range and
@@ -989,8 +991,10 @@ static void *serve(Client &c,bool present)
                 /* The host-visible budget always: a client keeps PW_GPU_LIMIT without it. */
                 if(b.local_memory)m.argument[2]=local_offer();
                 m.argument[3]=host_limit;
-                fprintf(b.log,"gpu-wine cookie=%d pid=%d local_offer=%llu host_limit=%llu flexible=%zu ranges_reserved=%llu\n",c.cookie,c.pid,
-                    (unsigned long long)m.argument[2],(unsigned long long)m.argument[3],flexible_now(),(unsigned long long)ranges_reserved_reported);
+                m.argument[1]=console_model;
+                fprintf(b.log,"gpu-wine cookie=%d pid=%d local_offer=%llu host_limit=%llu flexible=%zu ranges_reserved=%llu model=%u\n",c.cookie,c.pid,
+                    (unsigned long long)m.argument[2],(unsigned long long)m.argument[3],flexible_now(),(unsigned long long)ranges_reserved_reported,
+                    console_model);
             } else if(c.pid>0) switch(m.operation) {
             case PW_GPU_ALLOC:
                 m.status=wedged ? EIO : allocate(c,m,b.window,b.high,fd);
@@ -1456,6 +1460,12 @@ bool ps5_gpu_broker_set_host_limit(unsigned long long bytes)
     return true;
 }
 void ps5_gpu_broker_set_local_refused(void (*hook)(int pid,unsigned long long bytes)) { local_refused=hook; }
+bool ps5_gpu_broker_set_console_model(unsigned model)
+{
+    if(model>2 || broker_state.started)return false;
+    console_model=model;
+    return true;
+}
 bool ps5_gpu_broker_start(const char *directory,bool capture,bool local,bool (*is_absent)(int))
 {
     auto &b=broker_state;if(b.started || !directory || !*directory || !is_absent)return false;
