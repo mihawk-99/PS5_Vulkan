@@ -27,6 +27,10 @@ bool ps5_gpu_broker_capture_next(const char *path);
  * outlive it sets both, so none of that memory is its own; unset, the broker makes it, as before. */
 void ps5_gpu_broker_set_shared_memory(int (*alloc)(size_t bytes),int (*touch)(int fd,size_t from,size_t to));
 /* attach consumes fd. Frame-page format is frame_page.h. */
+/* Global HWND route, configured before any clients start. Attach consumes fd
+ * and returns 0 or an errno status, after lifetime/extent/capacity validation. */
+void ps5_gpu_broker_set_windows(int (*snapshot)(void *,unsigned));
+int ps5_gpu_broker_window_attach(int pid,int fd,size_t bytes);
 void ps5_gpu_broker_frame_attach(int pid,int fd);
 void ps5_gpu_broker_frame_detach(int pid);
 #endif
