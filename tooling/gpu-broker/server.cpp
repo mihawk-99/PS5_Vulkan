@@ -223,6 +223,9 @@ void reset(Client &c)
     new (&c) Client();
 }
 bool (*client_absent)(int)=nullptr;
+// Told when a client's device-local allocation is refused for want of memory (patch 0042), so the owner can tell the
+// player why a game stops: its own "out of memory" names no cause. Called under the broker's lock: it only records.
+void (*local_refused)(int pid,unsigned long long bytes)=nullptr;
 bool absent(int token) { return client_absent && client_absent(token); }
 std::string output_directory;
 std::string output_path(const char *path)
@@ -353,12 +356,19 @@ void release(Buffer &b)
     if(b.dmem>=0)dmem_give_back(b.dmem,b.bytes);
     b=Buffer{};
 }
-// The device-local heap a client is told it has: the offer, or what direct memory above the floor allows now.
-uint64_t local_offer()
+// Direct memory above the floor now: what device-local memory can still be given (patch 0042).
+uint64_t local_room()
 {
     const uint64_t available=radv_ps5_memory_available_bytes();
-    const uint64_t room=available>kLocalFloor ? (available-kLocalFloor)&~16383ull : 0;
-    return room<kLocalOffer ? room : kLocalOffer;
+    return available>kLocalFloor ? (available-kLocalFloor)&~16383ull : 0;
+}
+// The device-local heap a client is told it has: two thirds of the room, at most the offer. On this console a game's own
+// heaps come out of the same direct memory as its graphics memory (a Direct3D 12 game, 2026-10-29: 3,888 MiB of its own
+// against 5,641 of graphics, told 7.96 GiB), so a heap the size of the whole room is one its settings cannot fill.
+uint64_t local_offer()
+{
+    const uint64_t share=(local_room()/3*2)&~16383ull;
+    return share<kLocalOffer ? share : kLocalOffer;
 }
 // A client buffer's object, sized: from the application's maker when it set one (its pages written through there, so
 // they are not this process's when the GPU grant makes them resident), else made here. -1 on failure.
@@ -957,11 +967,13 @@ static void *serve(Client &c,bool present)
             } else if(c.pid>0) switch(m.operation) {
             case PW_GPU_ALLOC:
                 m.status=wedged ? EIO : allocate(c,m,b.window,b.high,fd);
+                if(b.local_memory)m.argument[3]=local_room()+1;
                 {
                     size_t flexible=0;
                     if(!sceKernelAvailableFlexibleMemorySize(&flexible) && flexible<b.flexible_min)b.flexible_min=flexible;
                     const uint64_t direct=radv_ps5_memory_available_bytes();if(direct<b.direct_min)b.direct_min=direct;
                 }
+                if(m.status && local_refused && !strncmp(c.allocation_stage,"local_",6))local_refused(c.pid,m.bytes);
                 if(m.status) {
                     size_t available=0;const int status=sceKernelAvailableFlexibleMemorySize(&available);
                     fprintf(b.log,"gpu-wine allocation_failed=1 cookie=%d pid=%d stage=%s bytes=%llu flexible_status=%#x flexible_available=%llu\n",
@@ -982,6 +994,7 @@ static void *serve(Client &c,bool present)
                     if(c.tess && pw_gpu_contains(a.address,a.bytes,c.tess,c.tess_bytes)) { c.tess=0;c.tess_bytes=0; }
                     free_buffer(c,a,b.log);m.status=0;break;
                 }
+                if(b.local_memory)m.argument[3]=local_room()+1;
                 break;
             case PW_GPU_SUBMIT:
                 m.status=submit(c,m,b.log,c.cookie);
@@ -1415,6 +1428,7 @@ bool ps5_gpu_broker_set_host_limit(unsigned long long bytes)
     host_limit=bytes;
     return true;
 }
+void ps5_gpu_broker_set_local_refused(void (*hook)(int pid,unsigned long long bytes)) { local_refused=hook; }
 bool ps5_gpu_broker_start(const char *directory,bool capture,bool local,bool (*is_absent)(int))
 {
     auto &b=broker_state;if(b.started || !directory || !*directory || !is_absent)return false;

@@ -40,6 +40,9 @@ patch --batch -p1 -d "$out/source" < "$out/patches/radv-gpu-broker-client-wait.p
 # Sparse ranges through the owner (PS5_Proton patch 0041): the client advertises sparse resources again.
 cp "$root/tooling/gpu-broker/client-sparse-ranges-winsys.patch" "$out/patches/"
 patch --batch -p1 -d "$out/source" < "$out/patches/client-sparse-ranges-winsys.patch"
+# The device-local budget follows the owner's room (PS5_Proton patch 0042).
+cp "$root/tooling/gpu-broker/client-budget-winsys.patch" "$out/patches/"
+patch --batch -p1 -d "$out/source" < "$out/patches/client-budget-winsys.patch"
 # Reuse Mesa's generated header/include flags. Strip every output/dependency
 # option before compilation, so the sibling build remains read-only.
 python3 - "$radv" "$out" <<'PY'

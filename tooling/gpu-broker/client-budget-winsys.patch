@@ -1,0 +1,23 @@
+--- a/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.c
++++ b/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.c
+@@ -420,7 +420,8 @@
+       /* The budget RADV reports is the device-local heap's. */
+       const uint64_t used = ps5_gpu_client_local_allocated();
+       *pool_bytes = local;
+-      *available_bytes = local - MIN2(used, local);
++      /* Never more than the owner's direct memory still allows (PS5_Proton patch 0042). */
++      *available_bytes = ps5_gpu_client_local_available();
+       *driver_bytes = used;
+       return;
+    }
+--- a/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.h
++++ b/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.h
+@@ -188,6 +188,8 @@
+ #define RADV_PS5_MEMORY_BROKER_LOCAL (-2)
+ uint64_t ps5_gpu_client_local_limit(void);
+ uint64_t ps5_gpu_client_local_allocated(void);
++/* The device-local budget left: the heap less what is held, at most the owner's room (PS5_Proton patch 0042). */
++uint64_t ps5_gpu_client_local_available(void);
+ bool ps5_gpu_client_alloc_local(uint64_t bytes, uint64_t alignment, bool window32, bool zero,
+                                    struct radv_ps5_memory *out);
+ 

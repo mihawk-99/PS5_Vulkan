@@ -48,6 +48,8 @@ enum { PW_GPU_INIT=1, PW_GPU_ALLOC, PW_GPU_FREE, PW_GPU_SUBMIT,
  * about once a second: argument[0] presents, [1] nanoseconds waiting for their fences, [2] flushing their frames,
  * [3] in their round trips; bytes its submissions and address their round trips' nanoseconds. Sums only: the owner
  * adds them to the client's report. */
+/* ALLOC and FREE replies (PS5_Proton patch 0042): argument[3] is the device-local room left now plus one (0: not said),
+ * the owner's direct memory above its floor, so a client's budget follows what the console can still give. */
 typedef struct PwGpuMessage {
     uint32_t magic, operation, sequence; int32_t status;
     uint64_t address, bytes, argument[4];

@@ -192,6 +192,22 @@ int ps5_gpu_client_bind(int fd, bool reserved)
 }
 uint64_t ps5_gpu_client_local_limit(void) { return local_limit; }
 uint64_t ps5_gpu_client_local_allocated(void) { return __atomic_load_n(&local_allocated,__ATOMIC_RELAXED); }
+/* The owner's device-local room at its last ALLOC or FREE reply, plus one (patch 0042; 0: not said yet). */
+static uint64_t local_room_plus_one;
+static void room_from(const PwGpuMessage *message)
+{
+    if(message->argument[3])__atomic_store_n(&local_room_plus_one,message->argument[3],__ATOMIC_RELAXED);
+}
+/* What this client's device-local budget still has: its heap less what it holds, and never more than the owner's room,
+ * which the game's own heaps and every other program draw from too. */
+uint64_t ps5_gpu_client_local_available(void)
+{
+    const uint64_t used=__atomic_load_n(&local_allocated,__ATOMIC_RELAXED);
+    uint64_t left=used<local_limit ? local_limit-used : 0;
+    const uint64_t room=__atomic_load_n(&local_room_plus_one,__ATOMIC_RELAXED);
+    if(room && room-1<left)left=room-1;
+    return left;
+}
 /* Device-local memory: the owner allocates and maps it for the GPU; this process gets only its address. */
 /* Every allocation this client refuses, said once with its reason (PS5_Proton patch 0040, diagnostic): a game's
  * E_OUTOFMEMORY otherwise names no layer. The first 32, then one in 256. */
@@ -211,7 +227,9 @@ bool ps5_gpu_client_alloc_local(uint64_t bytes,uint64_t alignment,bool window32,
         return false;
     }
     PwGpuMessage message={.operation=PW_GPU_ALLOC,.bytes=bytes,.argument={alignment,window32,PW_GPU_ALLOC_LOCAL|(zero ? PW_GPU_ALLOC_ZERO : 0)}};
-    if(rpc(&message,NULL)) { refused("local","the broker said no",bytes,alignment,local_limit);return false; }
+    const int status=rpc(&message,NULL);
+    room_from(&message);
+    if(status) { refused("local","the broker said no",bytes,alignment,local_limit);return false; }
     const bool okay=message.bytes>=bytes && message.bytes<=local_limit && !(message.bytes&16383) && !(message.address&16383) &&
         (!alignment || !(message.address&(alignment-1))) && message.argument[0]>0 && message.argument[0]<=UINT32_MAX &&
         message.address>=RADV_PS5_WINDOW_BASE && message.address<=RADV_PS5_GPU_ADDRESS_LIMIT-message.bytes &&
@@ -387,7 +405,9 @@ bool radv_ps5_memory_alloc(uint64_t bytes,uint64_t alignment,bool window32,struc
     }
     PwGpuMessage message={.operation=PW_GPU_ALLOC,.bytes=bytes,.argument={alignment,window32}};
     int fd=-1;
-    if(rpc(&message,&fd)) { refused("host","the broker said no",bytes,alignment,host_limit);return false; }
+    const int status=rpc(&message,&fd);
+    room_from(&message);
+    if(status) { refused("host","the broker said no",bytes,alignment,host_limit);return false; }
     void *at=(void *)(uintptr_t)message.address;
     bool okay=message.bytes>=bytes && message.bytes<=host_limit && !(message.bytes&16383) &&
         !(message.address&16383) && (!alignment || !(message.address&(alignment-1))) &&
@@ -438,6 +458,7 @@ void radv_ps5_memory_free(struct radv_ps5_memory *memory)
     }
     /* Broker submissions complete before acknowledgment; no GPU references remain. */
     if(rpc(&message,NULL)) { broker_lost("a free it did not take back",PW_GPU_FREE,message.sequence);return; }
+    room_from(&message);
     if(memory->physical==PS5_GPU_LOCAL_MEMORY)__atomic_sub_fetch(&local_allocated,memory->bytes,__ATOMIC_RELAXED);
     else __atomic_sub_fetch(&allocated,memory->bytes,__ATOMIC_RELAXED);
     memset(memory,0,sizeof(*memory));
