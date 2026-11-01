@@ -3,6 +3,7 @@
 #include "display.h"
 #include "pw_display_capture.h"
 #include "pw_display_rate.h"
+#include "pw_display_overlay.h"
 #include <ps5platform/kernel.h>
 #include <ps5platform/videoout.h>
 #include <cerrno>
@@ -167,6 +168,7 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
             for(size_t at=0;at<65536;at+=64)__asm__ volatile("clflushopt (%0)"::"r"((uint8_t *)tile+at):"memory");
         }
         }
+        if(overlay)pw_display_overlay_blit(target,overlay,overlay_x,overlay_y,overlay_w,overlay_h);
         if(cursor_x>=0 && cursor_y>=0)draw_cursor(target,cursor_x,cursor_y);
     };
     fill(buffer);
@@ -188,6 +190,7 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
     }
     const uint64_t serial=__atomic_add_fetch(&flips,1,__ATOMIC_RELAXED);   // read without display_lock (ps5_gpu_broker_flips)
     int status=sceVideoOutSubmitFlip(handle,back,PS5_VIDEO_OUT_FLIP_VSYNC,serial);
+    last_present_ns=now_ns();
     if(!status && capture) {
         if(picture && !pw_display_capture_take(&captures,picture,capture,serial,picture_ns,log))picture=nullptr;
         else {
@@ -220,9 +223,37 @@ bool Ps5GpuDisplay::read_last(uint32_t *pixels) const
         pixels[size_t(y)*width+x]=*(const uint32_t *)(buffer+tiled(x,y));
     return true;
 }
+int Ps5GpuDisplay::reshow(FILE *log)
+{
+    if(!registered || !flips || !mapped)return EBUSY;
+    uint64_t shown[PS5_VIDEO_OUT_FLIP_STATUS_WORDS]{};
+    if(flips>=2) {   // as present: the buffer written next is free once the flip after it has been shown
+        int status=0;unsigned waited=0;
+        for(;;) {
+            status=sceVideoOutGetFlipStatus(handle,shown);
+            if(status || shown[PS5_VIDEO_OUT_FLIP_STATUS_SHOWN_ARGUMENT]+1>=flips || waited>=2000)break;
+            sceKernelUsleep(250);++waited;
+        }
+        if(status)return status;
+        if(shown[PS5_VIDEO_OUT_FLIP_STATUS_SHOWN_ARGUMENT]+1<flips)return EBUSY;
+    }
+    // The last frame, read back (slow: about 80 ms, only when the panel changed while no frame came) and streamed out
+    const auto *last=(const __m128i *)((const uint8_t *)mapped+((back+buffer_count-1)%buffer_count)*buffer_bytes);
+    auto *buffer=(uint8_t *)mapped+back*buffer_bytes;
+    for(size_t at=0;at<frame_bytes/16;++at)_mm_stream_si128((__m128i *)(void *)buffer+at,_mm_load_si128(last+at));
+    if(overlay)pw_display_overlay_blit(buffer,overlay,overlay_x,overlay_y,overlay_w,overlay_h);
+    _mm_sfence();
+    const uint64_t serial=__atomic_add_fetch(&flips,1,__ATOMIC_RELAXED);
+    const int status=sceVideoOutSubmitFlip(handle,back,PS5_VIDEO_OUT_FLIP_VSYNC,serial);
+    last_present_ns=now_ns();
+    if(status && log)fprintf(log,"gpu-display reshow flip=%llu status=%#x\n",(unsigned long long)serial,unsigned(status));
+    back=(back+1)%buffer_count;
+    return status;
+}
 bool Ps5GpuDisplay::close(FILE *log)
 {
     pw_display_capture_drain(&captures);   // every picture asked for is on disk before the title goes
+    free(overlay);overlay=nullptr;overlay_w=overlay_h=0;
     int blank=0,unregistered=0,closed=0;
     if(handle>=0) {
         if(registered) {

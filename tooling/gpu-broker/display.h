@@ -13,9 +13,17 @@ struct Ps5GpuDisplay {
     bool registered=false;
     bool fast_copy=false;   /* PS5_Proton's PROTON_GPU_FAST_COPY=1, read when the display opens */
     bool high_frame_rate=false;   /* the output at 119.88 Hz (PS5_Proton's PROTON_120HZ=1), restored at close */
+    /* An application's panel drawn over every frame inside its rectangle (pw_display_overlay.h): owned here, set and cleared
+     * under the broker's display lock (ps5_gpu_broker_set_overlay). */
+    uint32_t *overlay=nullptr;
+    unsigned overlay_x=0,overlay_y=0,overlay_w=0,overlay_h=0;
+    uint64_t last_present_ns=0;
     /* cursor_x, cursor_y: where to draw the pointer on the 1920x1080 screen, or -1 for none. */
     int present(const void *pixels,unsigned width,unsigned height,unsigned pitch,FILE *log,const char *capture,bool bgra=false,
                 int cursor_x=-1,int cursor_y=-1);
+    /* The last frame shown again with the overlay as it is now, for a panel that changed while no frame came (0, or the
+     * flip's status). Over the previous panel's pixels: a panel taken off shows the game again with its next frame. */
+    int reshow(FILE *log);
     bool close(FILE *log);
     /* Opens the display now, as the first present would (0, or the first failure): the title reads the rate it kept
      * before any helper starts (graphics patch 0029). */

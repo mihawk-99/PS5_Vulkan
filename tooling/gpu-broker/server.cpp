@@ -1346,6 +1346,35 @@ bool ps5_gpu_broker_set_cover(const void *pixels)
     pthread_mutex_unlock(&b.display_lock);
     return true;
 }
+// The application's panel over every frame (pw_display_overlay.h), copied here; NULL takes it off. Tried for up to 100 ms as
+// the cover. When no frame came in the last 50 ms (a game that waits), the last one is shown again with the panel.
+bool ps5_gpu_broker_set_overlay(const void *pixels,unsigned x,unsigned y,unsigned w,unsigned h)
+{
+    auto &b=broker_state;
+    if(pixels && (!w || !h || x>=1920 || y>=1080))return false;
+    uint32_t *copy=nullptr;
+    if(pixels) {
+        copy=(uint32_t *)malloc(size_t(w)*h*4);
+        if(!copy)return false;
+        memcpy(copy,pixels,size_t(w)*h*4);
+    }
+    for(unsigned waited=0;pthread_mutex_trylock(&b.display_lock);++waited) {
+        if(waited>=100) { free(copy);return false; }
+        sceKernelUsleep(1000);
+    }
+    const bool was=b.display.overlay!=nullptr;
+    free(b.display.overlay);
+    b.display.overlay=copy;
+    b.display.overlay_x=x;b.display.overlay_y=y;b.display.overlay_w=copy ? w : 0;b.display.overlay_h=copy ? h : 0;
+    if(b.log && was!=(copy!=nullptr))fprintf(b.log,"gpu-overlay %s x=%u y=%u w=%u h=%u flips=%llu\n",copy ? "on" : "off",x,y,w,h,
+                                             (unsigned long long)b.display.flips);
+    timespec now{};clock_gettime(CLOCK_MONOTONIC,&now);   // the display's own clock (display.cpp now_ns)
+    if(copy && b.display.registered && b.display.flips &&
+       uint64_t(now.tv_sec)*1000000000u+now.tv_nsec-b.display.last_present_ns>50000000ull)
+        (void)b.display.reshow(b.log);
+    pthread_mutex_unlock(&b.display_lock);
+    return true;
+}
 unsigned ps5_gpu_broker_display_hz()
 {
     auto &b=broker_state;if(!b.started)return 0;

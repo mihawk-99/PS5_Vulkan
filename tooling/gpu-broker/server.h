@@ -46,6 +46,8 @@ bool ps5_gpu_broker_capture_next(const char *path);
  * true. While one is set, ps5_gpu_broker_flips stays where it was. False, and nothing changed, when display_lock could
  * not be had within 100 ms. */
 bool ps5_gpu_broker_set_cover(const void *pixels);
+/* A panel over every frame, linear B8G8R8A8 w x h at (x, y) on the screen, copied; NULL takes it off. */
+bool ps5_gpu_broker_set_overlay(const void *pixels, unsigned x, unsigned y, unsigned w, unsigned h);
 /* The broker as of now, for an application's watchdog, without waiting on anything the broker holds: whether its
  * client lock and its display lock are held this instant (a trylock, released at once), the GPU submissions it made
  * and the last one the GPU completed (its fence page's value; 0 before the first submission). phase is the call the
