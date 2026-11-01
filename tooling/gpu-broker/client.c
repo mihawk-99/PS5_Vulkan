@@ -330,6 +330,9 @@ void radv_ps5_cpu_flush(const void *address,size_t bytes)
 struct shared_source { uintptr_t address; int fd; uint64_t dmem_plus_one; };
 static int keep_sources;
 void ps5_gpu_client_keep_sources(void) { __atomic_store_n(&keep_sources,1,__ATOMIC_RELEASE); }
+/* ps5_gpu_client_in_owner: set once, before binding; never by a client in a process of its own. */
+static int in_owner;
+void ps5_gpu_client_in_owner(void) { __atomic_store_n(&in_owner,1,__ATOMIC_RELEASE); }
 static struct shared_source *sources;
 static size_t source_count,source_capacity;
 static pthread_mutex_t sources_lock=PTHREAD_MUTEX_INITIALIZER;
@@ -373,14 +376,17 @@ bool radv_ps5_memory_alloc(uint64_t bytes,uint64_t alignment,bool window32,struc
         (!window32 || pw_gpu_contains(RADV_PS5_WINDOW_BASE,RADV_PS5_WINDOW_BYTES,message.address,message.bytes));
     /* Only over this process's own reservation of a host range, still bare: an address the owner chose anywhere else
      * was taken where the kernel found a hole, which may lie inside the application's own reservations. */
-    const int ranged=okay && ranges_reserved && pw_gpu_host_range(message.address,message.bytes)>=0 &&
+    /* In the owner's process the owner has mapped the buffer at `at` already (its allocate): that mapping is this
+     * client's too. */
+    const int owned=okay && __atomic_load_n(&in_owner,__ATOMIC_ACQUIRE);
+    const int ranged=okay && !owned && ranges_reserved && pw_gpu_host_range(message.address,message.bytes)>=0 &&
         bare(at,message.bytes);
     if(ranged) {
         /* Over this process's own reservation of the range: a fixed mapping replaces it. */
         void *mapped=map_host_at(at,message.bytes,fd,message.argument[2]);
         okay=mapped==at;
         if(!okay) { void *again=at;sceKernelReserveVirtualRange(&again,message.bytes,PW_GPU_RESERVE_FIXED,16384); }
-    } else okay=false;
+    } else if(!owned)okay=false;
     /* Kept for a placed mapping of this memory (radv_ps5_memory_map_at): its direct-memory offset, or its shared
      * memory's descriptor; dropped when it is freed. */
     const bool kept=okay && __atomic_load_n(&keep_sources,__ATOMIC_ACQUIRE) &&
@@ -401,7 +407,8 @@ void radv_ps5_memory_free(struct radv_ps5_memory *memory)
     /* The owner gives the range back when it answers, and the next ALLOC of any thread here may get it at once: nothing
      * here may map it, or still lay a reservation over it, by then (a lay after FREE tore down that thread's new
      * buffer). In a reserved range the mapping goes back to a reservation (laid over it, it replaces it). */
-    if(memory->physical!=PS5_GPU_LOCAL_MEMORY) {
+    /* In the owner's process the mapping is the owner's: its free unmaps it. */
+    if(memory->physical!=PS5_GPU_LOCAL_MEMORY && !__atomic_load_n(&in_owner,__ATOMIC_ACQUIRE)) {
         void *at=memory->cpu;
         if(!(ranges_reserved && pw_gpu_host_range((uint64_t)(uintptr_t)at,memory->bytes)>=0 &&
              !sceKernelReserveVirtualRange(&at,memory->bytes,PW_GPU_RESERVE_FIXED,16384) && at==memory->cpu))

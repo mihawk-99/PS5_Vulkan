@@ -50,7 +50,8 @@ typedef struct PwGpuMessage {
  * spawn result before bootstrap; a client cannot replace that declaration. */
 static inline int pw_gpu_client_pid(int expected,uint64_t requested,int owner)
 {
-    return expected>=0 && requested>0 && requested<=INT32_MAX && requested!=(uint64_t)owner &&
+    /* The owner's own pid only for the slot the owner opened for itself (ps5_gpu_broker_open_in_owner). */
+    return expected>=0 && requested>0 && requested<=INT32_MAX && (requested!=(uint64_t)owner || expected==owner) &&
            (!expected || requested==(uint64_t)expected);
 }
 /* Window swapchain: width/height packed in argument[0], stride/full HWND in

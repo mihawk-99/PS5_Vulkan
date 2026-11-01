@@ -15,6 +15,9 @@ int ps5_gpu_broker_open(int *cookie);
 /* Bind to the owner's acknowledged payload PID before bootstrap gives the
  * helper its broker descriptor. INIT must match; window packets require it. */
 int ps5_gpu_broker_open_for_pid(int *cookie,int pid);
+/* A client in the owner's own process (a Windows program run inside the title): its INIT names the owner's pid, and its
+ * Vulkan uses the owner's mappings (ps5_gpu_client_in_owner). It ends with the owner. */
+int ps5_gpu_broker_open_in_owner(int *cookie);
 /* Game mode (src/pw_window_direct.h): the native pid whose full-screen frames are flipped directly, or 0. No lock. */
 int ps5_gpu_broker_game_mode();
 void ps5_gpu_broker_close(int cookie,int lifecycle_token);

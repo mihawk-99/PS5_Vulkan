@@ -1382,6 +1382,7 @@ int ps5_gpu_broker_open_for_pid(int *cookie,int pid)
     if(pid<=0 || pid==getpid()) {errno=EINVAL;return -1;}
     return open_client(cookie,pid);
 }
+int ps5_gpu_broker_open_in_owner(int *cookie) {return open_client(cookie,getpid());}
 void ps5_gpu_broker_close(int cookie,int service)
 {
     auto &b=broker_state;
