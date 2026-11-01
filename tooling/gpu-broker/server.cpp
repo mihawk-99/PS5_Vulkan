@@ -1059,9 +1059,7 @@ static void *serve(Client &c,bool present)
                 }break;
             case PW_GPU_SWAPCHAIN:
                 if(wedged) { m.status=EIO;break; }
-                if(m.argument[0]>0 && m.argument[0]<=1920 && m.argument[1]>0 && m.argument[1]<=1080 &&
-                   m.argument[2]>=m.argument[0]*4 && m.argument[2]<=1920*4 && m.argument[3]<=1 &&
-                   m.bytes==m.argument[1]*m.argument[2] && !(m.address&3) && owned(c,m.address,m.bytes)) {
+                if(pw_gpu_display_image(&m) && owned(c,m.address,m.bytes)) {
                     // No cache maintenance: the client waited for its frame's fence, and GPU writes reach CPU reads
                     // coherently (graphics-child-gpu-coherence-*). The copy runs outside the broker's lock, under the
                     // display's own, so other clients' submissions go on meanwhile: this client's buffers cannot go
@@ -1079,10 +1077,11 @@ static void *serve(Client &c,bool present)
                     const bool shown=!b.cover && may_show(b,c.cookie,c.pid,radv_ps5_now_ns());
                     if(b.cover)++b.cover_held_frames;
                     if(shown) {
-                        int cursor_x,cursor_y;screen_cursor(0,0,(unsigned)m.argument[0],(unsigned)m.argument[1],cursor_x,cursor_y);
+                        unsigned shown_width,shown_height;pw_gpu_display_shown(&m,&shown_width,&shown_height);
+                        int cursor_x,cursor_y;screen_cursor(0,0,shown_width,shown_height,cursor_x,cursor_y);
                         std::string asked=take_capture(b);
                         const std::string &picture=asked.empty() ? capture : asked;
-                        m.status=b.display.present((void *)m.address,(unsigned)m.argument[0],(unsigned)m.argument[1],
+                        m.status=b.display.present((void *)m.address,shown_width,shown_height,
                             (unsigned)m.argument[2],b.log,picture.empty() ? nullptr : picture.c_str(),m.argument[3]!=0,
                             cursor_x,cursor_y);
                     } else m.status=0;

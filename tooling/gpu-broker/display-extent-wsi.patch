@@ -1,0 +1,16 @@
+--- a/src/vulkan/wsi/wsi_common_videoout.c
++++ b/src/vulkan/wsi/wsi_common_videoout.c
+@@ -516,9 +516,11 @@
+     * program that names one without checking the list got no swapchain at all (Wine's vulkan-1, vulkan.c:975).
+     * A window's swapchain is its client area, which may be larger than the screen (Steam's restored window is 1922x1081):
+     * the owner clips it to the screen as Windows does, up to the size it composes (PS5_Proton's src/pw_window_page.h,
+-    * 2176x1408). Only a swapchain for the whole display is held to the display's size. */
++    * 2176x1408). A swapchain for the whole display is a window's client area as well (Wine's surface capabilities;
++    * The Binding of Isaac's borderless fullscreen window is 1921x1080): it takes the same size, and the owner shows
++    * its top-left part (pw_gpu_display_shown). */
+    const struct broker_surface *surface=(const void *)s;
+-   const uint32_t max_width=surface->hwnd ? 2176 : 1920,max_height=surface->hwnd ? 1408 : 1080;
++   const uint32_t max_width=2176,max_height=1408;
+    if(!info->imageExtent.width || info->imageExtent.width>max_width || !info->imageExtent.height ||
+       info->imageExtent.height>max_height ||
+       info->minImageCount>VIDEOOUT_BUFFERS ||

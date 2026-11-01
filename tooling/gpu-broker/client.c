@@ -276,9 +276,9 @@ static int present_timed(PwGpuMessage *message,const void *pixels,size_t bytes)
 }
 int ps5_gpu_client_swapchain(const void *pixels,unsigned width,unsigned height,unsigned pitch,unsigned bgra)
 {
-    if(!width || width>1920 || !height || height>1080 || pitch<width*4 || pitch>1920*4 || bgra>1)return EINVAL;
     PwGpuMessage message={.operation=PW_GPU_SWAPCHAIN,.address=(uint64_t)pixels,.bytes=(uint64_t)pitch*height,
                          .argument={width,height,pitch,bgra}};
+    if(!pw_gpu_display_image(&message))return EINVAL;
     return present_timed(&message,pixels,(size_t)pitch*height);
 }
 int ps5_gpu_client_window_swapchain(const void *pixels,unsigned width,unsigned height,unsigned stride,unsigned bgra,

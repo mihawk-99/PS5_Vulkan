@@ -125,7 +125,8 @@ int Ps5GpuDisplay::open(FILE *log)
 int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pitch,FILE *log,const char *capture,bool bgra,
     int cursor_x,int cursor_y)
 {
-    if(!pixels || !w || w>width || !h || h>height || pitch<w*4 || pitch>width*4)return EINVAL;
+    // A row may be longer than the part shown: the top-left of a swapchain larger than the screen (pw_gpu_display_shown).
+    if(!pixels || !w || w>width || !h || h>height || pitch<w*4 || pitch>2176*4)return EINVAL;
     if(handle<0) {
         const int status=open(log);
         if(status)return status;

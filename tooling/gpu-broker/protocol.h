@@ -67,6 +67,21 @@ static inline int pw_gpu_window_image(const PwGpuMessage *m)
            !(stride&3) && hwnd && m->argument[2] && m->argument[3]<=1 &&
            m->bytes==(uint64_t)height*stride && m->address && !(m->address&3);
 }
+/* Display swapchain: width, height, pitch and BGRA in argument[0..3]. Its image is the window's client area too (Wine's
+ * surface capabilities), which may be larger than the screen: The Binding of Isaac's borderless fullscreen window is
+ * 1921x1080. So it takes the size a window's does, and the owner shows its top-left part (pw_gpu_display_shown). */
+static inline int pw_gpu_display_image(const PwGpuMessage *m)
+{
+    const uint64_t width=m->argument[0],height=m->argument[1],pitch=m->argument[2];
+    return width && width<=2176 && height && height<=1408 && pitch>=width*4 && pitch<=2176*4 && !(pitch&3) &&
+           m->argument[3]<=1 && m->bytes==height*pitch && m->address && !(m->address&3);
+}
+/* The part of a display image on screen: its top-left, at most the screen's 1920x1080 (a smaller image is scaled). */
+static inline void pw_gpu_display_shown(const PwGpuMessage *m,unsigned *width,unsigned *height)
+{
+    *width=m->argument[0]>1920 ? 1920u : (unsigned)m->argument[0];
+    *height=m->argument[1]>1080 ? 1080u : (unsigned)m->argument[1];
+}
 /* Reject wrapped resources; subtraction bounds the requested range. */
 static inline int pw_gpu_contains(uint64_t base,uint64_t length,uint64_t address,uint64_t bytes)
 {

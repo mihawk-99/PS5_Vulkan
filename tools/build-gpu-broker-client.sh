@@ -78,6 +78,8 @@ if [[ $wsi == 1 ]]; then
     patch --batch -p1 -d "$out/source" < "$out/patches/present-mode-wsi.patch"
     cp "$root/tooling/gpu-broker/window-extent-wsi.patch" "$out/patches/"   # a window larger than the screen, clipped
     patch --batch -p1 -d "$out/source" < "$out/patches/window-extent-wsi.patch"
+    cp "$root/tooling/gpu-broker/display-extent-wsi.patch" "$out/patches/"   # a display swapchain larger than the screen too
+    patch --batch -p1 -d "$out/source" < "$out/patches/display-extent-wsi.patch"
     cp "$root/tooling/gpu-broker/pw_present_retry.h" "$out/source/src/vulkan/wsi/"   # PS5_Proton's, beside the WSI
     python3 - "$radv" "$out" <<'PYWSI'
 import json,shlex,subprocess,sys
