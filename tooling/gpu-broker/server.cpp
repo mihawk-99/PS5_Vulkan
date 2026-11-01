@@ -505,8 +505,11 @@ void (*desktop_cursor)(int *,int *)=nullptr;
 constexpr uint64_t kHoldNs=300000000ull;
 bool may_show(Broker &b,int source,int pid,uint64_t now)
 {
-    if(b.holder==source) { b.holder_ns=now;return true; }
     const int foreground=desktop_foreground ? desktop_foreground() : 0;
+    // A quiet foreground window still owns the screen. Background repaints
+    // must not replace it merely because its last paint was over 300 ms ago.
+    if(foreground && pid!=foreground) { ++b.hidden;return false; }
+    if(b.holder==source) { b.holder_ns=now;return true; }
     const bool idle=!b.holder || now-b.holder_ns>kHoldNs;
     const bool focus=foreground && pid==foreground && b.holder_pid!=foreground;
     if(!idle && !focus) { ++b.hidden;return false; }
@@ -651,12 +654,14 @@ void *compositor_main(void *)
         if(b.compositor_stop) { pthread_mutex_unlock(&b.display_lock);return nullptr; }
         int cx=INT32_MIN,cy=INT32_MIN;if(desktop_cursor)desktop_cursor(&cx,&cy);
         const bool cursor_moved=cx!=b.cursor_x || cy!=b.cursor_y;
+        const int foreground=desktop_foreground ? desktop_foreground() : 0;
         for(auto &f:b.frames) {
             if(!f.page)continue;
             const uint32_t sequence=__atomic_load_n(&f.page->sequence,__ATOMIC_ACQUIRE);
             if((sequence&1) || !sequence)continue;
             const bool fresh=sequence!=f.shown,held=b.holder==-f.pid;
-            if((!fresh && !(held && cursor_moved)) || !may_show(b,-f.pid,f.pid,radv_ps5_now_ns()))continue;
+            const bool focused=foreground && foreground==f.pid && b.holder_pid!=f.pid;
+            if((!fresh && !focused && !(held && (cursor_moved || !b.capture_next.empty()))) || !may_show(b,-f.pid,f.pid,radv_ps5_now_ns()))continue;
             const unsigned width=f.page->width,height=f.page->height,stride=f.page->stride;
             const int x=f.page->x,y=f.page->y;
             if(!width || width>PW_FRAME_WIDTH || !height || height>PW_FRAME_HEIGHT || stride!=width*4)continue;
