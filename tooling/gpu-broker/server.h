@@ -31,6 +31,9 @@ bool ps5_gpu_broker_capture_next(const char *path);
  * [from, to) of one in another process before the broker maps it for the GPU (0, or -1). An application whose clients
  * outlive it sets both, so none of that memory is its own; unset, the broker makes it, as before. */
 void ps5_gpu_broker_set_shared_memory(int (*alloc)(size_t bytes),int (*touch)(int fd,size_t from,size_t to));
+/* Host-visible client buffers from direct memory: alloc makes `bytes` and grants this process and client_pid (the memory helper;
+ * 0 with *offset, or -1), each side mapping it by offset (sceKernelMapDirectMemory); release gives a range back once nothing maps it. Unset: shared-memory objects, as before. */
+void ps5_gpu_broker_set_dmem_memory(int (*alloc)(size_t bytes,int client_pid,int64_t *offset),int (*release)(int64_t offset,size_t bytes));
 /* attach consumes fd. Frame-page format is frame_page.h. */
 /* Global HWND route, configured before any clients start. Attach consumes fd
  * and returns 0 or an errno status, after lifetime/extent/capacity validation. */

@@ -101,7 +101,7 @@ struct LogPipe {
 size_t flexible_now() { size_t available=0;return sceKernelAvailableFlexibleMemorySize(&available) ? 0 : available; }
 // A client buffer is host-visible (shared memory, mapped in both processes; fd set) or device-local (the owner's
 // direct memory, mapped for the GPU and the owner only; memory set).
-struct Buffer { uint64_t address=0,bytes=0;uint32_t token=0;int fd=-1;bool local=false,ranged=false;radv_ps5_memory memory{}; };
+struct Buffer { uint64_t address=0,bytes=0;uint32_t token=0;int fd=-1;bool local=false,ranged=false;radv_ps5_memory memory{};int64_t dmem=-1;int pid=-1; };
 // The owner's side of the host-visible address ranges (PW_GPU_HOST_*): reserved whole while a broker runs, handed out
 // first fit and given back coalesced, so freed addresses are used again. Without the reservation (something was there
 // already), allocations fall back to reserving each buffer's own range at a cursor, as before.
@@ -239,6 +239,40 @@ bool owned(const Client &c,uint64_t address,uint64_t bytes)
     for(const auto &b:c.buffers)if(b.token && pw_gpu_contains(b.address,b.bytes,address,bytes))return true;
     return false;
 }
+// Host-visible memory from the application's direct memory (ps5_gpu_broker_set_dmem_memory), not shared memory: made by the
+// memory helper and granted to this process and the client, each mapping it by offset (the system compositor shares memory
+// with games the same way). The helper owns the range until dmem_release: the client unmaps before it sends FREE (and a
+// client that is gone has no mappings), and this process unmaps before it releases, so nothing maps a range the kernel may reuse.
+int (*dmem_alloc)(size_t bytes,int client_pid,int64_t *offset)=nullptr;
+int (*dmem_release)(int64_t offset,size_t bytes)=nullptr;
+unsigned long long dmem_made=0,dmem_freed=0,dmem_refused=0,dmem_free_failed=0,dmem_bytes_made=0;
+void dmem_give_back(int64_t offset,uint64_t bytes)
+{
+    if(dmem_release && !dmem_release(offset,(size_t)bytes))++dmem_freed;
+    else ++dmem_free_failed;
+}
+// Map a client's host-visible buffer at `at` in this process: the memory helper's direct memory when it is set (dmem is
+// the offset), else a shared-memory object (fd). MAP_FAILED when neither could be mapped.
+int shared_object(uint64_t bytes);
+void *map_host(const Client &c,void *at,uint64_t bytes,int &fd,int64_t &dmem)
+{
+    fd=-1;dmem=-1;
+    // Direct memory first; a range the helper refuses (the pool is full, a grant failed) or this process cannot map is made as a
+    // shared-memory object instead, which the client maps by descriptor as before.
+    if(dmem_alloc) {
+        int64_t offset=-1;
+        if(dmem_alloc(bytes,c.pid,&offset))++dmem_refused;
+        else {
+            ++dmem_made;dmem_bytes_made+=bytes;
+            void *got=at;
+            if(!sceKernelMapDirectMemory(&got,bytes,0x33,PW_GPU_RESERVE_FIXED,offset,16384) && got==at) { dmem=offset;return got; }
+            dmem_give_back(offset,bytes);
+        }
+    }
+    fd=shared_object(bytes);
+    if(fd<0)return MAP_FAILED;
+    return mmap(at,bytes,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,fd,0);
+}
 void release(Buffer &b)
 {
     if(b.local)radv_ps5_memory_free(&b.memory);
@@ -250,6 +284,7 @@ void release(Buffer &b)
     }
     else if(b.address)sceKernelMunmap((void *)b.address,b.bytes);
     if(b.fd>=0)close(b.fd);
+    if(b.dmem>=0)dmem_give_back(b.dmem,b.bytes);
     b=Buffer{};
 }
 // The device-local heap a client is told it has: the offer, or what direct memory above the floor allows now.
@@ -308,23 +343,20 @@ int allocate(Client &c,PwGpuMessage &m,uint64_t &next_window,uint64_t &next_high
         c.allocation_stage="range";
         const uint64_t address=range.take(bytes,alignment);
         if(!address)return ENOMEM;
-        c.allocation_stage="shm";
-        const int shared=shared_object(bytes);
-        void *mapped=MAP_FAILED;
-        if(shared>=0) {
-            c.allocation_stage="map";
-            mapped=mmap((void *)address,bytes,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,shared,0);
-        }
+        c.allocation_stage="map";
+        int shared=-1;int64_t dmem=-1;
+        void *mapped=map_host(c,(void *)address,bytes,shared,dmem);
         bool granted=mapped==(void *)address;
         if(granted) { c.allocation_stage="gpu_permissions";granted=radv_ps5_memory_grant_gpu(mapped,bytes); }
         if(!granted) {
             void *at=(void *)address;
             if(!sceKernelReserveVirtualRange(&at,bytes,PW_GPU_RESERVE_FIXED,16384) && at==(void *)address)range.give(address,bytes);
             if(shared>=0)close(shared);
+            if(dmem>=0)dmem_give_back(dmem,bytes);
             return ENOMEM;
         }
-        *b=Buffer{address,bytes,++c.next_token,shared,false,true};c.allocated+=bytes;
-        m.address=address;m.bytes=bytes;m.argument[0]=b->token;fd=shared;
+        *b=Buffer{address,bytes,++c.next_token,shared,false,true};b->dmem=dmem;b->pid=c.pid;c.allocated+=bytes;
+        m.address=address;m.bytes=bytes;m.argument[0]=b->token;m.argument[2]=dmem>=0 ? uint64_t(dmem)+1 : 0;fd=shared;
         c.allocation_stage="complete";
         return 0;
     }
@@ -343,20 +375,16 @@ int allocate(Client &c,PwGpuMessage &m,uint64_t &next_window,uint64_t &next_high
         if(attempt==63)return EADDRINUSE;
         cursor=address+(bytes>(UINT64_C(2)<<20) ? bytes : UINT64_C(2)<<20);
     }
-    c.allocation_stage="shm";
-    const int shared=shared_object(bytes);
-    void *mapped=MAP_FAILED;
-    if(shared>=0) {
-        c.allocation_stage="map";
-        mapped=mmap(reserved,bytes,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,shared,0);
-    }
+    c.allocation_stage="map";
+    int shared=-1;int64_t dmem=-1;
+    void *mapped=map_host(c,reserved,bytes,shared,dmem);
     bool granted=false;
     if(mapped==reserved) { c.allocation_stage="gpu_permissions";granted=radv_ps5_memory_grant_gpu(mapped,bytes); }
     if(!granted) {
-        sceKernelMunmap(reserved,bytes);if(shared>=0)close(shared);return ENOMEM;
+        sceKernelMunmap(reserved,bytes);if(shared>=0)close(shared);if(dmem>=0)dmem_give_back(dmem,bytes);return ENOMEM;
     }
-    *b=Buffer{address,bytes,++c.next_token,shared};c.allocated+=bytes;cursor=address+bytes;
-    m.address=address;m.bytes=bytes;m.argument[0]=b->token;fd=shared;
+    *b=Buffer{address,bytes,++c.next_token,shared};b->dmem=dmem;b->pid=c.pid;c.allocated+=bytes;cursor=address+bytes;
+    m.address=address;m.bytes=bytes;m.argument[0]=b->token;m.argument[2]=dmem>=0 ? uint64_t(dmem)+1 : 0;fd=shared;
     c.allocation_stage="complete";
     return 0;
 }
@@ -925,6 +953,10 @@ bool ps5_gpu_broker_capture_next(const char *path)
     pthread_mutex_unlock(&b.display_lock);
     return asked;
 }
+void ps5_gpu_broker_set_dmem_memory(int (*alloc)(size_t,int,int64_t *),int (*release)(int64_t,size_t))
+{
+    dmem_alloc=alloc;dmem_release=release;
+}
 void ps5_gpu_broker_set_shared_memory(int (*alloc)(size_t),int (*touch)(int,size_t,size_t))
 {
     shared_alloc=alloc;shared_touch=touch;
@@ -1075,6 +1107,7 @@ bool ps5_gpu_broker_stop()
         (unsigned long long)fences.kick_ns/1000,wedged);
     // Wedged, the fence page, staging and the reserved ranges (with whatever is mapped in them) stay as they are.
     if(!wedged) { fences_reset();host_ranges_release(b.log); }
+    if(dmem_alloc)fprintf(b.log,"gpu-broker dmem_host made=%llu freed=%llu refused=%llu free_failed=%llu made_bytes=%llu\n",dmem_made,dmem_freed,dmem_refused,dmem_free_failed,dmem_bytes_made);
     if(b.compositing) {
         pthread_mutex_lock(&b.display_lock);b.compositor_stop=true;pthread_mutex_unlock(&b.display_lock);
         pthread_join(b.compositor,nullptr);b.compositing=false;

@@ -26,6 +26,21 @@ static uint64_t allocated,local_allocated;
 static uint64_t local_limit,host_limit=PW_GPU_LIMIT;
 /* This process reserved the broker's host ranges before anything else could map there (set by the application before binding): buffers are mapped over that reservation, and freed back to it. */
 static int ranges_reserved;
+/* A host-visible buffer at `at`: the broker's direct memory when it names an offset (dmem_plus_one, the offset and one), else its
+ * shared-memory object (fd). */
+static void *map_host_at(void *at,uint64_t bytes,int fd,uint64_t dmem_plus_one)
+{
+    if(dmem_plus_one) {
+        void *got=at;
+        const int status=sceKernelMapDirectMemory(&got,(size_t)bytes,0x33,PS5_KERNEL_MAP_FIXED,(int64_t)(dmem_plus_one-1),16384);
+        if(status || got!=at) {
+            fprintf(stderr,"gpu-client: direct memory %llu at %p for %llu bytes: status %#x, mapped at %p\n",(unsigned long long)(dmem_plus_one-1),at,(unsigned long long)bytes,(unsigned)status,got);
+            return MAP_FAILED;
+        }
+        return got;
+    }
+    return mmap(at,bytes,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,fd,0);
+}
 #define PS5_GPU_LOCAL_MEMORY (-2)
 
 int ps5_gpu_client_bind(int fd, bool reserved);
@@ -79,8 +94,9 @@ static int rpc(PwGpuMessage *message,int *descriptor)
     int okay=readable &&
         ps5_gpu_packet_recv(broker,message,sizeof(*message),fds,&count)==sizeof(*message) &&
         message->magic==PW_GPU_MAGIC && message->sequence==expected && message->operation==operation &&
-        count==(unsigned)(descriptor && !message->status);
-    if(okay && descriptor) *descriptor=fds[0];
+        (count==(unsigned)(descriptor && !message->status) ||
+         (operation==PW_GPU_ALLOC && descriptor && !message->status && !count && message->argument[2]));
+    if(okay && descriptor) *descriptor=count ? fds[0] : -1;
     else for(unsigned i=0;i<count;++i)close(fds[i]);
     if(!okay)__atomic_store_n(&broken,1,__ATOMIC_RELAXED);
     pthread_mutex_unlock(&lock);
@@ -206,13 +222,13 @@ void radv_ps5_cpu_flush(const void *address,size_t bytes)
  * mapping (PS5_Proton's docs/IA32_DESIGN.md, M4 step 3). One per allocation, closed when the allocation is freed,
  * and only when the application asked (ps5_gpu_client_keep_sources): a payload process has a few hundred
  * descriptors (636 measured), which a 64-bit program with many allocations would otherwise spend. */
-struct shared_source { uintptr_t address; int fd; };
+struct shared_source { uintptr_t address; int fd; uint64_t dmem_plus_one; };
 static int keep_sources;
 void ps5_gpu_client_keep_sources(void) { __atomic_store_n(&keep_sources,1,__ATOMIC_RELEASE); }
 static struct shared_source *sources;
 static size_t source_count,source_capacity;
 static pthread_mutex_t sources_lock=PTHREAD_MUTEX_INITIALIZER;
-static bool source_add(uintptr_t address,int fd)
+static bool source_add(uintptr_t address,int fd,uint64_t dmem_plus_one)
 {
     pthread_mutex_lock(&sources_lock);
     if(source_count==source_capacity) {
@@ -221,9 +237,19 @@ static bool source_add(uintptr_t address,int fd)
         if(!grown) { pthread_mutex_unlock(&sources_lock);return false; }
         sources=grown;source_capacity=capacity;
     }
-    sources[source_count++]=(struct shared_source){address,fd};
+    sources[source_count++]=(struct shared_source){address,fd,dmem_plus_one};
     pthread_mutex_unlock(&sources_lock);
     return true;
+}
+/* The direct-memory offset (plus one) of the allocation at address, or 0 when it is a descriptor's. */
+static uint64_t source_dmem(uintptr_t address)
+{
+    uint64_t dmem=0;
+    pthread_mutex_lock(&sources_lock);
+    for(size_t i=0;i<source_count;++i)
+        if(sources[i].address==address) { dmem=sources[i].dmem_plus_one;break; }
+    pthread_mutex_unlock(&sources_lock);
+    return dmem;
 }
 /* The descriptor of the allocation at address, or -1; take removes it from the table. */
 static int source_find(uintptr_t address,bool take)
@@ -253,20 +279,20 @@ bool radv_ps5_memory_alloc(uint64_t bytes,uint64_t alignment,bool window32,struc
     const int ranged=okay && ranges_reserved && pw_gpu_host_range(message.address,message.bytes)>=0;
     if(ranged) {
         /* Over this process's own reservation of the range: a fixed mapping replaces it. */
-        void *mapped=mmap(at,message.bytes,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,fd,0);
+        void *mapped=map_host_at(at,message.bytes,fd,message.argument[2]);
         okay=mapped==at;
         if(!okay) { void *again=at;sceKernelReserveVirtualRange(&again,message.bytes,PW_GPU_RESERVE_FIXED,16384); }
     } else if(okay) {
         okay=sceKernelReserveVirtualRange(&at,message.bytes,0,16384)==0;
         if(okay && at!=(void *)(uintptr_t)message.address) { sceKernelMunmap(at,message.bytes);okay=false; }
         if(okay) {
-            void *mapped=mmap(at,message.bytes,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,fd,0);
+            void *mapped=map_host_at(at,message.bytes,fd,message.argument[2]);
             okay=mapped==at;
             if(!okay)sceKernelMunmap(at,message.bytes);
         }
     }
     /* Kept for a placed mapping of this memory (radv_ps5_memory_map_at); closed when it is freed. */
-    if(!okay || !__atomic_load_n(&keep_sources,__ATOMIC_ACQUIRE) || !source_add((uintptr_t)at,fd))close(fd);
+    if(!okay || (!message.argument[2] && !__atomic_load_n(&keep_sources,__ATOMIC_ACQUIRE)) || !source_add((uintptr_t)at,fd,message.argument[2]))close(fd);
     if(!okay) {
         message.operation=PW_GPU_FREE;rpc(&message,NULL);return false;
     }
@@ -279,13 +305,21 @@ void radv_ps5_memory_free(struct radv_ps5_memory *memory)
     if(!memory->cpu)return;
     PwGpuMessage message={.operation=PW_GPU_FREE,.address=(uint64_t)memory->cpu,.bytes=memory->bytes,
                          .argument={memory->granule}};
+    /* Direct memory: the owner releases the range when it answers, so nothing here may map it by then. */
+    const bool dmem=memory->physical!=PS5_GPU_LOCAL_MEMORY && source_dmem((uintptr_t)memory->cpu)!=0;
+    if(dmem) {
+        void *at=memory->cpu;
+        if(!(ranges_reserved && pw_gpu_host_range((uint64_t)(uintptr_t)at,memory->bytes)>=0 &&
+             !sceKernelReserveVirtualRange(&at,memory->bytes,PW_GPU_RESERVE_FIXED,16384) && at==memory->cpu))
+            sceKernelMunmap(memory->cpu,memory->bytes);
+    }
     /* Broker submissions complete before acknowledgment; no GPU references remain. */
     if(rpc(&message,NULL)) { __atomic_store_n(&broken,1,__ATOMIC_RELAXED);return; }
     if(memory->physical==PS5_GPU_LOCAL_MEMORY)__atomic_sub_fetch(&local_allocated,memory->bytes,__ATOMIC_RELAXED);
     else {
         /* In a reserved range the mapping goes back to a reservation (laid over it, it replaces it). */
         void *at=memory->cpu;
-        if(!(ranges_reserved && pw_gpu_host_range((uint64_t)(uintptr_t)at,memory->bytes)>=0 &&
+        if(!dmem && !(ranges_reserved && pw_gpu_host_range((uint64_t)(uintptr_t)at,memory->bytes)>=0 &&
              !sceKernelReserveVirtualRange(&at,memory->bytes,PW_GPU_RESERVE_FIXED,16384) && at==memory->cpu))
             sceKernelMunmap(memory->cpu,memory->bytes);
         const int fd=source_find((uintptr_t)memory->cpu,true);
@@ -337,8 +371,12 @@ bool radv_ps5_memory_grant_gpu(void *a,uint64_t b) { (void)a;(void)b;return fals
  * no CPU mapping in this process, and so no source. */
 bool radv_ps5_memory_map_at(const struct radv_ps5_memory *m,void *a)
 {
-    const int fd=m->physical==PS5_GPU_LOCAL_MEMORY ? -1 : source_find((uintptr_t)m->cpu,false);
-    if(fd<0 || !a || ((uintptr_t)a&16383))return false;
+    if(m->physical==PS5_GPU_LOCAL_MEMORY || !a || ((uintptr_t)a&16383))return false;
+    /* Direct memory: the same range mapped again at a. */
+    const uint64_t dmem=source_dmem((uintptr_t)m->cpu);
+    if(dmem)return map_host_at(a,m->bytes,-1,dmem)==a;
+    const int fd=source_find((uintptr_t)m->cpu,false);
+    if(fd<0)return false;
     return mmap(a,m->bytes,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,fd,0)==a;
 }
 void radv_ps5_memory_unmap_at(void *a,uint64_t b,bool r)
