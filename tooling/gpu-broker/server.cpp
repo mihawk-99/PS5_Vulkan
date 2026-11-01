@@ -183,6 +183,10 @@ static uint64_t host_limit=PW_GPU_LIMIT;
 constexpr unsigned kClientBuffers=1024;
 struct Client {
     int socket=-1,service=-1,pid=-1,expected_pid=0;uint32_t sequence=0,next_token=0;
+    // Its present link (PW_GPU_PRESENT_LINK): a second socket and thread for its presents, so its submissions go on
+    // while the display copies a frame. pin_*: the frame a present reads outside b.lock; a FREE of it waits for that.
+    int present_socket=-1;uint32_t present_sequence=0;uint64_t pin_address=0,pin_bytes=0;
+    bool present_serving=false;pthread_t presenter{};
     Buffer buffers[kClientBuffers];unsigned submissions=0;
     uint64_t allocated=0,local=0,local_peak=0,tess=0;uint32_t tess_bytes=0,granularity=0,buffering=0;
     // Where submission time goes, in nanoseconds: staging allocation and copy, the native submit, the completion wait
@@ -657,6 +661,7 @@ int submit(Client &c,const PwGpuMessage &m,FILE *out,unsigned client)
 namespace {
 struct Broker {
     pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER,display_lock=PTHREAD_MUTEX_INITIALIZER;
+    pthread_cond_t pin_released=PTHREAD_COND_INITIALIZER;   // a present link's frame unpinned (Client::pin_*)
     Client clients[32];
     Ps5GpuDisplay display;
     uint64_t window=0x240000000ull,high=0x5100000000ull;
@@ -842,10 +847,13 @@ int show_windows(Broker &b,const PwWindowSnapshot &snapshot,int cx,int cy,bool r
 // One thread per client, started with its slot, waiting on that client's socket alone (await_message); the broker's
 // work is serialized by its lock, taken only while a message is handled. The single worker this replaces held the
 // lock across a 20 ms poll of every socket, so opening or closing a slot, and every other client, waited on it.
-void *client_main(void *argument)
+// The same loop serves a client's present link (present), which takes its presents and their timing alone.
+void *present_main(void *argument);
+static void *serve(Client &c,bool present)
 {
-    auto &b=broker_state;auto &c=*static_cast<Client *>(argument);
-    const int socket=c.socket;uint64_t spin_until=0,idle_since=radv_ps5_now_ns();
+    auto &b=broker_state;
+    const int socket=present ? c.present_socket : c.socket;uint32_t &sequence=present ? c.present_sequence : c.sequence;
+    uint64_t spin_until=0,idle_since=radv_ps5_now_ns();
     for(;;) {
         const int found=await_message(socket,spin_until);
         pthread_mutex_lock(&b.lock);
@@ -857,13 +865,15 @@ void *client_main(void *argument)
         }
         do {
             PwGpuMessage m{};int received_fds[2];unsigned count=0;
-            const ssize_t bytes=ps5_gpu_packet_recv(c.socket,&m,sizeof(m),received_fds,&count);
+            const ssize_t bytes=ps5_gpu_packet_recv(socket,&m,sizeof(m),received_fds,&count);
             for(unsigned n=0;n<count;++n)close(received_fds[n]);
-            if(bytes!=sizeof(m) || count || m.magic!=PW_GPU_MAGIC || m.status || m.sequence!=c.sequence+1) {
+            if(bytes!=sizeof(m) || count || m.magic!=PW_GPU_MAGIC || m.status || m.sequence!=sequence+1) {
                 c.ended=true;break;
             }
-            c.sequence=m.sequence;m.status=EINVAL;int fd=-1;
-            if(m.operation==PW_GPU_INIT && c.pid<0 && pw_gpu_client_pid(c.expected_pid,m.argument[0],getpid())) {
+            sequence=m.sequence;m.status=EINVAL;int fd=-1;bool sent_away=false;   // sent_away: fd is closed once sent
+            if(present && m.operation!=PW_GPU_SWAPCHAIN && m.operation!=PW_GPU_WINDOW_SWAPCHAIN && m.operation!=PW_GPU_TIMING) {
+                // Refused (EINVAL): the present link carries presents alone.
+            } else if(m.operation==PW_GPU_INIT && c.pid<0 && pw_gpu_client_pid(c.expected_pid,m.argument[0],getpid())) {
                 c.pid=(int)m.argument[0];m.status=0;
                 const uint64_t ranges_reserved_reported=m.argument[2];m.argument[2]=m.argument[3]=0;
                 /* The host-visible budget always: a client keeps PW_GPU_LIMIT without it. */
@@ -886,6 +896,9 @@ void *client_main(void *argument)
                 }break;
             case PW_GPU_FREE:
                 for(auto &a:c.buffers)if(a.token && a.token==m.argument[0] && a.address==m.address && a.bytes==m.bytes) {
+                    // Its present link may be reading this buffer outside b.lock: the free waits for that present.
+                    while(c.pin_bytes && a.address<c.pin_address+c.pin_bytes && c.pin_address<a.address+a.bytes)
+                        pthread_cond_wait(&b.pin_released,&b.lock);
                     if(c.tess && pw_gpu_contains(a.address,a.bytes,c.tess,c.tess_bytes)) { c.tess=0;c.tess_bytes=0; }
                     free_buffer(c,a,b.log);m.status=0;break;
                 }
@@ -903,6 +916,19 @@ void *client_main(void *argument)
                     }
                 }
                 break;
+            case PW_GPU_PRESENT_LINK:
+                if(c.present_socket<0) {
+                    int pair[2];
+                    if(!ps5_gpu_packet_socketpair(pair,sizeof(PwGpuMessage))) {
+                        c.present_socket=pair[0];
+                        pthread_attr_t attributes;pthread_attr_init(&attributes);pthread_attr_setstacksize(&attributes,512u<<10);
+                        c.present_serving=!pthread_create(&c.presenter,&attributes,present_main,&c);
+                        pthread_attr_destroy(&attributes);
+                        if(c.present_serving) { fd=pair[1];sent_away=true;m.status=0; }
+                        else { close(pair[0]);close(pair[1]);c.present_socket=-1;m.status=EAGAIN; }
+                    } else m.status=EAGAIN;
+                    fprintf(b.log,"gpu-wine cookie=%d pid=%d present_link=%d status=%d\n",c.cookie,c.pid,!m.status,m.status);
+                }break;
             case PW_GPU_TESS:
                 if(m.bytes<=UINT32_MAX && owned(c,m.address,m.bytes)) { c.tess=m.address;c.tess_bytes=(uint32_t)m.bytes;m.status=0; }break;
             case PW_GPU_TIMING:   // the client's share of its frames' time, sums only (protocol.h)
@@ -923,6 +949,7 @@ void *client_main(void *argument)
                     // The client's fence has completed. Its allocation stays owned
                     // until this synchronous reply or native worker teardown.
                     const uint64_t begin=radv_ps5_now_ns();
+                    c.pin_address=m.address;c.pin_bytes=m.bytes;
                     pthread_mutex_unlock(&b.lock);
                     pthread_mutex_lock(&b.display_lock);
                     const uint64_t flips_before=b.display.flips;
@@ -985,6 +1012,7 @@ void *client_main(void *argument)
                     const uint64_t end=radv_ps5_now_ns(),copied=b.display.flips!=flips_before ? b.display.last_copy_ns : 0;
                     pthread_mutex_unlock(&b.display_lock);
                     pthread_mutex_lock(&b.lock);
+                    c.pin_address=c.pin_bytes=0;pthread_cond_broadcast(&b.pin_released);
                     c.timing.copy_ns+=copied;
                     if(!m.status) {
                         ++c.presentations;
@@ -1016,6 +1044,7 @@ void *client_main(void *argument)
                                         c.presentations/b.capture_every<=12;
                     const std::string capture=b.capture && (c.presentations<4 || periodic) ? output_path(path) : std::string();
                     const uint64_t begin=radv_ps5_now_ns();
+                    c.pin_address=m.address;c.pin_bytes=m.bytes;
                     pthread_mutex_unlock(&b.lock);
                     pthread_mutex_lock(&b.display_lock);
                     // A client that does not hold the screen is told its frame was shown, a frame's time later,
@@ -1033,6 +1062,7 @@ void *client_main(void *argument)
                     pthread_mutex_unlock(&b.display_lock);
                     if(!shown)sceKernelUsleep(16000);
                     pthread_mutex_lock(&b.lock);
+                    c.pin_address=c.pin_bytes=0;pthread_cond_broadcast(&b.pin_released);
                     c.timing.copy_ns+=copied;
                     if(!m.status)++c.presentations;
                     if(!m.status) {
@@ -1050,7 +1080,8 @@ void *client_main(void *argument)
             if(trace || m.status)
                 fprintf(b.log,"gpu-wine cookie=%d pid=%d operation=%u status=%#x live_bytes=%llu local_bytes=%llu\n",c.cookie,c.pid,m.operation,unsigned(m.status),(unsigned long long)c.allocated,(unsigned long long)c.local);
             note_peaks(b);
-            if(ps5_gpu_packet_send(c.socket,&m,sizeof(m),fd>=0 ? &fd : nullptr,fd>=0 ? 1 : 0))c.ended=true;
+            if(ps5_gpu_packet_send(socket,&m,sizeof(m),fd>=0 ? &fd : nullptr,fd>=0 ? 1 : 0))c.ended=true;
+            if(sent_away)close(fd);
             kick();
         } while(false);
         const bool ended=c.ended;
@@ -1059,6 +1090,8 @@ void *client_main(void *argument)
         spin_until=radv_ps5_now_ns()+kServeSpinNs;idle_since=radv_ps5_now_ns();
     }
 }
+void *client_main(void *argument) { return serve(*static_cast<Client *>(argument),false); }
+void *present_main(void *argument) { return serve(*static_cast<Client *>(argument),true); }
 }
 namespace {
 // Helpers' frames (src/pw_frame_page.h): every 4 ms, the newest picture of a frame page that may hold the screen is
@@ -1308,8 +1341,10 @@ void ps5_gpu_broker_close(int cookie,int service)
     Client *closing=nullptr;
     for(auto &c:b.clients)if(c.socket>=0 && c.cookie==cookie) { closing=&c;c.ended=true;break; }
     const bool serving=closing && closing->serving;const pthread_t server=serving ? closing->server : pthread_t{};
+    const bool presenting=closing && closing->present_serving;const pthread_t presenter=presenting ? closing->presenter : pthread_t{};
     pthread_mutex_unlock(&b.lock);
     if(serving)pthread_join(server,nullptr);
+    if(presenting)pthread_join(presenter,nullptr);
     pthread_mutex_lock(&b.lock);
     for(auto &c:b.clients)if(c.socket>=0 && c.cookie==cookie) {
         // The helper is gone, but its last submissions may not be: nothing it used is released before they are.
@@ -1320,7 +1355,7 @@ void ps5_gpu_broker_close(int cookie,int service)
             "local_released=%llu local_peak=%llu flexible=%zu\n",cookie,c.pid,c.presentations,c.submissions,(unsigned long long)c.allocated,
             (unsigned long long)c.local,(unsigned long long)c.local_peak,flexible_now());fsync(fileno(b.log));
         if(!wedged)for(auto &a:c.buffers)if(a.token)release(a);
-        close(c.socket);reset(c);break;
+        close(c.socket);if(c.present_socket>=0)close(c.present_socket);reset(c);break;
     }
     pthread_mutex_unlock(&b.lock);
 }

@@ -100,17 +100,19 @@ void ps5_gpu_client_rpc_split(uint64_t split[3])
     split[0]=__atomic_load_n(&rpc_lock_ns,__ATOMIC_RELAXED);split[1]=__atomic_load_n(&rpc_send_ns,__ATOMIC_RELAXED);
     split[2]=__atomic_load_n(&rpc_wait_ns,__ATOMIC_RELAXED);
 }
-static int rpc(PwGpuMessage *message,int *descriptor)
+/* One call on a connection to the owner: the main one (rpc), or the present link (present_rpc), each one call at a time
+ * under its own lock and with its own sequence. */
+static int rpc_on(int socket,pthread_mutex_t *link_lock,uint32_t *link_sequence,PwGpuMessage *message,int *descriptor)
 {
     int fds[2]={-1,-1};unsigned count=0;
     const bool timed=message->operation==PW_GPU_SUBMIT;
     const uint64_t t0=timed ? radv_ps5_now_ns() : 0;
-    pthread_mutex_lock(&lock);
+    pthread_mutex_lock(link_lock);
     const uint64_t t1=timed ? radv_ps5_now_ns() : 0;
-    message->magic=PW_GPU_MAGIC;message->sequence=++sequence;
+    message->magic=PW_GPU_MAGIC;message->sequence=++*link_sequence;
     const uint32_t expected=message->sequence,operation=message->operation;
-    struct pollfd p={broker,POLLIN,0};
-    const int sent=!__atomic_load_n(&broken,__ATOMIC_RELAXED) && broker>=0 && !ps5_gpu_packet_send(broker,message,sizeof(*message),NULL,0);
+    struct pollfd p={socket,POLLIN,0};
+    const int sent=!__atomic_load_n(&broken,__ATOMIC_RELAXED) && socket>=0 && !ps5_gpu_packet_send(socket,message,sizeof(*message),NULL,0);
     const uint64_t t2=timed ? radv_ps5_now_ns() : 0;
     /* The owner answers in tens of microseconds, so the reply is looked for by peeking: continuously for 2 ms, then
      * after short polls, which bound the wait for one that takes longer. Adopted while poll was suspected of waking
@@ -120,7 +122,7 @@ static int rpc(PwGpuMessage *message,int *descriptor)
         const uint64_t start=radv_ps5_now_ns(),spin_until=start+2000000,give_up=start+15000000000ull;
         char peek=0;
         for(;;) {
-            const ssize_t found=recv(broker,&peek,1,MSG_PEEK|MSG_DONTWAIT);
+            const ssize_t found=recv(socket,&peek,1,MSG_PEEK|MSG_DONTWAIT);
             if(found==1) { readable=1;break; }
             if(found==0 || (found<0 && errno!=EAGAIN && errno!=EWOULDBLOCK && errno!=EINTR)) {
                 lost=found ? "the connection failed" : "the connection closed";break;
@@ -138,15 +140,39 @@ static int rpc(PwGpuMessage *message,int *descriptor)
         __atomic_add_fetch(&rpc_wait_ns,t3-t2,__ATOMIC_RELAXED);
     }
     int okay=readable &&
-        ps5_gpu_packet_recv(broker,message,sizeof(*message),fds,&count)==sizeof(*message) &&
+        ps5_gpu_packet_recv(socket,message,sizeof(*message),fds,&count)==sizeof(*message) &&
         message->magic==PW_GPU_MAGIC && message->sequence==expected && message->operation==operation &&
         (count==(unsigned)(descriptor && !message->status) ||
          (operation==PW_GPU_ALLOC && descriptor && !message->status && !count && message->argument[2]));
     if(okay && descriptor) *descriptor=count ? fds[0] : -1;
     else for(unsigned i=0;i<count;++i)close(fds[i]);
     if(!okay)broker_lost(lost,operation,expected);
-    pthread_mutex_unlock(&lock);
+    pthread_mutex_unlock(link_lock);
     return okay ? message->status : EIO;
+}
+static int rpc(PwGpuMessage *message,int *descriptor) { return rpc_on(broker,&lock,&sequence,message,descriptor); }
+/* The present link (protocol.h, PW_GPU_PRESENT_LINK), with WINE_PS5_PRESENT_LINK=1 in the environment: asked for at the
+ * first present, then every present and its timing go over it, so the submissions on the main connection never wait
+ * behind a present the display is copying. Refused or not asked for: the main connection, as before. */
+static int presenter=-1,present_link;   /* present_link: 0 not asked yet, 1 open, -1 not used */
+static uint32_t present_sequence;
+static pthread_mutex_t present_lock=PTHREAD_MUTEX_INITIALIZER;
+static int present_rpc(PwGpuMessage *message)
+{
+    if(!__atomic_load_n(&present_link,__ATOMIC_ACQUIRE)) {
+        pthread_mutex_lock(&present_lock);
+        if(!present_link) {
+            const char *wanted=getenv("WINE_PS5_PRESENT_LINK");
+            PwGpuMessage link={.operation=PW_GPU_PRESENT_LINK};int fd=-1;
+            const int status=wanted && !strcmp(wanted,"1") ? rpc(&link,&fd) : ENOTSUP;
+            presenter=!status ? fd : -1;
+            if(wanted)fprintf(stderr,"gpu-client present link=%d status=%d\n",presenter>=0,status);
+            __atomic_store_n(&present_link,presenter>=0 ? 1 : -1,__ATOMIC_RELEASE);
+        }
+        pthread_mutex_unlock(&present_lock);
+    }
+    return __atomic_load_n(&present_link,__ATOMIC_ACQUIRE)>0 ? rpc_on(presenter,&present_lock,&present_sequence,message,NULL)
+                                                             : rpc(message,NULL);
 }
 int ps5_gpu_client_bind(int fd, bool reserved)
 {
@@ -229,7 +255,7 @@ static int present_timed(PwGpuMessage *message,const void *pixels,size_t bytes)
     const uint64_t start=radv_ps5_now_ns();
     radv_ps5_cpu_flush(pixels,bytes);
     const uint64_t flushed=radv_ps5_now_ns();
-    const int status=rpc(message,NULL);
+    const int status=present_rpc(message);
     const uint64_t end=radv_ps5_now_ns();
     __atomic_add_fetch(&timing_presents,1,__ATOMIC_RELAXED);__atomic_add_fetch(&timing_flush_ns,flushed-start,__ATOMIC_RELAXED);
     __atomic_add_fetch(&timing_present_ns,end-flushed,__ATOMIC_RELAXED);
@@ -244,7 +270,7 @@ static int present_timed(PwGpuMessage *message,const void *pixels,size_t bytes)
                                        __atomic_exchange_n(&timing_flush_ns,0,__ATOMIC_RELAXED),
                                        __atomic_exchange_n(&timing_present_ns,0,__ATOMIC_RELAXED)}};
         /* Its status is not the present's: an owner without the operation refuses it, and nothing is lost but the line. */
-        (void)rpc(&timing,NULL);
+        (void)present_rpc(&timing);
     }
     return status;
 }

@@ -32,7 +32,12 @@
 #define PW_GPU_RESERVE_NO_OVERWRITE 0x80
 enum { PW_GPU_INIT=1, PW_GPU_ALLOC, PW_GPU_FREE, PW_GPU_SUBMIT,
        PW_GPU_TESS, PW_GPU_OFFCHIP, PW_GPU_DONE, PW_GPU_IMAGE, PW_GPU_PRESENT, PW_GPU_SWAPCHAIN, PW_GPU_WINDOW_SWAPCHAIN,
-       PW_GPU_TIMING };
+       PW_GPU_TIMING, PW_GPU_PRESENT_LINK };
+/* PW_GPU_PRESENT_LINK: a second connection for this client's presents (SWAPCHAIN, WINDOW_SWAPCHAIN and TIMING, nothing
+ * else), its socket in the reply. Each connection is one call at a time, so on a single one a present the display took
+ * 6.4 ms to copy held the client's submissions behind it: 8.05 ms of round trips a frame for a Direct3D 12 game with the
+ * asynchronous present (PS5_Proton, 2026-10-17). On its own connection, served by its own thread in the owner,
+ * a present no longer holds them. */
 /* PW_GPU_TIMING: the client's share of its frames' time since its last one (PS5_Proton's src/pw_gpu_timing.h), sent
  * about once a second: argument[0] presents, [1] nanoseconds waiting for their fences, [2] flushing their frames,
  * [3] in their round trips; bytes its submissions and address their round trips' nanoseconds. Sums only: the owner
