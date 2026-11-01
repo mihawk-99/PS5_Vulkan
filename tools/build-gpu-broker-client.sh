@@ -17,7 +17,9 @@ mesa_fork=${PS5_MESA_FORK:-$radv/../PS5_Mesa}
 overlay_revision=f7ce91ac4c3697990bf89d79fdc61ae7cb98570b
 install=$radv/.deps/native/radv-release
 original=$install/lib/libvulkan_radeon.ps5.a
-revision=7b59ef27c1b09b9671bc4153c41940c3155c3af2
+revision=1ba9874f478657ccf6da72ce55f0260164cc0bd0
+# The window system layer is taken as the broker overlay (radv-gpu-broker-wsi.patch) was made: 47e9eb6 moved the lines it applies to.
+wsi_revision=7b59ef27c1b09b9671bc4153c41940c3155c3af2
 expected=0ffa39311881236b4872ec77a56bca417ce56c71cefca5954224b9ea8f3a1bf5
 # The archive is pinned by what it was built from, not by its bytes: a release archive built on another machine
 # differs byte for byte (PS5_Proton's tools/setup-pinned-radv.sh builds it from this Mesa revision and the pinned SDK).
@@ -64,7 +66,7 @@ for source in client packet_io; do
 done
 if [[ $wsi == 1 ]]; then
     mkdir -p "$out/source/src/vulkan/wsi"
-    git -C "$mesa_fork" show "$revision:src/vulkan/wsi/wsi_common_videoout.c" > "$out/source/src/vulkan/wsi/wsi_common_videoout.c"
+    git -C "$mesa_fork" show "$wsi_revision:src/vulkan/wsi/wsi_common_videoout.c" > "$out/source/src/vulkan/wsi/wsi_common_videoout.c"
     patch --batch -p1 -d "$out/source" < "$out/patches/radv-gpu-broker-wsi.patch"
     cp "$root/tooling/gpu-broker/window-surfaces-wsi.patch" "$out/patches/"
     patch --batch -p1 -d "$out/source" < "$out/patches/window-surfaces-wsi.patch"
@@ -92,7 +94,7 @@ from pathlib import Path
 root,radv,sdk,out=map(Path,sys.argv[1:5]);digest=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
 files=[p for p in (root/'tooling/gpu-broker').glob('*') if p.is_file()]
 manifest={'wsi':sys.argv[5]=='1','sha256':digest(out/'client.a'),
- 'mesa_base_revision':'7b59ef27c1b09b9671bc4153c41940c3155c3af2',
+ 'mesa_base_revision':'1ba9874f478657ccf6da72ce55f0260164cc0bd0',
  'mesa_overlay_revision':'f7ce91ac4c3697990bf89d79fdc61ae7cb98570b',
  'sdk_revision':(sdk/'.ps5-sdk-revision').read_text().strip(),
  'recipe_sha256':digest(radv/'tools/radv-link.sh'),
