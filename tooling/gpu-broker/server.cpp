@@ -1391,6 +1391,16 @@ bool ps5_gpu_broker_set_overlay(const void *pixels,unsigned x,unsigned y,unsigne
     pthread_mutex_unlock(&b.display_lock);
     return true;
 }
+void ps5_gpu_broker_overlay_refresh()
+{
+    auto &b=broker_state;
+    if(!b.started || pthread_mutex_trylock(&b.display_lock))return;
+    timespec now{};clock_gettime(CLOCK_MONOTONIC,&now);
+    if(b.display.overlay && b.display.registered && b.display.flips &&
+       uint64_t(now.tv_sec)*1000000000u+uint64_t(now.tv_nsec)-b.display.last_present_ns>30000000ull)
+        (void)b.display.reshow(b.log);
+    pthread_mutex_unlock(&b.display_lock);
+}
 unsigned ps5_gpu_broker_display_hz()
 {
     auto &b=broker_state;if(!b.started)return 0;

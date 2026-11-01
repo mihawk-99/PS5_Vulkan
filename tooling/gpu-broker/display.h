@@ -13,7 +13,8 @@ struct Ps5GpuDisplay {
     bool registered=false;
     bool fast_copy=false;   /* PS5_Proton's PROTON_GPU_FAST_COPY=1, read when the display opens */
     bool high_frame_rate=false;   /* the output at 119.88 Hz (PS5_Proton's PROTON_120HZ=1), restored at close */
-    /* An application's panel drawn over every frame inside its rectangle (pw_display_overlay.h): owned here, set and cleared
+    /* An application's panel over every frame inside its rectangle, premultiplied: blended over the frame blurred under it,
+     * with bubbles in its margins (pw_display_overlay_compose). Owned here, set and cleared
      * under the broker's display lock (ps5_gpu_broker_set_overlay). */
     uint32_t *overlay=nullptr;
     unsigned overlay_x=0,overlay_y=0,overlay_w=0,overlay_h=0;
@@ -23,6 +24,7 @@ struct Ps5GpuDisplay {
      * waiting game before (osk-lag-desktop-base-2026-11-01-01, the owner: "insane input lag"). shadow_valid: it holds
      * the last frame; the first re-show after the panel came reads that frame back once. */
     uint8_t *shadow=nullptr;
+    uint32_t *blur=nullptr;   /* the see-through panel's blurred frame (pw_display_overlay_compose's scratch), with the shadow */
     bool shadow_valid=false;
     int last_cursor_x=-1,last_cursor_y=-1;
     /* Makes the shadow (on) or drops it (off), with the panel. */
