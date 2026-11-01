@@ -13,7 +13,7 @@ extern "C" {
 int ps5_gpu_client_bind(int fd,bool reserved);
 /* For an application that maps memory where it chooses (VK_EXT_map_memory_placed; a 32-bit Windows program under
  * WoW64 maps all of its memory below 4 GiB): call before Vulkan allocates. The client then keeps each host-visible
- * allocation's descriptor, one per allocation, which a placed mapping needs; without it none is kept. */
+ * allocation's direct-memory offset, which a placed mapping needs; without it none is kept and nothing is placed. */
 void ps5_gpu_client_keep_sources(void);
 int ps5_gpu_client_done(int result,uint64_t images,uint64_t hash);
 int ps5_gpu_client_image(unsigned cycle,unsigned pixels,uint64_t hash);
