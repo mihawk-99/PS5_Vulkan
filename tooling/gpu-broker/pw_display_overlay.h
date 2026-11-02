@@ -49,8 +49,9 @@ enum { PW_OVERLAY_BUBBLES = 14, PW_OVERLAY_MARGIN = 165 };
 typedef struct PwOverlayBubble { int cx, cy, r; unsigned alpha; } PwOverlayBubble;
 
 /* Where each bubble is at `seconds`: rising from below the rectangle to its top over 6..11 s, wobbling 4..12 px, fading in
- * and out; radius 9..35; even ones in the left margin, odd ones in the right. Only ones inside the rectangle count. */
-static inline unsigned pw_overlay_bubbles(double seconds, unsigned y, unsigned h, unsigned screen_w, PwOverlayBubble *out)
+ * and out; radius 9..35; even ones in the rectangle's left margin, odd ones in its right (the keyboard's: the screen's
+ * edges; the control overlay's right-hand panel: its own). Only ones inside the rectangle count. */
+static inline unsigned pw_overlay_bubbles(double seconds, unsigned x, unsigned y, unsigned w, unsigned h, PwOverlayBubble *out)
 {
     unsigned count = 0;
     for (unsigned i = 0; i < PW_OVERLAY_BUBBLES; ++i) {
@@ -62,7 +63,7 @@ static inline unsigned pw_overlay_bubbles(double seconds, unsigned y, unsigned h
         life -= (double)(long long)life;
         const double rise = (h + 2.0 * r) * life, sway = sin(6.283185307 * (seconds + phase) * 2 / period) * wobble;
         const double fade = life < 0.12 ? life / 0.12 : life > 0.82 ? (1 - life) / 0.18 : 1;
-        PwOverlayBubble b = {(i & 1) ? (int)screen_w - PW_OVERLAY_MARGIN + base + (int)sway : base + (int)sway,
+        PwOverlayBubble b = {(int)x + ((i & 1) ? (int)w - PW_OVERLAY_MARGIN + base + (int)sway : base + (int)sway),
                              (int)(y + h + r - rise), r, (unsigned)(fade * 255)};
         if (b.alpha && b.cy + r > (int)y && b.cy - r < (int)(y + h)) out[count++] = b;
     }
@@ -173,7 +174,7 @@ static inline void pw_display_overlay_compose(uint8_t *buffer, const uint8_t *fr
         }
     }
     PwOverlayBubble bubbles[PW_OVERLAY_BUBBLES];
-    const unsigned nb = pw_overlay_bubbles(seconds, y, h, PW_DISPLAY_WIDTH, bubbles);
+    const unsigned nb = pw_overlay_bubbles(seconds, x, y, w, h, bubbles);
     /* 3. each 4x4 block: the panel over its colour, four pixels at a time; the bubbles in the margins; streamed out */
     const __m128i zero = _mm_setzero_si128();
     for (unsigned oy = 0; oy < h; oy += 4)
@@ -209,7 +210,7 @@ static inline void pw_display_overlay_compose(uint8_t *buffer, const uint8_t *fr
                     rows[r] = _mm_or_si128(_mm_packus_epi16(l, h), opaque);
                 }
             }
-            if (nb && (bx < PW_OVERLAY_MARGIN || bx + 4 > PW_DISPLAY_WIDTH - PW_OVERLAY_MARGIN))
+            if (nb && (ox < PW_OVERLAY_MARGIN || ox + 4 > w - PW_OVERLAY_MARGIN))
                 for (unsigned i = 0; i < nb; ++i) {
                     const PwOverlayBubble *bb = &bubbles[i];
                     if (bx + 4 < bb->cx - bb->r - 2 || bx > bb->cx + bb->r + 2 || by + 4 < bb->cy - bb->r - 2 || by > bb->cy + bb->r + 2) continue;
