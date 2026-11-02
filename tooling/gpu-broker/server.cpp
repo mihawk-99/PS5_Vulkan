@@ -1068,6 +1068,7 @@ static void *serve(Client &c,bool present)
                 if(!c.expected_pid || c.pid!=c.expected_pid) {m.status=EPROTO;break;}
                 if(!pw_gpu_window_image(&m) || !owned(c,m.address,m.bytes))break;
                 {
+                    const bool answer_shown=m.argument[3]&PW_GPU_PRESENT_SHOWN;m.argument[3]&=1;
                     const uint32_t width=(uint32_t)m.argument[0],height=(uint32_t)(m.argument[0]>>32);
                     const uint32_t stride=(uint32_t)m.argument[1],hwnd=(uint32_t)(m.argument[1]>>32);
                     // The client's fence has completed. Its allocation stays owned
@@ -1137,7 +1138,10 @@ static void *serve(Client &c,bool present)
                     if(!m.status && !direct && b.cover)++b.cover_held_frames;
                     if(!m.status && (behind || b.cover))b.window_dirty=true;
                     const uint64_t end=radv_ps5_now_ns(),copied=b.display.flips!=flips_before ? b.display.last_copy_ns : 0;
+                    const uint64_t flipped=!m.status && b.display.flips!=flips_before ? b.display.flips : 0;
                     pthread_mutex_unlock(&b.display_lock);
+                    // FIFO (PW_GPU_PRESENT_SHOWN): answered once the flip with this frame is on screen, outside both locks.
+                    if(answer_shown && flipped)b.display.wait_shown(flipped,&b.display_lock);
                     pthread_mutex_lock(&b.lock);
                     c.pin_address=c.pin_bytes=0;pthread_cond_broadcast(&b.pin_released);
                     c.timing.copy_ns+=copied;
@@ -1160,6 +1164,7 @@ static void *serve(Client &c,bool present)
             case PW_GPU_SWAPCHAIN:
                 if(wedged) { m.status=EIO;break; }
                 if(pw_gpu_display_image(&m) && owned(c,m.address,m.bytes)) {
+                    const bool answer_shown=m.argument[3]&PW_GPU_PRESENT_SHOWN;m.argument[3]&=1;
                     // No cache maintenance: the client waited for its frame's fence, and GPU writes reach CPU reads
                     // coherently (graphics-child-gpu-coherence-*). The copy runs outside the broker's lock, under the
                     // display's own, so other clients' submissions go on meanwhile: this client's buffers cannot go
@@ -1186,8 +1191,10 @@ static void *serve(Client &c,bool present)
                             cursor_x,cursor_y);
                     } else m.status=0;
                     const uint64_t end=radv_ps5_now_ns(),copied=shown && !m.status ? b.display.last_copy_ns : 0;
+                    const uint64_t flipped=shown && !m.status ? b.display.flips : 0;
                     pthread_mutex_unlock(&b.display_lock);
                     if(!shown)sceKernelUsleep(16000);
+                    else if(answer_shown && flipped)b.display.wait_shown(flipped,&b.display_lock);   // FIFO, as above
                     pthread_mutex_lock(&b.lock);
                     c.pin_address=c.pin_bytes=0;pthread_cond_broadcast(&b.pin_released);
                     c.timing.copy_ns+=copied;

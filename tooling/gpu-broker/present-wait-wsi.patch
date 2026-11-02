@@ -1,0 +1,213 @@
+--- a/src/vulkan/wsi/wsi_common_videoout.c
++++ b/src/vulkan/wsi/wsi_common_videoout.c
+@@ -44,6 +44,14 @@
+    surface->hwnd=hwnd;surface->generation=generation;return 0;
+ }
+ #define VIDEOOUT_BUFFERS 3
++/* FIFO holds the presenting thread to the display's refresh, as on a PC: the owner answers a FIFO present once its flip
++ * is on screen, and only then is the image free and its present wait done. MAILBOX and IMMEDIATE never wait for the
++ * display: a newer frame replaces the one still waiting (IMMEDIATE does not tear here: every flip is at a vblank). */
++static const VkPresentModeKHR videoout_present_modes[] = {
++   VK_PRESENT_MODE_FIFO_KHR, VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR,
++};
++static bool videoout_holds(VkPresentModeKHR mode)
++{ return mode!=VK_PRESENT_MODE_MAILBOX_KHR && mode!=VK_PRESENT_MODE_IMMEDIATE_KHR; }
+ #define VIDEOOUT_SIZES 1
+ struct wsi_videoout_size { VkExtent2D extent; };
+ static const struct wsi_videoout_size videoout_sizes[] = {{{1920,1080}}};
+@@ -299,16 +307,13 @@
+          break;
+       }
+       case VK_STRUCTURE_TYPE_SURFACE_PRESENT_MODE_COMPATIBILITY_KHR: {
+-         /* FIFO only. */
++         /* Every mode the chain offers: it changes mode at any present (broker_set_present_mode). */
+          VkSurfacePresentModeCompatibilityKHR *compat = (void *)ext;
+          if (compat->pPresentModes) {
+-            if (compat->presentModeCount) {
+-               assert(present_mode);
+-               compat->pPresentModes[0] = present_mode->presentMode;
+-               compat->presentModeCount = 1;
+-            }
++            compat->presentModeCount = MIN2(compat->presentModeCount, ARRAY_SIZE(videoout_present_modes));
++            memcpy(compat->pPresentModes, videoout_present_modes, compat->presentModeCount * sizeof(VkPresentModeKHR));
+          } else {
+-            compat->presentModeCount = 1;
++            compat->presentModeCount = ARRAY_SIZE(videoout_present_modes);
+          }
+          break;
+       }
+@@ -360,8 +365,10 @@
+                                    uint32_t *pPresentModeCount, VkPresentModeKHR *pPresentModes)
+ {
+    VK_OUTARRAY_MAKE_TYPED(VkPresentModeKHR, out, pPresentModes, pPresentModeCount);
+-   vk_outarray_append_typed(VkPresentModeKHR, &out, mode)
+-      *mode = VK_PRESENT_MODE_FIFO_KHR;
++   for (unsigned i = 0; i < ARRAY_SIZE(videoout_present_modes); i++) {
++      vk_outarray_append_typed(VkPresentModeKHR, &out, mode)
++         *mode = videoout_present_modes[i];
++   }
+    return vk_outarray_status(&out);
+ }
+ 
+@@ -381,7 +388,8 @@
+  * is done. VKD3D-Proton presents from its D3D12 queue's submission thread, which otherwise waited 5.8 ms a frame here,
+  * no later submission reaching the GPU meanwhile (PS5_Proton's docs/PLAN.md, 2026-10-17). Under lock:
+  * queue (head, count; never more than the images, as each queued one is busy), lost (the first failure, returned by
+- * every later present and acquire), stopping. */
++ * every later present and acquire), stopping, and for each queued frame its present id and whether it holds (FIFO);
++ * shown_id, the highest present id the owner has answered for (vkWaitForPresentKHR). */
+ struct broker_chain {
+    struct wsi_swapchain base;
+    mtx_t lock;
+@@ -389,6 +397,8 @@
+    uint32_t hwnd;uint64_t generation;
+    bool async,stopping;VkResult lost;cnd_t changed;thrd_t presenter;
+    uint32_t queue[VIDEOOUT_BUFFERS],head,count;
++   uint64_t ids[VIDEOOUT_BUFFERS],shown_id;bool hold[VIDEOOUT_BUFFERS];
++   bool fifo_shown;   /* PS5_Proton's WINE_PS5_FIFO_SHOWN, read at creation: 0 keeps FIFO as before (released at the copy) */
+    struct wsi_image images[];
+ };
+ static struct wsi_image *broker_image(struct wsi_swapchain *b,uint32_t i)
+@@ -418,8 +428,9 @@
+       } else { mtx_unlock(&c->lock);os_time_sleep(1000); }
+    }
+ }
+-/* Image i to the owner: its fence, then the round trip; *status, the owner's answer. */
+-static VkResult broker_show(struct broker_chain *c,uint32_t i,int *status_out)
++/* Image i to the owner: its fence, then the round trip; *status, the owner's answer. hold: answered once its flip is
++ * on screen (PS5_Vulkan's PW_GPU_PRESENT_SHOWN, 2 beside BGRA's 1). */
++static VkResult broker_show(struct broker_chain *c,uint32_t i,int *status_out,bool hold)
+ {
+    struct wsi_swapchain *b=&c->base;
+    /* The GPU-to-buffer blit and application's semaphore waits precede this fence. */
+@@ -429,8 +440,9 @@
+    if(result!=VK_SUCCESS)return result;
+    struct wsi_image *image=&c->images[i];
+    const unsigned width=b->image_info.create.extent.width,height=b->image_info.create.extent.height;
+-   int status=c->hwnd ? ps5_gpu_client_window_swapchain(image->cpu_map,width,height,image->row_pitches[0],1,c->hwnd,c->generation)
+-                      : ps5_gpu_client_swapchain(image->cpu_map,width,height,image->row_pitches[0],1);
++   const unsigned flags=hold ? 3 : 1;
++   int status=c->hwnd ? ps5_gpu_client_window_swapchain(image->cpu_map,width,height,image->row_pitches[0],flags,c->hwnd,c->generation)
++                      : ps5_gpu_client_swapchain(image->cpu_map,width,height,image->row_pitches[0],flags);
+    if(status)result=VK_ERROR_DEVICE_LOST;
+    *status_out=status;
+    return result;
+@@ -440,7 +452,7 @@
+ static int broker_resend_send(void *opaque)
+ {
+    struct broker_resend *r=opaque;int status=0;
+-   r->result=broker_show(r->chain,r->image,&status);
++   r->result=broker_show(r->chain,r->image,&status,false);
+    return status;
+ }
+ static int broker_resend_newer(void *opaque)
+@@ -457,10 +469,10 @@
+    for(;;) {
+       while(!c->count && !c->stopping)cnd_wait(&c->changed,&c->lock);
+       if(!c->count)break;   /* stopping, and every queued present shown */
+-      const uint32_t i=c->queue[c->head];
++      const uint32_t i=c->queue[c->head];const uint64_t id=c->ids[c->head];const bool hold=c->hold[c->head];
+       mtx_unlock(&c->lock);
+       int status=0;
+-      VkResult result=broker_show(c,i,&status);
++      VkResult result=broker_show(c,i,&status,hold);
+       /* A window frame the owner cannot place yet (ESTALE) goes again while nothing newer is queued, then is dropped,
+        * never the device lost (pw_present_retry.h): one line per burst. */
+       if(status==ESTALE) {
+@@ -472,6 +484,7 @@
+       }
+       mtx_lock(&c->lock);
+       c->head=(c->head+1)%VIDEOOUT_BUFFERS;--c->count;
++      if(id>c->shown_id)c->shown_id=id;
+       if(result!=VK_SUCCESS && c->lost==VK_SUCCESS)c->lost=result;
+       c->busy[i]=false;cnd_broadcast(&c->changed);
+    }
+@@ -484,21 +497,49 @@
+    VkResult result=VK_SUCCESS;
+    if(!c->async) {
+       int status=0;
+-      result=broker_show(c,i,&status);
++      result=broker_show(c,i,&status,false);
+       mtx_lock(&c->lock);c->busy[i]=false;mtx_unlock(&c->lock);
+       return result;
+    }
+    mtx_lock(&c->lock);
+    result=c->lost;
+-   if(result==VK_SUCCESS) {
++   const bool hold=c->fifo_shown && videoout_holds(b->present_mode);
++   if(result==VK_SUCCESS && !hold && c->count>=2) {
++      /* MAILBOX/IMMEDIATE: the newest waiting frame (never the head, which the presenter may be showing) gives way to
++       * this one; its id is kept, so a wait for it ends when this frame is answered. */
++      const uint32_t last=(c->head+c->count-1)%VIDEOOUT_BUFFERS;
++      c->busy[c->queue[last]]=false;
++      c->queue[last]=i;c->ids[last]=MAX2(id,c->ids[last]);c->hold[last]=false;cnd_broadcast(&c->changed);
++   } else if(result==VK_SUCCESS) {
+       assert(c->count<VIDEOOUT_BUFFERS);
+-      c->queue[(c->head+c->count)%VIDEOOUT_BUFFERS]=i;++c->count;cnd_broadcast(&c->changed);
++      const uint32_t at=(c->head+c->count)%VIDEOOUT_BUFFERS;
++      c->queue[at]=i;c->ids[at]=id;c->hold[at]=hold;++c->count;cnd_broadcast(&c->changed);
+    } else c->busy[i]=false;
+    mtx_unlock(&c->lock);
+    return result;
+ }
++/* A present is waited for until the owner has answered for it: for FIFO, its frame on screen. Mesa's present-id
++ * semaphore is signalled when the GPU finishes the frame, before the display shows it, so a FIFO game's present waits
++ * ended at the rate it rendered: DXVK measured ~113 presents a second at 60 Hz and engaged its own frame limiter, with
++ * two or three frames queued (Fable through DXVK, 2026-11-01: "lag when moving camera"). Without the asynchronous
++ * present the semaphore stays, as before. */
+ static VkResult broker_wait(struct wsi_swapchain *b,uint64_t id,uint64_t timeout)
+-{ return wsi_swapchain_wait_for_present_semaphore(b,id,timeout); }
++{
++   struct broker_chain *c=(void *)b;
++   if(!c->async || !c->fifo_shown)return wsi_swapchain_wait_for_present_semaphore(b,id,timeout);
++   const uint64_t start=os_time_get_nano();
++   mtx_lock(&c->lock);
++   for(;;) {
++      if(c->shown_id>=id) { mtx_unlock(&c->lock);return VK_SUCCESS; }
++      if(c->lost!=VK_SUCCESS) { const VkResult lost=c->lost;mtx_unlock(&c->lock);return lost; }
++      if(os_time_get_nano()-start>=timeout) { mtx_unlock(&c->lock);return VK_TIMEOUT; }
++      struct timespec until;timespec_get(&until,TIME_UTC);   /* woken by the presenter; 1 ms bounds each wait */
++      until.tv_nsec+=1000000;if(until.tv_nsec>=1000000000) { until.tv_nsec-=1000000000;++until.tv_sec; }
++      cnd_timedwait(&c->changed,&c->lock,&until);
++   }
++}
++static void broker_set_present_mode(struct wsi_swapchain *b,VkPresentModeKHR mode)
++{ b->present_mode=videoout_holds(mode) ? VK_PRESENT_MODE_FIFO_KHR : mode; }
+ static VkResult broker_destroy(struct wsi_swapchain *b,const VkAllocationCallbacks *a)
+ {
+    struct broker_chain *c=(void *)b;
+@@ -512,8 +553,9 @@
+ static VkResult broker_create(VkIcdSurfaceBase *s,VkDevice device,struct wsi_device *w,
+    const VkSwapchainCreateInfoKHR *info,const VkAllocationCallbacks *a,struct wsi_swapchain **out)
+ {
+-   /* Any present mode is presented as FIFO (c->base.present_mode): Windows drivers offer IMMEDIATE and MAILBOX, and a
+-    * program that names one without checking the list got no swapchain at all (Wine's vulkan-1, vulkan.c:975).
++   /* Any present mode is taken (videoout_present_modes; any other is presented as FIFO): Windows drivers offer IMMEDIATE
++    * and MAILBOX, and a program that names one without checking the list got no swapchain at all (Wine's vulkan-1,
++    * vulkan.c:975).
+     * A window's swapchain is its client area, which may be larger than the screen (Steam's restored window is 1922x1081):
+     * the owner clips it to the screen as Windows does, up to the size it composes (PS5_Proton's src/pw_window_page.h,
+     * 2176x1408). A swapchain for the whole display is a window's client area as well (Wine's surface capabilities;
+@@ -540,7 +582,8 @@
+    c->hwnd=surface->hwnd;c->generation=surface->generation;
+    c->base.destroy=broker_destroy;c->base.get_wsi_image=broker_image;c->base.acquire_next_image=broker_acquire;
+    c->base.release_images=broker_release;c->base.queue_present=broker_present;c->base.wait_for_present=broker_wait;
+-   c->base.present_mode=VK_PRESENT_MODE_FIFO_KHR;c->base.image_count=count;
++   c->base.set_present_mode=broker_set_present_mode;broker_set_present_mode(&c->base,info->presentMode);
++   c->base.image_count=count;
+    for(unsigned i=0;i<count;i++) {
+       result=wsi_create_image(&c->base,&c->base.image_info,&c->images[i]);
+       if(result!=VK_SUCCESS) {
+@@ -552,8 +595,10 @@
+    if(async && !strcmp(async,"1")) {
+       c->async=cnd_init(&c->changed)==thrd_success;
+       if(c->async && thrd_create(&c->presenter,broker_presenter,c)!=thrd_success) { cnd_destroy(&c->changed);c->async=false; }
+-      fprintf(stderr,"gpu-wsi async present=%d images=%u extent=%ux%u\n",c->async,count,info->imageExtent.width,
+-              info->imageExtent.height);
++      const char *shown=getenv("WINE_PS5_FIFO_SHOWN");
++      c->fifo_shown=!shown || strcmp(shown,"0");
++      fprintf(stderr,"gpu-wsi async present=%d images=%u extent=%ux%u mode=%d fifo_shown=%d\n",c->async,count,
++              info->imageExtent.width,info->imageExtent.height,info->presentMode,c->fifo_shown);
+    }
+    if(info->oldSwapchain) {
+       struct broker_chain *old=(void *)wsi_swapchain_from_handle(info->oldSwapchain);

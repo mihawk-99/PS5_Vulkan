@@ -2,6 +2,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #ifndef PS5_GPU_DISPLAY_H
 #define PS5_GPU_DISPLAY_H
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 /* Only the owning title uses this display. Input is completed, linear RGBA8. */
@@ -39,6 +40,11 @@ struct Ps5GpuDisplay {
     /* cursor_x, cursor_y: where to draw the pointer on the 1920x1080 screen, or -1 for none. */
     int present(const void *pixels,unsigned width,unsigned height,unsigned pitch,FILE *log,const char *capture,bool bgra=false,
                 int cursor_x=-1,int cursor_y=-1);
+    /* Waits until flip `serial` is on screen, at most about 50 ms (three frames at 60 Hz): a FIFO present answered when
+     * its frame is shown, so the client's present wait and image release follow the display's real refresh. Each poll
+     * takes `lock` (the broker's display lock, which every VideoOut call holds) and the wait itself holds nothing.
+     * True once shown; false on a timeout, a closed display or a failed status. */
+    bool wait_shown(uint64_t serial,pthread_mutex_t *lock);
     /* The last frame shown again with the overlay as it is now, for a panel that changed while no frame came (0, or the
      * flip's status). Over the previous panel's pixels: a panel taken off shows the game again with its next frame. */
     int reshow(FILE *log);

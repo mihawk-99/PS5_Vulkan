@@ -291,6 +291,8 @@ static int present_timed(PwGpuMessage *message,const void *pixels,size_t bytes)
     const uint64_t start=radv_ps5_now_ns();
     radv_ps5_cpu_flush(pixels,bytes);
     const uint64_t flushed=radv_ps5_now_ns();
+    /* Answered once shown only on the present link: on the main connection that wait would hold every submission. */
+    if(__atomic_load_n(&present_link,__ATOMIC_ACQUIRE)<=0)message->argument[3]&=~PW_GPU_PRESENT_SHOWN;
     const int status=present_rpc(message);
     const uint64_t end=radv_ps5_now_ns();
     __atomic_add_fetch(&timing_presents,1,__ATOMIC_RELAXED);__atomic_add_fetch(&timing_flush_ns,flushed-start,__ATOMIC_RELAXED);

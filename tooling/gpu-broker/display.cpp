@@ -9,6 +9,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <smmintrin.h>
 #include <unistd.h>
 extern "C" int sceKernelUsleep(unsigned);
 #include <time.h>
@@ -72,6 +73,20 @@ uint64_t vblank_period_ns(int handle)
     }
     return intervals[3];
 }
+// A shown frame into cached memory for a capture, 64 bytes at a time with streaming loads (MOVNTDQA), the read the
+// display's write-combined memory is made for. Read pixel by pixel through the tiling it took about 3 s a capture
+// (alpha7-gate-pro-2026-11-01-window-compose64: 3 s a phase against 1 s with the fast copy off), all of it in the
+// present under the display lock, and the window-compose probe's other process gave up its window meanwhile.
+__attribute__((target("sse4.1"))) void read_shown(uint8_t *to,const uint8_t *from,size_t bytes)
+{
+    auto *in=(__m128i *)(void *)from;auto *out=(__m128i *)(void *)to;
+    for(size_t at=0;at<bytes/16;at+=4) {
+        const __m128i a=_mm_stream_load_si128(in+at),b=_mm_stream_load_si128(in+at+1),
+                      c=_mm_stream_load_si128(in+at+2),d=_mm_stream_load_si128(in+at+3);
+        _mm_store_si128(out+at,a);_mm_store_si128(out+at+1,b);_mm_store_si128(out+at+2,c);_mm_store_si128(out+at+3,d);
+    }
+}
+static_assert(frame_bytes%64==0,"read_shown copies whole 64-byte lines");
 // The display's captures, written on their own thread (pw_display_capture.h); one display per title.
 PwDisplayCaptures captures=PW_DISPLAY_CAPTURES_INIT;
 static_assert(frame_bytes==PW_DISPLAY_TILED_BYTES,"the capture copies the whole tiled frame");
@@ -207,7 +222,8 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
     // Without memory for the copy or a thread, it is read back and written here once the flip is shown, as before.
     // With the fast copy the capture reads what was scanned out instead (below, once the flip is shown): its own copy
     // came out black on the console while the screen showed the frame (w3-ab-b-pro-2026-11-01, the owner watching),
-    // and the same copy into the same kind of buffer is exact on a host. A capture then costs about 80 ms in that present.
+    // and the same copy into the same kind of buffer is exact on a host. A capture then costs one whole-buffer read in that
+    // present (read_shown), and the capture thread writes it.
     uint8_t *picture=nullptr;uint64_t picture_ns=0;
     if(capture && !fast_copy) {
         const uint64_t start=now_ns();
@@ -224,7 +240,18 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
             if(!settled(handle))status=EBUSY;
             if(!status)status=sceVideoOutGetFlipStatus(handle,shown);
             if(!status && shown[PS5_VIDEO_OUT_FLIP_STATUS_SHOWN_ARGUMENT]!=serial)status=EIO;
-            if(!status && pw_display_capture_write(buffer,capture))status=EIO;
+            // The shown buffer copied out whole, then written by the capture thread like any other picture.
+            bool taken=false;
+            if(!status && fast_copy) {
+                auto *shown_frame=(uint8_t *)aligned_alloc(64,frame_bytes);
+                if(shown_frame) {
+                    const uint64_t start=now_ns();
+                    read_shown(shown_frame,buffer,frame_bytes);
+                    taken=!pw_display_capture_take(&captures,shown_frame,capture,serial,now_ns()-start,log);
+                    if(!taken)free(shown_frame);
+                }
+            }
+            if(!status && !taken && pw_display_capture_write(buffer,capture))status=EIO;
         }
     }
     free(picture);   // not handed over: the flip failed, or it was written here
@@ -233,6 +260,19 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
             (unsigned long long)serial,(unsigned long long)shown[PS5_VIDEO_OUT_FLIP_STATUS_SHOWN_ARGUMENT],w,h,
             (unsigned long long)last_copy_ns/1000,unsigned(status));
     back=(back+1)%buffer_count;return status;
+}
+bool Ps5GpuDisplay::wait_shown(uint64_t serial,pthread_mutex_t *lock)
+{
+    for(unsigned polls=0;;++polls) {
+        uint64_t shown[PS5_VIDEO_OUT_FLIP_STATUS_WORDS]{};
+        pthread_mutex_lock(lock);
+        const int status=registered ? sceVideoOutGetFlipStatus(handle,shown) : -1;
+        pthread_mutex_unlock(lock);
+        if(status)return false;
+        if(shown[PS5_VIDEO_OUT_FLIP_STATUS_SHOWN_ARGUMENT]>=serial)return true;
+        if(polls>=200)return false;
+        sceKernelUsleep(250);
+    }
 }
 bool Ps5GpuDisplay::capture_last(const char *path)
 {

@@ -64,6 +64,10 @@ static inline int pw_gpu_client_pid(int expected,uint64_t requested,int owner)
     return expected>=0 && requested>0 && requested<=INT32_MAX && (requested!=(uint64_t)owner || expected==owner) &&
            (!expected || requested==(uint64_t)expected);
 }
+/* argument[3] of SWAPCHAIN and WINDOW_SWAPCHAIN: bit 0 BGRA; PW_GPU_PRESENT_SHOWN, answer only once the flip that shows
+ * the frame is on screen (a FIFO swapchain's present wait), at most about 50 ms later. Asked only on the present link,
+ * whose thread nothing else waits behind. */
+#define PW_GPU_PRESENT_SHOWN UINT64_C(2)
 /* Window swapchain: width/height packed in argument[0], stride/full HWND in
  * argument[1], generation in argument[2], BGRA in argument[3]. Native PID comes
  * from the owner-managed client slot established by the native helper. No process guessing. */
@@ -74,7 +78,7 @@ static inline int pw_gpu_window_image(const PwGpuMessage *m)
     /* A window may be larger than the screen (its client area: Steam's restored window is 1922x1081); the owner
      * clips it, up to the size it composes (PS5_Proton's src/pw_window_page.h, 2176x1408). */
     return width && width<=2176 && height && height<=1408 && stride>=width*4 && stride<=2176*4 &&
-           !(stride&3) && hwnd && m->argument[2] && m->argument[3]<=1 &&
+           !(stride&3) && hwnd && m->argument[2] && (m->argument[3]&~PW_GPU_PRESENT_SHOWN)<=1 &&
            m->bytes==(uint64_t)height*stride && m->address && !(m->address&3);
 }
 /* Display swapchain: width, height, pitch and BGRA in argument[0..3]. Its image is the window's client area too (Wine's
@@ -84,7 +88,7 @@ static inline int pw_gpu_display_image(const PwGpuMessage *m)
 {
     const uint64_t width=m->argument[0],height=m->argument[1],pitch=m->argument[2];
     return width && width<=2176 && height && height<=1408 && pitch>=width*4 && pitch<=2176*4 && !(pitch&3) &&
-           m->argument[3]<=1 && m->bytes==height*pitch && m->address && !(m->address&3);
+           (m->argument[3]&~PW_GPU_PRESENT_SHOWN)<=1 && m->bytes==height*pitch && m->address && !(m->address&3);
 }
 /* The part of a display image on screen: its top-left, at most the screen's 1920x1080 (a smaller image is scaled). */
 static inline void pw_gpu_display_shown(const PwGpuMessage *m,unsigned *width,unsigned *height)

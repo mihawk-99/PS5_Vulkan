@@ -93,6 +93,8 @@ if [[ $wsi == 1 ]]; then
     patch --batch -p1 -d "$out/source" < "$out/patches/window-extent-wsi.patch"
     git -C "$mesa_fork" show "$overlay_revision:ps5/broker/display-extent-wsi.patch" > "$out/patches/display-extent-wsi.patch"   # a display swapchain larger than the screen too
     patch --batch -p1 -d "$out/source" < "$out/patches/display-extent-wsi.patch"
+    cp "$root/tooling/gpu-broker/present-wait-wsi.patch" "$out/patches/"   # FIFO held to the display, present waits when shown
+    patch --batch -p1 -d "$out/source" < "$out/patches/present-wait-wsi.patch"
     cp "$root/tooling/gpu-broker/pw_present_retry.h" "$out/source/src/vulkan/wsi/"   # PS5_Proton's, beside the WSI
     python3 - "$radv" "$out" <<'PYWSI'
 import json,shlex,subprocess,sys
