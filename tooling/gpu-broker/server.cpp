@@ -1370,6 +1370,13 @@ bool ps5_gpu_broker_set_overlay(const void *pixels,unsigned x,unsigned y,unsigne
     b.display.overlay=copy;
     // The panel's shadow of the frame (display.h): made with the panel, dropped with it
     b.display.keep_shadow(copy!=nullptr);
+    {   // the glass sweep's clock: about 1 s after the panel came; every later change is a key press (display.h)
+        timespec at{};clock_gettime(CLOCK_MONOTONIC,&at);
+        const uint64_t t=uint64_t(at.tv_sec)*1000000000u+uint64_t(at.tv_nsec);
+        if(copy && !was)b.display.panel_on_ns=t,b.display.next_sweep_ns=t+1000000000ull,b.display.panel_press_ns=0,b.display.sweep_ns=0;
+        else if(copy)b.display.panel_press_ns=t;
+        else b.display.next_sweep_ns=0,b.display.sweep_ns=0;
+    }
     b.display.overlay_x=x;b.display.overlay_y=y;b.display.overlay_w=copy ? w : 0;b.display.overlay_h=copy ? h : 0;
     if(b.log && was!=(copy!=nullptr))fprintf(b.log,"gpu-overlay %s x=%u y=%u w=%u h=%u flips=%llu\n",copy ? "on" : "off",x,y,w,h,
                                              (unsigned long long)b.display.flips);

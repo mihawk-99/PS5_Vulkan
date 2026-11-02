@@ -183,7 +183,10 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
     const auto decorate=[&](uint8_t *target,const uint8_t *clean) {
         if(overlay && blur) {
             const uint64_t start=now_ns();
-            pw_display_overlay_compose(target,clean,overlay,overlay_x,overlay_y,overlay_w,overlay_h,start/1e9,blur);
+            const int fresh=!blur_ready || !(composes++&1);
+            pw_display_overlay_compose(target,clean,overlay,overlay_x,overlay_y,overlay_w,overlay_h,start/1e9,blur,fresh,
+                                       sweep_at(start));
+            blur_ready=true;
             composed(log,now_ns()-start);
         }
         else if(overlay)pw_display_overlay_blit(target,overlay,overlay_x,overlay_y,overlay_w,overlay_h);
@@ -273,7 +276,10 @@ int Ps5GpuDisplay::reshow(FILE *log)
     else for(size_t at=0;at<frame_bytes/16;++at)_mm_stream_si128((__m128i *)(void *)buffer+at,_mm_load_si128(last+at));
     if(overlay && shadow && blur) {
         const uint64_t start=now_ns();
-        pw_display_overlay_compose(buffer,shadow,overlay,overlay_x,overlay_y,overlay_w,overlay_h,start/1e9,blur);
+        const int fresh=!blur_ready || !(composes++&1);
+        pw_display_overlay_compose(buffer,shadow,overlay,overlay_x,overlay_y,overlay_w,overlay_h,start/1e9,blur,fresh,
+                                   sweep_at(start));
+        blur_ready=true;
         composed(log,now_ns()-start);
     }
     else if(overlay)pw_display_overlay_blit(buffer,overlay,overlay_x,overlay_y,overlay_w,overlay_h);
@@ -286,10 +292,17 @@ int Ps5GpuDisplay::reshow(FILE *log)
     back=(back+1)%buffer_count;
     return status;
 }
+double Ps5GpuDisplay::sweep_at(uint64_t now)
+{
+    if(sweep_ns && (now-sweep_ns>1800000000ull || panel_press_ns>sweep_ns))sweep_ns=0;   // over, or a key stopped it
+    if(!sweep_ns && next_sweep_ns && now>=next_sweep_ns && (!panel_press_ns || now-panel_press_ns>=3000000000ull))
+        sweep_ns=now,next_sweep_ns=now+30000000000ull;
+    return sweep_ns ? (now-sweep_ns)/1e9 : -1.0;
+}
 void Ps5GpuDisplay::keep_shadow(bool on)
 {
     if(on && !shadow) {
-        shadow=(uint8_t *)aligned_alloc(64,frame_bytes),shadow_valid=false;
+        shadow=(uint8_t *)aligned_alloc(64,frame_bytes),shadow_valid=false,blur_ready=false;
         blur=(uint32_t *)malloc((size_t(width/8+2)*(height/8+2)*2+size_t(width/4)*(height/4))*sizeof(uint32_t));
     } else if(!on) free(shadow),free(blur),shadow=nullptr,blur=nullptr,shadow_valid=false;
 }

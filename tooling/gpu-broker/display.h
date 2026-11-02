@@ -28,6 +28,12 @@ struct Ps5GpuDisplay {
     uint32_t *blur=nullptr;   /* the see-through panel's blurred frame (pw_display_overlay_compose's scratch), with the shadow */
     bool shadow_valid=false;
     int last_cursor_x=-1,last_cursor_y=-1;
+    /* The panel's motion: its blur made fresh every second compose; the glass sweep about 1 s after it came, then at most
+     * every 30 s, never within 3 s of a change to it (a key press: the owner, "it can be destabilizing") */
+    unsigned composes=0;
+    bool blur_ready=false;
+    uint64_t panel_on_ns=0,panel_press_ns=0,sweep_ns=0,next_sweep_ns=0;
+    double sweep_at(uint64_t now);
     /* Makes the shadow (on) or drops it (off), with the panel. */
     void keep_shadow(bool on);
     /* cursor_x, cursor_y: where to draw the pointer on the 1920x1080 screen, or -1 for none. */

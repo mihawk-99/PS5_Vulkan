@@ -111,13 +111,26 @@ static inline unsigned pw_overlay_line_sum(const __m128i *line, int shift)
     return (unsigned)_mm_cvtsi128_si32(sum) + (unsigned)_mm_cvtsi128_si32(_mm_srli_si128(sum, 8));
 }
 
-/* scratch: (w / 8 + 2) * (h / 8 + 2) * 2 + (w / 4) * (h / 4) uint32 */
+/* The glass sweep's light at diagonal position `diag` (x + 0.45 (y - top)), `k` seconds into it (the owner's pick,
+ * 2026-11-01, mockup video B: a soft band crossing the panel in 1.8 s); 0..1 */
+static inline float pw_overlay_sweep_band(float diag, double k)
+{
+    double s = k / 1.8;
+    s = s < 0 ? 0 : s > 1 ? 1 : s;
+    const float centre = (float)(-300 + (PW_DISPLAY_WIDTH + 600) * s * s * (3 - 2 * s)), d = (diag - centre) / 110;
+    return d > 3.5f || d < -3.5f ? 0 : expf(-d * d);
+}
+
+/* scratch: (w / 8 + 2) * (h / 8 + 2) * 2 + (w / 4) * (h / 4) uint32. fresh_blur 0 keeps the last call's blur (every second
+ * frame: half the cost, the owner's "halve it"); `sweep`: seconds into the glass sweep, or below 0 for none. */
 static inline void pw_display_overlay_compose(uint8_t *buffer, const uint8_t *frame, const uint32_t *panel, unsigned x,
-                                              unsigned y, unsigned w, unsigned h, double seconds, uint32_t *scratch)
+                                              unsigned y, unsigned w, unsigned h, double seconds, uint32_t *scratch,
+                                              int fresh_blur, double sweep)
 {
     if (!buffer || !frame || !panel || (x | y | w | h) & 7 || x + w > PW_DISPLAY_WIDTH || y + h > PW_DISPLAY_HEIGHT) return;
     const unsigned sw = w / 8, sh = h / 8, stride = sw + 2, mw = w / 4;
     uint32_t *small = scratch, *soft = scratch + (size_t)stride * (sh + 2), *mid = soft + (size_t)stride * (sh + 2);
+    if (fresh_blur) {
     /* 1. the frame under the rectangle, 8x smaller: each 8x8 block's mean (four 4x4 lines of the tiling) */
     for (unsigned by = 0; by < sh; ++by)
         for (unsigned bx = 0; bx < sw; ++bx) {
@@ -157,6 +170,7 @@ static inline void pw_display_overlay_compose(uint8_t *buffer, const uint8_t *fr
             }
             mid[my * mw + mx] = c;
         }
+    }
     PwOverlayBubble bubbles[PW_OVERLAY_BUBBLES];
     const unsigned nb = pw_overlay_bubbles(seconds, y, h, PW_DISPLAY_WIDTH, bubbles);
     /* 3. each 4x4 block: the panel over its colour, four pixels at a time; the bubbles in the margins; streamed out */
@@ -169,6 +183,31 @@ static inline void pw_display_overlay_compose(uint8_t *buffer, const uint8_t *fr
             for (unsigned r = 0; r < 4; ++r)
                 rows[r] = pw_overlay_over4(_mm_loadu_si128((const __m128i *)(const void *)(panel + (size_t)(oy + r) * w + ox)), under16);
             const int bx = (int)(x + ox), by = (int)(y + oy);
+            /* the glass sweep: the band's light at the block's middle, more on more opaque glass (the keys') */
+            const float band = sweep < 0 ? 0 : pw_overlay_sweep_band((float)ox + 2 + ((float)oy + 2) * 0.45f, sweep);
+            if (band > 0.004f) {
+                /* 0.10 of the way to white on clear glass, up to 0.26 on the keys' (alpha 0.75 to 0.95), x65536 */
+                static unsigned glass[256];
+                if (!glass[0])
+                    for (unsigned a = 0; a < 256; ++a) {
+                        const float pa = a / 255.0f;
+                        glass[a] = (unsigned)((0.10f + 0.16f * (pa < 0.75f ? 0 : pa > 0.95f ? 1 : (pa - 0.75f) / 0.2f)) * 65536);
+                    }
+                const unsigned band256 = (unsigned)(band * 256);
+                const __m128i c255 = _mm_set1_epi16(255), opaque = _mm_set1_epi32((int)0xff000000u);
+                for (unsigned r = 0; r < 4; ++r) {
+                    const uint32_t *alpha = panel + (size_t)(oy + r) * w + ox;
+                    unsigned s[4];
+                    for (unsigned i = 0; i < 4; ++i) s[i] = (band256 * glass[alpha[i] >> 24]) >> 16;
+                    /* v + (255 - v) * s / 256, two pixels a half, each pixel's s in its four lanes */
+                    const __m128i lo = _mm_unpacklo_epi8(rows[r], zero), hi = _mm_unpackhi_epi8(rows[r], zero);
+                    const __m128i slo = _mm_set_epi16((short)s[1], (short)s[1], (short)s[1], (short)s[1], (short)s[0], (short)s[0], (short)s[0], (short)s[0]);
+                    const __m128i shi = _mm_set_epi16((short)s[3], (short)s[3], (short)s[3], (short)s[3], (short)s[2], (short)s[2], (short)s[2], (short)s[2]);
+                    const __m128i l = _mm_add_epi16(lo, _mm_srli_epi16(_mm_mullo_epi16(_mm_sub_epi16(c255, lo), slo), 8));
+                    const __m128i h = _mm_add_epi16(hi, _mm_srli_epi16(_mm_mullo_epi16(_mm_sub_epi16(c255, hi), shi), 8));
+                    rows[r] = _mm_or_si128(_mm_packus_epi16(l, h), opaque);
+                }
+            }
             if (nb && (bx < PW_OVERLAY_MARGIN || bx + 4 > PW_DISPLAY_WIDTH - PW_OVERLAY_MARGIN))
                 for (unsigned i = 0; i < nb; ++i) {
                     const PwOverlayBubble *bb = &bubbles[i];
