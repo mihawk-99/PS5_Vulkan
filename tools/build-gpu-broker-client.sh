@@ -14,12 +14,17 @@ draw_flags=()
 [[ ${4:-0} == 1 ]] && draw_flags=(-DPS5_GPU_DRAW)
 wsi=${3:-1}
 mesa_fork=${PS5_MESA_FORK:-$radv/../PS5_Mesa}
-overlay_revision=f7ce91ac4c3697990bf89d79fdc61ae7cb98570b
+overlay_revision=2a53a8e29f20606ede9155ed5f31b6249d63e23c
 install=$radv/.deps/native/radv-release
 original=$install/lib/libvulkan_radeon.ps5.a
-revision=7b59ef27c1b09b9671bc4153c41940c3155c3af2
+revision=1ba9874f478657ccf6da72ce55f0260164cc0bd0
+# The window system layer is taken as the broker overlay (radv-gpu-broker-wsi.patch) was made: 47e9eb6 moved the lines it applies to.
+wsi_revision=7b59ef27c1b09b9671bc4153c41940c3155c3af2
 expected=0ffa39311881236b4872ec77a56bca417ce56c71cefca5954224b9ea8f3a1bf5
-[[ $(sha256sum "$original" | cut -d' ' -f1) == "$expected" ]] || { echo 'RADV archive pin differs' >&2; exit 2; }
+# The archive is pinned by what it was built from, not by its bytes: a release archive built on another machine
+# differs byte for byte (PS5_Proton's tools/setup-pinned-radv.sh builds it from this Mesa revision and the pinned SDK).
+grep -qx "revision: $revision" "$install/PROVENANCE.txt" && grep -qx 'assertions: off' "$install/PROVENANCE.txt" ||
+    { echo "RADV archive provenance differs from revision $revision, release" >&2; exit 2; }
 mkdir -p "$out/obj" "$out/build" "$out/patches" "$out/source/src/amd/vulkan/winsys/ps5"
 for name in features local-memory client-wait wsi; do
     git -C "$mesa_fork" show "$overlay_revision:ps5/broker/radv-gpu-broker-$name.patch" > "$out/patches/radv-gpu-broker-$name.patch"
@@ -32,6 +37,19 @@ patch --batch -p1 -d "$out/source" < "$out/patches/radv-gpu-broker-features.patc
 patch --batch -p1 -d "$out/source" < "$out/patches/radv-gpu-broker-local-memory.patch"
 # Short GPU waits: a client spins briefly and sleeps in short steps (the patch's comment has what was measured).
 patch --batch -p1 -d "$out/source" < "$out/patches/radv-gpu-broker-client-wait.patch"
+# Sparse ranges through the owner (PS5_Proton patch 0041): the client advertises sparse resources again.
+git -C "$mesa_fork" show "$overlay_revision:ps5/broker/client-sparse-ranges-winsys.patch" > "$out/patches/client-sparse-ranges-winsys.patch"
+patch --batch -p1 -d "$out/source" < "$out/patches/client-sparse-ranges-winsys.patch"
+# The device-local budget follows the owner's room (PS5_Proton patch 0042).
+git -C "$mesa_fork" show "$overlay_revision:ps5/broker/client-budget-winsys.patch" > "$out/patches/client-budget-winsys.patch"
+patch --batch -p1 -d "$out/source" < "$out/patches/client-budget-winsys.patch"
+# The GPU a Windows game is told it is, for the console model the owner says (PS5_Proton patch 0045).
+git -C "$mesa_fork" show "$overlay_revision:ps5/broker/client-identity-winsys.patch" > "$out/patches/client-identity-winsys.patch"
+patch --batch -p1 -d "$out/source" < "$out/patches/client-identity-winsys.patch"
+cp "$root/tooling/gpu-broker/pw_gpu_identity.h" "$out/source/src/amd/vulkan/winsys/ps5/"   # PS5_Proton's, beside the winsys
+# Host memory the GPU reaches, for a client in the owner's process only (Direct3D 12's existing heaps).
+git -C "$mesa_fork" show "$overlay_revision:ps5/broker/client-host-memory-winsys.patch" > "$out/patches/client-host-memory-winsys.patch"
+patch --batch -p1 -d "$out/source" < "$out/patches/client-host-memory-winsys.patch"
 # Reuse Mesa's generated header/include flags. Strip every output/dependency
 # option before compilation, so the sibling build remains read-only.
 python3 - "$radv" "$out" <<'PY'
@@ -61,8 +79,23 @@ for source in client packet_io; do
 done
 if [[ $wsi == 1 ]]; then
     mkdir -p "$out/source/src/vulkan/wsi"
-    git -C "$mesa_fork" show "$revision:src/vulkan/wsi/wsi_common_videoout.c" > "$out/source/src/vulkan/wsi/wsi_common_videoout.c"
+    git -C "$mesa_fork" show "$wsi_revision:src/vulkan/wsi/wsi_common_videoout.c" > "$out/source/src/vulkan/wsi/wsi_common_videoout.c"
     patch --batch -p1 -d "$out/source" < "$out/patches/radv-gpu-broker-wsi.patch"
+    git -C "$mesa_fork" show "$overlay_revision:ps5/broker/window-surfaces-wsi.patch" > "$out/patches/window-surfaces-wsi.patch"
+    patch --batch -p1 -d "$out/source" < "$out/patches/window-surfaces-wsi.patch"
+    git -C "$mesa_fork" show "$overlay_revision:ps5/broker/present-times-wsi.patch" > "$out/patches/present-times-wsi.patch"
+    patch --batch -p1 -d "$out/source" < "$out/patches/present-times-wsi.patch"
+    git -C "$mesa_fork" show "$overlay_revision:ps5/broker/async-present-wsi.patch" > "$out/patches/async-present-wsi.patch"
+    patch --batch -p1 -d "$out/source" < "$out/patches/async-present-wsi.patch"
+    git -C "$mesa_fork" show "$overlay_revision:ps5/broker/present-mode-wsi.patch" > "$out/patches/present-mode-wsi.patch"   # any present mode, presented as FIFO
+    patch --batch -p1 -d "$out/source" < "$out/patches/present-mode-wsi.patch"
+    git -C "$mesa_fork" show "$overlay_revision:ps5/broker/window-extent-wsi.patch" > "$out/patches/window-extent-wsi.patch"   # a window larger than the screen, clipped
+    patch --batch -p1 -d "$out/source" < "$out/patches/window-extent-wsi.patch"
+    git -C "$mesa_fork" show "$overlay_revision:ps5/broker/display-extent-wsi.patch" > "$out/patches/display-extent-wsi.patch"   # a display swapchain larger than the screen too
+    patch --batch -p1 -d "$out/source" < "$out/patches/display-extent-wsi.patch"
+    cp "$root/tooling/gpu-broker/present-wait-wsi.patch" "$out/patches/"   # FIFO held to the display, present waits when shown
+    patch --batch -p1 -d "$out/source" < "$out/patches/present-wait-wsi.patch"
+    cp "$root/tooling/gpu-broker/pw_present_retry.h" "$out/source/src/vulkan/wsi/"   # PS5_Proton's, beside the WSI
     python3 - "$radv" "$out" <<'PYWSI'
 import json,shlex,subprocess,sys
 from pathlib import Path
@@ -87,8 +120,8 @@ from pathlib import Path
 root,radv,sdk,out=map(Path,sys.argv[1:5]);digest=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
 files=[p for p in (root/'tooling/gpu-broker').glob('*') if p.is_file()]
 manifest={'wsi':sys.argv[5]=='1','sha256':digest(out/'client.a'),
- 'mesa_base_revision':'7b59ef27c1b09b9671bc4153c41940c3155c3af2',
- 'mesa_overlay_revision':'f7ce91ac4c3697990bf89d79fdc61ae7cb98570b',
+ 'mesa_base_revision':'1ba9874f478657ccf6da72ce55f0260164cc0bd0',
+ 'mesa_overlay_revision':'2a53a8e29f20606ede9155ed5f31b6249d63e23c',
  'sdk_revision':(sdk/'.ps5-sdk-revision').read_text().strip(),
  'recipe_sha256':digest(radv/'tools/radv-link.sh'),
  'build_script_sha256':digest(root/'tools/build-gpu-broker-client.sh'),

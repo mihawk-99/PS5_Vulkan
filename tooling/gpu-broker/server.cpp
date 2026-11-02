@@ -7,26 +7,39 @@
 #include "display.h"
 
 #include <pthread.h>
+#include <pthread_np.h>
 
 extern "C" {
 #include "radv_ps5_platform.h"
+#include "staging.h"
 #include "protocol.h"
 #include "frame_page.h"
+#include "pw_window_scene.h"
+#include "pw_window_effects.h"
+#include "pw_frame_pacing.h"
+#include "pw_gpu_timing.h"
+#include "pw_window_direct.h"
+#include "pw_log_drain.h"
 #include "packet_io.h"
 #include <ps5platform/kernel.h>
 #include <ps5platform/agc.h>
 
 int sceKernelUsleep(unsigned);
+int sceKernelGetPageTableStats(int *cpu_total, int *cpu_free, int *gpu_total, int *gpu_free);
 }
 #include <cerrno>
 #include <string>
+#include <vector>
+#include <map>
 #include <sched.h>
 #include <cstdlib>
 
 #include <new>
 #include <cstring>
+#include <atomic>
 #include <fcntl.h>
 #include <poll.h>
+#include <time.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -36,6 +49,10 @@ namespace {
 // errors, the first frames, closes): each line is written straight to the console's disk, and when every operation
 // was logged and flushed, a submission's round trip took 160-197 ms.
 const bool trace=[] { const char *v=getenv("PROTON_GPU_TRACE");return v && !strcmp(v,"1"); }();
+// PROTON_GPU_TIMESTAMPS=1 (read at start): every submission is wrapped in two GPU timestamps, and each client's
+// "gpu-split" line says how long the GPU worked on its frames (src/pw_gpu_timing.h). The clock's rate, measured.
+bool gpu_timestamps=false;
+PwGpuClock gpu_clock{};
 // Waits for a message on one client's socket: 1 if one is there, 0 if not yet, -1 at the socket's end. A message is
 // looked for by peeking: continuously until spin_until (the broker has just served this client, which is likely to ask
 // again at once), then after a short poll that bounds the wait when idle. Adopted while poll was suspected of missing
@@ -60,18 +77,22 @@ int await_message(int socket,uint64_t spin_until,bool *spun=nullptr)
     return found==1 ? 1 : found==0 || (found<0 && errno!=EAGAIN && errno!=EWOULDBLOCK && errno!=EINTR) ? -1 : 0;
 }
 constexpr uint64_t kServeSpinNs=1000000;
-// The broker's log goes through a pipe that a thread of its own drains to the file: a line written straight to the
-// console's disk under the broker's lock held every other client up to 262 ms (graphics-child-gpu-async-18), which
-// showed as 2.3 ms per submission in the other client's 30-submission phases. A whole line is one write, atomic in the
-// pipe, so lines from several threads do not interleave.
+// The broker's log goes through a socket pair that a thread of its own drains to the file: a line written straight to
+// the console's disk under the broker's lock held every other client up to 262 ms (graphics-child-gpu-async-18), which
+// showed as 2.3 ms per submission in the other client's 30-submission phases. Not a pipe: once the system's pipe memory
+// is used up a new pipe's buffer is small, and each line waited for the disk again (pw_log_drain.h). The writing end
+// is non-blocking with a buffer of about a megabyte: a line that does not fit is lost whole, never waited for.
 struct LogPipe {
     FILE *front=nullptr,*back=nullptr;int reader=-1;pthread_t writer{};bool running=false;
     bool open(FILE *file)
     {
-        int ends[2];if(pipe(ends))return false;
+        int ends[2];if(pw_log_drain_pair(ends,1<<20))return false;
         front=fdopen(ends[1],"w");
         if(!front) { ::close(ends[0]);::close(ends[1]);return false; }
         setvbuf(front,nullptr,_IOLBF,0);back=file;reader=ends[0];
+        // One line now shows the way out takes writes (a pipe's refused them, ENOMEM, once the pipe memory was used up).
+        static const char ready[]="gpu-broker log=socket\n";
+        if(write(ends[1],ready,sizeof(ready)-1)!=ssize_t(sizeof(ready)-1)) { fclose(front);::close(reader);front=nullptr;reader=-1;return false; }
         running=!pthread_create(&writer,nullptr,[](void *argument) -> void * {
             auto *self=static_cast<LogPipe *>(argument);char buffer[4096];
             for(;;) {
@@ -88,6 +109,9 @@ struct LogPipe {
     void close()
     {
         if(!front)return;
+        // The last lines wait for the file: blocking again, the final flush is not dropped.
+        const int flags=fcntl(fileno(front),F_GETFL);
+        if(flags>=0)fcntl(fileno(front),F_SETFL,flags&~O_NONBLOCK);
         fclose(front);front=nullptr;
         if(running)pthread_join(writer,nullptr);
         running=false;::close(reader);reader=-1;fsync(fileno(back));
@@ -96,7 +120,7 @@ struct LogPipe {
 size_t flexible_now() { size_t available=0;return sceKernelAvailableFlexibleMemorySize(&available) ? 0 : available; }
 // A client buffer is host-visible (shared memory, mapped in both processes; fd set) or device-local (the owner's
 // direct memory, mapped for the GPU and the owner only; memory set).
-struct Buffer { uint64_t address=0,bytes=0;uint32_t token=0;int fd=-1;bool local=false,ranged=false;radv_ps5_memory memory{}; };
+struct Buffer { uint64_t address=0,bytes=0;uint32_t token=0;int fd=-1;bool local=false,ranged=false;radv_ps5_memory memory{};int64_t dmem=-1;int pid=-1; };
 // The owner's side of the host-visible address ranges (PW_GPU_HOST_*): reserved whole while a broker runs, handed out
 // first fit and given back coalesced, so freed addresses are used again. Without the reservation (something was there
 // already), allocations fall back to reserving each buffer's own range at a cursor, as before.
@@ -164,16 +188,41 @@ void host_ranges_release(FILE *log)
 constexpr uint64_t kLocalOffer=UINT64_C(8)<<30,kLocalFloor=UINT64_C(1)<<30;
 /* The host-visible bytes each client may hold: the application's choice (ps5_gpu_broker_set_host_limit). */
 static uint64_t host_limit=PW_GPU_LIMIT;
+/* The console's model, told each client at INIT (ps5_gpu_broker_set_console_model): 0 says none. */
+static unsigned console_model;
 constexpr unsigned kClientBuffers=1024;
+// A client's sparse ranges (patch 0041): reserved in the owner's device-memory region, as the owner's own are. A
+// Direct3D 12 game makes one per reserved resource: 256 was too few (a big racing game was refused a 1.4 MiB range and
+// crashed on the null it got back, 2026-10-31), and so was 4096 (the same game streaming its open world, a tester's
+// standard PS5, 2026-11-01). A range costs a 2 MiB granule of the region (256 GiB) and, mapped over the zero block in
+// 2 MiB pieces, about 0.2 of the owner's CPU page tables and 0.1 of its GPU ones (that run: 4096 ranges and the game's
+// device-local buffers together took about 810 and 415 of 16384). The page tables are what runs out, so they decide:
+// a range is refused while either pool has fewer than kRangeTableFloor free, and the count only bounds the bookkeeping.
+constexpr unsigned kClientRanges=32768;
+constexpr int kRangeTableFloor=1024;
+struct Range { uint64_t address=0,bytes=0;radv_ps5_memory memory{}; };
 struct Client {
-    int socket=-1,service=-1,pid=-1;uint32_t sequence=0,next_token=0;
+    int socket=-1,service=-1,pid=-1,expected_pid=0;uint32_t sequence=0,next_token=0;
+    // Its present link (PW_GPU_PRESENT_LINK): a second socket and thread for its presents, so its submissions go on
+    // while the display copies a frame. pin_*: the frame a present reads outside b.lock; a FREE of it waits for that.
+    int present_socket=-1;uint32_t present_sequence=0;uint64_t pin_address=0,pin_bytes=0;
+    bool present_serving=false;pthread_t presenter{};
     Buffer buffers[kClientBuffers];unsigned submissions=0;
+    std::vector<Range> ranges;unsigned range_count=0,range_peak=0;
+    std::map<uint64_t,unsigned> range_index;   // a live range's address: its slot in ranges (a bind finds it in log n)
     uint64_t allocated=0,local=0,local_peak=0,tess=0;uint32_t tess_bytes=0,granularity=0,buffering=0;
     // Where submission time goes, in nanoseconds: staging allocation and copy, the native submit, the completion wait
     // and the staging release.
     uint64_t time_stage=0,time_submit=0,time_wait=0,time_release=0,waits=0,time_recv=0,recv_samples=0,poll_missed=0;
     uint64_t found[2]{},waited[4]{},lock_ns=0,handle_ns=0,handled=0,op_ns[16]{},op_count[16]{},op_max_ns[16]{};
     unsigned images=0,presentations=0,coherence=0,coherent=0,timings=0;
+    // When its frames reached the screen (src/pw_frame_pacing.h): direct flips of its own buffer, or composed.
+    PwFramePacing pacing{};const char *route="none";
+    // Game mode (src/pw_window_direct.h): its window frames shown directly or composed in the current pacing window,
+    // and why the last composed one could not go directly.
+    uint64_t direct_frames=0,composed_frames=0;int direct_reason=-1;
+    // Where its frames' time went over the same window (src/pw_gpu_timing.h); the submission totals at its start.
+    PwGpuTiming timing{};uint64_t timing_submit_ns=0;unsigned timing_submissions=0;
     int cookie=0;
     const char *allocation_stage="none";
     bool ended=false,offchip=false,done=false,passed=false,serving=false;
@@ -187,10 +236,39 @@ void reset(Client &c)
     new (&c) Client();
 }
 bool (*client_absent)(int)=nullptr;
+// Told when a client's device-local allocation is refused for want of memory (patch 0042), so the owner can tell the
+// player why a game stops: its own "out of memory" names no cause. Called under the broker's lock: it only records.
+void (*local_refused)(int pid,unsigned long long bytes)=nullptr;
 bool absent(int token) { return client_absent && client_absent(token); }
 std::string output_directory;
 std::string output_path(const char *path)
 { const char *slash=strrchr(path,'/');return output_directory+"/"+(slash ? slash+1 : path); }
+// A client's pacing window, to the record and to stderr (the owner's klog keeps it whatever becomes of the record).
+void pacing_report(FILE *log,Client &c,uint64_t now,bool final)
+{
+    if(!c.pacing.frames && !c.pacing.hidden)return;
+    char fields[320],line[448];
+    pw_frame_pacing_format(&c.pacing,now,fields,sizeof(fields));
+    // The sparse ranges it holds and its most so far, against kClientRanges and the page tables (patch 0044).
+    snprintf(line,sizeof(line),"gpu-pacing cookie=%d pid=%d route=%s final=%d direct=%llu composed=%llu refused=%s ranges=%u "
+        "ranges_peak=%u %s\n",c.cookie,c.pid,c.route,final,(unsigned long long)c.direct_frames,
+        (unsigned long long)c.composed_frames,c.direct_reason<0 ? "none" : pw_window_direct_reason(c.direct_reason),
+        c.range_count,c.range_peak,fields);
+    c.direct_frames=c.composed_frames=0;c.direct_reason=-1;
+    if(log)fputs(line,log);
+    fputs(line,stderr);
+    // The same window's split: the GPU's work, the presents' parts, the submissions' handling.
+    const uint64_t submit_ns=c.time_wait+c.time_stage+c.time_submit;
+    c.timing.broker_submit_ns=submit_ns-c.timing_submit_ns;c.timing_submit_ns=submit_ns;
+    c.timing.submissions=c.submissions-c.timing_submissions;c.timing_submissions=c.submissions;
+    pw_gpu_timing_format(&c.timing,c.pacing.frames,now>c.pacing.window_ns ? now-c.pacing.window_ns : 0,c.pacing.present_ns,
+                         pw_gpu_clock_rate(&gpu_clock),fields,sizeof(fields));
+    snprintf(line,sizeof(line),"gpu-split cookie=%d pid=%d %s\n",c.cookie,c.pid,fields);
+    c.timing=PwGpuTiming{};
+    if(log)fputs(line,log);
+    fputs(line,stderr);
+    pw_frame_pacing_next(&c.pacing,now);
+}
 [[noreturn]] void retain(FILE *out,const char *reason)
 {
     fprintf(out,"gpu-broker unsafe_to_close=1 reason=%s\n",reason);fsync(fileno(out));
@@ -210,13 +288,77 @@ bool give_up(FILE *out,const char *reason)
 // PROTON_GPU_TEST_FAIL_SUBMIT=n (Wine broker): the submission after n succeeds is refused before it reaches the GPU,
 // as a failed one would be, to show the title surviving a broker failure. 0: off.
 unsigned test_fail_submit=0,test_submissions=0;
+// The call the client lock's holder waits in, for an application's watchdog (ps5_gpu_broker_health), which reads these
+// with atomics and never the lock. A 2026-10-15 run held b.lock from flight-recorder t=40 to t=278 with every
+// fence completed, and nothing said in which call. Set around each call that can wait while b.lock is held and the
+// outer one restored after, always within one stretch of holding it (never across the unlock a present makes), so the
+// outermost restores none.
+std::atomic<const char *> held_phase{nullptr};
+std::atomic<uint64_t> held_since_ns{0};
+std::atomic<int> held_tid{0};
+struct Phase {
+    const char *outer;uint64_t outer_since;int outer_tid;
+    explicit Phase(const char *name):outer(held_phase.load(std::memory_order_relaxed)),
+        outer_since(held_since_ns.load(std::memory_order_relaxed)),outer_tid(held_tid.load(std::memory_order_relaxed))
+    {
+        held_tid.store(pthread_getthreadid_np(),std::memory_order_relaxed);
+        held_since_ns.store(radv_ps5_now_ns(),std::memory_order_relaxed);
+        held_phase.store(name,std::memory_order_release);
+    }
+    ~Phase()
+    {
+        held_tid.store(outer_tid,std::memory_order_relaxed);held_since_ns.store(outer_since,std::memory_order_relaxed);
+        held_phase.store(outer,std::memory_order_release);
+    }
+};
+// PROTON_TEST_BROKER_HOLD_S=n (Wine broker): once, the first submission 10 s after the first one keeps the client lock
+// n s longer, in phase test-hold, as a broker stuck in a kernel call would: the title's wedge rule ends the game
+// (src/pw_hang_breaker.h). Under b.lock. 0: off.
+unsigned test_hold_s=0;uint64_t test_hold_first_ns=0;bool test_held=false;
 bool owned(const Client &c,uint64_t address,uint64_t bytes)
 {
     for(const auto &b:c.buffers)if(b.token && pw_gpu_contains(b.address,b.bytes,address,bytes))return true;
     return false;
 }
+// Host-visible memory from the application's direct memory (ps5_gpu_broker_set_dmem_memory), not shared memory: made by the
+// memory helper and granted to this process and the client, each mapping it by offset (the system compositor shares memory
+// with games the same way). The helper owns the range until dmem_release: the client unmaps before it sends FREE (and a
+// client that is gone has no mappings), and this process unmaps before it releases, so nothing maps a range the kernel may reuse.
+int (*dmem_alloc)(size_t bytes,int client_pid,int64_t *offset)=nullptr;
+int (*dmem_release)(int64_t offset,size_t bytes)=nullptr;
+unsigned long long dmem_made=0,dmem_freed=0,dmem_refused=0,dmem_free_failed=0,dmem_bytes_made=0;
+void dmem_give_back(int64_t offset,uint64_t bytes)
+{
+    Phase phase("give-back");
+    if(dmem_release && !dmem_release(offset,(size_t)bytes))++dmem_freed;
+    else ++dmem_free_failed;
+}
+// Map a client's host-visible buffer at `at` in this process: the memory helper's direct memory when it is set (dmem is
+// the offset), else a shared-memory object (fd). MAP_FAILED when neither could be mapped.
+int shared_object(uint64_t bytes);
+void *map_host(const Client &c,void *at,uint64_t bytes,int &fd,int64_t &dmem)
+{
+    Phase phase("map");
+    fd=-1;dmem=-1;
+    // Direct memory first; a range the helper refuses (the pool is full, a grant failed) or this process cannot map is made as a
+    // shared-memory object instead, which the client maps by descriptor as before.
+    if(dmem_alloc) {
+        int64_t offset=-1;
+        if(dmem_alloc(bytes,c.pid,&offset))++dmem_refused;
+        else {
+            ++dmem_made;dmem_bytes_made+=bytes;
+            void *got=at;
+            if(!sceKernelMapDirectMemory(&got,bytes,0x33,PW_GPU_RESERVE_FIXED,offset,16384) && got==at) { dmem=offset;return got; }
+            dmem_give_back(offset,bytes);
+        }
+    }
+    fd=shared_object(bytes);
+    if(fd<0)return MAP_FAILED;
+    return mmap(at,bytes,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,fd,0);
+}
 void release(Buffer &b)
 {
+    Phase phase("munmap");
     if(b.local)radv_ps5_memory_free(&b.memory);
     else if(b.ranged) {
         // Back to a reservation laid over the mapping (it replaces it), and the range back to the free list.
@@ -226,14 +368,22 @@ void release(Buffer &b)
     }
     else if(b.address)sceKernelMunmap((void *)b.address,b.bytes);
     if(b.fd>=0)close(b.fd);
+    if(b.dmem>=0)dmem_give_back(b.dmem,b.bytes);
     b=Buffer{};
 }
-// The device-local heap a client is told it has: the offer, or what direct memory above the floor allows now.
-uint64_t local_offer()
+// Direct memory above the floor now: what device-local memory can still be given (patch 0042).
+uint64_t local_room()
 {
     const uint64_t available=radv_ps5_memory_available_bytes();
-    const uint64_t room=available>kLocalFloor ? (available-kLocalFloor)&~16383ull : 0;
-    return room<kLocalOffer ? room : kLocalOffer;
+    return available>kLocalFloor ? (available-kLocalFloor)&~16383ull : 0;
+}
+// The device-local heap a client is told it has: two thirds of the room, at most the offer. On this console a game's own
+// heaps come out of the same direct memory as its graphics memory (a Direct3D 12 game, 2026-10-29: 3,888 MiB of its own
+// against 5,641 of graphics, told 7.96 GiB), so a heap the size of the whole room is one its settings cannot fill.
+uint64_t local_offer()
+{
+    const uint64_t share=(local_room()/3*2)&~16383ull;
+    return share<kLocalOffer ? share : kLocalOffer;
 }
 // A client buffer's object, sized: from the application's maker when it set one (its pages written through there, so
 // they are not this process's when the GPU grant makes them resident), else made here. -1 on failure.
@@ -244,7 +394,11 @@ int shared_object(uint64_t bytes)
     if(shared_alloc) {
         const int fd=shared_alloc(bytes);
         if(fd>=0 && (!shared_touch || !shared_touch(fd,0,bytes)))return fd;
+        const int error=errno;
         if(fd>=0)close(fd);
+        // The maker is gone or did not answer in time: an object made here would be the application's, held by a client
+        // when the system closes the application, which panicked the console (PS5_Proton src/pw_shared_page.h).
+        if(error==ENOTCONN || error==ETIMEDOUT) { errno=error;return -1; }
     }
     const int fd=shm_open(SHM_ANON,O_RDWR,0600);
     if(fd>=0 && ftruncate(fd,bytes)) { close(fd);return -1; }
@@ -258,8 +412,11 @@ int allocate_local(Client &c,PwGpuMessage &m,Buffer &b,uint64_t bytes,uint64_t a
     if(radv_ps5_memory_available_bytes()<kLocalFloor+bytes)return ENOMEM;
     c.allocation_stage="local_direct";
     radv_ps5_memory memory{};
-    if(!radv_ps5_memory_alloc(bytes,alignment,m.argument[1]!=0,&memory))return ENOMEM;
-    if(m.argument[2]&PW_GPU_ALLOC_ZERO) { memset(memory.cpu,0,memory.bytes);radv_ps5_cpu_flush(memory.cpu,memory.bytes); }
+    {
+        Phase phase("alloc");
+        if(!radv_ps5_memory_alloc(bytes,alignment,m.argument[1]!=0,&memory))return ENOMEM;
+        if(m.argument[2]&PW_GPU_ALLOC_ZERO) { memset(memory.cpu,0,memory.bytes);radv_ps5_cpu_flush(memory.cpu,memory.bytes); }
+    }
     b=Buffer{(uint64_t)memory.cpu,memory.bytes,++c.next_token,-1,true,false,memory};
     c.local+=memory.bytes;if(c.local>c.local_peak)c.local_peak=c.local;
     m.address=b.address;m.bytes=b.bytes;m.argument[0]=b.token;
@@ -284,23 +441,21 @@ int allocate(Client &c,PwGpuMessage &m,uint64_t &next_window,uint64_t &next_high
         c.allocation_stage="range";
         const uint64_t address=range.take(bytes,alignment);
         if(!address)return ENOMEM;
-        c.allocation_stage="shm";
-        const int shared=shared_object(bytes);
-        void *mapped=MAP_FAILED;
-        if(shared>=0) {
-            c.allocation_stage="map";
-            mapped=mmap((void *)address,bytes,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,shared,0);
-        }
+        c.allocation_stage="map";
+        int shared=-1;int64_t dmem=-1;
+        void *mapped=map_host(c,(void *)address,bytes,shared,dmem);
         bool granted=mapped==(void *)address;
-        if(granted) { c.allocation_stage="gpu_permissions";granted=radv_ps5_memory_grant_gpu(mapped,bytes); }
+        if(granted) { c.allocation_stage="gpu_permissions";Phase phase("grant");granted=radv_ps5_memory_grant_gpu(mapped,bytes); }
         if(!granted) {
+            Phase phase("munmap");
             void *at=(void *)address;
             if(!sceKernelReserveVirtualRange(&at,bytes,PW_GPU_RESERVE_FIXED,16384) && at==(void *)address)range.give(address,bytes);
             if(shared>=0)close(shared);
+            if(dmem>=0)dmem_give_back(dmem,bytes);
             return ENOMEM;
         }
-        *b=Buffer{address,bytes,++c.next_token,shared,false,true};c.allocated+=bytes;
-        m.address=address;m.bytes=bytes;m.argument[0]=b->token;fd=shared;
+        *b=Buffer{address,bytes,++c.next_token,shared,false,true};b->dmem=dmem;b->pid=c.pid;c.allocated+=bytes;
+        m.address=address;m.bytes=bytes;m.argument[0]=b->token;m.argument[2]=dmem>=0 ? uint64_t(dmem)+1 : 0;fd=shared;
         c.allocation_stage="complete";
         return 0;
     }
@@ -319,30 +474,27 @@ int allocate(Client &c,PwGpuMessage &m,uint64_t &next_window,uint64_t &next_high
         if(attempt==63)return EADDRINUSE;
         cursor=address+(bytes>(UINT64_C(2)<<20) ? bytes : UINT64_C(2)<<20);
     }
-    c.allocation_stage="shm";
-    const int shared=shared_object(bytes);
-    void *mapped=MAP_FAILED;
-    if(shared>=0) {
-        c.allocation_stage="map";
-        mapped=mmap(reserved,bytes,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,shared,0);
-    }
+    c.allocation_stage="map";
+    int shared=-1;int64_t dmem=-1;
+    void *mapped=map_host(c,reserved,bytes,shared,dmem);
     bool granted=false;
-    if(mapped==reserved) { c.allocation_stage="gpu_permissions";granted=radv_ps5_memory_grant_gpu(mapped,bytes); }
+    if(mapped==reserved) { c.allocation_stage="gpu_permissions";Phase phase("grant");granted=radv_ps5_memory_grant_gpu(mapped,bytes); }
     if(!granted) {
-        sceKernelMunmap(reserved,bytes);if(shared>=0)close(shared);return ENOMEM;
+        Phase phase("munmap");
+        sceKernelMunmap(reserved,bytes);if(shared>=0)close(shared);if(dmem>=0)dmem_give_back(dmem,bytes);return ENOMEM;
     }
-    *b=Buffer{address,bytes,++c.next_token,shared};c.allocated+=bytes;cursor=address+bytes;
-    m.address=address;m.bytes=bytes;m.argument[0]=b->token;fd=shared;
+    *b=Buffer{address,bytes,++c.next_token,shared};b->dmem=dmem;b->pid=c.pid;c.allocated+=bytes;cursor=address+bytes;
+    m.address=address;m.bytes=bytes;m.argument[0]=b->token;m.argument[2]=dmem>=0 ? uint64_t(dmem)+1 : 0;fd=shared;
     c.allocation_stage="complete";
     return 0;
 }
 // Asynchronous submission. The broker copies a client's stream into owner-private staging, appends its own
 // end-of-work packet writing a sequence number to an owner-private fence page, submits, and replies at once: the
 // client waits on its own marker, which the GPU's writes reach coherently (graphics-child-gpu-coherence-*). Every
-// client's work goes to the one GPU ring in submission order, so one fence orders it all. Staging, and the backing of
-// any buffer a client frees while work is in flight, are released only once the fence has passed the last
-// submission that could use them.
-struct Inflight { uint32_t seq;radv_ps5_memory staging; };
+// client's work goes to the one GPU ring in submission order, so one fence orders it all. A submission's staging is
+// kept as a spare once the fence has passed it and taken again by a later one (staging.h); the backing of any buffer a
+// client frees while work is in flight is released only once the fence has passed the last submission that could use it.
+struct Inflight { uint32_t seq;radv_ps5_memory staging;Client *client=nullptr; };
 struct Deferred { Buffer buffer;uint32_t seq; };
 struct Fences {
     radv_ps5_memory page{};
@@ -350,13 +502,25 @@ struct Fences {
     static constexpr unsigned kRing=512,kDeferred=1024;
     Inflight ring[kRing]{};unsigned head=0,count=0;
     Deferred deferred[kDeferred]{};unsigned deferred_count=0;
+    ps5_gpu_staging staging{};
     // The GPU state every client shares, as last set: changing it waits for all work in flight.
     uint64_t tess=0;uint32_t tess_bytes=0,granularity=0,buffering=0;bool offchip=false;
     uint64_t drains=0,state_drains=0;
     // The suspend point that starts a submission promptly (ps5platform/agc.h), made by the broker's own thread once its
     // replies are out, rather than by the platform's kick thread inside the round trip.
     bool kick=false;uint64_t kicks=0,kick_ns=0;
+    // With PROTON_GPU_TIMESTAMPS: each ring slot's GPU clock at its submission's start and end (src/pw_gpu_timing.h),
+    // and the newest end read back, so overlapping submissions are not counted twice.
+    radv_ps5_memory stamps{};uint64_t stamp_last_end=0;
 } fences;
+static_assert(PS5_GPU_STAGING_SPARES>=Fences::kRing,"the spares' slots hold what the ring held; only the budget refuses");
+// Staging made, freed, taken again, and given back past the spares' budget (each a free during play); the bytes made and
+// not freed, and their peak. Across broker restarts, as dmem_host's.
+unsigned long long staging_allocs=0,staging_frees=0,staging_reuses=0,staging_refused=0,staging_held=0,staging_peak=0;
+void staging_free(radv_ps5_memory &memory)
+{
+    staging_held-=memory.bytes;++staging_frees;radv_ps5_memory_free(&memory);
+}
 int broker_submit(void *words,uint32_t count)
 {
     radv_ps5_cpu_flush(words,size_t(count)*4);
@@ -368,6 +532,7 @@ int broker_submit(void *words,uint32_t count)
 void kick()
 {
     if(!fences.kick)return;
+    Phase phase("suspend");
     const uint64_t start=radv_ps5_now_ns();
     sceAgcSuspendPoint();
     fences.kick_ns+=radv_ps5_now_ns()-start;++fences.kicks;fences.kick=false;
@@ -378,13 +543,28 @@ uint32_t completed()
     auto *value=(volatile uint32_t *)fences.page.cpu;
     radv_ps5_cpu_flush((const void *)value,4);return *value;
 }
+// A completed submission's timestamps (ring slot `slot`): the GPU's busy time goes to its client.
+void stamped(unsigned slot,Client *client)
+{
+    auto *at=(volatile uint64_t *)((uint8_t *)fences.stamps.cpu+size_t(slot)*PW_GPU_TS_SLOT_BYTES);
+    radv_ps5_cpu_flush((const void *)at,PW_GPU_TS_SLOT_BYTES);
+    const uint64_t start=at[0],end=at[1];
+    const uint64_t busy=pw_gpu_busy(&fences.stamp_last_end,start,end);
+    if(start && end)pw_gpu_clock_note(&gpu_clock,radv_ps5_now_ns(),end);
+    if(client)client->timing.gpu_ticks+=busy;
+}
 // Releases whatever the fence has passed.
 void reap()
 {
     if(!fences.page.cpu)return;
     const uint32_t now=completed();
     while(fences.count && done(fences.ring[fences.head].seq,now)) {
-        radv_ps5_memory_free(&fences.ring[fences.head].staging);
+        if(fences.stamps.cpu)stamped(fences.head,fences.ring[fences.head].client);
+        // A spare for a later submission, which takes it with no kernel call; freed past the spares' budget (staging.h).
+        if(!ps5_gpu_staging_give(&fences.staging,fences.ring[fences.head].staging)) {
+            Phase phase("reap-free");
+            staging_free(fences.ring[fences.head].staging);++staging_refused;
+        }
         fences.ring[fences.head]=Inflight{};fences.head=(fences.head+1)%Fences::kRing;--fences.count;
     }
     for(unsigned i=0;i<fences.deferred_count;)
@@ -397,27 +577,104 @@ bool drain(uint64_t timeout_ns)
 {
     reap();
     if(!fences.count && !fences.deferred_count)return true;
+    Phase phase("drain");
     ++fences.drains;
     const uint64_t end=radv_ps5_now_ns()+timeout_ns;
     while((fences.count || fences.deferred_count) && radv_ps5_now_ns()<end) { sceKernelUsleep(50);reap(); }
     return !fences.count && !fences.deferred_count;
 }
-// After a drain: the fence page goes back, and the state is as at start. In place, as Fences is about 100 KiB.
+// Held only to publish or take back the fence page, never across a wait: ps5_gpu_broker_health reads the page under it.
+pthread_mutex_t fence_page_lock=PTHREAD_MUTEX_INITIALIZER;
+// After a drain: the spare staging and the fence page go back, and the state is as at start. In place, as Fences is
+// about 140 KiB.
 void fences_reset()
 {
-    if(fences.page.cpu)radv_ps5_memory_free(&fences.page);
+    while(fences.staging.count)staging_free(fences.staging.spare[--fences.staging.count]);
+    pthread_mutex_lock(&fence_page_lock);
+    radv_ps5_memory page=fences.page,stamps=fences.stamps;
     fences.~Fences();new (&fences) Fences();
+    pthread_mutex_unlock(&fence_page_lock);
+    if(page.cpu)radv_ps5_memory_free(&page);
+    if(stamps.cpu)radv_ps5_memory_free(&stamps);
 }
 bool fences_ready(FILE *out)
 {
     if(fences.page.cpu)return true;
-    if(!radv_ps5_memory_alloc(16384,16384,false,&fences.page))return false;
-    *(volatile uint32_t *)fences.page.cpu=fences.issued;radv_ps5_cpu_flush(fences.page.cpu,64);
+    radv_ps5_memory page{};
+    if(!radv_ps5_memory_alloc(16384,16384,false,&page))return false;
+    *(volatile uint32_t *)page.cpu=fences.issued;radv_ps5_cpu_flush(page.cpu,64);
+    pthread_mutex_lock(&fence_page_lock);fences.page=page;pthread_mutex_unlock(&fence_page_lock);
     fprintf(out,"gpu-broker fences address=%#llx\n",(unsigned long long)(uint64_t)fences.page.cpu);
+    // Without its page, no submission is stamped and the split's GPU fields stay 0.
+    static_assert(Fences::kRing*PW_GPU_TS_SLOT_BYTES<=16384,"a slot per ring entry");
+    if(gpu_timestamps) {
+        const bool made=radv_ps5_memory_alloc(16384,16384,false,&fences.stamps);
+        fprintf(out,"gpu-broker timestamps=%d address=%#llx\n",made,(unsigned long long)(uint64_t)fences.stamps.cpu);
+        if(!made)fences.stamps=radv_ps5_memory{};
+    }
     return true;
 }
 // A buffer the client let go of: released now if no work is in flight, otherwise once the fence passes the last
 // submission so far.
+// A client's sparse range (patch 0041): the owner reserves it as it does its own (radv_ps5_vrange_reserve), so the
+// GPU, which works in the owner's address space, finds it; unbound pieces read the shared zero block.
+// Each refusal is logged with its reason, and the client is told which: EINVAL a size it does not take, ENOSPC the
+// client holds kClientRanges already, ENOMEM no room in the owner's device-memory region.
+int vrange_reserve(Client &c,PwGpuMessage &m,FILE *log)
+{
+    int cpu_total=0,cpu_free=0,gpu_total=0,gpu_free=0;
+    const bool tables=!sceKernelGetPageTableStats(&cpu_total,&cpu_free,&gpu_total,&gpu_free) && cpu_total>0 && gpu_total>0;
+    const char *why=!m.bytes || m.bytes>(UINT64_C(64)<<30) ? "size" : c.range_count>=kClientRanges ? "count" :
+                    tables && (cpu_free<kRangeTableFloor || gpu_free<kRangeTableFloor) ? "tables" : nullptr;
+    if(why) {
+        fprintf(log,"gpu-wine vrange_refused=1 cookie=%d pid=%d bytes=%llu ranges=%u reason=%s tables_free=%d/%d\n",c.cookie,
+            c.pid,(unsigned long long)m.bytes,c.range_count,why,cpu_free,gpu_free);
+        return *why=='s' ? EINVAL : ENOSPC;
+    }
+    Range *slot=nullptr;
+    for(auto &r:c.ranges)if(!r.address) { slot=&r;break; }
+    radv_ps5_memory memory{};
+    if(!radv_ps5_vrange_reserve(m.bytes,m.argument[0]!=0,m.argument[1]!=0,m.argument[2],&memory)) {
+        fprintf(log,"gpu-wine vrange_refused=1 cookie=%d pid=%d bytes=%llu ranges=%u window32=%d reason=region\n",c.cookie,
+            c.pid,(unsigned long long)m.bytes,c.range_count,int(m.argument[0]!=0));
+        return ENOMEM;
+    }
+    if(!slot) { c.ranges.emplace_back();slot=&c.ranges.back(); }
+    slot->address=(uint64_t)(uintptr_t)memory.cpu;slot->bytes=memory.bytes;slot->memory=memory;++c.range_count;
+    c.range_index[slot->address]=(unsigned)(slot-c.ranges.data());
+    if(c.range_count>c.range_peak)c.range_peak=c.range_count;
+    m.address=slot->address;m.bytes=slot->bytes;return 0;
+}
+Range *vrange_of(Client &c,uint64_t address,uint64_t bytes)
+{
+    auto at=c.range_index.upper_bound(address);
+    if(at==c.range_index.begin())return nullptr;
+    Range &r=c.ranges[(--at)->second];
+    return r.address && pw_gpu_contains(r.address,r.bytes,address,bytes) ? &r : nullptr;
+}
+int vrange_release(Client &c,PwGpuMessage &m)
+{
+    auto at=m.address ? c.range_index.find(m.address) : c.range_index.end();
+    if(at==c.range_index.end())return EINVAL;
+    Range &r=c.ranges[at->second];
+    // Work in flight may still read through it: it is unmapped once nothing is.
+    if(!drain(5000000000ull))return EBUSY;
+    radv_ps5_vrange_release(&r.memory);r=Range{};--c.range_count;c.range_index.erase(at);return 0;
+}
+int vrange_bind(Client &c,PwGpuMessage &m,bool bind,FILE *log)
+{
+    if(!m.bytes || (m.address|m.bytes)&16383 || !vrange_of(c,m.address,m.bytes))return EINVAL;
+    void *at=(void *)(uintptr_t)m.address;
+    if(!bind)return radv_ps5_vrange_unbind(at,m.bytes) ? 0 : EIO;
+    // Only one of this client's own device-local buffers, whose direct memory the owner holds.
+    for(auto &a:c.buffers)if(a.token && a.token==m.argument[0] && a.local && a.memory.physical>=0) {
+        if(m.argument[1]>a.memory.bytes || m.bytes>a.memory.bytes-m.argument[1] || (m.argument[1]&16383))return EINVAL;
+        if(radv_ps5_vrange_bind(at,m.bytes,&a.memory,m.argument[1]))return 0;
+        fprintf(log,"gpu-wine vrange_bind_failed=1 cookie=%d pid=%d bytes=%llu\n",c.cookie,c.pid,(unsigned long long)m.bytes);
+        return EIO;
+    }
+    return EINVAL;
+}
 void free_buffer(Client &c,Buffer &b,FILE *out)
 {
     (b.local ? c.local : c.allocated)-=b.bytes;
@@ -445,25 +702,47 @@ int submit(Client &c,const PwGpuMessage &m,FILE *out,unsigned client)
         if(!drain(5000000000ull))return give_up(out,"vulkan_state_drain_stalled"),EIO;
     }
     const uint64_t t1=radv_ps5_now_ns();c.time_wait+=t1-t0;
+    // Timestamps: one before the client's words and one after them, into this submission's ring slot.
+    const unsigned slot=(fences.head+fences.count)%Fences::kRing;
+    const uint64_t before=fences.stamps.cpu ? 4*PW_GPU_TS_START_WORDS : 0,after=fences.stamps.cpu ? 4*PW_GPU_TS_END_WORDS : 0;
     radv_ps5_memory staging{};
-    if(!radv_ps5_memory_alloc(m.bytes+32,16384,false,&staging))return ENOMEM;
-    memcpy(staging.cpu,(void *)m.address,m.bytes);
-    uint32_t seq=++fences.issued;if(!seq)seq=++fences.issued;
-    ps5_gpu_completion_packet((uint32_t *)((uint8_t *)staging.cpu+m.bytes),(uint64_t)fences.page.cpu,seq);
+    if(ps5_gpu_staging_take(&fences.staging,before+m.bytes+after+32,&staging))++staging_reuses;
+    else {
+        Phase phase("stage-alloc");
+        if(!radv_ps5_memory_alloc(ps5_gpu_staging_round(before+m.bytes+after+32),16384,false,&staging))return ENOMEM;
+        ++staging_allocs;staging_held+=staging.bytes;if(staging_held>staging_peak)staging_peak=staging_held;
+    }
+    {
+        // The client's command words, in memory it shares with this process.
+        Phase phase("copy");
+        memcpy((uint8_t *)staging.cpu+before,(void *)m.address,m.bytes);
+    }
+    if(fences.stamps.cpu) {
+        auto *at=(uint8_t *)fences.stamps.cpu+size_t(slot)*PW_GPU_TS_SLOT_BYTES;
+        memset(at,0,PW_GPU_TS_SLOT_BYTES);radv_ps5_cpu_flush(at,PW_GPU_TS_SLOT_BYTES);
+        pw_gpu_ts_start((uint32_t *)staging.cpu,uint64_t(at));
+        pw_gpu_ts_end((uint32_t *)((uint8_t *)staging.cpu+before+m.bytes),uint64_t(at)+8);
+    }
+    uint32_t seq=__atomic_add_fetch(&fences.issued,1,__ATOMIC_RELAXED);if(!seq)seq=__atomic_add_fetch(&fences.issued,1,__ATOMIC_RELAXED);
+    ps5_gpu_completion_packet((uint32_t *)((uint8_t *)staging.cpu+before+m.bytes+after),(uint64_t)fences.page.cpu,seq);
     const uint64_t t2=radv_ps5_now_ns();c.time_stage+=t2-t1;
     int status=0;
+    Phase phase("submit");
     if(tess_changes && !(status=radv_ps5_set_tess_factor_ring(c.tess,c.tess_bytes))) { fences.tess=c.tess;fences.tess_bytes=c.tess_bytes; }
     if(!status && offchip_changes && !(status=radv_ps5_set_hs_offchip_param(c.granularity,c.buffering))) {
         fences.offchip=true;fences.granularity=c.granularity;fences.buffering=c.buffering;
     }
     if(!status) {
         const bool refused=test_fail_submit && ++test_submissions>test_fail_submit;
-        status=refused ? EIO : broker_submit(staging.cpu,(uint32_t)(m.bytes/4)+8);
+        status=refused ? EIO : broker_submit(staging.cpu,(uint32_t)((before+m.bytes+after)/4)+8);
         // An error cannot prove that nothing reached the hardware: the staging stays, and nothing else is freed.
         if(status) { give_up(out,refused ? "test_submit_failure" : "vulkan_submit_error");return EIO; }
     }
-    if(status) { radv_ps5_memory_free(&staging);return status; }
-    fences.ring[(fences.head+fences.count++)%Fences::kRing]=Inflight{seq,staging};
+    if(status) {   // never submitted: a spare again, or freed past the budget
+        if(!ps5_gpu_staging_give(&fences.staging,staging)) { Phase freeing("stage-free");staging_free(staging);++staging_refused; }
+        return status;
+    }
+    fences.ring[(fences.head+fences.count++)%Fences::kRing]=Inflight{seq,staging,&c};
     c.time_submit+=radv_ps5_now_ns()-t2;++c.submissions;++c.waits;
     const bool final=true;
     // Tracing only: a line per submission, flushed to disk, cost 90-190 ms each (graphics-child-gpu-sync-timing-03).
@@ -475,6 +754,10 @@ int submit(Client &c,const PwGpuMessage &m,FILE *out,unsigned client)
 namespace {
 struct Broker {
     pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER,display_lock=PTHREAD_MUTEX_INITIALIZER;
+    pthread_cond_t pin_released=PTHREAD_COND_INITIALIZER;   // a present link's frame unpinned (Client::pin_*)
+    // The app is not in the foreground (ps5_gpu_broker_set_away, under lock): submissions and presents wait here.
+    bool away=false;uint64_t away_held=0;
+    pthread_cond_t away_changed=PTHREAD_COND_INITIALIZER;
     Client clients[32];
     Ps5GpuDisplay display;
     uint64_t window=0x240000000ull,high=0x5100000000ull;
@@ -493,20 +776,70 @@ struct Broker {
     int holder=0,holder_pid=0;uint64_t holder_ns=0;unsigned switches=0,hidden=0;
     struct FrameSource { int pid=0;PwFramePage *page=nullptr;uint32_t shown=0; } frames[32];
     uint8_t *frame_copy=nullptr;int cursor_x=INT32_MIN,cursor_y=INT32_MIN;
+    PwWindowScene window_scene{};
+    PwWindowEffects window_effects{}; // DWM corners/shadows/materials/thumbnails caches
+    bool window_composed=false;       // frame_copy holds the last complete composition
+    uint64_t compose_count=0,compose_ns=0,compose_max_ns=0;
+    // Per phase, a phase ending at each display capture (a probe's marker): compositions by time (under 2, 4, 8, 12,
+    // 16.7 and 33.3 ms, longer) and how the composed desktop's presents were paced (src/pw_frame_pacing.h).
+    uint64_t phase_compose_count=0,phase_compose_ns=0,phase_compose_max_ns=0;
+    uint32_t phase_compose_hist[7]={};
+    PwFramePacing desktop_pacing{};
+    // Why each interval over 20 ms came (src/pw_frame_pacing.h, pw_frame_pacing_slow): the looks since the last
+    // present that found nothing new, and the last composition's time.
+    PwPacingSlow phase_slow{};
+    unsigned idle_looks=0;
+    uint64_t composed_ns=0;
+    uint64_t window_sequence=0,window_frames=0;
+    int window_error=0;
+    bool window_dirty=false;
+    // Game mode, step 1 (src/pw_window_direct.h): a full-screen GPU window's frames go to the display themselves
+    // and the compositor looks at nothing while they keep coming. Under display_lock.
+    bool direct=false;int32_t direct_pid=0;uint32_t direct_hwnd=0,direct_width=0,direct_height=0;
+    uint64_t direct_generation=0,direct_ns=0,direct_checked_ns=0;
+    uint64_t direct_entries=0,direct_exits=0,direct_restores=0,direct_flips=0;
+    // The game-mode process, for the title's session supervisor without the display lock (a present holds that lock
+    // through its flip wait): its native pid while game mode lasts, 0 otherwise.
+    std::atomic<int32_t> direct_published{0};
     pthread_t compositor{};bool compositing=false,compositor_stop=false;
-    // Under display_lock: a picture the application asked for (ps5_gpu_broker_capture_next), of the next frame shown.
+    // Under capture_lock, held only for a swap: a picture the application asked for (ps5_gpu_broker_capture_next),
+    // of the next frame shown. Under display_lock, held through every present, a request could not get in: four of six
+    // captures in a gate case were declined (v3-jit-gatecases-2026-10-14 gpu-window64).
+    pthread_mutex_t capture_lock=PTHREAD_MUTEX_INITIALIZER;
     std::string capture_next;
+    // The application's cover (ps5_gpu_broker_set_cover), under display_lock: shown instead of the desktop while set.
+    // Its flips are not the program's: while it lasts, ps5_gpu_broker_flips stays at the count it began with.
+    const void *cover=nullptr;uint64_t cover_serial=0,cover_shown=0,cover_flips=0,cover_held_frames=0;int cover_error=0;
+    std::atomic<bool> cover_held{false};std::atomic<unsigned long long> cover_frozen_flips{0};
 } broker_state;
+static std::string take_capture(decltype(broker_state) &b)
+{
+    std::string asked;
+    pthread_mutex_lock(&b.capture_lock);asked.swap(b.capture_next);pthread_mutex_unlock(&b.capture_lock);
+    return asked;
+}
+static bool capture_pending(decltype(broker_state) &b)
+{
+    pthread_mutex_lock(&b.capture_lock);const bool pending=!b.capture_next.empty();pthread_mutex_unlock(&b.capture_lock);
+    return pending;
+}
 // The desktop state, supplied by the application: the native process of the foreground window, and the cursor.
 int (*desktop_foreground)()=nullptr;
 void (*desktop_cursor)(int *,int *)=nullptr;
+int (*desktop_windows)(void *,unsigned)=nullptr;
 // A source keeps the screen while it presents at least this often; then the next source to present takes it. The
 // foreground window's process takes it whenever it presents.
 constexpr uint64_t kHoldNs=300000000ull;
 bool may_show(Broker &b,int source,int pid,uint64_t now)
 {
-    if(b.holder==source) { b.holder_ns=now;return true; }
+    // Until GPU clients publish an HWND identity, their process frame cannot
+    // replace an independently composed scene. This route is globally opt-in.
+    if(desktop_windows) { ++b.hidden;return false; }
     const int foreground=desktop_foreground ? desktop_foreground() : 0;
+    // A quiet foreground window still owns the screen. Background repaints
+    // must not replace it merely because its last paint was over 300 ms ago.
+    if(foreground && pid!=foreground) { ++b.hidden;return false; }
+    if(b.holder==source) { b.holder_ns=now;return true; }
     const bool idle=!b.holder || now-b.holder_ns>kHoldNs;
     const bool focus=foreground && pid==foreground && b.holder_pid!=foreground;
     if(!idle && !focus) { ++b.hidden;return false; }
@@ -531,13 +864,96 @@ void note_peaks(Broker &b)
     if(host>b.host_peak)b.host_peak=host;
     if(local>b.local_peak)b.local_peak=local;
 }
+// A game that stops presenting for this long while it owns the screen is looked at again, at this interval.
+constexpr uint64_t kDirectHoldNs=100000000ull;
+/* Under display_lock: game mode ends. With restore, the window's image in the scene becomes the last frame the
+ * display showed of it, so composing never brings back the frame it had before game mode began; without, the caller
+ * is about to copy the window's newest frame itself. */
+void leave_direct(Broker &b,const PwWindowSnapshot *snapshot,int reason,bool restore)
+{
+    if(!b.direct)return;
+    int restored=0;
+    if(restore && snapshot && b.frame_copy && b.display.read_last(reinterpret_cast<uint32_t *>(b.frame_copy)) &&
+       !pw_window_scene_gpu(&b.window_scene,b.direct_pid,b.direct_hwnd,b.direct_generation,b.frame_copy,1920,1080,1920*4,1,
+                            snapshot))
+        { restored=1;++b.direct_restores; }
+    b.direct=false;++b.direct_exits;b.window_composed=false;b.window_dirty=true;
+    b.direct_published.store(0,std::memory_order_release);
+    if(b.direct_exits<=64) {
+        char line[200];
+        snprintf(line,sizeof(line),"gpu-direct leave pid=%d hwnd=%#x reason=%s restored=%d flips=%llu\n",b.direct_pid,
+            b.direct_hwnd,pw_window_direct_reason(reason),restored,(unsigned long long)b.direct_flips);
+        fputs(line,b.log);fputs(line,stderr);
+    }
+}
+/* Under display_lock: show one complete copied scene and wait for its flip.
+ * GPU RPC replies retain FIFO pacing; no live GPU/shared pointer is painted. */
+/* The pointer is drawn by present into the display buffer, never into
+ * frame_copy: pointer motion and captures re-present the last composition. */
+int show_windows(Broker &b,const PwWindowSnapshot &snapshot,int cx,int cy,bool recompose=true)
+{
+    b.composed_ns=0;
+    if(recompose || !b.window_composed) {
+        if(pw_window_scene_update(&b.window_scene,&snapshot)<0)return errno;
+        PwWindowImage images[PW_WINDOW_IMAGE_LIMIT];
+        const size_t count=pw_window_scene_images(&b.window_scene,images,PW_WINDOW_IMAGE_LIMIT);
+        const uint64_t start=radv_ps5_now_ns();
+        b.window_composed=false;
+        if(pw_windows_compose_effects(reinterpret_cast<uint32_t *>(b.frame_copy),1920,1080,&snapshot,images,count,
+                                      &b.window_effects))return errno;
+        const uint64_t spent=radv_ps5_now_ns()-start;
+        b.window_composed=true;++b.compose_count;b.compose_ns+=spent;
+        if(spent>b.compose_max_ns)b.compose_max_ns=spent;
+        static const uint64_t edges[6]={2000000,4000000,8000000,12000000,16666667,33333333};
+        unsigned bucket=0;while(bucket<6 && spent>=edges[bucket])++bucket;
+        ++b.phase_compose_hist[bucket];++b.phase_compose_count;b.phase_compose_ns+=spent;
+        if(spent>b.phase_compose_max_ns)b.phase_compose_max_ns=spent;
+        b.composed_ns=spent;
+    }
+    std::string asked=take_capture(b);
+    if(!asked.empty()) {
+        // The phase that this capture ends: its compositions and the pacing of the desktop's presents.
+        char fields[512],slow[256],line[1400];const uint64_t now=radv_ps5_now_ns();
+        pw_frame_pacing_format(&b.desktop_pacing,now,fields,sizeof(fields));
+        pw_frame_pacing_slow_format(&b.phase_slow,slow,sizeof(slow));
+        const uint32_t *h=b.phase_compose_hist;
+        snprintf(line,sizeof(line),"gpu-windows phase capture=%s compose_count=%llu compose_avg_us=%llu compose_max_us=%llu "
+                 "compose_hist=%u,%u,%u,%u,%u,%u,%u pacing %s %s\n",asked.c_str(),(unsigned long long)b.phase_compose_count,
+                 (unsigned long long)(b.phase_compose_count ? b.phase_compose_ns/b.phase_compose_count/1000 : 0),
+                 (unsigned long long)(b.phase_compose_max_ns/1000),h[0],h[1],h[2],h[3],h[4],h[5],h[6],fields,slow);
+        fputs(line,b.log);fputs(line,stderr);
+        b.phase_compose_count=b.phase_compose_ns=b.phase_compose_max_ns=0;
+        for(unsigned i=0;i<7;++i)b.phase_compose_hist[i]=0;
+        b.phase_slow=PwPacingSlow{};
+        pw_frame_pacing_next(&b.desktop_pacing,now);
+    }
+    const uint64_t present_begin=radv_ps5_now_ns();
+    if(b.display.present(b.frame_copy,1920,1080,1920*4,b.log,asked.empty() ? nullptr : asked.c_str(),true,cx,cy))return EIO;
+    // A capture's present also copies the whole frame for its picture (pw_display_capture.h): the probe's time, not
+    // the desktop's pacing.
+    const uint64_t present_end=radv_ps5_now_ns(),previous=b.desktop_pacing.last_ns;
+    if(asked.empty()) {
+        pw_frame_pacing_shown(&b.desktop_pacing,present_begin,present_end);
+        // The present is the frame's copy into the display's buffer, then the wait for a free one and the flip's submit.
+        const uint64_t copy=b.display.last_copy_ns,inside=present_end-present_begin;
+        pw_frame_pacing_slow(&b.phase_slow,previous && present_end>previous ? present_end-previous : 0,b.idle_looks,
+                             b.composed_ns,copy,inside>copy ? inside-copy : 0);
+    }
+    else pw_frame_pacing_skip(&b.desktop_pacing,present_end);
+    b.idle_looks=0;
+    b.window_sequence=snapshot.sequence;b.window_dirty=false;++b.window_frames;
+    b.cursor_x=cx;b.cursor_y=cy;return 0;
+}
 // One thread per client, started with its slot, waiting on that client's socket alone (await_message); the broker's
 // work is serialized by its lock, taken only while a message is handled. The single worker this replaces held the
 // lock across a 20 ms poll of every socket, so opening or closing a slot, and every other client, waited on it.
-void *client_main(void *argument)
+// The same loop serves a client's present link (present), which takes its presents and their timing alone.
+void *present_main(void *argument);
+static void *serve(Client &c,bool present)
 {
-    auto &b=broker_state;auto &c=*static_cast<Client *>(argument);
-    const int socket=c.socket;uint64_t spin_until=0,idle_since=radv_ps5_now_ns();
+    auto &b=broker_state;
+    const int socket=present ? c.present_socket : c.socket;uint32_t &sequence=present ? c.present_sequence : c.sequence;
+    uint64_t spin_until=0,idle_since=radv_ps5_now_ns();
     for(;;) {
         const int found=await_message(socket,spin_until);
         pthread_mutex_lock(&b.lock);
@@ -549,51 +965,206 @@ void *client_main(void *argument)
         }
         do {
             PwGpuMessage m{};int received_fds[2];unsigned count=0;
-            const ssize_t bytes=ps5_gpu_packet_recv(c.socket,&m,sizeof(m),received_fds,&count);
+            const ssize_t bytes=ps5_gpu_packet_recv(socket,&m,sizeof(m),received_fds,&count);
             for(unsigned n=0;n<count;++n)close(received_fds[n]);
-            if(bytes!=sizeof(m) || count || m.magic!=PW_GPU_MAGIC || m.status || m.sequence!=c.sequence+1) {
+            if(bytes!=sizeof(m) || count || m.magic!=PW_GPU_MAGIC || m.status || m.sequence!=sequence+1) {
                 c.ended=true;break;
             }
-            c.sequence=m.sequence;m.status=EINVAL;int fd=-1;
-            if(m.operation==PW_GPU_INIT && c.pid<0 && m.argument[0]>0 && m.argument[0]<=INT32_MAX && m.argument[0]!=uint64_t(getpid())) {
+            sequence=m.sequence;m.status=EINVAL;int fd=-1;bool sent_away=false;   // sent_away: fd is closed once sent
+            // Away (ps5_gpu_broker_set_away): no new GPU work and no flip while the app is not in the foreground. This one
+            // waits, without the lock, until it is again; the client's thread waits on its reply meanwhile.
+            if(c.pid>0 && b.away && (m.operation==PW_GPU_SUBMIT || m.operation==PW_GPU_SWAPCHAIN ||
+                                     m.operation==PW_GPU_WINDOW_SWAPCHAIN)) {
+                ++b.away_held;
+                // Timed, so a client closed or a broker stopped meanwhile is seen within 100 ms.
+                while(b.away && !b.stopping && !c.ended) {
+                    struct timespec until;clock_gettime(CLOCK_REALTIME,&until);
+                    until.tv_nsec+=100000000;if(until.tv_nsec>=1000000000) { until.tv_nsec-=1000000000;++until.tv_sec; }
+                    pthread_cond_timedwait(&b.away_changed,&b.lock,&until);
+                }
+            }
+            if(present && m.operation!=PW_GPU_SWAPCHAIN && m.operation!=PW_GPU_WINDOW_SWAPCHAIN && m.operation!=PW_GPU_TIMING) {
+                // Refused (EINVAL): the present link carries presents alone.
+            } else if(m.operation==PW_GPU_INIT && c.pid<0 && pw_gpu_client_pid(c.expected_pid,m.argument[0],getpid())) {
                 c.pid=(int)m.argument[0];m.status=0;
                 const uint64_t ranges_reserved_reported=m.argument[2];m.argument[2]=m.argument[3]=0;
                 /* The host-visible budget always: a client keeps PW_GPU_LIMIT without it. */
                 if(b.local_memory)m.argument[2]=local_offer();
                 m.argument[3]=host_limit;
-                fprintf(b.log,"gpu-wine cookie=%d pid=%d local_offer=%llu host_limit=%llu flexible=%zu ranges_reserved=%llu\n",c.cookie,c.pid,
-                    (unsigned long long)m.argument[2],(unsigned long long)m.argument[3],flexible_now(),(unsigned long long)ranges_reserved_reported);
+                m.argument[1]=console_model;
+                fprintf(b.log,"gpu-wine cookie=%d pid=%d local_offer=%llu host_limit=%llu flexible=%zu ranges_reserved=%llu model=%u\n",c.cookie,c.pid,
+                    (unsigned long long)m.argument[2],(unsigned long long)m.argument[3],flexible_now(),(unsigned long long)ranges_reserved_reported,
+                    console_model);
             } else if(c.pid>0) switch(m.operation) {
             case PW_GPU_ALLOC:
                 m.status=wedged ? EIO : allocate(c,m,b.window,b.high,fd);
+                if(b.local_memory)m.argument[3]=local_room()+1;
                 {
                     size_t flexible=0;
                     if(!sceKernelAvailableFlexibleMemorySize(&flexible) && flexible<b.flexible_min)b.flexible_min=flexible;
                     const uint64_t direct=radv_ps5_memory_available_bytes();if(direct<b.direct_min)b.direct_min=direct;
                 }
+                if(m.status && local_refused && !strncmp(c.allocation_stage,"local_",6))local_refused(c.pid,m.bytes);
                 if(m.status) {
                     size_t available=0;const int status=sceKernelAvailableFlexibleMemorySize(&available);
                     fprintf(b.log,"gpu-wine allocation_failed=1 cookie=%d pid=%d stage=%s bytes=%llu flexible_status=%#x flexible_available=%llu\n",
                         c.cookie,c.pid,c.allocation_stage,(unsigned long long)m.bytes,unsigned(status),(unsigned long long)available);
                 }break;
+            case PW_GPU_VRANGE_RESERVE:
+                m.status=wedged ? EIO : vrange_reserve(c,m,b.log);break;
+            case PW_GPU_VRANGE_RELEASE:
+                m.status=wedged ? EIO : vrange_release(c,m);break;
+            case PW_GPU_VRANGE_BIND:
+            case PW_GPU_VRANGE_UNBIND:
+                m.status=wedged ? EIO : vrange_bind(c,m,m.operation==PW_GPU_VRANGE_BIND,b.log);break;
             case PW_GPU_FREE:
                 for(auto &a:c.buffers)if(a.token && a.token==m.argument[0] && a.address==m.address && a.bytes==m.bytes) {
+                    // Its present link may be reading this buffer outside b.lock: the free waits for that present.
+                    while(c.pin_bytes && a.address<c.pin_address+c.pin_bytes && c.pin_address<a.address+a.bytes)
+                        pthread_cond_wait(&b.pin_released,&b.lock);
                     if(c.tess && pw_gpu_contains(a.address,a.bytes,c.tess,c.tess_bytes)) { c.tess=0;c.tess_bytes=0; }
                     free_buffer(c,a,b.log);m.status=0;break;
                 }
+                if(b.local_memory)m.argument[3]=local_room()+1;
                 break;
-            case PW_GPU_SUBMIT: m.status=submit(c,m,b.log,c.cookie);break;
+            case PW_GPU_SUBMIT:
+                m.status=submit(c,m,b.log,c.cookie);
+                if(test_hold_s && !test_held) {
+                    const uint64_t now=radv_ps5_now_ns();
+                    if(!test_hold_first_ns)test_hold_first_ns=now;
+                    else if(now-test_hold_first_ns>=10000000000ull) {
+                        test_held=true;
+                        fprintf(b.log,"gpu-broker test_hold=%u s pid=%d\n",test_hold_s,c.pid);
+                        Phase hold("test-hold");
+                        for(unsigned second=0;second<test_hold_s;++second)sceKernelUsleep(1000000);
+                    }
+                }
+                break;
+            case PW_GPU_PRESENT_LINK:
+                if(c.present_socket<0) {
+                    int pair[2];
+                    if(!ps5_gpu_packet_socketpair(pair,sizeof(PwGpuMessage))) {
+                        c.present_socket=pair[0];
+                        pthread_attr_t attributes;pthread_attr_init(&attributes);pthread_attr_setstacksize(&attributes,512u<<10);
+                        c.present_serving=!pthread_create(&c.presenter,&attributes,present_main,&c);
+                        pthread_attr_destroy(&attributes);
+                        if(c.present_serving) { fd=pair[1];sent_away=true;m.status=0; }
+                        else { close(pair[0]);close(pair[1]);c.present_socket=-1;m.status=EAGAIN; }
+                    } else m.status=EAGAIN;
+                    fprintf(b.log,"gpu-wine cookie=%d pid=%d present_link=%d status=%d\n",c.cookie,c.pid,!m.status,m.status);
+                }break;
             case PW_GPU_TESS:
                 if(m.bytes<=UINT32_MAX && owned(c,m.address,m.bytes)) { c.tess=m.address;c.tess_bytes=(uint32_t)m.bytes;m.status=0; }break;
+            case PW_GPU_TIMING:   // the client's share of its frames' time, sums only (protocol.h)
+                c.timing.client_presents+=m.argument[0];c.timing.fence_ns+=m.argument[1];c.timing.flush_ns+=m.argument[2];
+                c.timing.present_rpc_ns+=m.argument[3];c.timing.submit_rpc_ns+=m.address;m.status=0;break;
             case PW_GPU_OFFCHIP:
                 if(m.argument[0]<=3 && m.argument[1]<=511) {
                     c.granularity=(uint32_t)m.argument[0];c.buffering=(uint32_t)m.argument[1];c.offchip=true;m.status=0;
                 }break;
+            case PW_GPU_WINDOW_SWAPCHAIN:
+                if(wedged) {m.status=EIO;break;}
+                if(!desktop_windows) {m.status=ENOTSUP;break;}
+                if(!c.expected_pid || c.pid!=c.expected_pid) {m.status=EPROTO;break;}
+                if(!pw_gpu_window_image(&m) || !owned(c,m.address,m.bytes))break;
+                {
+                    const bool answer_shown=m.argument[3]&PW_GPU_PRESENT_SHOWN;m.argument[3]&=1;
+                    const uint32_t width=(uint32_t)m.argument[0],height=(uint32_t)(m.argument[0]>>32);
+                    const uint32_t stride=(uint32_t)m.argument[1],hwnd=(uint32_t)(m.argument[1]>>32);
+                    // The client's fence has completed. Its allocation stays owned
+                    // until this synchronous reply or native worker teardown.
+                    const uint64_t begin=radv_ps5_now_ns();
+                    c.pin_address=m.address;c.pin_bytes=m.bytes;
+                    pthread_mutex_unlock(&b.lock);
+                    pthread_mutex_lock(&b.display_lock);
+                    const uint64_t flips_before=b.display.flips;
+                    PwWindowSnapshot snapshot{};
+                    m.status=desktop_windows(&snapshot,sizeof(snapshot)) ? errno : 0;
+                    const int verdict=m.status ? -1 : pw_window_direct_flip(&snapshot,c.pid,hwnd,m.argument[2],width,height,1920,1080);
+                    const bool mine=b.direct && b.direct_pid==c.pid && b.direct_hwnd==hwnd;
+                    // Another window owns the screen in game mode: this one is behind it. Its frame still updates the
+                    // scene, but nothing is composed while that window remains the whole screen.
+                    bool behind=false;
+                    if(!m.status && b.direct && !mine) {
+                        const int held=pw_window_direct_flip(&snapshot,b.direct_pid,b.direct_hwnd,b.direct_generation,
+                                                             b.direct_width,b.direct_height,1920,1080);
+                        if(held==PW_DIRECT_YES)behind=true;
+                        else leave_direct(b,&snapshot,held,true);
+                    }
+                    const bool direct=verdict==PW_DIRECT_YES && m.argument[3]<=1;
+                    if(direct) {
+                        // Game mode: the frame is the whole screen. Nothing is copied into the scene or composed.
+                        int cx=INT32_MIN,cy=INT32_MIN;if(desktop_cursor)desktop_cursor(&cx,&cy);
+                        std::string asked=take_capture(b);
+                        m.status=b.display.present((void *)m.address,width,height,stride,b.log,
+                                                   asked.empty() ? nullptr : asked.c_str(),m.argument[3]!=0,cx,cy);
+                        if(!m.status) {
+                            if(!b.direct) {
+                                ++b.direct_entries;
+                                if(b.direct_entries<=64) {
+                                    char line[160];
+                                    snprintf(line,sizeof(line),"gpu-direct enter pid=%d hwnd=%#x frame=%ux%u\n",c.pid,hwnd,width,height);
+                                    fputs(line,b.log);fputs(line,stderr);
+                                }
+                            }
+                            b.direct=true;b.direct_pid=c.pid;b.direct_hwnd=hwnd;b.direct_generation=m.argument[2];
+                            b.direct_published.store(c.pid,std::memory_order_release);
+                            b.direct_width=width;b.direct_height=height;b.direct_ns=b.direct_checked_ns=radv_ps5_now_ns();
+                            ++b.direct_flips;b.window_composed=false;b.window_dirty=true;b.cursor_x=cx;b.cursor_y=cy;
+                        }
+                    } else if(mine) leave_direct(b,&snapshot,verdict,false);
+                    if(!m.status && !direct && pw_window_scene_gpu(&b.window_scene,c.pid,hwnd,m.argument[2],(void *)m.address,
+                                                      width,height,stride,(unsigned)m.argument[3],&snapshot))m.status=errno;
+                    if(!m.status && (trace || c.presentations<8)) {
+                        const PwWindowRow *row=nullptr;
+                        for(unsigned n=0;n<snapshot.count;++n)
+                            if(snapshot.windows[n].pid==c.pid && snapshot.windows[n].hwnd==hwnd &&
+                               snapshot.windows[n].generation==m.argument[2])row=&snapshot.windows[n];
+                        unsigned coloured=0;
+                        for(unsigned y=1;y<=3;++y)for(unsigned x=1;x<=3;++x) {
+                            const uint32_t *pixel=reinterpret_cast<const uint32_t *>(
+                                m.address+uint64_t((height-1)*y/4)*stride+uint64_t((width-1)*x/4)*4);
+                            if(*pixel&0x00ffffff)++coloured;
+                        }
+                        fprintf(b.log,"gpu-window-backing cookie=%d frame=%u flags=%#x clips=%u coloured_samples=%u/9\n",
+                                c.cookie,c.presentations+1,row?row->flags:0,row?row->clip_count:0,coloured);
+                    }
+                    // While the application's cover is set a window's frame only updates the scene: shown, it replaced
+                    // the cover until the cover's next picture, a tenth of a second later, and the screen flickered.
+                    if(!m.status && !direct && !behind && !b.cover) {
+                        int cx=INT32_MIN,cy=INT32_MIN;if(desktop_cursor)desktop_cursor(&cx,&cy);
+                        m.status=show_windows(b,snapshot,cx,cy);
+                    }
+                    if(!m.status && !direct && b.cover)++b.cover_held_frames;
+                    if(!m.status && (behind || b.cover))b.window_dirty=true;
+                    const uint64_t end=radv_ps5_now_ns(),copied=b.display.flips!=flips_before ? b.display.last_copy_ns : 0;
+                    const uint64_t flipped=!m.status && b.display.flips!=flips_before ? b.display.flips : 0;
+                    pthread_mutex_unlock(&b.display_lock);
+                    // FIFO (PW_GPU_PRESENT_SHOWN): answered once the flip with this frame is on screen, outside both locks.
+                    if(answer_shown && flipped)b.display.wait_shown(flipped,&b.display_lock);
+                    pthread_mutex_lock(&b.lock);
+                    c.pin_address=c.pin_bytes=0;pthread_cond_broadcast(&b.pin_released);
+                    c.timing.copy_ns+=copied;
+                    if(!m.status) {
+                        ++c.presentations;
+                        if(behind)pw_frame_pacing_hidden(&c.pacing);
+                        else {
+                            c.route=direct ? "independent" : "composed";
+                            if(direct)++c.direct_frames;
+                            else { ++c.composed_frames;c.direct_reason=verdict; }
+                            pw_frame_pacing_shown(&c.pacing,begin,end);
+                        }
+                        if(pw_frame_pacing_due(&c.pacing,end))pacing_report(b.log,c,end,false);
+                    }
+                    if(trace || m.status || c.presentations<=8 || !(c.presentations%600))
+                        fprintf(b.log,"gpu-window cookie=%d pid=%d hwnd=%#x generation=%llu frame=%u extent=%ux%u flip=%llu status=%d\n",
+                                c.cookie,c.pid,hwnd,(unsigned long long)m.argument[2],c.presentations,width,height,
+                                (unsigned long long)b.display.flips,m.status);
+                }break;
             case PW_GPU_SWAPCHAIN:
                 if(wedged) { m.status=EIO;break; }
-                if(m.argument[0]>0 && m.argument[0]<=1920 && m.argument[1]>0 && m.argument[1]<=1080 &&
-                   m.argument[2]>=m.argument[0]*4 && m.argument[2]<=1920*4 && m.argument[3]<=1 &&
-                   m.bytes==m.argument[1]*m.argument[2] && !(m.address&3) && owned(c,m.address,m.bytes)) {
+                if(pw_gpu_display_image(&m) && owned(c,m.address,m.bytes)) {
+                    const bool answer_shown=m.argument[3]&PW_GPU_PRESENT_SHOWN;m.argument[3]&=1;
                     // No cache maintenance: the client waited for its frame's fence, and GPU writes reach CPU reads
                     // coherently (graphics-child-gpu-coherence-*). The copy runs outside the broker's lock, under the
                     // display's own, so other clients' submissions go on meanwhile: this client's buffers cannot go
@@ -602,23 +1173,38 @@ void *client_main(void *argument)
                     const bool periodic=b.capture_every && c.presentations && !(c.presentations%b.capture_every) &&
                                         c.presentations/b.capture_every<=12;
                     const std::string capture=b.capture && (c.presentations<4 || periodic) ? output_path(path) : std::string();
+                    const uint64_t begin=radv_ps5_now_ns();
+                    c.pin_address=m.address;c.pin_bytes=m.bytes;
                     pthread_mutex_unlock(&b.lock);
                     pthread_mutex_lock(&b.display_lock);
                     // A client that does not hold the screen is told its frame was shown, a frame's time later,
                     // so it paces as it would on a display.
-                    const bool shown=may_show(b,c.cookie,c.pid,radv_ps5_now_ns());
+                    const bool shown=!b.cover && may_show(b,c.cookie,c.pid,radv_ps5_now_ns());
+                    if(b.cover)++b.cover_held_frames;
                     if(shown) {
-                        int cursor_x,cursor_y;screen_cursor(0,0,(unsigned)m.argument[0],(unsigned)m.argument[1],cursor_x,cursor_y);
-                        std::string asked;asked.swap(b.capture_next);
+                        unsigned shown_width,shown_height;pw_gpu_display_shown(&m,&shown_width,&shown_height);
+                        int cursor_x,cursor_y;screen_cursor(0,0,shown_width,shown_height,cursor_x,cursor_y);
+                        std::string asked=take_capture(b);
                         const std::string &picture=asked.empty() ? capture : asked;
-                        m.status=b.display.present((void *)m.address,(unsigned)m.argument[0],(unsigned)m.argument[1],
+                        m.status=b.display.present((void *)m.address,shown_width,shown_height,
                             (unsigned)m.argument[2],b.log,picture.empty() ? nullptr : picture.c_str(),m.argument[3]!=0,
                             cursor_x,cursor_y);
                     } else m.status=0;
+                    const uint64_t end=radv_ps5_now_ns(),copied=shown && !m.status ? b.display.last_copy_ns : 0;
+                    const uint64_t flipped=shown && !m.status ? b.display.flips : 0;
                     pthread_mutex_unlock(&b.display_lock);
                     if(!shown)sceKernelUsleep(16000);
+                    else if(answer_shown && flipped)b.display.wait_shown(flipped,&b.display_lock);   // FIFO, as above
                     pthread_mutex_lock(&b.lock);
+                    c.pin_address=c.pin_bytes=0;pthread_cond_broadcast(&b.pin_released);
+                    c.timing.copy_ns+=copied;
                     if(!m.status)++c.presentations;
+                    if(!m.status) {
+                        c.route="direct";
+                        if(shown)pw_frame_pacing_shown(&c.pacing,begin,end);
+                        else pw_frame_pacing_hidden(&c.pacing);
+                        if(pw_frame_pacing_due(&c.pacing,end))pacing_report(b.log,c,end,false);
+                    }
                     if(trace || m.status || c.presentations<=8 || !(c.presentations%600))
                         fprintf(b.log,"gpu-wine cookie=%d pid=%d frame=%u extent=%llux%llu flip=%llu status=%#x\n",c.cookie,c.pid,c.presentations,
                             (unsigned long long)m.argument[0],(unsigned long long)m.argument[1],(unsigned long long)b.display.flips,unsigned(m.status));
@@ -628,7 +1214,8 @@ void *client_main(void *argument)
             if(trace || m.status)
                 fprintf(b.log,"gpu-wine cookie=%d pid=%d operation=%u status=%#x live_bytes=%llu local_bytes=%llu\n",c.cookie,c.pid,m.operation,unsigned(m.status),(unsigned long long)c.allocated,(unsigned long long)c.local);
             note_peaks(b);
-            if(ps5_gpu_packet_send(c.socket,&m,sizeof(m),fd>=0 ? &fd : nullptr,fd>=0 ? 1 : 0))c.ended=true;
+            if(ps5_gpu_packet_send(socket,&m,sizeof(m),fd>=0 ? &fd : nullptr,fd>=0 ? 1 : 0))c.ended=true;
+            if(sent_away)close(fd);
             kick();
         } while(false);
         const bool ended=c.ended;
@@ -637,6 +1224,8 @@ void *client_main(void *argument)
         spin_until=radv_ps5_now_ns()+kServeSpinNs;idle_since=radv_ps5_now_ns();
     }
 }
+void *client_main(void *argument) { return serve(*static_cast<Client *>(argument),false); }
+void *present_main(void *argument) { return serve(*static_cast<Client *>(argument),true); }
 }
 namespace {
 // Helpers' frames (src/pw_frame_page.h): every 4 ms, the newest picture of a frame page that may hold the screen is
@@ -649,14 +1238,63 @@ void *compositor_main(void *)
         sceKernelUsleep(4000);
         pthread_mutex_lock(&b.display_lock);
         if(b.compositor_stop) { pthread_mutex_unlock(&b.display_lock);return nullptr; }
+        // The application's cover: shown when it changes or a capture is asked, without the pointer; the desktop is
+        // composed again once it ends. A game's own full-screen presents (game mode) still go to the display.
+        if(b.cover) {
+            if(b.cover_serial!=b.cover_shown || capture_pending(b)) {
+                const std::string asked=take_capture(b);
+                const uint64_t before=b.display.flips;
+                const int status=b.display.present(b.cover,1920,1080,1920*4,b.log,asked.empty() ? nullptr : asked.c_str(),true);
+                __atomic_add_fetch(&b.cover_flips,b.display.flips-before,__ATOMIC_RELAXED);b.cover_shown=b.cover_serial;
+                if(status!=b.cover_error)fprintf(b.log,"gpu-cover status=%d flips=%llu\n",status,(unsigned long long)b.cover_flips);
+                b.cover_error=status;
+            }
+            b.window_dirty=true;
+            pthread_mutex_unlock(&b.display_lock);continue;
+        }
         int cx=INT32_MIN,cy=INT32_MIN;if(desktop_cursor)desktop_cursor(&cx,&cy);
         const bool cursor_moved=cx!=b.cursor_x || cy!=b.cursor_y;
+        if(desktop_windows) {
+            if(b.direct) {
+                // Game mode: the game's own presents show it, the pointer included; the desktop is not looked at while
+                // they keep coming. A quiet game is looked at again every kDirectHoldNs: still the whole screen, it
+                // stays as it is; otherwise game mode ends and the desktop is composed again.
+                const uint64_t now=radv_ps5_now_ns();
+                if(now-b.direct_ns<kDirectHoldNs || now-b.direct_checked_ns<kDirectHoldNs) {
+                    pthread_mutex_unlock(&b.display_lock);continue;
+                }
+                b.direct_checked_ns=now;
+                PwWindowSnapshot held{};
+                const int verdict=desktop_windows(&held,sizeof(held)) ? PW_DIRECT_INCOMPLETE :
+                    pw_window_direct_flip(&held,b.direct_pid,b.direct_hwnd,b.direct_generation,b.direct_width,
+                                          b.direct_height,1920,1080);
+                if(verdict==PW_DIRECT_YES) { pthread_mutex_unlock(&b.display_lock);continue; }
+                leave_direct(b,&held,verdict,true);
+            }
+            PwWindowSnapshot snapshot{};
+            int error=desktop_windows(&snapshot,sizeof(snapshot)) ? errno : 0;
+            const int changes=error ? -1 : pw_window_scene_update(&b.window_scene,&snapshot);
+            if(changes<0 && !error)error=errno;
+            const bool recompose=changes || b.window_dirty || snapshot.sequence!=b.window_sequence;
+            if(!error && (recompose || cursor_moved || capture_pending(b))) {
+                error=show_windows(b,snapshot,cx,cy,recompose);
+            } else if(!error)++b.idle_looks;
+            if(error!=b.window_error) {
+                fprintf(b.log,"gpu-windows status=%d frames=%llu shared_bytes=%zu retained_bytes=%zu\n",error,
+                    (unsigned long long)b.window_frames,b.window_scene.mapped_bytes,b.window_scene.pixel_bytes);
+                b.window_error=error;
+            }
+            b.cursor_x=cx;b.cursor_y=cy;
+            pthread_mutex_unlock(&b.display_lock);continue;
+        }
+        const int foreground=desktop_foreground ? desktop_foreground() : 0;
         for(auto &f:b.frames) {
             if(!f.page)continue;
             const uint32_t sequence=__atomic_load_n(&f.page->sequence,__ATOMIC_ACQUIRE);
             if((sequence&1) || !sequence)continue;
             const bool fresh=sequence!=f.shown,held=b.holder==-f.pid;
-            if((!fresh && !(held && cursor_moved)) || !may_show(b,-f.pid,f.pid,radv_ps5_now_ns()))continue;
+            const bool focused=foreground && foreground==f.pid && b.holder_pid!=f.pid;
+            if((!fresh && !focused && !(held && (cursor_moved || capture_pending(b)))) || !may_show(b,-f.pid,f.pid,radv_ps5_now_ns()))continue;
             const unsigned width=f.page->width,height=f.page->height,stride=f.page->stride;
             const int x=f.page->x,y=f.page->y;
             if(!width || width>PW_FRAME_WIDTH || !height || height>PW_FRAME_HEIGHT || stride!=width*4)continue;
@@ -667,7 +1305,7 @@ void *compositor_main(void *)
             // PROTON_GPU_CAPTURE: a picture of each helper's first frame as the screen showed it, pointer included.
             char path[96];snprintf(path,sizeof(path),"/app0/gpu-desktop-%d.ppm",f.pid);
             const std::string capture=b.capture && !f.shown ? output_path(path) : std::string();
-            std::string asked;asked.swap(b.capture_next);
+            std::string asked=take_capture(b);
             const std::string &picture=asked.empty() ? capture : asked;
             const int status=b.display.present(b.frame_copy,width,height,stride,b.log,picture.empty() ? nullptr : picture.c_str(),
                 true,screen_x,screen_y);
@@ -681,23 +1319,163 @@ void *compositor_main(void *)
     }
 }
 }
+int ps5_gpu_broker_game_mode()
+{
+    return broker_state.direct_published.load(std::memory_order_acquire);
+}
+// The application's loop calls these: neither may wait on display_lock for good, as a display that stops would stop
+// the loop with it. flips needs no lock (Ps5GpuDisplay::flips is bumped atomically, display.cpp); a capture tries the
+// lock for up to 100 ms, since the compositor holds it for most of every frame it shows.
 unsigned long long ps5_gpu_broker_flips()
 {
     auto &b=broker_state;
-    pthread_mutex_lock(&b.display_lock);
-    const unsigned long long flips=b.display.flips;
+    if(b.cover_held.load(std::memory_order_acquire))return b.cover_frozen_flips.load(std::memory_order_relaxed);
+    return __atomic_load_n(&b.display.flips,__ATOMIC_RELAXED)-__atomic_load_n(&b.cover_flips,__ATOMIC_RELAXED);
+}
+// Like a capture, tried for up to 100 ms; once it returns, no present reads the picture it replaced.
+bool ps5_gpu_broker_set_cover(const void *pixels)
+{
+    auto &b=broker_state;
+    for(unsigned waited=0;pthread_mutex_trylock(&b.display_lock);++waited) {
+        if(waited>=100)return false;
+        sceKernelUsleep(1000);
+    }
+    if(pixels && !b.cover) {
+        b.cover_frozen_flips.store(b.display.flips-b.cover_flips,std::memory_order_relaxed);
+        b.cover_held.store(true,std::memory_order_release);
+    }
+    if(!pixels && b.cover) {
+        if(b.log)fprintf(b.log,"gpu-cover ended flips=%llu held=%llu\n",(unsigned long long)b.cover_flips,
+                         (unsigned long long)b.cover_held_frames);
+        b.cover_held.store(false,std::memory_order_release);
+    }
+    b.cover=pixels;++b.cover_serial;
     pthread_mutex_unlock(&b.display_lock);
-    return flips;
+    return true;
+}
+// The application's panel over every frame (pw_display_overlay.h), copied here; NULL takes it off. Tried for up to 100 ms as
+// the cover. When no frame came in the last 50 ms (a game that waits), the last one is shown again with the panel, and a
+// capture asked for (ps5_gpu_broker_capture_next) is of that frame: a waiting game would show no next one.
+bool ps5_gpu_broker_set_overlay(const void *pixels,unsigned x,unsigned y,unsigned w,unsigned h)
+{
+    auto &b=broker_state;
+    if(pixels && (!w || !h || x>=1920 || y>=1080))return false;
+    uint32_t *copy=nullptr;
+    if(pixels) {
+        copy=(uint32_t *)malloc(size_t(w)*h*4);
+        if(!copy)return false;
+        memcpy(copy,pixels,size_t(w)*h*4);
+    }
+    timespec asked{};clock_gettime(CLOCK_MONOTONIC,&asked);
+    for(unsigned waited=0;pthread_mutex_trylock(&b.display_lock);++waited) {
+        if(waited>=100) { free(copy);return false; }
+        sceKernelUsleep(1000);
+    }
+    timespec locked{};clock_gettime(CLOCK_MONOTONIC,&locked);
+    const bool was=b.display.overlay!=nullptr;
+    free(b.display.overlay);
+    b.display.overlay=copy;
+    // The panel's shadow of the frame (display.h): made with the panel, dropped with it
+    b.display.keep_shadow(copy!=nullptr);
+    {   // the glass sweep's clock: about 1 s after the panel came; every later change is a key press (display.h)
+        timespec at{};clock_gettime(CLOCK_MONOTONIC,&at);
+        const uint64_t t=uint64_t(at.tv_sec)*1000000000u+uint64_t(at.tv_nsec);
+        if(copy && !was)b.display.panel_on_ns=t,b.display.next_sweep_ns=t+1000000000ull,b.display.panel_press_ns=0,b.display.sweep_ns=0;
+        else if(copy)b.display.panel_press_ns=t;
+        else b.display.next_sweep_ns=0,b.display.sweep_ns=0;
+    }
+    b.display.overlay_x=x;b.display.overlay_y=y;b.display.overlay_w=copy ? w : 0;b.display.overlay_h=copy ? h : 0;
+    if(b.log && was!=(copy!=nullptr))fprintf(b.log,"gpu-overlay %s x=%u y=%u w=%u h=%u flips=%llu\n",copy ? "on" : "off",x,y,w,h,
+                                             (unsigned long long)b.display.flips);
+    timespec now{};clock_gettime(CLOCK_MONOTONIC,&now);   // the display's own clock (display.cpp now_ns)
+    const auto ns=[](const timespec &t) { return uint64_t(t.tv_sec)*1000000000u+uint64_t(t.tv_nsec); };
+    // a panel change is shown at once when the application presented no frame in the last 50 ms (the bubbles' re-shows
+    // at 30 Hz do not count: a change waited up to 33 ms for the next one, osk-lag-desktop-base-2026-11-01-03)
+    const bool idle=copy && b.display.registered && b.display.flips && ns(now)-b.display.last_frame_ns>50000000ull;
+    int reshown=-1;
+    if(idle && !(reshown=b.display.reshow(b.log)) && capture_pending(b)) {
+        const std::string capture=take_capture(b);
+        const bool written=!capture.empty() && b.display.capture_last(capture.c_str());
+        if(b.log)fprintf(b.log,"gpu-overlay capture %s\n",written ? "written" : "failed");
+    }
+    // The keyboard's input lag (the owner, 2026-11-01): the lock's wait and the re-show of a waiting game's frame
+    static unsigned sets=0;
+    timespec done{};clock_gettime(CLOCK_MONOTONIC,&done);
+    if(b.log && copy && (++sets<=40 || sets%50==0))
+        fprintf(b.log,"gpu-overlay set %u lock_wait_ms=%.1f reshow=%d ms=%.1f\n",sets,double(ns(locked)-ns(asked))/1e6,reshown,
+                double(ns(done)-ns(locked))/1e6);
+    pthread_mutex_unlock(&b.display_lock);
+    return true;
+}
+void ps5_gpu_broker_overlay_refresh()
+{
+    auto &b=broker_state;
+    if(!b.started || pthread_mutex_trylock(&b.display_lock))return;
+    timespec now{};clock_gettime(CLOCK_MONOTONIC,&now);
+    const uint64_t at=uint64_t(now.tv_sec)*1000000000u+uint64_t(now.tv_nsec);
+    if(b.display.overlay && b.display.registered && b.display.flips && at-b.display.last_frame_ns>30000000ull &&
+       at-b.display.last_present_ns>30000000ull)
+        (void)b.display.reshow(b.log);
+    pthread_mutex_unlock(&b.display_lock);
+}
+unsigned ps5_gpu_broker_display_hz()
+{
+    auto &b=broker_state;if(!b.started)return 0;
+    pthread_mutex_lock(&b.display_lock);
+    const int status=b.display.handle<0 ? b.display.open(b.log) : 0;
+    const unsigned hz=b.display.refresh_hz();
+    pthread_mutex_unlock(&b.display_lock);
+    fprintf(b.log,"gpu-display early hz=%u status=%#x\n",hz,unsigned(status));
+    return hz;
 }
 bool ps5_gpu_broker_capture_next(const char *path)
 {
     auto &b=broker_state;
     if(!path || !*path)return false;
-    pthread_mutex_lock(&b.display_lock);
+    pthread_mutex_lock(&b.capture_lock);
     const bool asked=b.started && b.capture_next.empty();
     if(asked)b.capture_next=path;
-    pthread_mutex_unlock(&b.display_lock);
+    pthread_mutex_unlock(&b.capture_lock);
     return asked;
+}
+void ps5_gpu_broker_set_away(bool away)
+{
+    auto &b=broker_state;
+    if(__atomic_load_n(&b.away,__ATOMIC_RELAXED)==away)return;
+    pthread_mutex_lock(&b.lock);
+    __atomic_store_n(&b.away,away,__ATOMIC_RELAXED);
+    // Nothing in flight when the system freezes the app: what was submitted completes now, and nothing new starts.
+    if(away && b.started && fences.page.cpu) {
+        const bool drained=drain(1000000000ull);
+        fprintf(b.log,"gpu-broker away=1 drained=%d fences=%u/%u\n",drained,fences.issued,completed());
+    } else if(!away && b.started && fences.page.cpu) {
+        fprintf(b.log,"gpu-broker away=0 fences=%u/%u held=%llu\n",fences.issued,completed(),(unsigned long long)b.away_held);
+    }
+    if(!away)pthread_cond_broadcast(&b.away_changed);
+    if(b.log)fflush(b.log);
+    pthread_mutex_unlock(&b.lock);
+}
+void ps5_gpu_broker_health(Ps5GpuBrokerHealth *health)
+{
+    auto &b=broker_state;
+    *health=Ps5GpuBrokerHealth{};
+    health->lock_busy=pthread_mutex_trylock(&b.lock)!=0;
+    if(!health->lock_busy)pthread_mutex_unlock(&b.lock);
+    health->display_busy=pthread_mutex_trylock(&b.display_lock)!=0;
+    if(!health->display_busy)pthread_mutex_unlock(&b.display_lock);
+    health->fences_issued=__atomic_load_n(&fences.issued,__ATOMIC_RELAXED);
+    if((health->phase=held_phase.load(std::memory_order_acquire))) {
+        const uint64_t since=held_since_ns.load(std::memory_order_relaxed),now=radv_ps5_now_ns();
+        health->phase_ms=now>since ? (now-since)/1000000 : 0;
+        health->holder_tid=held_tid.load(std::memory_order_relaxed);
+    }
+    pthread_mutex_lock(&fence_page_lock);
+    if(fences.page.cpu)health->fences_completed=completed();
+    pthread_mutex_unlock(&fence_page_lock);
+}
+void ps5_gpu_broker_set_dmem_memory(int (*alloc)(size_t,int,int64_t *),int (*release)(int64_t,size_t))
+{
+    dmem_alloc=alloc;dmem_release=release;
 }
 void ps5_gpu_broker_set_shared_memory(int (*alloc)(size_t),int (*touch)(int,size_t,size_t))
 {
@@ -706,6 +1484,23 @@ void ps5_gpu_broker_set_shared_memory(int (*alloc)(size_t),int (*touch)(int,size
 void ps5_gpu_broker_set_desktop(int (*foreground)(),void (*cursor)(int *,int *))
 {
     desktop_foreground=foreground;desktop_cursor=cursor;
+}
+void ps5_gpu_broker_set_windows(int (*snapshot)(void *,unsigned))
+{
+    desktop_windows=snapshot; // Install before starting root/children.
+}
+int ps5_gpu_broker_window_attach(int pid,int fd,size_t bytes)
+{
+    auto &b=broker_state;
+    PwWindowSnapshot snapshot{};
+    if(!desktop_windows || desktop_windows(&snapshot,sizeof(snapshot))) {close(fd);return ENOTSUP;}
+    pthread_mutex_lock(&b.display_lock);
+    int status;
+    if(!b.started) {close(fd);status=ENOTCONN;}
+    else status=pw_window_scene_attach(&b.window_scene,pid,fd,bytes,&snapshot) ? errno : 0;
+    if(!status)b.window_dirty=true;
+    if(b.log)fprintf(b.log,"gpu-windows adopt pid=%d bytes=%zu status=%d live_bytes=%zu\n",pid,bytes,status,b.window_scene.mapped_bytes);
+    pthread_mutex_unlock(&b.display_lock);return status;
 }
 void ps5_gpu_broker_frame_attach(int pid,int fd)
 {
@@ -726,6 +1521,7 @@ void ps5_gpu_broker_frame_detach(int pid)
     auto &b=broker_state;
     pthread_mutex_lock(&b.display_lock);
     for(auto &f:b.frames)if(f.page && f.pid==pid) { munmap(f.page,PW_FRAME_BYTES);f=Broker::FrameSource{}; }
+    pw_window_scene_detach(&b.window_scene,pid);b.window_dirty=true;
     if(b.holder==-pid) { b.holder=0;b.holder_pid=0; }
     pthread_mutex_unlock(&b.display_lock);
 }
@@ -735,6 +1531,13 @@ bool ps5_gpu_broker_set_host_limit(unsigned long long bytes)
     host_limit=bytes;
     return true;
 }
+void ps5_gpu_broker_set_local_refused(void (*hook)(int pid,unsigned long long bytes)) { local_refused=hook; }
+bool ps5_gpu_broker_set_console_model(unsigned model)
+{
+    if(model>2 || broker_state.started)return false;
+    console_model=model;
+    return true;
+}
 bool ps5_gpu_broker_start(const char *directory,bool capture,bool local,bool (*is_absent)(int))
 {
     auto &b=broker_state;if(b.started || !directory || !*directory || !is_absent)return false;
@@ -742,37 +1545,44 @@ bool ps5_gpu_broker_start(const char *directory,bool capture,bool local,bool (*i
     b.local_memory=local;
     retain_on_failure=false;wedged=false;test_submissions=0;
     {
-        const char *fail=getenv("PROTON_GPU_TEST_FAIL_SUBMIT");
+        const char *fail=getenv("PROTON_GPU_TEST_FAIL_SUBMIT"),*hold=getenv("PROTON_TEST_BROKER_HOLD_S");
         test_fail_submit=fail ? (unsigned)strtoul(fail,nullptr,10) : 0;
+        test_hold_s=hold ? (unsigned)strtoul(hold,nullptr,10) : 0;test_hold_first_ns=0;test_held=false;
     }
     b.log_file=fopen(output_path("/app0/gpu-broker-results.txt").c_str(),"w");
     if(!b.log_file) { fprintf(stderr,"gpu-wine startup stage=open errno=%d\n",errno);return false; }
     setvbuf(b.log_file,nullptr,_IONBF,0);
-    b.log=b.log_pipe.open(b.log_file) ? b.log_pipe.front : b.log_file;
+    if(b.log_pipe.open(b.log_file))b.log=b.log_pipe.front;
+    else { b.log=b.log_file;fprintf(b.log_file,"gpu-broker log=file errno=%d\n",errno); }
     if(!radv_ps5_platform_init() || !ps5_gpu_broker_warm(b.log)) { b.log_pipe.close();fclose(b.log_file);b.log=b.log_file=nullptr;return false; }
     b.capture=capture;b.stopping=false;
     {
         const char *every=getenv("PROTON_GPU_CAPTURE_EVERY");
         b.capture_every=every ? (unsigned)strtoul(every,nullptr,10) : 0;
+        const char *stamps=getenv("PROTON_GPU_TIMESTAMPS");
+        gpu_timestamps=stamps && !strcmp(stamps,"1");gpu_clock=PwGpuClock{};
     }
     host_ranges_reserve(b.log);
-    fprintf(b.log,"gpu-wine broker test_fail_submit=%u capture_every=%u\n",test_fail_submit,b.capture_every);
+    fprintf(b.log,"gpu-wine broker test_fail_submit=%u capture_every=%u test_hold_s=%u timestamps=%d\n",test_fail_submit,
+        b.capture_every,test_hold_s,gpu_timestamps);
     fprintf(b.log,"gpu-wine broker local_memory=%d local_offer=%llu local_floor=%llu host_limit=%llu\n",local,
         (unsigned long long)(local ? local_offer() : 0),(unsigned long long)kLocalFloor,(unsigned long long)host_limit);
     b.holder=b.holder_pid=0;b.switches=b.hidden=0;b.compositor_stop=false;
+    b.window_sequence=b.window_frames=0;b.window_error=0;b.window_dirty=true;
+    b.window_composed=false;b.compose_count=b.compose_ns=b.compose_max_ns=0;
     if(!b.frame_copy)b.frame_copy=static_cast<uint8_t *>(malloc(size_t(PW_FRAME_WIDTH)*PW_FRAME_HEIGHT*4));
     b.compositing=b.frame_copy && !pthread_create(&b.compositor,nullptr,compositor_main,nullptr);
     fprintf(b.log,"gpu-desktop compositor=%d\n",b.compositing);
     b.started=true;return true;
 }
-int ps5_gpu_broker_open(int *cookie)
+static int open_client(int *cookie,int expected_pid)
 {
     auto &b=broker_state;if(!b.started || !cookie) { errno=EINVAL;return -1; }
     pthread_mutex_lock(&b.lock);
     Client *c=nullptr;for(auto &slot:b.clients)if(slot.socket<0) { c=&slot;break; }
     int pair[2],fd=-1;
     if(c && b.next_cookie<INT32_MAX && !ps5_gpu_packet_socketpair(pair,sizeof(PwGpuMessage))) {
-        reset(*c);c->socket=pair[0];c->cookie=++b.next_cookie;*cookie=c->cookie;fd=pair[1];
+        reset(*c);c->expected_pid=expected_pid;c->socket=pair[0];c->cookie=++b.next_cookie;*cookie=c->cookie;fd=pair[1];
         pthread_attr_t attributes;pthread_attr_init(&attributes);pthread_attr_setstacksize(&attributes,512u<<10);
         c->serving=!pthread_create(&c->server,&attributes,client_main,c);
         pthread_attr_destroy(&attributes);
@@ -782,6 +1592,13 @@ int ps5_gpu_broker_open(int *cookie)
     } else errno=EAGAIN;
     pthread_mutex_unlock(&b.lock);return fd;
 }
+int ps5_gpu_broker_open(int *cookie) {return open_client(cookie,0);}
+int ps5_gpu_broker_open_for_pid(int *cookie,int pid)
+{
+    if(pid<=0 || pid==getpid()) {errno=EINVAL;return -1;}
+    return open_client(cookie,pid);
+}
+int ps5_gpu_broker_open_in_owner(int *cookie) {return open_client(cookie,getpid());}
 void ps5_gpu_broker_close(int cookie,int service)
 {
     auto &b=broker_state;
@@ -795,18 +1612,23 @@ void ps5_gpu_broker_close(int cookie,int service)
     Client *closing=nullptr;
     for(auto &c:b.clients)if(c.socket>=0 && c.cookie==cookie) { closing=&c;c.ended=true;break; }
     const bool serving=closing && closing->serving;const pthread_t server=serving ? closing->server : pthread_t{};
+    const bool presenting=closing && closing->present_serving;const pthread_t presenter=presenting ? closing->presenter : pthread_t{};
     pthread_mutex_unlock(&b.lock);
     if(serving)pthread_join(server,nullptr);
+    if(presenting)pthread_join(presenter,nullptr);
     pthread_mutex_lock(&b.lock);
     for(auto &c:b.clients)if(c.socket>=0 && c.cookie==cookie) {
         // The helper is gone, but its last submissions may not be: nothing it used is released before they are.
         if(!wedged && !drain(5000000000ull))give_up(b.log,"wine_gpu_pending_on_close");
+        pacing_report(b.log,c,radv_ps5_now_ns(),true);
         // Logged before the release below clears the accounts.
         fprintf(b.log,"gpu-wine cookie=%d pid=%d closed=1 absent=1 frames=%u submissions=%u backing_released=%llu "
             "local_released=%llu local_peak=%llu flexible=%zu\n",cookie,c.pid,c.presentations,c.submissions,(unsigned long long)c.allocated,
             (unsigned long long)c.local,(unsigned long long)c.local_peak,flexible_now());fsync(fileno(b.log));
+        // Its sparse ranges first: they may still map buffers' memory, which the release below gives back.
+        if(!wedged)for(auto &r:c.ranges)if(r.address)radv_ps5_vrange_release(&r.memory);
         if(!wedged)for(auto &a:c.buffers)if(a.token)release(a);
-        close(c.socket);reset(c);break;
+        close(c.socket);if(c.present_socket>=0)close(c.present_socket);reset(c);break;
     }
     pthread_mutex_unlock(&b.lock);
 }
@@ -822,18 +1644,40 @@ bool ps5_gpu_broker_stop()
         (unsigned long long)fences.kick_ns/1000,wedged);
     // Wedged, the fence page, staging and the reserved ranges (with whatever is mapped in them) stay as they are.
     if(!wedged) { fences_reset();host_ranges_release(b.log); }
+    // Made and freed equal after a clean stop; reuses near the submissions while allocations stay few.
+    fprintf(b.log,"gpu-broker staging allocs=%llu frees=%llu reuses=%llu refused=%llu peak_bytes=%llu held_bytes=%llu\n",
+        staging_allocs,staging_frees,staging_reuses,staging_refused,staging_peak,staging_held);
+    if(dmem_alloc)fprintf(b.log,"gpu-broker dmem_host made=%llu freed=%llu refused=%llu free_failed=%llu made_bytes=%llu\n",dmem_made,dmem_freed,dmem_refused,dmem_free_failed,dmem_bytes_made);
     if(b.compositing) {
         pthread_mutex_lock(&b.display_lock);b.compositor_stop=true;pthread_mutex_unlock(&b.display_lock);
         pthread_join(b.compositor,nullptr);b.compositing=false;
     }
     pthread_mutex_lock(&b.display_lock);
     for(auto &f:b.frames)if(f.page) { munmap(f.page,PW_FRAME_BYTES);f=Broker::FrameSource{}; }
+    {
+        /* Also on stderr: the owner's klog keeps it even when the results file is unreadable. */
+        char line[320];
+        snprintf(line,sizeof(line),"gpu-windows stopped frames=%llu shared_bytes=%zu retained_bytes=%zu effect_bytes=%zu "
+            "mica_builds=%llu thumbnail_builds=%llu compose_count=%llu compose_avg_us=%llu compose_max_us=%llu\n",
+            (unsigned long long)b.window_frames,b.window_scene.mapped_bytes,b.window_scene.pixel_bytes,b.window_effects.bytes,
+            (unsigned long long)b.window_effects.mica_builds,(unsigned long long)b.window_effects.thumbnail_builds,
+            (unsigned long long)b.compose_count,(unsigned long long)(b.compose_count ? b.compose_ns/b.compose_count/1000 : 0),
+            (unsigned long long)(b.compose_max_ns/1000));
+        fputs(line,b.log);fputs(line,stderr);
+        snprintf(line,sizeof(line),"gpu-direct stopped entries=%llu exits=%llu restores=%llu flips=%llu\n",
+            (unsigned long long)b.direct_entries,(unsigned long long)b.direct_exits,(unsigned long long)b.direct_restores,
+            (unsigned long long)b.direct_flips);
+        fputs(line,b.log);fputs(line,stderr);
+    }
+    pw_window_scene_release(&b.window_scene);
+    pw_window_effects_release(&b.window_effects);
     fprintf(b.log,"gpu-desktop switches=%u hidden_presents=%u\n",b.switches,b.hidden);
     pthread_mutex_unlock(&b.display_lock);
     if(!b.display.close(b.log))give_up(b.log,"wine_gpu_display_teardown_failed");
     fprintf(b.log,"gpu-wine stopped=1 clients_closed=%d flips=%llu flexible_min=%llu direct_min=%llu host_peak=%llu local_peak=%llu\n",
         b.next_cookie,(unsigned long long)b.display.flips,(unsigned long long)(b.flexible_min==SIZE_MAX ? 0 : b.flexible_min),
         (unsigned long long)(b.direct_min==UINT64_MAX ? 0 : b.direct_min),(unsigned long long)b.host_peak,(unsigned long long)b.local_peak);
+    b.direct=false;b.direct_published.store(0,std::memory_order_release);
     b.log_pipe.close();fclose(b.log_file);b.log=b.log_file=nullptr;b.started=false;return true;
 }
 

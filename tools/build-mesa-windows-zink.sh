@@ -12,7 +12,7 @@ mkdir -p "$work"
 work=$(cd -- "$work" && pwd)
 mesa_fork=$(cd -- "$mesa_fork" && pwd)
 mingw_archive=$(realpath "$mingw_archive")
-revision=b3588f78dd7fd46fbadc7ecd487e5f14d4213e4b
+revision=a8800d9130583fbd4a436c4c64ab9e33b98edf10
 printf '%s  %s\n' bb7bb7654b33d5aa8712acb837c963b2e0c56352560c76105270a3268c665c21 "$mingw_archive" | sha256sum --check --status
 mkdir -p "$work"
 mingw=$work/toolchain
@@ -54,7 +54,8 @@ meson setup "${reconfigure[@]}" "$work/build" "$work/source" --cross-file "$work
     -Degl=disabled -Dgbm=disabled -Dglx=disabled -Dgles1=disabled -Dgles2=disabled \
     -Dllvm=disabled -Dzlib=disabled -Dzstd=disabled -Dshader-cache=disabled \
     -Dxmlconfig=disabled -Dexpat=disabled -Dlibunwind=disabled -Dvalgrind=disabled \
-    -Dvideo-codecs= -Dbuild-tests=false -Dtools= -Dgallium-va=disabled -Dgallium-rusticl=false
+    -Dvideo-codecs= -Dbuild-tests=false -Dtools= -Dgallium-va=disabled -Dgallium-rusticl=false \
+    -Dc_link_args=-Wl,--no-insert-timestamp -Dcpp_link_args=-Wl,--no-insert-timestamp
 ninja -C "$work/build" -j "${JOBS:-12}" \
     src/gallium/targets/libgl-gdi/opengl32.dll src/gallium/targets/wgl/libgallium_wgl.dll
 python3 - "$root" "$work" <<'PY'
@@ -63,7 +64,7 @@ from pathlib import Path
 root,work=map(Path,sys.argv[1:])
 digest=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
 files={p.name:digest(p) for p in work.glob('build/src/gallium/targets/*/*.dll')}
-manifest={'mesa_version':'26.2.0','mesa_revision':'b3588f78dd7fd46fbadc7ecd487e5f14d4213e4b',
+manifest={'mesa_version':'26.2.0','mesa_revision':'a8800d9130583fbd4a436c4c64ab9e33b98edf10',
           'llvm_mingw':'20260922-ucrt','build_script':digest(root/'tools/build-mesa-windows-zink.sh'),
           'architecture':'x86_64','driver':'zink','files':files,'console_validated':False}
 manifest['zink_source_sha256']=digest(work/'source/src/gallium/drivers/zink/zink_kopper.c')
