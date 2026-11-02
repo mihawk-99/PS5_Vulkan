@@ -123,18 +123,23 @@ static inline float pw_overlay_sweep_band(float diag, double k)
     return d > 3.5f || d < -3.5f ? 0 : expf(-d * d);
 }
 
-/* scratch: (w / 8 + 2) * (h / 8 + 2) * 2 + (w / 4) * (h / 4) uint32. fresh_blur 0 keeps the last call's blur (every second
- * frame: half the cost, the owner's "halve it"); `sweep`: seconds into the glass sweep, or below 0 for none. */
-static inline void pw_display_overlay_compose(uint8_t *buffer, const uint8_t *frame, const uint32_t *panel, unsigned x,
-                                              unsigned y, unsigned w, unsigned h, double seconds, uint32_t *scratch,
-                                              int fresh_blur, double sweep)
+/* The panel over the frame blurred under it, without the bubbles or the sweep, into `cache` (cached memory tiled as the
+ * display's buffer; only the rectangle's blocks are written); pw_display_overlay_show puts it out every frame, with what
+ * moves. scratch: (w / 8 + 2) * (h / 8 + 2) * 2 + (w / 4) * (h / 4) uint32, the blur's. fresh_blur 0 keeps the last blur.
+ * Band `band` of `bands` (0 of 1: all of it): the frame's rows of that band shrunk for the next blur, the blur made when
+ * the last band's are, and the panel's rows of that band blended. A band a frame spreads the work over `bands` frames
+ * (the 120 Hz budget, 8.3 ms a frame; the blur then new every `bands` frames); a changed panel is blended whole. */
+static inline void pw_display_overlay_blend(uint8_t *cache, const uint8_t *frame, const uint32_t *panel, unsigned x,
+                                            unsigned y, unsigned w, unsigned h, uint32_t *scratch, int fresh_blur,
+                                            unsigned band, unsigned bands)
 {
-    if (!buffer || !frame || !panel || (x | y | w | h) & 7 || x + w > PW_DISPLAY_WIDTH || y + h > PW_DISPLAY_HEIGHT) return;
+    if (!cache || !frame || !panel || (x | y | w | h) & 7 || x + w > PW_DISPLAY_WIDTH || y + h > PW_DISPLAY_HEIGHT) return;
     const unsigned sw = w / 8, sh = h / 8, stride = sw + 2, mw = w / 4;
     uint32_t *small = scratch, *soft = scratch + (size_t)stride * (sh + 2), *mid = soft + (size_t)stride * (sh + 2);
+    if (!bands || band >= bands) return;
     if (fresh_blur) {
-    /* 1. the frame under the rectangle, 8x smaller: each 8x8 block's mean (four 4x4 lines of the tiling) */
-    for (unsigned by = 0; by < sh; ++by)
+    /* 1. the frame under the rectangle, 8x smaller: each 8x8 block's mean (four 4x4 lines of the tiling), this band's rows */
+    for (unsigned by = sh * band / bands; by < sh * (band + 1) / bands; ++by)
         for (unsigned bx = 0; bx < sw; ++bx) {
             unsigned r = 0, g = 0, b = 0;
             for (unsigned q = 0; q < 4; ++q) {
@@ -143,6 +148,8 @@ static inline void pw_display_overlay_compose(uint8_t *buffer, const uint8_t *fr
             }
             small[(by + 1) * stride + bx + 1] = (r / 64) << 16 | (g / 64) << 8 | (b / 64);
         }
+    }
+    if (fresh_blur && band == bands - 1) {
     /* edges repeated, then a 3x3 box (the mockup's second shrink) */
     for (unsigned by = 1; by <= sh; ++by) small[by * stride] = small[by * stride + 1], small[by * stride + sw + 1] = small[by * stride + sw];
     for (unsigned bx = 0; bx < stride; ++bx) small[bx] = small[stride + bx], small[(sh + 1) * stride + bx] = small[sh * stride + bx];
@@ -173,17 +180,37 @@ static inline void pw_display_overlay_compose(uint8_t *buffer, const uint8_t *fr
             mid[my * mw + mx] = c;
         }
     }
+    /* 3. each 4x4 block of this band: the panel over its colour, four pixels at a time */
+    const __m128i zero = _mm_setzero_si128();
+    for (unsigned oy = h / 4 * band / bands * 4; oy < h / 4 * (band + 1) / bands * 4; oy += 4)
+        for (unsigned ox = 0; ox < w; ox += 4) {
+            __m128i *at = (__m128i *)(void *)(cache + pw_display_tiled(x + ox, y + oy));
+            const __m128i under16 = _mm_unpacklo_epi8(_mm_set1_epi32((int)mid[(oy / 4) * mw + ox / 4]), zero);
+            for (unsigned r = 0; r < 4; ++r)
+                _mm_store_si128(at + r, pw_overlay_over4(_mm_loadu_si128((const __m128i *)(const void *)(panel + (size_t)(oy + r) * w + ox)),
+                                                        under16));
+        }
+}
+
+/* The blended panel (pw_display_overlay_blend's cache) into the display's buffer, a 4x4 block at a time with streaming
+ * stores, with the glass sweep (`sweep`: seconds into it, below 0 for none; it reads the panel's alpha) and the bubbles
+ * rising in the rectangle's margins at `seconds`. cache may be buffer. */
+static inline void pw_display_overlay_show(uint8_t *buffer, const uint8_t *cache, const uint32_t *panel, unsigned x,
+                                           unsigned y, unsigned w, unsigned h, double seconds, double sweep)
+{
+    if (!buffer || !cache || !panel || (x | y | w | h) & 7 || x + w > PW_DISPLAY_WIDTH || y + h > PW_DISPLAY_HEIGHT) return;
     PwOverlayBubble bubbles[PW_OVERLAY_BUBBLES];
     const unsigned nb = pw_overlay_bubbles(seconds, x, y, w, h, bubbles);
-    /* 3. each 4x4 block: the panel over its colour, four pixels at a time; the bubbles in the margins; streamed out */
     const __m128i zero = _mm_setzero_si128();
-    for (unsigned oy = 0; oy < h; oy += 4)
-        for (unsigned ox = 0; ox < w; ox += 4) {
+    /* a 128x128 tile of the display's at a time, so the reads and the streamed writes stay within 64 KiB */
+    for (unsigned ty = y / 128 * 128; ty < y + h; ty += 128)
+    for (unsigned tx = x / 128 * 128; tx < x + w; tx += 128)
+    for (unsigned oy = (ty > y ? ty : y) - y; oy < (ty + 128 < y + h ? ty + 128 : y + h) - y; oy += 4)
+        for (unsigned ox = (tx > x ? tx : x) - x; ox < (tx + 128 < x + w ? tx + 128 : x + w) - x; ox += 4) {
             __m128i *at = (__m128i *)(void *)(buffer + pw_display_tiled(x + ox, y + oy));
-            const __m128i under16 = _mm_unpacklo_epi8(_mm_set1_epi32((int)mid[(oy / 4) * mw + ox / 4]), zero);
+            const __m128i *from = (const __m128i *)(const void *)(cache + pw_display_tiled(x + ox, y + oy));
             __m128i rows[4];
-            for (unsigned r = 0; r < 4; ++r)
-                rows[r] = pw_overlay_over4(_mm_loadu_si128((const __m128i *)(const void *)(panel + (size_t)(oy + r) * w + ox)), under16);
+            for (unsigned r = 0; r < 4; ++r) rows[r] = _mm_load_si128(from + r);
             const int bx = (int)(x + ox), by = (int)(y + oy);
             /* the glass sweep: the band's light at the block's middle, more on more opaque glass (the keys') */
             const float band = sweep < 0 ? 0 : pw_overlay_sweep_band((float)ox + 2 + ((float)oy + 2) * 0.45f, sweep);
@@ -229,6 +256,17 @@ static inline void pw_display_overlay_compose(uint8_t *buffer, const uint8_t *fr
             for (unsigned r = 0; r < 4; ++r) _mm_stream_si128(at + r, rows[r]);
         }
     _mm_sfence();
+}
+
+
+/* scratch: (w / 8 + 2) * (h / 8 + 2) * 2 + (w / 4) * (h / 4) uint32. fresh_blur 0 keeps the last call's blur; `sweep`: seconds
+ * into the glass sweep, or below 0 for none. Blend and show in one go, in place (for a buffer in cached memory). */
+static inline void pw_display_overlay_compose(uint8_t *buffer, const uint8_t *frame, const uint32_t *panel, unsigned x,
+                                              unsigned y, unsigned w, unsigned h, double seconds, uint32_t *scratch,
+                                              int fresh_blur, double sweep)
+{
+    pw_display_overlay_blend(buffer, frame, panel, x, y, w, h, scratch, fresh_blur, 0, 1);
+    pw_display_overlay_show(buffer, buffer, panel, x, y, w, h, seconds, sweep);
 }
 
 /* ---- A small see-through panel without blur, bubbles or sweep (PS5_Proton's statistics HUD, src/pw_overlay.h): premultiplied

@@ -209,14 +209,7 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
     };
     // clean: the frame without the panel, in cached memory (the shadow, or a capture's own picture)
     const auto decorate=[&](uint8_t *target,const uint8_t *clean) {
-        if(overlay && blur) {
-            const uint64_t start=now_ns();
-            const int fresh=!blur_ready || !(composes++&1);
-            pw_display_overlay_compose(target,clean,overlay,overlay_x,overlay_y,overlay_w,overlay_h,start/1e9,blur,fresh,
-                                       sweep_at(start));
-            blur_ready=true;
-            composed(log,now_ns()-start);
-        }
+        if(overlay && blur && panel_cache)compose_panel(target,clean,log);
         else if(overlay)pw_display_overlay_blit(target,overlay,overlay_x,overlay_y,overlay_w,overlay_h);
         if(hud) {   // over the frame: the shadow when there is one, else the presented picture itself
             const uint64_t start=now_ns();
@@ -332,14 +325,7 @@ int Ps5GpuDisplay::reshow(FILE *log)
     }
     if(shadow)pw_display_stream_copy(buffer,shadow,frame_bytes);
     else for(size_t at=0;at<frame_bytes/16;++at)_mm_stream_si128((__m128i *)(void *)buffer+at,_mm_load_si128(last+at));
-    if(overlay && shadow && blur) {
-        const uint64_t start=now_ns();
-        const int fresh=!blur_ready || !(composes++&1);
-        pw_display_overlay_compose(buffer,shadow,overlay,overlay_x,overlay_y,overlay_w,overlay_h,start/1e9,blur,fresh,
-                                   sweep_at(start));
-        blur_ready=true;
-        composed(log,now_ns()-start);
-    }
+    if(overlay && shadow && blur && panel_cache)compose_panel(buffer,shadow,log);
     else if(overlay)pw_display_overlay_blit(buffer,overlay,overlay_x,overlay_y,overlay_w,overlay_h);
     if(hud && shadow)pw_display_hud_compose(buffer,hud,hud_x,hud_y,hud_w,hud_h,shadow,nullptr,0,0,0,1);
     if(last_cursor_x>=0 && last_cursor_y>=0)draw_cursor(buffer,last_cursor_x,last_cursor_y);
@@ -358,19 +344,38 @@ double Ps5GpuDisplay::sweep_at(uint64_t now)
         sweep_ns=now,next_sweep_ns=now+30000000000ull;
     return sweep_ns ? (now-sweep_ns)/1e9 : -1.0;
 }
+// The see-through panel over target. A frame blends one band of it again over the blur being made (the blur new every 4
+// frames at 120 Hz, every 2 at 60), and a changed panel is blended whole over the blur there is; then the cache is put out
+// with the bubbles and the sweep. At 120 Hz the whole compose of every frame, 3 to 6 ms, missed the 8.3 ms refresh while
+// the panel was open (overlay-base-2026-11-02-03: p95 16.5 ms).
+void Ps5GpuDisplay::compose_panel(uint8_t *target,const uint8_t *clean,FILE *log)
+{
+    const uint64_t start=now_ns();
+    const unsigned bands=high_frame_rate ? 4u : 2u;
+    if(!blur_ready || panel_blended!=panel_changes) {
+        pw_display_overlay_blend(panel_cache,clean,overlay,overlay_x,overlay_y,overlay_w,overlay_h,blur,!blur_ready,0,1);
+        blur_ready=true,panel_blended=panel_changes,composes=0;
+    } else {
+        pw_display_overlay_blend(panel_cache,clean,overlay,overlay_x,overlay_y,overlay_w,overlay_h,blur,1,composes%bands,bands);
+        ++composes;
+    }
+    pw_display_overlay_show(target,panel_cache,overlay,overlay_x,overlay_y,overlay_w,overlay_h,start/1e9,sweep_at(start));
+    composed(log,now_ns()-start);
+}
 void Ps5GpuDisplay::keep_shadow(bool on)
 {
     if(on && !shadow) {
         shadow=(uint8_t *)aligned_alloc(64,frame_bytes),shadow_valid=false,blur_ready=false;
         blur=(uint32_t *)malloc((size_t(width/8+2)*(height/8+2)*2+size_t(width/4)*(height/4))*sizeof(uint32_t));
-    } else if(!on) free(shadow),free(blur),shadow=nullptr,blur=nullptr,shadow_valid=false;
+        panel_cache=(uint8_t *)aligned_alloc(64,frame_bytes);
+    } else if(!on) free(shadow),free(blur),free(panel_cache),shadow=nullptr,blur=nullptr,panel_cache=nullptr,shadow_valid=false;
 }
 bool Ps5GpuDisplay::close(FILE *log)
 {
     pw_display_capture_drain(&captures);   // every picture asked for is on disk before the title goes
     free(overlay);overlay=nullptr;overlay_w=overlay_h=0;
     free(hud);hud=nullptr;hud_w=hud_h=0;
-    free(shadow);free(blur);shadow=nullptr;blur=nullptr;shadow_valid=false;
+    free(shadow);free(blur);free(panel_cache);shadow=nullptr;blur=nullptr;panel_cache=nullptr;shadow_valid=false;
     free(rows);rows=nullptr;
     int blank=0,unregistered=0,closed=0;
     if(handle>=0) {

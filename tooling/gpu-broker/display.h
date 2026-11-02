@@ -32,12 +32,18 @@ struct Ps5GpuDisplay {
      * waiting game before (osk-lag-desktop-base-2026-11-01-01, the owner: "insane input lag"). shadow_valid: it holds
      * the last frame; the first re-show after the panel came reads that frame back once. */
     uint8_t *shadow=nullptr;
-    uint32_t *blur=nullptr;   /* the see-through panel's blurred frame (pw_display_overlay_compose's scratch), with the shadow */
+    uint32_t *blur=nullptr;   /* the see-through panel's blurred frame (pw_display_overlay_blend's scratch), with the shadow */
+    /* The panel blended over the blur, tiled as the display, in cached memory (pw_display_overlay_blend), with the shadow:
+     * each frame puts it out with the bubbles (pw_display_overlay_show) and blends one band of it again */
+    uint8_t *panel_cache=nullptr;
+    unsigned panel_changes=0,panel_blended=0;   /* set_overlay counts the panel's changes; the cache holds this one */
     bool shadow_valid=false;
     int last_cursor_x=-1,last_cursor_y=-1;
-    /* The panel's motion: its blur made fresh every second compose; the glass sweep about 1 s after it came, then at most
-     * every 30 s, never within 3 s of a change to it (a key press: the owner, "it can be destabilizing") */
+    /* The panel's motion: its blur made fresh over 4 frames at 120 Hz, 2 at 60 (a band each, compose_panel); the glass
+     * sweep about 1 s after it came, then at most every 30 s, never within 3 s of a change to it (a key press: the owner,
+     * "it can be destabilizing") */
     unsigned composes=0;
+    void compose_panel(uint8_t *target,const uint8_t *clean,FILE *log);
     bool blur_ready=false;
     uint64_t panel_on_ns=0,panel_press_ns=0,sweep_ns=0,next_sweep_ns=0;
     double sweep_at(uint64_t now);

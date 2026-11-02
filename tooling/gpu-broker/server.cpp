@@ -1379,6 +1379,7 @@ bool ps5_gpu_broker_set_overlay(const void *pixels,unsigned x,unsigned y,unsigne
     b.display.overlay=copy;
     // The panel's shadow of the frame (display.h): made with the panel, dropped with it
     b.display.keep_shadow(copy!=nullptr);
+    ++b.display.panel_changes;   // the cached blend is of the panel before (display.cpp compose_panel)
     {   // the glass sweep's clock: about 1 s after the panel came; every later change is a key press (display.h)
         timespec at{};clock_gettime(CLOCK_MONOTONIC,&at);
         const uint64_t t=uint64_t(at.tv_sec)*1000000000u+uint64_t(at.tv_nsec);
