@@ -135,6 +135,7 @@ int Ps5GpuDisplay::open(FILE *log)
     // PS5_Proton's PROTON_GPU_FAST_COPY=1: an unscaled frame is copied a 64-byte line at a time with streaming
     // stores (pw_display_copy.h); a scaled one, and every frame without it, pixel by pixel below.
     const char *fast=getenv("PROTON_GPU_FAST_COPY");fast_copy=fast && !strcmp(fast,"1");
+    if(fast_copy && !rows)rows=(uint8_t *)aligned_alloc(64,size_t(width)*height*4);   // none: scaled frames keep the loop
     fprintf(log,"gpu-display opened fast_copy=%d\n",fast_copy);
     return 0;
 }
@@ -176,7 +177,10 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
     // The frame into a tiled buffer, the pointer over it: the display's buffer, and a capture's own copy below.
     const auto frame=[&](uint8_t *target) {
         if(fast_copy && w==width && h==height)pw_display_copy_lines(target,(const uint8_t *)pixels,pitch,bgra);
-        else {
+        else if(fast_copy && rows) {   // 5.4 ms a 1272x680 frame on the standard PS5 by the loop below (pw_display_copy.h)
+            pw_display_scale_rows(rows,(const uint8_t *)pixels,w,h,pitch);
+            pw_display_copy_lines(target,rows,size_t(width)*4,bgra);
+        } else {
         // Scaling, nearest neighbour, as tables; then each tile in memory order, flushed as it is finished.
         static uint16_t source_x[width],source_y[height];
         for(unsigned x=0;x<width;++x)source_x[x]=uint16_t(x*w/width);
@@ -351,6 +355,7 @@ bool Ps5GpuDisplay::close(FILE *log)
     pw_display_capture_drain(&captures);   // every picture asked for is on disk before the title goes
     free(overlay);overlay=nullptr;overlay_w=overlay_h=0;
     free(shadow);free(blur);shadow=nullptr;blur=nullptr;shadow_valid=false;
+    free(rows);rows=nullptr;
     int blank=0,unregistered=0,closed=0;
     if(handle>=0) {
         if(registered) {

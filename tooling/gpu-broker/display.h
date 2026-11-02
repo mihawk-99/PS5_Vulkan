@@ -13,6 +13,7 @@ struct Ps5GpuDisplay {
     uint64_t flips=0,last_copy_ns=0;
     bool registered=false;
     bool fast_copy=false;   /* PS5_Proton's PROTON_GPU_FAST_COPY=1, read when the display opens */
+    uint8_t *rows=nullptr;  /* with it: a frame of another size scaled to 1920x1080 here first (pw_display_scale_rows) */
     bool high_frame_rate=false;   /* the output at 119.88 Hz (PS5_Proton's PROTON_120HZ=1), restored at close */
     /* An application's panel over every frame inside its rectangle, premultiplied: blended over the frame blurred under it,
      * with bubbles in its margins (pw_display_overlay_compose). Owned here, set and cleared
