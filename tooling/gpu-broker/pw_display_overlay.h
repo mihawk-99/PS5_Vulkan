@@ -3,6 +3,7 @@
 #define PW_DISPLAY_OVERLAY_H
 #include "pw_display_copy.h"
 #include <math.h>
+#include <string.h>
 /* An application's panel over the frame (PS5_Proton's own on-screen keyboard, in the bottom part of the screen with the
  * game live above it): linear B8G8R8A8 rows, pitch w * 4. pw_display_overlay_blit draws it opaque into the display's
  * tiled buffer after the frame is copied there, inside the rectangle only; pw_display_overlay_compose (below) blends a
@@ -225,6 +226,56 @@ static inline void pw_display_overlay_compose(uint8_t *buffer, const uint8_t *fr
                     for (unsigned r = 0; r < 4; ++r) rows[r] = _mm_loadu_si128((const __m128i *)(const void *)(px + r * 4));
                 }
             for (unsigned r = 0; r < 4; ++r) _mm_stream_si128(at + r, rows[r]);
+        }
+    _mm_sfence();
+}
+
+/* ---- A small see-through panel without blur, bubbles or sweep (PS5_Proton's statistics HUD, src/pw_overlay.h): premultiplied
+ * B8G8R8A8 w x h over the frame pixel by pixel, written a 4x4 block at a time (corners and size on multiples of 4). The frame
+ * under it is read from `tiled` (the display's shadow, cached) when given, else from the presented picture itself
+ * (`pixels`, sw x sh, pitch bytes a row, RGBA unless bgra; scaled to the screen nearest-neighbour as the copy is): never from
+ * the display's buffer, which reads slowly. ---- */
+static inline __m128i pw_overlay_over4_each(__m128i p, __m128i under)
+{
+    const __m128i zero = _mm_setzero_si128(), c255 = _mm_set1_epi16(255), c128 = _mm_set1_epi16(128);
+    __m128i half[2] = {_mm_unpacklo_epi8(p, zero), _mm_unpackhi_epi8(p, zero)};
+    const __m128i below[2] = {_mm_unpacklo_epi8(under, zero), _mm_unpackhi_epi8(under, zero)};
+    for (int i = 0; i < 2; ++i) {
+        __m128i a = _mm_shufflelo_epi16(half[i], 0xff);
+        a = _mm_shufflehi_epi16(a, 0xff);
+        __m128i x = _mm_add_epi16(_mm_mullo_epi16(below[i], _mm_sub_epi16(c255, a)), c128);
+        x = _mm_srli_epi16(_mm_add_epi16(x, _mm_srli_epi16(x, 8)), 8);
+        half[i] = _mm_add_epi16(half[i], x);
+    }
+    return _mm_or_si128(_mm_packus_epi16(half[0], half[1]), _mm_set1_epi32((int)0xff000000u));
+}
+
+static inline void pw_display_hud_compose(uint8_t *buffer, const uint32_t *hud, unsigned x, unsigned y, unsigned w, unsigned h,
+                                          const uint8_t *tiled, const void *pixels, unsigned sw, unsigned sh, size_t pitch,
+                                          int bgra)
+{
+    if (!buffer || !hud || (x | y | w | h) & 3 || x + w > PW_DISPLAY_WIDTH || y + h > PW_DISPLAY_HEIGHT) return;
+    if (!tiled && (!pixels || !sw || !sh)) return;
+    for (unsigned oy = 0; oy < h; oy += 4)
+        for (unsigned ox = 0; ox < w; ox += 4) {
+            __m128i *at = (__m128i *)(void *)(buffer + pw_display_tiled(x + ox, y + oy));
+            for (unsigned r = 0; r < 4; ++r) {
+                __m128i under;
+                if (tiled) {
+                    under = _mm_load_si128((const __m128i *)(const void *)(tiled + pw_display_tiled(x + ox, y + oy)) + r);
+                } else {
+                    uint32_t u[4];
+                    const unsigned sy = (y + oy + r) * sh / PW_DISPLAY_HEIGHT;
+                    for (unsigned i = 0; i < 4; ++i) {
+                        uint32_t c;
+                        memcpy(&c, (const uint8_t *)pixels + sy * pitch + (size_t)((x + ox + i) * sw / PW_DISPLAY_WIDTH) * 4, 4);
+                        u[i] = bgra ? c : (c & 0xff00ff00u) | (c & 0xff) << 16 | (c >> 16 & 0xff);
+                    }
+                    under = _mm_loadu_si128((const __m128i *)(const void *)u);
+                }
+                const __m128i p = _mm_loadu_si128((const __m128i *)(const void *)(hud + (size_t)(oy + r) * w + ox));
+                _mm_stream_si128(at + r, pw_overlay_over4_each(p, under));
+            }
         }
     _mm_sfence();
 }

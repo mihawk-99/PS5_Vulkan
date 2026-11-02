@@ -20,6 +20,11 @@ struct Ps5GpuDisplay {
      * under the broker's display lock (ps5_gpu_broker_set_overlay). */
     uint32_t *overlay=nullptr;
     unsigned overlay_x=0,overlay_y=0,overlay_w=0,overlay_h=0;
+    /* A second, small panel (PS5_Proton's statistics HUD): see-through over the frame as it is, no blur, no bubbles
+     * (pw_display_hud_compose); owned and set the same way (ps5_gpu_broker_set_hud). It needs no shadow: a frame's present
+     * reads the picture under it, a re-show the shadow the main panel keeps. */
+    uint32_t *hud=nullptr;
+    unsigned hud_x=0,hud_y=0,hud_w=0,hud_h=0;
     uint64_t last_present_ns=0;   /* the last flip, a frame's or a re-show's */
     uint64_t last_frame_ns=0;     /* the last frame the application presented (a re-show is none) */
     /* While a panel is up: the last frame, tiled, without the panel or the pointer, in cached memory (the broker allocates

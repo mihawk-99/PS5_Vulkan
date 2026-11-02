@@ -53,6 +53,7 @@ const bool trace=[] { const char *v=getenv("PROTON_GPU_TRACE");return v && !strc
 // "gpu-split" line says how long the GPU worked on its frames (src/pw_gpu_timing.h). The clock's rate, measured.
 bool gpu_timestamps=false;
 PwGpuClock gpu_clock{};
+uint64_t gpu_busy_ticks=0;   // every client's, summed (ps5_gpu_broker_gpu_seconds: the title's statistics HUD)
 // Waits for a message on one client's socket: 1 if one is there, 0 if not yet, -1 at the socket's end. A message is
 // looked for by peeking: continuously until spin_until (the broker has just served this client, which is likely to ask
 // again at once), then after a short poll that bounds the wait when idle. Adopted while poll was suspected of missing
@@ -552,6 +553,7 @@ void stamped(unsigned slot,Client *client)
     const uint64_t busy=pw_gpu_busy(&fences.stamp_last_end,start,end);
     if(start && end)pw_gpu_clock_note(&gpu_clock,radv_ps5_now_ns(),end);
     if(client)client->timing.gpu_ticks+=busy;
+    __atomic_add_fetch(&gpu_busy_ticks,busy,__ATOMIC_RELAXED);
 }
 // Releases whatever the fence has passed.
 void reap()
@@ -1406,6 +1408,37 @@ bool ps5_gpu_broker_set_overlay(const void *pixels,unsigned x,unsigned y,unsigne
                 double(ns(done)-ns(locked))/1e6);
     pthread_mutex_unlock(&b.display_lock);
     return true;
+}
+// The HUD's small panel (display.h hud), copied here; NULL takes it off. Shown from the next frame (a waiting game shows it
+// with the main panel's next re-show, if there is one). Tried for up to 100 ms, as the panel.
+bool ps5_gpu_broker_set_hud(const void *pixels,unsigned x,unsigned y,unsigned w,unsigned h)
+{
+    auto &b=broker_state;
+    if(pixels && (!w || !h || (x|y|w|h)&3 || x+w>1920 || y+h>1080))return false;
+    uint32_t *copy=nullptr;
+    if(pixels) {
+        copy=(uint32_t *)malloc(size_t(w)*h*4);
+        if(!copy)return false;
+        memcpy(copy,pixels,size_t(w)*h*4);
+    }
+    for(unsigned waited=0;pthread_mutex_trylock(&b.display_lock);++waited) {
+        if(waited>=100) { free(copy);return false; }
+        sceKernelUsleep(1000);
+    }
+    const bool was=b.display.hud!=nullptr;
+    free(b.display.hud);
+    b.display.hud=copy;
+    b.display.hud_x=x;b.display.hud_y=y;b.display.hud_w=copy ? w : 0;b.display.hud_h=copy ? h : 0;
+    if(b.log && was!=(copy!=nullptr))fprintf(b.log,"gpu-hud %s x=%u y=%u w=%u h=%u\n",copy ? "on" : "off",x,y,w,h);
+    pthread_mutex_unlock(&b.display_lock);
+    return true;
+}
+double ps5_gpu_broker_gpu_seconds()
+{
+    if(!gpu_timestamps)return -1.0;
+    // shortcut: gpu_clock is read without the broker's lock (a torn reading skews one sample); lock it if the HUD jumps
+    const double per_ns=pw_gpu_clock_rate(&gpu_clock);
+    return per_ns>0 ? double(__atomic_load_n(&gpu_busy_ticks,__ATOMIC_RELAXED))/per_ns/1e9 : -1.0;
 }
 void ps5_gpu_broker_overlay_refresh()
 {

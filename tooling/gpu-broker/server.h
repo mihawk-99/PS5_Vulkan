@@ -52,6 +52,11 @@ bool ps5_gpu_broker_set_overlay(const void *pixels, unsigned x, unsigned y, unsi
 /* The panel's animation (its bubbles) while no frame comes: shows the last frame again with the panel when none came in
  * the last 30 ms. Never waits for the display: a present under way draws them itself. */
 void ps5_gpu_broker_overlay_refresh(void);
+/* A second, small panel over every frame (PS5_Proton's statistics HUD): premultiplied B8G8R8A8 w x h at (x, y), all on
+ * multiples of 4, see-through without blur or bubbles; copied. NULL takes it off. */
+bool ps5_gpu_broker_set_hud(const void *pixels, unsigned x, unsigned y, unsigned w, unsigned h);
+/* Seconds the GPU worked on every client's submissions so far, or below 0 without PROTON_GPU_TIMESTAMPS=1. */
+double ps5_gpu_broker_gpu_seconds(void);
 /* The broker as of now, for an application's watchdog, without waiting on anything the broker holds: whether its
  * client lock and its display lock are held this instant (a trylock, released at once), the GPU submissions it made
  * and the last one the GPU completed (its fence page's value; 0 before the first submission). phase is the call the

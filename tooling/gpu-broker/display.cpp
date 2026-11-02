@@ -149,6 +149,15 @@ static void composed(FILE *log,uint64_t ns)
     if(log)fprintf(log,"gpu-overlay compose n=%u avg_us=%.0f max_us=%.0f\n",count,double(sum)/count/1e3,double(worst)/1e3);
     count=0,sum=0,worst=0;
 }
+// The same for the HUD: its blend over the frame
+static void hud_composed(FILE *log,uint64_t ns)
+{
+    static unsigned count;static uint64_t sum,worst;
+    sum+=ns;if(ns>worst)worst=ns;
+    if(++count<120)return;
+    if(log)fprintf(log,"gpu-hud compose n=%u avg_us=%.0f max_us=%.0f\n",count,double(sum)/count/1e3,double(worst)/1e3);
+    count=0,sum=0,worst=0;
+}
 int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pitch,FILE *log,const char *capture,bool bgra,
     int cursor_x,int cursor_y)
 {
@@ -209,6 +218,11 @@ int Ps5GpuDisplay::present(const void *pixels,unsigned w,unsigned h,unsigned pit
             composed(log,now_ns()-start);
         }
         else if(overlay)pw_display_overlay_blit(target,overlay,overlay_x,overlay_y,overlay_w,overlay_h);
+        if(hud) {   // over the frame: the shadow when there is one, else the presented picture itself
+            const uint64_t start=now_ns();
+            pw_display_hud_compose(target,hud,hud_x,hud_y,hud_w,hud_h,clean!=target ? clean : nullptr,pixels,w,h,pitch,bgra);
+            hud_composed(log,now_ns()-start);
+        }
         if(cursor_x>=0 && cursor_y>=0)draw_cursor(target,cursor_x,cursor_y);
     };
     const auto fill=[&](uint8_t *target) { frame(target);decorate(target,target); };
@@ -327,6 +341,7 @@ int Ps5GpuDisplay::reshow(FILE *log)
         composed(log,now_ns()-start);
     }
     else if(overlay)pw_display_overlay_blit(buffer,overlay,overlay_x,overlay_y,overlay_w,overlay_h);
+    if(hud && shadow)pw_display_hud_compose(buffer,hud,hud_x,hud_y,hud_w,hud_h,shadow,nullptr,0,0,0,1);
     if(last_cursor_x>=0 && last_cursor_y>=0)draw_cursor(buffer,last_cursor_x,last_cursor_y);
     _mm_sfence();
     const uint64_t serial=__atomic_add_fetch(&flips,1,__ATOMIC_RELAXED);
@@ -354,6 +369,7 @@ bool Ps5GpuDisplay::close(FILE *log)
 {
     pw_display_capture_drain(&captures);   // every picture asked for is on disk before the title goes
     free(overlay);overlay=nullptr;overlay_w=overlay_h=0;
+    free(hud);hud=nullptr;hud_w=hud_h=0;
     free(shadow);free(blur);shadow=nullptr;blur=nullptr;shadow_valid=false;
     free(rows);rows=nullptr;
     int blank=0,unregistered=0,closed=0;
