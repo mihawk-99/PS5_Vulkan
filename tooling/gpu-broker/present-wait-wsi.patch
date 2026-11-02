@@ -134,8 +134,8 @@
     mtx_lock(&c->lock);
     result=c->lost;
 -   if(result==VK_SUCCESS) {
-+   const bool hold=c->fifo_shown && videoout_holds(b->present_mode);
-+   if(result==VK_SUCCESS && !hold && c->count>=2) {
++   const bool fifo=videoout_holds(b->present_mode),hold=c->fifo_shown && fifo;
++   if(result==VK_SUCCESS && !fifo && c->count>=2) {
 +      /* MAILBOX/IMMEDIATE: the newest waiting frame (never the head, which the presenter may be showing) gives way to
 +       * this one; its id is kept, so a wait for it ends when this frame is answered. */
 +      const uint32_t last=(c->head+c->count-1)%VIDEOOUT_BUFFERS;
