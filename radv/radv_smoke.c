@@ -40,6 +40,7 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_icdGetInstanceProcAddr(VkInstance in
 /* libkernel's klog writer: a title's stderr does not reach klog, and klog is
  * what tools/run-title.py watches for the run's end. */
 int sceKernelDebugOutText(int channel, const char *text);
+int sceSystemServiceLoadExec(const char *path, const char *const *argv);
 /* ps5platform/klog.h: the driver's messages on standard error, in klog. */
 int ps5_klog_capture_stderr(const char *prefix);
 #else
@@ -3045,5 +3046,16 @@ main(void)
    report("RADV smoke test ends: %u passed, %u failed", passed, failed);
    if (results)
       fclose(results);
-   return failed == 0 && passed > 0 ? 0 : 1;
+   int status = failed == 0 && passed > 0 ? 0 : 1;
+#if defined(__PROSPERO__)
+   (void)status;
+   fflush(stdout);
+   fflush(stderr);
+   /* exit() raises SIGSYS in PS5 titles; the shell closes LoadExec asynchronously. */
+   sceSystemServiceLoadExec("exit", NULL);
+   for (;;)
+      usleep(100000);
+#else
+   return status;
+#endif
 }
