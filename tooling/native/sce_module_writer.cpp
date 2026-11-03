@@ -707,6 +707,13 @@ Bytes write_executable(const Image &image, std::span<const Stub> stubs, const Op
                 break;
             }
         }
+        // A weak undefined reference resolves to nothing at runtime. Mesa's
+        // radv entry points (radv_EnumeratePhysicalDevices and the surface and
+        // debug-report names) stay weak-undefined by design in the RADV
+        // archive and no SDK stub exports them, so the import is skipped and
+        // the dispatch entry stays null, which the callers guard for.
+        // (local patch, 2026-11-03, RastaFairy)
+        if (provider == nullptr && symbol.weak() && symbol.undefined()) continue;
         require(provider != nullptr, "no public SDK stub exports required symbol " + symbol.name);
         imports.push_back({symbol.name, provider, 0, 0, static_cast<std::uint32_t>(i), {}});
     }
