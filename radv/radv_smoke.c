@@ -2259,7 +2259,7 @@ display_image_barrier(struct context *c, VkImage image, VkImageLayout from, VkIm
 /* One frame: acquire, clear to gray, read back when asked, present. */
 static VkResult
 display_frame(struct context *c, VkSwapchainKHR swapchain, const VkImage *images, VkSemaphore acquired,
-              VkSemaphore rendered, float gray, struct buffer *readback)
+              VkSemaphore rendered, VkClearColorValue color, struct buffer *readback)
 {
    uint32_t index;
    VkResult result = vkAcquireNextImageKHR(c->device, swapchain, UINT64_MAX, acquired, VK_NULL_HANDLE, &index);
@@ -2274,7 +2274,6 @@ display_frame(struct context *c, VkSwapchainKHR swapchain, const VkImage *images
    display_image_barrier(c, images[index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                          VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0, VK_PIPELINE_STAGE_2_CLEAR_BIT,
                          VK_ACCESS_2_TRANSFER_WRITE_BIT);
-   const VkClearColorValue color = {.float32 = {gray, gray, gray, 1.0f}};
    const VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
    vkCmdClearColorImage(c->cmd, images[index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &color, 1, &range);
    VkImageLayout layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -2327,14 +2326,15 @@ display_frame(struct context *c, VkSwapchainKHR swapchain, const VkImage *images
 }
 
 static VkSwapchainKHR
-display_swapchain(struct context *c, VkSurfaceKHR surface, VkSwapchainKHR old, VkImage *images, uint32_t *count)
+display_swapchain(struct context *c, VkSurfaceKHR surface, VkSwapchainKHR old, VkImage *images, uint32_t *count,
+                  VkSurfaceFormatKHR format)
 {
    const VkSwapchainCreateInfoKHR info = {
       .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
       .surface = surface,
       .minImageCount = 3,
-      .imageFormat = VK_FORMAT_B8G8R8A8_UNORM,
-      .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+      .imageFormat = format.format,
+      .imageColorSpace = format.colorSpace,
       .imageExtent = {3840, 2160},
       .imageArrayLayers = 1,
       .imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
@@ -2385,8 +2385,8 @@ test_display(struct context *c)
    VkDisplayModePropertiesKHR modes[2];
    count = 2;
    result = vkGetDisplayModePropertiesKHR(c->physical, display.display, &count, modes);
-   check(result == VK_SUCCESS && count >= 1, "display: its modes");
-   if (count == 0)
+   check((result == VK_SUCCESS || result == VK_INCOMPLETE) && count >= 1, "display: its modes");
+   if ((result != VK_SUCCESS && result != VK_INCOMPLETE) || count == 0)
       return;
    report("display: %s, %u mode(s), the first at %.3f Hz", display.displayName, count,
           modes[0].parameters.refreshRate / 1000.0);
@@ -2410,6 +2410,52 @@ test_display(struct context *c)
    check(supported && caps.currentExtent.width == 3840 && caps.currentExtent.height == 2160 &&
             caps.minImageCount <= 3 && caps.maxImageCount >= 3,
          "display: the surface's support and capabilities");
+   /* Read the declaration independently of the driver's surface query. */
+   uint32_t attribute = 0;
+   bool attribute_read = false;
+#if defined(__PROSPERO__)
+   FILE *param = fopen("/app0/sce_sys/param.json", "rb");
+   if (param) {
+      char text[16384];
+      size_t length = fread(text, 1, sizeof(text) - 1, param);
+      bool complete = !ferror(param) && feof(param);
+      fclose(param);
+      text[length] = '\0';
+      const char *at = strstr(text, "\"attribute\"");
+      if (complete && at && (at = strchr(at, ':'))) {
+         char *end;
+         unsigned long value = strtoul(at + 1, &end, 0);
+         if (end != at + 1 && value <= UINT32_MAX) {
+            attribute = (uint32_t)value;
+            attribute_read = true;
+         }
+      }
+   }
+#endif
+   report("display hdr: title attribute 0x%08x%s", attribute, attribute_read ? "" : " (unavailable)");
+   check(attribute_read, "display hdr: title attribute read");
+   uint32_t format_count = 0;
+   result = vkGetPhysicalDeviceSurfaceFormatsKHR(c->physical, surface, &format_count, NULL);
+   VkSurfaceFormatKHR *formats = format_count ? calloc(format_count, sizeof(*formats)) : NULL;
+   bool formats_ok = result == VK_SUCCESS && formats;
+   if (formats_ok)
+      formats_ok = vkGetPhysicalDeviceSurfaceFormatsKHR(c->physical, surface, &format_count, formats) == VK_SUCCESS;
+   VkSurfaceFormatKHR hdr = {VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_HDR10_ST2084_EXT};
+   bool hdr_offered = false;
+   for (uint32_t i = 0; formats_ok && i < format_count; i++) {
+      if (formats[i].colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT) {
+         hdr_offered = true;
+         if (formats[i].format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 ||
+             formats[i].format == VK_FORMAT_A2R10G10B10_UNORM_PACK32)
+            hdr = formats[i];
+      }
+   }
+   free(formats);
+   report("display hdr: %s", hdr_offered ? "offered" : "not offered");
+   check(formats_ok && attribute_read && hdr_offered == ((attribute & 0x20000000u) != 0),
+         "display hdr: formats match title attribute");
+   check(!hdr_offered || hdr.format != VK_FORMAT_UNDEFINED, "display hdr: offered format is supported by probe");
+
 
    struct buffer readback;
    VkSemaphore acquired = VK_NULL_HANDLE, rendered = VK_NULL_HANDLE;
@@ -2423,7 +2469,9 @@ test_display(struct context *c)
    }
 
    VkImage images[8];
-   VkSwapchainKHR swapchain = display_swapchain(c, surface, VK_NULL_HANDLE, images, &count);
+   const VkSurfaceFormatKHR sdr = {VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+   VkSwapchainKHR swapchain = display_swapchain(c, surface, VK_NULL_HANDLE, images, &count, sdr);
+   bool sdr_frames_ok = swapchain != VK_NULL_HANDLE;
    if (swapchain) {
       const unsigned frames = 60, paced = 50;
       uint64_t start = 0;
@@ -2432,7 +2480,8 @@ test_display(struct context *c)
          if (frame == frames - paced)
             start = now_ns();
          const float gray = 0.10f + 0.10f * (float)(frame % 16) / 16.0f;
-         result = display_frame(c, swapchain, images, acquired, rendered, gray,
+         const VkClearColorValue color = {.float32 = {gray, gray, gray, 1.0f}};
+         result = display_frame(c, swapchain, images, acquired, rendered, color,
                                 frame == frames - 1 ? &readback : NULL);
          if (result != VK_SUCCESS)
             break;
@@ -2441,6 +2490,7 @@ test_display(struct context *c)
       const double seconds = (now_ns() - start) / 1e9;
       const double expected = paced * 1000.0 / modes[0].parameters.refreshRate;
       check(presented == frames, "display: 60 frames acquired, cleared and presented");
+      sdr_frames_ok = presented == frames;
       report("display: the last %u frames took %.3f s, %.3f s at the mode's refresh", paced, seconds, expected);
       check(presented == frames && seconds > expected * 0.85 && seconds < expected * 1.15,
             "display: FIFO presents paced by the display's flips");
@@ -2453,7 +2503,8 @@ test_display(struct context *c)
 
       uint32_t new_count = 0;
       VkImage new_images[8];
-      VkSwapchainKHR replacement = display_swapchain(c, surface, swapchain, new_images, &new_count);
+      VkSwapchainKHR replacement = sdr_frames_ok ?
+         display_swapchain(c, surface, swapchain, new_images, &new_count, sdr) : VK_NULL_HANDLE;
       if (replacement) {
          uint32_t index;
          result = vkAcquireNextImageKHR(c->device, swapchain, 0, VK_NULL_HANDLE, c->fence, &index);
@@ -2461,14 +2512,45 @@ test_display(struct context *c)
          vkDestroySwapchainKHR(c->device, swapchain, NULL);
          swapchain = VK_NULL_HANDLE;
          unsigned more = 0;
-         for (unsigned frame = 0; frame < 5; frame++)
-            more += display_frame(c, replacement, new_images, acquired, rendered, 0.0f, NULL) == VK_SUCCESS;
+         const VkClearColorValue black = {.float32 = {0.0f, 0.0f, 0.0f, 1.0f}};
+         for (unsigned frame = 0; frame < 5; frame++) {
+            if (display_frame(c, replacement, new_images, acquired, rendered, black, NULL) != VK_SUCCESS)
+               break;
+            more++;
+         }
+         sdr_frames_ok = more == 5;
          check(more == 5, "display: 5 frames through the replacement");
          vkDeviceWaitIdle(c->device);
          vkDestroySwapchainKHR(c->device, replacement, NULL);
+      } else {
+         sdr_frames_ok = false;
       }
       if (swapchain)
          vkDestroySwapchainKHR(c->device, swapchain, NULL);
+   }
+   if (!sdr_frames_ok && hdr.format != VK_FORMAT_UNDEFINED)
+      report("display hdr: not run after SDR display failure");
+   if (sdr_frames_ok && hdr.format != VK_FORMAT_UNDEFINED) {
+      swapchain = display_swapchain(c, surface, VK_NULL_HANDLE, images, &count, hdr);
+      if (swapchain) {
+         /* PQ code values R=1, G=B=0, alpha=1 avoid UNORM rounding ambiguity. */
+         const VkClearColorValue pq_red = {.float32 = {1.0f, 0.0f, 0.0f, 1.0f}};
+         unsigned presented = 0;
+         for (unsigned frame = 0; frame < 5; frame++) {
+            result = display_frame(c, swapchain, images, acquired, rendered, pq_red,
+                                   frame == 4 ? &readback : NULL);
+            if (result != VK_SUCCESS)
+               break;
+            presented++;
+         }
+         const uint32_t want = hdr.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 ? 0xc00003ffu : 0xfff00000u;
+         const uint32_t *pixels = readback.map;
+         report("display hdr: readback 0x%08x 0x%08x expected 0x%08x", pixels[0], pixels[1], want);
+         check(presented == 5 && pixels[0] == want && pixels[1] == want,
+               "display hdr: 5 PQ frames and first/last pixel readback");
+         vkDeviceWaitIdle(c->device);
+         vkDestroySwapchainKHR(c->device, swapchain, NULL);
+      }
    }
    vkDestroySemaphore(c->device, acquired, NULL);
    vkDestroySemaphore(c->device, rendered, NULL);
@@ -2498,16 +2580,21 @@ context_create(struct context *c)
    VkExtensionProperties instance_extensions[64];
    uint32_t instance_extension_count = sizeof(instance_extensions) / sizeof(instance_extensions[0]);
    c->display = false;
+   bool swapchain_colorspace = false;
    if (enumerate_instance_extensions &&
        enumerate_instance_extensions(NULL, &instance_extension_count, instance_extensions) >= VK_SUCCESS) {
-      for (uint32_t i = 0; i < instance_extension_count; i++)
+      for (uint32_t i = 0; i < instance_extension_count; i++) {
          c->display |= strcmp(instance_extensions[i].extensionName, VK_KHR_DISPLAY_EXTENSION_NAME) == 0;
+         swapchain_colorspace |=
+            strcmp(instance_extensions[i].extensionName, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME) == 0;
+      }
    }
-   const char *const display_extensions[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_DISPLAY_EXTENSION_NAME};
+   const char *const display_extensions[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_DISPLAY_EXTENSION_NAME,
+                                             VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME};
    const VkInstanceCreateInfo instance_info = {
       .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
       .pApplicationInfo = &app,
-      .enabledExtensionCount = c->display ? 2 : 0,
+      .enabledExtensionCount = c->display ? (swapchain_colorspace ? 3 : 2) : 0,
       .ppEnabledExtensionNames = display_extensions,
    };
    VkResult result = vkCreateInstance(&instance_info, NULL, &c->instance);
@@ -2976,7 +3063,12 @@ main(void)
       test_title_files();
 #endif
    const char *const only = getenv("RADV_SMOKE_ONLY");
-   if (ready && only && strcmp(only, "task") == 0) {
+   if (ready && only && strcmp(only, "display") == 0) {
+      if (c.display)
+         test_display(&c);
+      else
+         check(false, "display: VK_KHR_display is not reported");
+   } else if (ready && only && strcmp(only, "task") == 0) {
       if (c.task)
          test_task(&c);
    } else if (ready && only && strcmp(only, "barycentric") == 0) {
