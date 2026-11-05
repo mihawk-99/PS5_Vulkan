@@ -628,7 +628,7 @@ Bytes write_executable(const Image &image, std::span<const Stub> stubs, const Op
     std::uint64_t tls_start = 0;
     std::uint64_t tls_file_end = 0;
     std::uint64_t tls_memory_end = 0;
-    std::uint64_t tls_alignment = 0x20;
+    std::uint64_t tls_alignment = 1;
 
     for (const Section &input : image.sections)
     {
@@ -648,6 +648,16 @@ Bytes write_executable(const Image &image, std::span<const Stub> stubs, const Op
             if (!input.no_bits())
                 tls_file_end = std::max(tls_file_end, end);
             tls_alignment = std::max(tls_alignment, input.alignment);
+
+            // Writable TLS sections must also be present in the file-backed
+            // data PT_LOAD so their initial values reach the loader.
+            if (input.writable())
+            {
+                data_start = std::min(data_start, input.address);
+                data_end = std::max(data_end, end);
+                if (!input.no_bits())
+                    data_stored_end = std::max(data_stored_end, end);
+            }
         }
         else if (relro_section(input.name))
         {
