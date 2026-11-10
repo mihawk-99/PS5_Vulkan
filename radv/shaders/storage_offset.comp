@@ -1,0 +1,16 @@
+#version 450
+// PS5 Vulkan - RADV smoke test: one storage buffer of an array, picked at run time, written from its first word to
+// its last (radv_smoke.c, test_storage_offset).
+// Copyright (C) 2026 Mihawk-99
+// SPDX-License-Identifier: GPL-3.0-or-later
+layout(local_size_x = 1) in;
+layout(std430, set = 0, binding = 0) buffer Words { uint w[]; } buffers[4];
+layout(push_constant) uniform Push { uint index; uint value; } p;
+void main()
+{
+    uint n = uint(buffers[p.index].w.length());
+    buffers[p.index].w[0] = p.value;
+    buffers[p.index].w[1] = n;
+    buffers[p.index].w[2] = buffers[p.index].w[3] + 1u;
+    buffers[p.index].w[n - 1u] = ~p.value;
+}

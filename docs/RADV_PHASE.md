@@ -1043,3 +1043,17 @@ not do it. Mesa fork 1ba9874f478 (`radv/ps5: per-vertex fragment inputs in the p
 4. The smoke title's survey is now a set of checks (triangle list, strip, fan, lines in both provoking modes, `gl_BaryCoord`).
    The full smoke on this archive: 127 passed, 1 failed (display: its modes, which counts 2 modes since the console's
    resolution is 1440p, the 2026-10-10 entry).
+
+## 2026-11-10 — storage and uniform buffers bound from offsets inside a buffer
+
+A title that binds the pieces of one large buffer binds them from any offset `minStorageBufferOffsetAlignment` (4)
+allows. The smoke title now checks that (`test_storage_offset`; `RADV_SMOKE_ONLY=storage` runs it alone):
+
+1. Four pieces of 0x640 bytes, at 0x0, 0x9c0, 0x984 and 0x900 of their 16 KiB steps, in one descriptor array.
+2. Read as read-only storage buffers and as uniform buffers: the first word, the last, one picked at run time, and the
+   length the shader sees. Then written through a storage buffer picked at run time, first word to last.
+3. In the driver's memory, and in the title's own memory imported with `VK_EXT_external_memory_host`.
+
+On the Pro with the release archive (Mesa fork 47e9eb6): all 25 pass. The full smoke: 127 passed, 1 failed (display: its
+modes, the 2026-10-10 entry). No fault was found. The check was written while looking for why one title's storage buffer
+stayed empty when bound from 0x9c0; that was not the driver's handling of the offset, and the check stays as a regression.

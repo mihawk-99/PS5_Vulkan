@@ -226,6 +226,8 @@ struct context {
    bool display;
    /* VK_EXT_descriptor_buffer is reported and enabled (test_sparse_timing). */
    bool descriptor_buffer;
+   /* VK_EXT_external_memory_host is reported and enabled (test_storage_offset). */
+   bool host_memory;
    /* VK_EXT_mesh_shader is reported and its mesh shaders enabled (test_mesh),
     * and its task shaders when reported (test_task). */
    bool mesh;
@@ -2586,6 +2588,7 @@ context_create(struct context *c)
             strcmp(extensions[i].extensionName, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) == 0;
          c->descriptor_buffer |= strcmp(extensions[i].extensionName, VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME) == 0;
          c->mesh |= strcmp(extensions[i].extensionName, VK_EXT_MESH_SHADER_EXTENSION_NAME) == 0;
+         c->host_memory |= strcmp(extensions[i].extensionName, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME) == 0;
       }
    }
    VkPhysicalDeviceMeshShaderFeaturesEXT mesh = {
@@ -2633,6 +2636,8 @@ context_create(struct context *c)
    }
    if (c->display)
       device_extensions[enabled_extensions++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+   if (c->host_memory)
+      device_extensions[enabled_extensions++] = VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME;
    VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer = {
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT,
       .descriptorBuffer = VK_TRUE,
@@ -2655,6 +2660,8 @@ context_create(struct context *c)
       .sparseBinding = supported.sparseBinding,
       .geometryShader = VK_TRUE,
       .tessellationShader = VK_TRUE,
+      .shaderUniformBufferArrayDynamicIndexing = VK_TRUE,
+      .shaderStorageBufferArrayDynamicIndexing = VK_TRUE,
       .vertexPipelineStoresAndAtomics = VK_TRUE,
       .fragmentStoresAndAtomics = VK_TRUE,
    };
@@ -2935,6 +2942,265 @@ test_host_pointer(struct context *c)
    vkDestroyShaderModule(c->device, module, NULL);
    munmap(memory, WORDS * 4);
 }
+/* A storage buffer bound from an offset inside its buffer: a title that binds
+ * the pieces of one large buffer (an emulator's or a recompiled game's memory
+ * pool) binds from any offset minStorageBufferOffsetAlignment allows. Four
+ * pieces of 0x640 bytes, in one descriptor array the shader picks from at run
+ * time, each written at its first words and its last. */
+enum { STORAGE_PIECES = 4, STORAGE_RANGE = 0x640, STORAGE_STEP = 0x4000 };
+static const uint32_t storage_offsets[STORAGE_PIECES] = {0x000, 0x9c0, 0x984, 0x900};
+
+struct storage_offset_pipelines {
+   VkPipeline write, read;
+   VkPipelineLayout write_layout, read_layout;
+   VkDescriptorSet write_set, read_set;
+};
+
+static void
+storage_offset_run(struct context *c, const char *where, VkBuffer buffer, uint32_t *words,
+                   const struct storage_offset_pipelines *p)
+{
+   const uint32_t count = STORAGE_RANGE / 4, word = 77;
+   struct buffer result;
+   if (!buffer_create(c, STORAGE_PIECES * 32, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, &result)) {
+      check(false, "storage offset: the result buffer");
+      return;
+   }
+   VkDescriptorBufferInfo infos[STORAGE_PIECES];
+   for (uint32_t i = 0; i < STORAGE_PIECES; i++)
+      infos[i] = (VkDescriptorBufferInfo){buffer, i * STORAGE_STEP + storage_offsets[i], STORAGE_RANGE};
+   const VkDescriptorBufferInfo result_info = {result.buffer, 0, VK_WHOLE_SIZE};
+   const VkWriteDescriptorSet writes[] = {
+      {
+         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+         .dstSet = p->write_set,
+         .descriptorCount = STORAGE_PIECES,
+         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+         .pBufferInfo = infos,
+      },
+      {
+         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+         .dstSet = p->read_set,
+         .descriptorCount = STORAGE_PIECES,
+         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+         .pBufferInfo = infos,
+      },
+      {
+         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+         .dstSet = p->read_set,
+         .dstBinding = 1,
+         .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+         .pBufferInfo = &result_info,
+      },
+      {
+         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+         .dstSet = p->read_set,
+         .dstBinding = 2,
+         .descriptorCount = STORAGE_PIECES,
+         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+         .pBufferInfo = infos,
+      },
+   };
+   vkUpdateDescriptorSets(c->device, 4, writes, 0, NULL);
+
+   /* Read: every word of a piece names its piece and its place. */
+   memset(words, 0, STORAGE_PIECES * STORAGE_STEP);
+   memset(result.map, 0, STORAGE_PIECES * 32);
+   for (uint32_t i = 0; i < STORAGE_PIECES; i++)
+      for (uint32_t j = 0; j < count; j++)
+         words[infos[i].offset / 4 + j] = 0x70000000u + (i << 16) + j;
+   bool ok = begin(c);
+   vkCmdBindPipeline(c->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p->read);
+   vkCmdBindDescriptorSets(c->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p->read_layout, 0, 1, &p->read_set, 0, NULL);
+   vkCmdPushConstants(c->cmd, p->read_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 4, &word);
+   vkCmdDispatch(c->cmd, 1, 1, 1);
+   ok = ok && submit_and_wait(c, "storage offset read");
+   for (uint32_t i = 0; i < STORAGE_PIECES; i++) {
+      const volatile uint32_t *const r = (const uint32_t *)result.map + i * 8;
+      const uint32_t base = 0x70000000u + (i << 16);
+      const bool storage = ok && r[0] == base && r[1] == base + count - 1 && r[2] == count && r[3] == base + word;
+      const bool uniform = ok && r[4] == base && r[5] == base + count - 1 && r[6] == base + (word / 4) * 4 + 1;
+      if (ok && !(storage && uniform))
+         report("storage offset: %s, offset 0x%x, piece 0x%08x: storage 0x%08x 0x%08x length %u 0x%08x, "
+                "uniform 0x%08x 0x%08x 0x%08x",
+                where, (unsigned)infos[i].offset, base, r[0], r[1], r[2], r[3], r[4], r[5], r[6]);
+      char name[128];
+      snprintf(name, sizeof(name), "storage offset: %s, a read-only storage buffer bound from offset 0x%x is read",
+               where, (unsigned)infos[i].offset);
+      check(storage, name);
+      snprintf(name, sizeof(name), "storage offset: %s, a uniform buffer bound from offset 0x%x is read", where,
+               (unsigned)infos[i].offset);
+      check(uniform, name);
+   }
+
+   /* Write. */
+   memset(words, 0, STORAGE_PIECES * STORAGE_STEP);
+   for (uint32_t i = 0; i < STORAGE_PIECES; i++)
+      words[infos[i].offset / 4 + 3] = 0x1000 + i;
+   ok = begin(c);
+   vkCmdBindPipeline(c->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p->write);
+   vkCmdBindDescriptorSets(c->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p->write_layout, 0, 1, &p->write_set, 0, NULL);
+   for (uint32_t i = 0; i < STORAGE_PIECES; i++) {
+      const uint32_t push[2] = {i, 0xa5000000u + i};
+      vkCmdPushConstants(c->cmd, p->write_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), push);
+      vkCmdDispatch(c->cmd, 1, 1, 1);
+   }
+   ok = ok && submit_and_wait(c, "storage offset write");
+   for (uint32_t i = 0; i < STORAGE_PIECES; i++) {
+      const volatile uint32_t *const w = words + infos[i].offset / 4;
+      const uint32_t value = 0xa5000000u + i;
+      const bool right = ok && w[0] == value && w[1] == count && w[2] == 0x1001 + i && w[count - 1] == ~value;
+      if (ok && !right)
+         report("storage offset: %s, offset 0x%x: words 0x%08x 0x%08x 0x%08x, the last 0x%08x", where,
+                (unsigned)infos[i].offset, w[0], w[1], w[2], w[count - 1]);
+      char name[128];
+      snprintf(name, sizeof(name), "storage offset: %s, a storage buffer bound from offset 0x%x is written", where,
+               (unsigned)infos[i].offset);
+      check(right, name);
+   }
+   buffer_destroy(c, &result);
+}
+
+/* One compute pipeline with one set of its own from the pool. */
+static bool
+storage_offset_pipeline(struct context *c, const uint32_t *code, size_t bytes,
+                        const VkDescriptorSetLayoutBinding *bindings, uint32_t binding_count, uint32_t push_bytes,
+                        VkDescriptorPool pool, VkPipeline *pipeline, VkPipelineLayout *layout, VkDescriptorSet *set)
+{
+   const VkDescriptorSetLayoutCreateInfo set_info = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      .bindingCount = binding_count,
+      .pBindings = bindings,
+   };
+   VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
+   VkShaderModule module = shader(c, code, bytes);
+   bool ok = module && vkCreateDescriptorSetLayout(c->device, &set_info, NULL, &set_layout) == VK_SUCCESS;
+   const VkPushConstantRange range = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .size = push_bytes};
+   const VkPipelineLayoutCreateInfo layout_info = {
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+      .setLayoutCount = 1,
+      .pSetLayouts = &set_layout,
+      .pushConstantRangeCount = 1,
+      .pPushConstantRanges = &range,
+   };
+   ok = ok && vkCreatePipelineLayout(c->device, &layout_info, NULL, layout) == VK_SUCCESS;
+   const VkComputePipelineCreateInfo pipeline_info = {
+      .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+      .stage =
+         {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+            .module = module,
+            .pName = "main",
+         },
+      .layout = *layout,
+   };
+   ok = ok && vkCreateComputePipelines(c->device, VK_NULL_HANDLE, 1, &pipeline_info, NULL, pipeline) == VK_SUCCESS;
+   const VkDescriptorSetAllocateInfo set_alloc = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+      .descriptorPool = pool,
+      .descriptorSetCount = 1,
+      .pSetLayouts = &set_layout,
+   };
+   ok = ok && vkAllocateDescriptorSets(c->device, &set_alloc, set) == VK_SUCCESS;
+   /* The pipeline layout and the set keep what they need of it. */
+   vkDestroyDescriptorSetLayout(c->device, set_layout, NULL);
+   vkDestroyShaderModule(c->device, module, NULL);
+   return ok;
+}
+
+static void
+test_storage_offset(struct context *c)
+{
+   const VkDescriptorSetLayoutBinding write_bindings[] = {
+      {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, STORAGE_PIECES, VK_SHADER_STAGE_COMPUTE_BIT, NULL},
+   };
+   const VkDescriptorSetLayoutBinding read_bindings[] = {
+      {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, STORAGE_PIECES, VK_SHADER_STAGE_COMPUTE_BIT, NULL},
+      {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL},
+      {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, STORAGE_PIECES, VK_SHADER_STAGE_COMPUTE_BIT, NULL},
+   };
+   const VkDescriptorPoolSize sizes[] = {
+      {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 2 * STORAGE_PIECES + 1},
+      {.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = STORAGE_PIECES},
+   };
+   const VkDescriptorPoolCreateInfo pool_info = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+      .maxSets = 2,
+      .poolSizeCount = 2,
+      .pPoolSizes = sizes,
+   };
+   VkDescriptorPool pool = VK_NULL_HANDLE;
+   struct storage_offset_pipelines p = {0};
+   const bool ok =
+      vkCreateDescriptorPool(c->device, &pool_info, NULL, &pool) == VK_SUCCESS &&
+      storage_offset_pipeline(c, radv_smoke_storage_offset_comp, sizeof(radv_smoke_storage_offset_comp),
+                              write_bindings, 1, 8, pool, &p.write, &p.write_layout, &p.write_set) &&
+      storage_offset_pipeline(c, radv_smoke_storage_read_comp, sizeof(radv_smoke_storage_read_comp), read_bindings,
+                              3, 4, pool, &p.read, &p.read_layout, &p.read_set);
+   check(ok, "storage offset: the pipelines and their sets");
+
+   /* The driver's own memory. */
+   struct buffer b;
+   if (ok && buffer_create(c, STORAGE_PIECES * STORAGE_STEP,
+                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, &b)) {
+      storage_offset_run(c, "the driver's memory", b.buffer, b.map, &p);
+      buffer_destroy(c, &b);
+   }
+
+   /* The title's own memory, imported (VK_EXT_external_memory_host). */
+   const PFN_vkGetMemoryHostPointerPropertiesEXT host_properties =
+      (PFN_vkGetMemoryHostPointerPropertiesEXT)vkGetDeviceProcAddr(c->device, "vkGetMemoryHostPointerPropertiesEXT");
+   void *const memory = mmap(NULL, STORAGE_PIECES * STORAGE_STEP, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+   if (ok && c->host_memory && host_properties && memory != MAP_FAILED) {
+      const VkExternalMemoryHandleTypeFlagBits handle = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
+      VkMemoryHostPointerPropertiesEXT properties = {.sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT};
+      const VkExternalMemoryBufferCreateInfo external = {
+         .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
+         .handleTypes = handle,
+      };
+      const VkBufferCreateInfo info = {
+         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+         .pNext = &external,
+         .size = STORAGE_PIECES * STORAGE_STEP,
+         .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+      };
+      const VkImportMemoryHostPointerInfoEXT import = {
+         .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
+         .handleType = handle,
+         .pHostPointer = memory,
+      };
+      VkBuffer buffer = VK_NULL_HANDLE;
+      VkDeviceMemory imported = VK_NULL_HANDLE;
+      bool made = host_properties(c->device, handle, memory, &properties) == VK_SUCCESS;
+      const VkMemoryAllocateInfo alloc = {
+         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+         .pNext = &import,
+         .allocationSize = STORAGE_PIECES * STORAGE_STEP,
+         .memoryTypeIndex = memory_type(c, properties.memoryTypeBits,
+                                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
+      };
+      made = made && alloc.memoryTypeIndex != UINT32_MAX &&
+             vkCreateBuffer(c->device, &info, NULL, &buffer) == VK_SUCCESS &&
+             vkAllocateMemory(c->device, &alloc, NULL, &imported) == VK_SUCCESS &&
+             vkBindBufferMemory(c->device, buffer, imported, 0) == VK_SUCCESS;
+      check(made, "storage offset: the title's memory is imported as a buffer");
+      if (made)
+         storage_offset_run(c, "the title's memory", buffer, memory, &p);
+      vkDestroyBuffer(c->device, buffer, NULL);
+      vkFreeMemory(c->device, imported, NULL);
+   } else if (ok) {
+      report("storage offset: VK_EXT_external_memory_host is not reported; the title's memory is skipped");
+   }
+   if (memory != MAP_FAILED)
+      munmap(memory, STORAGE_PIECES * STORAGE_STEP);
+   vkDestroyPipeline(c->device, p.write, NULL);
+   vkDestroyPipeline(c->device, p.read, NULL);
+   vkDestroyPipelineLayout(c->device, p.write_layout, NULL);
+   vkDestroyPipelineLayout(c->device, p.read_layout, NULL);
+   vkDestroyDescriptorPool(c->device, pool, NULL);
+}
 #endif
 
 int
@@ -2979,6 +3245,10 @@ main(void)
    if (ready && only && strcmp(only, "task") == 0) {
       if (c.task)
          test_task(&c);
+#if defined(__PROSPERO__)
+   } else if (ready && only && strcmp(only, "storage") == 0) {
+      test_storage_offset(&c);
+#endif
    } else if (ready && only && strcmp(only, "barycentric") == 0) {
       /* The barycentric survey alone (docs/BARYCENTRIC_GFX101.md): runs where the rest of the checks do not, such as
        * with RADV_DEBUG=nongg, which a legacy geometry shader hangs. */
@@ -3029,6 +3299,7 @@ main(void)
       else
          report("display: VK_KHR_display is not reported; its checks are skipped");
 #if defined(__PROSPERO__)
+      test_storage_offset(&c);
       /* Last: a GPU fault ends the run. It needs buffer device addresses. */
       if (c.acceleration_structure)
          test_host_pointer(&c);

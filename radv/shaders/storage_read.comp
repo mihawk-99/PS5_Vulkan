@@ -1,0 +1,28 @@
+#version 450
+// PS5 Vulkan - RADV smoke test: read-only storage buffers and uniform buffers bound from offsets inside one buffer,
+// read at their first and last words (radv_smoke.c, test_storage_offset).
+// Copyright (C) 2026 Mihawk-99
+// SPDX-License-Identifier: GPL-3.0-or-later
+layout(local_size_x = 1) in;
+layout(std430, set = 0, binding = 0) readonly buffer Table { uint t[]; } tables[4];
+layout(std430, set = 0, binding = 1) buffer Result { uint w[]; } result;
+layout(std140, set = 0, binding = 2) uniform Block { uvec4 u[100]; } blocks[4];
+layout(push_constant) uniform Push { uint word; } p;
+#define READ(k)                                                \
+    {                                                          \
+        uint n = uint(tables[k].t.length());                   \
+        result.w[k * 8 + 0] = tables[k].t[0];                  \
+        result.w[k * 8 + 1] = tables[k].t[n - 1u];             \
+        result.w[k * 8 + 2] = n;                               \
+        result.w[k * 8 + 3] = tables[k].t[p.word];             \
+        result.w[k * 8 + 4] = blocks[k].u[0].x;                \
+        result.w[k * 8 + 5] = blocks[k].u[99].w;               \
+        result.w[k * 8 + 6] = blocks[k].u[p.word / 4u].y;      \
+    }
+void main()
+{
+    READ(0)
+    READ(1)
+    READ(2)
+    READ(3)
+}

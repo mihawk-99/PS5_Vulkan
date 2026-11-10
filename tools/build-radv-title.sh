@@ -48,7 +48,7 @@ for shader in tess.vert tess.tesc tess_coord.tese tess_patch.tese tess_varying.v
         tess_varying.tese colour.frag tess_level.tesc gs_points.vert gs_16.geom gs_32.geom gs_64.geom \
         gs_100.geom gs_128.geom gs_primid.geom gs_colour.vert gs_colour.geom gs_primid_fixed.geom gs_record.geom \
         scratch.frag bary.vert bary.frag bary6.vert bary_survey.vert bary_coord.frag bary_line.frag full.vert rate.frag prim_id.vert prim_id.frag prim_id_raw.frag \
-        gs_quads.vert gs_triangles.geom ptr_write.comp; do
+        gs_quads.vert gs_triangles.geom ptr_write.comp storage_offset.comp storage_read.comp; do
     name=${shader//./_}
     glslangValidator -V --target-env vulkan1.0 --vn "radv_smoke_$name" \
         "$root/radv/shaders/$shader" -o "$work/gen/smoke_$name.h" > /dev/null
